@@ -105,7 +105,10 @@ impl AcceleratorRegistry {
 
     /// All profiles satisfying an [`AcceleratorRequirement`].
     pub fn satisfying(&self, req: &AcceleratorRequirement) -> Vec<&AcceleratorProfile> {
-        self.profiles.iter().filter(|p| req.satisfied_by(p)).collect()
+        self.profiles
+            .iter()
+            .filter(|p| req.satisfied_by(p))
+            .collect()
     }
 
     /// Add a profile manually (for testing or manual config).
@@ -135,10 +138,10 @@ impl AcceleratorRegistry {
         }
 
         // Check for Gaudi — also prefers BFloat16
-        if let Some(gaudi_mem) = self.best_memory_for(AcceleratorFamily::AiAsic) {
-            if Self::estimate_memory(model_params, &QuantizationLevel::BFloat16) <= gaudi_mem {
-                return QuantizationLevel::BFloat16;
-            }
+        if let Some(gaudi_mem) = self.best_memory_for(AcceleratorFamily::AiAsic)
+            && Self::estimate_memory(model_params, &QuantizationLevel::BFloat16) <= gaudi_mem
+        {
+            return QuantizationLevel::BFloat16;
         }
 
         // Check GPU
@@ -203,10 +206,10 @@ fn detect_cpu_memory() -> u64 {
         for line in info.lines() {
             if line.starts_with("MemTotal:") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
-                if let Some(kb_str) = parts.get(1) {
-                    if let Ok(kb) = kb_str.parse::<u64>() {
-                        return kb * 1024;
-                    }
+                if let Some(kb_str) = parts.get(1)
+                    && let Ok(kb) = kb_str.parse::<u64>()
+                {
+                    return kb * 1024;
                 }
             }
         }
@@ -256,7 +259,11 @@ fn detect_cuda(profiles: &mut Vec<AcceleratorProfile>) {
             accelerator: AcceleratorType::CudaGpu { device_id },
             available: true,
             memory_bytes: mem_total_mb * 1024 * 1024,
-            compute_capability: if compute_cap.is_empty() { None } else { Some(compute_cap) },
+            compute_capability: if compute_cap.is_empty() {
+                None
+            } else {
+                Some(compute_cap)
+            },
             driver_version: None,
         });
     }
@@ -312,24 +319,24 @@ fn read_sysfs_u64(path: &Path) -> Option<u64> {
 // -- Apple Metal + ANE --
 
 fn detect_metal_and_ane(profiles: &mut Vec<AcceleratorProfile>) {
-    if let Ok(compat) = std::fs::read_to_string("/proc/device-tree/compatible") {
-        if compat.contains("apple") {
-            debug!("Apple device detected, registering Metal GPU + ANE");
-            profiles.push(AcceleratorProfile {
-                accelerator: AcceleratorType::MetalGpu,
-                available: true,
-                memory_bytes: 16 * 1024 * 1024 * 1024,
-                compute_capability: None,
-                driver_version: None,
-            });
-            profiles.push(AcceleratorProfile {
-                accelerator: AcceleratorType::AppleNpu,
-                available: true,
-                memory_bytes: 4 * 1024 * 1024 * 1024,
-                compute_capability: None,
-                driver_version: None,
-            });
-        }
+    if let Ok(compat) = std::fs::read_to_string("/proc/device-tree/compatible")
+        && compat.contains("apple")
+    {
+        debug!("Apple device detected, registering Metal GPU + ANE");
+        profiles.push(AcceleratorProfile {
+            accelerator: AcceleratorType::MetalGpu,
+            available: true,
+            memory_bytes: 16 * 1024 * 1024 * 1024,
+            compute_capability: None,
+            driver_version: None,
+        });
+        profiles.push(AcceleratorProfile {
+            accelerator: AcceleratorType::AppleNpu,
+            available: true,
+            memory_bytes: 4 * 1024 * 1024 * 1024,
+            compute_capability: None,
+            driver_version: None,
+        });
     }
 }
 
@@ -340,9 +347,12 @@ fn detect_vulkan(profiles: &mut Vec<AcceleratorProfile>) {
         // In a real implementation, we'd parse vulkaninfo output for device names
         // and memory. For now, register a generic Vulkan device if the tool exists
         // but only if we didn't already find a CUDA or ROCm GPU (avoid double-counting).
-        let has_dedicated_gpu = profiles
-            .iter()
-            .any(|p| matches!(p.accelerator, AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }));
+        let has_dedicated_gpu = profiles.iter().any(|p| {
+            matches!(
+                p.accelerator,
+                AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
+            )
+        });
 
         if !has_dedicated_gpu {
             debug!("vulkaninfo found (no CUDA/ROCm), registering Vulkan GPU");
@@ -430,10 +440,10 @@ fn detect_tpu(profiles: &mut Vec<AcceleratorProfile>) {
 
         // Skip if this is an AMD XDNA device
         let driver_link = format!("/sys/class/accel/accel{}/device/driver", device_id);
-        if let Ok(target) = std::fs::read_link(&driver_link) {
-            if target.to_string_lossy().contains("amdxdna") {
-                continue;
-            }
+        if let Ok(target) = std::fs::read_link(&driver_link)
+            && target.to_string_lossy().contains("amdxdna")
+        {
+            continue;
         }
 
         let version = detect_tpu_version(device_id);
@@ -472,12 +482,11 @@ fn detect_tpu_version(device_id: u32) -> TpuVersion {
 
 fn detect_tpu_chip_count(device_id: u32) -> u32 {
     let path = format!("/sys/class/accel/accel{}/device/chip_count", device_id);
-    if let Ok(count) = std::fs::read_to_string(&path) {
-        if let Ok(n) = count.trim().parse::<u32>() {
-            if n > 0 {
-                return n;
-            }
-        }
+    if let Ok(count) = std::fs::read_to_string(&path)
+        && let Ok(n) = count.trim().parse::<u32>()
+        && n > 0
+    {
+        return n;
     }
     1
 }
@@ -515,7 +524,10 @@ fn detect_gaudi(profiles: &mut Vec<AcceleratorProfile>) {
 
         debug!(device_id, %generation, "Intel Gaudi HPU detected");
         profiles.push(AcceleratorProfile {
-            accelerator: AcceleratorType::Gaudi { device_id, generation },
+            accelerator: AcceleratorType::Gaudi {
+                device_id,
+                generation,
+            },
             available: true,
             memory_bytes: mem_total_mb * 1024 * 1024,
             compute_capability: Some(generation.to_string()),
@@ -532,39 +544,39 @@ fn detect_aws_neuron(profiles: &mut Vec<AcceleratorProfile>) {
         .args(["--json-output"])
         .output();
 
-    if let Ok(o) = output {
-        if o.status.success() {
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
-                if let Some(devices) = json.as_array() {
-                    for (i, device) in devices.iter().enumerate() {
-                        let model = device["model"].as_str().unwrap_or("Neuron Device");
-                        let nc_count = device["nc_count"].as_u64().unwrap_or(2) as u32;
-                        let mem_per_nc = device["memory_per_nc_mb"].as_u64().unwrap_or(8192);
-                        let mem_total = nc_count as u64 * mem_per_nc * 1024 * 1024;
+    if let Ok(o) = output
+        && o.status.success()
+    {
+        let stdout = String::from_utf8_lossy(&o.stdout);
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout)
+            && let Some(devices) = json.as_array()
+        {
+            for (i, device) in devices.iter().enumerate() {
+                let model = device["model"].as_str().unwrap_or("Neuron Device");
+                let nc_count = device["nc_count"].as_u64().unwrap_or(2) as u32;
+                let mem_per_nc = device["memory_per_nc_mb"].as_u64().unwrap_or(8192);
+                let mem_total = nc_count as u64 * mem_per_nc * 1024 * 1024;
 
-                        let chip_type = if model.contains("trn") || model.contains("Trainium") {
-                            NeuronChipType::Trainium
-                        } else {
-                            NeuronChipType::Inferentia
-                        };
+                let chip_type = if model.contains("trn") || model.contains("Trainium") {
+                    NeuronChipType::Trainium
+                } else {
+                    NeuronChipType::Inferentia
+                };
 
-                        debug!(device_id = i, %chip_type, nc_count, "AWS Neuron device detected");
-                        profiles.push(AcceleratorProfile {
-                            accelerator: AcceleratorType::AwsNeuron {
-                                device_id: i as u32,
-                                chip_type,
-                                core_count: nc_count,
-                            },
-                            available: true,
-                            memory_bytes: mem_total,
-                            compute_capability: Some(format!("Neuron {}", chip_type)),
-                            driver_version: None,
-                        });
-                    }
-                    return;
-                }
+                debug!(device_id = i, %chip_type, nc_count, "AWS Neuron device detected");
+                profiles.push(AcceleratorProfile {
+                    accelerator: AcceleratorType::AwsNeuron {
+                        device_id: i as u32,
+                        chip_type,
+                        core_count: nc_count,
+                    },
+                    available: true,
+                    memory_bytes: mem_total,
+                    compute_capability: Some(format!("Neuron {}", chip_type)),
+                    driver_version: None,
+                });
             }
+            return;
         }
     }
 

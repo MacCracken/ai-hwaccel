@@ -162,7 +162,10 @@ impl AcceleratorType {
 
     /// Returns `true` for any NPU variant.
     pub fn is_npu(&self) -> bool {
-        matches!(self, Self::IntelNpu | Self::AppleNpu | Self::AmdXdnaNpu { .. })
+        matches!(
+            self,
+            Self::IntelNpu | Self::AppleNpu | Self::AmdXdnaNpu { .. }
+        )
     }
 
     /// Returns `true` for Google TPU.
@@ -189,9 +192,9 @@ impl AcceleratorType {
             | Self::IntelOneApi { .. } => AcceleratorFamily::Gpu,
             Self::IntelNpu | Self::AppleNpu | Self::AmdXdnaNpu { .. } => AcceleratorFamily::Npu,
             Self::Tpu { .. } => AcceleratorFamily::Tpu,
-            Self::Gaudi { .. }
-            | Self::AwsNeuron { .. }
-            | Self::QualcommAi100 { .. } => AcceleratorFamily::AiAsic,
+            Self::Gaudi { .. } | Self::AwsNeuron { .. } | Self::QualcommAi100 { .. } => {
+                AcceleratorFamily::AiAsic
+            }
         }
     }
 
@@ -215,7 +218,11 @@ impl AcceleratorType {
                 GaudiGeneration::Gaudi2 => 22.0,
                 GaudiGeneration::Gaudi3 => 30.0,
             },
-            Self::AwsNeuron { chip_type, core_count, .. } => {
+            Self::AwsNeuron {
+                chip_type,
+                core_count,
+                ..
+            } => {
                 let base = match chip_type {
                     NeuronChipType::Inferentia => 15.0,
                     NeuronChipType::Trainium => 24.0,
@@ -247,12 +254,16 @@ impl AcceleratorType {
                 GaudiGeneration::Gaudi2 => 25.0,
                 GaudiGeneration::Gaudi3 => 35.0,
             },
-            Self::AwsNeuron { chip_type, core_count, .. } => match chip_type {
+            Self::AwsNeuron {
+                chip_type,
+                core_count,
+                ..
+            } => match chip_type {
                 NeuronChipType::Inferentia => 0.0, // inference only
                 NeuronChipType::Trainium => 26.0 * (*core_count as f64 / 2.0).max(1.0),
             },
             Self::QualcommAi100 { .. } => 0.0, // inference only
-            Self::IntelOneApi { .. } => 10.0, // oneAPI training support via SYCL
+            Self::IntelOneApi { .. } => 10.0,  // oneAPI training support via SYCL
         }
     }
 
@@ -264,15 +275,36 @@ impl AcceleratorType {
     /// Priority rank for [`AcceleratorRegistry::best_available`] (higher = preferred).
     pub(crate) fn rank(&self) -> u32 {
         match self {
-            Self::Tpu { version: TpuVersion::V5p, .. } => 80,
-            Self::Gaudi { generation: GaudiGeneration::Gaudi3, .. } => 75,
-            Self::Tpu { version: TpuVersion::V4, .. } => 70,
-            Self::Gaudi { generation: GaudiGeneration::Gaudi2, .. } => 65,
+            Self::Tpu {
+                version: TpuVersion::V5p,
+                ..
+            } => 80,
+            Self::Gaudi {
+                generation: GaudiGeneration::Gaudi3,
+                ..
+            } => 75,
+            Self::Tpu {
+                version: TpuVersion::V4,
+                ..
+            } => 70,
+            Self::Gaudi {
+                generation: GaudiGeneration::Gaudi2,
+                ..
+            } => 65,
             Self::CudaGpu { .. } => 60,
-            Self::AwsNeuron { chip_type: NeuronChipType::Trainium, .. } => 58,
-            Self::Tpu { version: TpuVersion::V5e, .. } => 55,
+            Self::AwsNeuron {
+                chip_type: NeuronChipType::Trainium,
+                ..
+            } => 58,
+            Self::Tpu {
+                version: TpuVersion::V5e,
+                ..
+            } => 55,
             Self::RocmGpu { .. } => 50,
-            Self::AwsNeuron { chip_type: NeuronChipType::Inferentia, .. } => 45,
+            Self::AwsNeuron {
+                chip_type: NeuronChipType::Inferentia,
+                ..
+            } => 45,
             Self::MetalGpu => 40,
             Self::QualcommAi100 { .. } => 38,
             Self::VulkanGpu { .. } => 35,
@@ -292,20 +324,42 @@ impl fmt::Display for AcceleratorType {
             Self::CudaGpu { device_id } => write!(f, "CUDA GPU (device {})", device_id),
             Self::RocmGpu { device_id } => write!(f, "ROCm GPU (device {})", device_id),
             Self::MetalGpu => write!(f, "Metal GPU"),
-            Self::VulkanGpu { device_id, device_name } => {
+            Self::VulkanGpu {
+                device_id,
+                device_name,
+            } => {
                 write!(f, "Vulkan GPU (device {}, {})", device_id, device_name)
             }
             Self::IntelNpu => write!(f, "Intel NPU"),
             Self::AmdXdnaNpu { device_id } => write!(f, "AMD XDNA NPU (device {})", device_id),
             Self::AppleNpu => write!(f, "Apple Neural Engine"),
-            Self::Tpu { device_id, chip_count, version } => {
-                write!(f, "TPU {} (device {}, {} chips)", version, device_id, chip_count)
+            Self::Tpu {
+                device_id,
+                chip_count,
+                version,
+            } => {
+                write!(
+                    f,
+                    "TPU {} (device {}, {} chips)",
+                    version, device_id, chip_count
+                )
             }
-            Self::Gaudi { device_id, generation } => {
+            Self::Gaudi {
+                device_id,
+                generation,
+            } => {
                 write!(f, "Intel {} (device {})", generation, device_id)
             }
-            Self::AwsNeuron { device_id, chip_type, core_count } => {
-                write!(f, "AWS {} (device {}, {} cores)", chip_type, device_id, core_count)
+            Self::AwsNeuron {
+                device_id,
+                chip_type,
+                core_count,
+            } => {
+                write!(
+                    f,
+                    "AWS {} (device {}, {} cores)",
+                    chip_type, device_id, core_count
+                )
             }
             Self::QualcommAi100 { device_id } => {
                 write!(f, "Qualcomm Cloud AI 100 (device {})", device_id)
@@ -587,9 +641,10 @@ pub struct ShardingPlan {
 // ---------------------------------------------------------------------------
 
 /// Hardware accelerator requirement for a workload (scheduling integration).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AcceleratorRequirement {
     /// No accelerator needed — CPU is sufficient.
+    #[default]
     None,
     /// Requires a GPU (CUDA, ROCm, Metal, Vulkan).
     Gpu,
@@ -603,12 +658,6 @@ pub enum AcceleratorRequirement {
     GpuOrTpu,
     /// Any accelerator (GPU, TPU, or AI ASIC) — not CPU-only.
     AnyAccelerator,
-}
-
-impl Default for AcceleratorRequirement {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl fmt::Display for AcceleratorRequirement {

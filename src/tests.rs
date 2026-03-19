@@ -171,8 +171,14 @@ fn display_quantization() {
 #[test]
 fn tpu_hbm_per_chip() {
     assert_eq!(TpuVersion::V4.hbm_per_chip_bytes(), 32 * 1024 * 1024 * 1024);
-    assert_eq!(TpuVersion::V5e.hbm_per_chip_bytes(), 16 * 1024 * 1024 * 1024);
-    assert_eq!(TpuVersion::V5p.hbm_per_chip_bytes(), 95 * 1024 * 1024 * 1024);
+    assert_eq!(
+        TpuVersion::V5e.hbm_per_chip_bytes(),
+        16 * 1024 * 1024 * 1024
+    );
+    assert_eq!(
+        TpuVersion::V5p.hbm_per_chip_bytes(),
+        95 * 1024 * 1024 * 1024
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +188,10 @@ fn tpu_hbm_per_chip() {
 #[test]
 fn gaudi_hbm() {
     assert_eq!(GaudiGeneration::Gaudi2.hbm_bytes(), 96 * 1024 * 1024 * 1024);
-    assert_eq!(GaudiGeneration::Gaudi3.hbm_bytes(), 128 * 1024 * 1024 * 1024);
+    assert_eq!(
+        GaudiGeneration::Gaudi3.hbm_bytes(),
+        128 * 1024 * 1024 * 1024
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -412,15 +421,9 @@ fn requirement_satisfied_by() {
     assert!(!AcceleratorRequirement::Gpu.satisfied_by(&cpu_profile));
 
     // TPU requirement
-    assert!(
-        AcceleratorRequirement::Tpu { min_chips: 2 }.satisfied_by(&tpu_profile)
-    );
-    assert!(
-        !AcceleratorRequirement::Tpu { min_chips: 8 }.satisfied_by(&tpu_profile)
-    );
-    assert!(
-        !AcceleratorRequirement::Tpu { min_chips: 1 }.satisfied_by(&cuda_profile)
-    );
+    assert!(AcceleratorRequirement::Tpu { min_chips: 2 }.satisfied_by(&tpu_profile));
+    assert!(!AcceleratorRequirement::Tpu { min_chips: 8 }.satisfied_by(&tpu_profile));
+    assert!(!AcceleratorRequirement::Tpu { min_chips: 1 }.satisfied_by(&cuda_profile));
 
     // GpuOrTpu
     assert!(AcceleratorRequirement::GpuOrTpu.satisfied_by(&cuda_profile));
@@ -704,11 +707,8 @@ fn training_memory_tpu_less_optimizer_than_gpu() {
 #[test]
 fn training_memory_qlora_less_than_full() {
     let full = estimate_training_memory(7000, TrainingMethod::FullFineTune, TrainingTarget::Gpu);
-    let qlora = estimate_training_memory(
-        7000,
-        TrainingMethod::QLoRA { bits: 4 },
-        TrainingTarget::Gpu,
-    );
+    let qlora =
+        estimate_training_memory(7000, TrainingMethod::QLoRA { bits: 4 }, TrainingTarget::Gpu);
     assert!(qlora.total_gb < full.total_gb);
 }
 
@@ -840,8 +840,9 @@ fn model_shard_invalid_range() {
 fn detect_returns_at_least_cpu() {
     let reg = AcceleratorRegistry::detect();
     assert!(!reg.all_profiles().is_empty());
-    assert!(reg
-        .all_profiles()
-        .iter()
-        .any(|p| matches!(p.accelerator, AcceleratorType::Cpu)));
+    assert!(
+        reg.all_profiles()
+            .iter()
+            .any(|p| matches!(p.accelerator, AcceleratorType::Cpu))
+    );
 }
