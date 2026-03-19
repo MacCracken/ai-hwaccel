@@ -4,71 +4,35 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
-## Phase 1: v1.0-rc (2026-03-20)
+## Phase 4: Ecosystem (2026-03-20)
 
-Final pre-release. Everything needed for a stable public API.
-
-- [ ] Stable serde format: document the JSON schema, freeze `SCHEMA_VERSION`.
-- [ ] `cargo publish --dry-run` passes (verified).
-- [ ] Review all public API signatures for stability.
-- [ ] Final CHANGELOG entry for v1.0-rc.
-
-## Phase 2: v1.0 (2026-03-21)
-
-First stable release. Published to crates.io.
-
-- [ ] Publish to crates.io.
-- [ ] Tag `1.0.0` (switch from CalVer to SemVer).
-- [ ] Announce on relevant channels.
-
----
-
-## Phase 3: Hardening (2026-03-22 -- 2026-03-24)
-
-Post-v1 stabilization, one release per day.
-
-### 2026-03-22: Testing depth
-
-- [ ] Mock detection harness: simulated sysfs trees and CLI outputs via
-  `tempdir` + symlinks for hardware-independent backend testing.
-- [ ] Windows CI: add `x86_64-pc-windows-msvc` to the matrix.
-
-### 2026-03-23: Supply chain + audit
-
-- [ ] `cargo-vet`: add supply-chain audits for all dependencies.
-- [ ] Minimal dependencies audit: evaluate whether `serde_json` can be
-  feature-gated (only needed by `aws-neuron` backend and CLI binary).
-
-### 2026-03-24: Performance tuning
-
-- [ ] Caching: cache detection results for a configurable TTL so repeated
-  `detect()` calls don't re-shell-out.
-- [ ] Lazy detection: detect only the backends the caller queries.
-- [ ] Reduce allocations: `Cow<str>` for device names, `SmallVec` for profiles.
-
----
-
-## Phase 4: Ecosystem (2026-03-25 -- 2026-03-28)
-
-### 2026-03-25: Integration guides
+### Integration guides
 
 - [ ] Document usage with `candle`, `burn`, `tch-rs`, and `ort`.
 - [ ] Expand examples with framework-specific code.
 
-### 2026-03-26: Async API
+### Async API
 
 - [ ] `tokio` feature flag: async `detect()` via `tokio::process`.
 - [ ] Async builder: `AcceleratorRegistry::builder().detect_async().await`.
 
-### 2026-03-27: CLI polish
+### CLI polish
 
 - [ ] `--table` column sorting and filtering flags.
 - [ ] `--watch` mode: re-detect on interval, show diffs.
 
-### 2026-03-28: Language bindings
+### Language bindings
 
 - [ ] C FFI: `ai_hwaccel_detect()`, `ai_hwaccel_best_available()`, etc.
 - [ ] Python bindings scaffold via PyO3.
+
+---
+
+## Remaining pre-v1
+
+- [ ] Switch from CalVer to SemVer (`1.0.0`).
+- [ ] Publish to crates.io.
+- [ ] `cargo-vet`: supply-chain audits for all dependencies.
 
 ---
 
@@ -117,6 +81,9 @@ These are longer-term items that don't block any release.
 - [ ] **Cost-aware planning** -- cloud pricing data for cheapest config.
 - [ ] **WASM target** -- browser-based ML dashboards with stubbed detection.
 - [ ] **Python bindings** -- full PyO3 package for the ML ecosystem.
+- [ ] **Reduce allocations** -- `Cow<str>` for device names, `SmallVec` for
+  profiles.
+- [ ] **Lazy detection** -- detect only backends the caller queries.
 
 ---
 

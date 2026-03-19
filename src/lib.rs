@@ -85,7 +85,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! ai-hwaccel = { version = "2026.3", default-features = false, features = ["cuda", "tpu"] }
+//! ai-hwaccel = { version = "0.19", default-features = false, features = ["cuda", "tpu"] }
 //! ```
 //!
 //! ## Step 2: Query capabilities
@@ -176,6 +176,7 @@
 //! ai-hwaccel = { version = "2026.3", default-features = false, features = ["cuda"] }
 //! ```
 
+pub mod cache;
 pub mod detect;
 pub mod error;
 pub mod hardware;
@@ -187,6 +188,7 @@ pub mod requirement;
 pub mod sharding;
 pub mod training;
 
+pub use cache::CachedRegistry;
 pub use error::DetectionError;
 pub use hardware::{
     AcceleratorFamily, AcceleratorType, GaudiGeneration, NeuronChipType, TpuVersion,

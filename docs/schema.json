@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MacCracken/ai-hwaccel/schema.json",
+  "title": "AcceleratorRegistry",
+  "description": "Serialized output of ai-hwaccel hardware detection.",
+  "type": "object",
+  "required": ["schema_version", "profiles"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "description": "Schema version for forward-compatibility. Currently 1.",
+      "const": 1
+    },
+    "profiles": {
+      "type": "array",
+      "description": "Detected accelerator profiles (always includes at least CPU).",
+      "items": { "$ref": "#/$defs/AcceleratorProfile" }
+    },
+    "warnings": {
+      "type": "array",
+      "description": "Non-fatal detection warnings. Omitted when empty.",
+      "items": { "$ref": "#/$defs/DetectionError" }
+    }
+  },
+  "$defs": {
+    "AcceleratorProfile": {
+      "type": "object",
+      "required": ["accelerator", "available", "memory_bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "accelerator": { "$ref": "#/$defs/AcceleratorType" },
+        "available": { "type": "boolean" },
+        "memory_bytes": { "type": "integer", "minimum": 0 },
+        "compute_capability": { "type": ["string", "null"] },
+        "driver_version": { "type": ["string", "null"] }
+      }
+    },
+    "AcceleratorType": {
+      "description": "Tagged union. The variant name is the key, fields are the value.",
+      "oneOf": [
+        { "type": "string", "const": "Cpu" },
+        { "type": "object", "required": ["CudaGpu"], "properties": { "CudaGpu": { "type": "object", "properties": { "device_id": { "type": "integer" } } } } },
+        { "type": "object", "required": ["RocmGpu"], "properties": { "RocmGpu": { "type": "object", "properties": { "device_id": { "type": "integer" } } } } },
+        { "type": "string", "const": "MetalGpu" },
+        { "type": "object", "required": ["VulkanGpu"], "properties": { "VulkanGpu": { "type": "object", "properties": { "device_id": { "type": "integer" }, "device_name": { "type": "string" } } } } },
+        { "type": "string", "const": "IntelNpu" },
+        { "type": "object", "required": ["AmdXdnaNpu"], "properties": { "AmdXdnaNpu": { "type": "object", "properties": { "device_id": { "type": "integer" } } } } },
+        { "type": "string", "const": "AppleNpu" },
+        { "type": "object", "required": ["Tpu"], "properties": { "Tpu": { "type": "object", "properties": { "device_id": { "type": "integer" }, "chip_count": { "type": "integer" }, "version": { "type": "string", "enum": ["V4", "V5e", "V5p"] } } } } },
+        { "type": "object", "required": ["Gaudi"], "properties": { "Gaudi": { "type": "object", "properties": { "device_id": { "type": "integer" }, "generation": { "type": "string", "enum": ["Gaudi2", "Gaudi3"] } } } } },
+        { "type": "object", "required": ["AwsNeuron"], "properties": { "AwsNeuron": { "type": "object", "properties": { "device_id": { "type": "integer" }, "chip_type": { "type": "string", "enum": ["Inferentia", "Trainium"] }, "core_count": { "type": "integer" } } } } },
+        { "type": "object", "required": ["QualcommAi100"], "properties": { "QualcommAi100": { "type": "object", "properties": { "device_id": { "type": "integer" } } } } },
+        { "type": "object", "required": ["IntelOneApi"], "properties": { "IntelOneApi": { "type": "object", "properties": { "device_id": { "type": "integer" } } } } }
+      ]
+    },
+    "DetectionError": {
+      "description": "Non-fatal detection warning.",
+      "oneOf": [
+        { "type": "object", "required": ["ToolNotFound"], "properties": { "ToolNotFound": { "type": "object", "properties": { "tool": { "type": "string" } } } } },
+        { "type": "object", "required": ["ToolFailed"], "properties": { "ToolFailed": { "type": "object", "properties": { "tool": { "type": "string" }, "exit_code": { "type": ["integer", "null"] }, "stderr": { "type": "string" } } } } },
+        { "type": "object", "required": ["ParseError"], "properties": { "ParseError": { "type": "object", "properties": { "backend": { "type": "string" }, "message": { "type": "string" } } } } },
+        { "type": "object", "required": ["SysfsReadError"], "properties": { "SysfsReadError": { "type": "object", "properties": { "path": { "type": "string" }, "message": { "type": "string" } } } } }
+      ]
+    }
+  }
+}

@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-This project uses [calendar versioning](https://calver.org/) (`YYYY.M.D`).
+This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
@@ -29,8 +29,18 @@ This project uses [calendar versioning](https://calver.org/) (`YYYY.M.D`).
 - **Crate-level guide**: expanded `lib.rs` documentation with a 4-step
   walkthrough (detect → query → plan → train) and cargo feature reference
   table.
-- `proptest` dev-dependency for property-based testing.
-- Test suite expanded to 161 tests (140 unit + 9 integration + 12 doc-tests).
+- **JSON schema**: `docs/schema.json` documenting the serialized registry
+  format (JSON Schema draft 2020-12).
+- **`CachedRegistry`**: thread-safe detection cache with configurable TTL.
+  Avoids redundant CLI tool invocations on repeated `detect()` calls.
+- **Mock detection tests**: `tests/mock_detection.rs` with 11 tests using
+  `tempfile` to build fake sysfs trees for hardware-independent backend
+  testing, plus serde `deny_unknown_fields` rejection tests and schema
+  version validation.
+- **Windows CI**: added `x86_64-pc-windows-msvc` to the CI test matrix.
+- `proptest` and `tempfile` dev-dependencies.
+- Test suite expanded to 173 tests (140 unit + 9 integration + 11 mock +
+  13 doc-tests).
 - **Modular architecture**: refactored 3 monolithic source files into 23
   focused modules with single responsibilities.
   - `types.rs` (714 lines) split into `hardware/` (with `tpu.rs`, `gaudi.rs`,
@@ -100,6 +110,8 @@ This project uses [calendar versioning](https://calver.org/) (`YYYY.M.D`).
 
 ### Changed
 
+- **Switched from CalVer to SemVer**: version is now `0.19.3` (pre-1.0). The
+  `0.x` series may contain breaking changes between minor versions.
 - **NVIDIA detection**: now parses `driver_version` from `nvidia-smi` and
   reports structured `DetectionError` on tool failure or parse errors.
 - **Vulkan detection**: parses `vulkaninfo --summary` for real device names,

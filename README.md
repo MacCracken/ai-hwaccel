@@ -39,7 +39,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ai-hwaccel = "2026.3"
+ai-hwaccel = "0.19"
 ```
 
 ### Library usage
@@ -185,9 +185,10 @@ RUST_LOG=trace               # Everything including dependency traces
 
 ## Versioning
 
-This crate uses **calendar versioning** (`YYYY.M.D`). The current version is
-read from the `VERSION` file at the repo root and kept in sync with
-`Cargo.toml` via `scripts/version-bump.sh`.
+This crate uses **semantic versioning**. The `0.x` series is pre-1.0 and may
+contain breaking changes between minor versions. The version is read from the
+`VERSION` file at the repo root and kept in sync with `Cargo.toml` via
+`scripts/version-bump.sh`.
 
 ## Development
 

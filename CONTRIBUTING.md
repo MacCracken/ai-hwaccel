@@ -91,9 +91,9 @@ src/
 
 ## Versioning
 
-This crate uses calendar versioning (`YYYY.M.D`). Version bumps are handled by
-maintainers using `scripts/version-bump.sh`. Contributors do **not** need to
-bump the version in their PRs.
+This crate uses semantic versioning. Version bumps are handled by maintainers
+using `scripts/version-bump.sh`. Contributors do **not** need to bump the
+version in their PRs.
 
 ## License
 

@@ -1,6 +1,6 @@
 [package]
 name = "ai-hwaccel"
-version = "2026.3.19"
+version = "0.19.3"
 edition = "2024"
 rust-version = "1.89"
 license = "AGPL-3.0-only"
@@ -42,6 +42,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
+tempfile = "3"
 
 [[bench]]
 name = "detect"
