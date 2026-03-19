@@ -3,11 +3,17 @@ name = "ai-hwaccel"
 version = "2026.3.19"
 edition = "2024"
 rust-version = "1.89"
-license = "AGPL-3.0"
+license = "AGPL-3.0-only"
 description = "Universal AI hardware accelerator detection, capability querying, and workload planning for Rust"
+homepage = "https://github.com/MacCracken/ai-hwaccel"
 repository = "https://github.com/MacCracken/ai-hwaccel"
+readme = "README.md"
 keywords = ["gpu", "tpu", "npu", "cuda", "accelerator"]
 categories = ["hardware-support", "science"]
+
+[[bin]]
+name = "ai-hwaccel"
+path = "src/main.rs"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
