@@ -173,12 +173,14 @@
 //!
 //! ```toml
 //! [dependencies]
-//! ai-hwaccel = { version = "2026.3", default-features = false, features = ["cuda"] }
+//! ai-hwaccel = { version = "0.19", default-features = false, features = ["cuda"] }
 //! ```
 
+mod async_detect;
 pub mod cache;
 pub mod detect;
 pub mod error;
+pub mod ffi;
 pub mod hardware;
 pub mod plan;
 pub mod profile;

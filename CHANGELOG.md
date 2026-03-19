@@ -9,6 +9,22 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ### Added
 
+- **Async detection**: `AcceleratorRegistry::detect_async()` and
+  `DetectBuilder::detect_async()` behind the `async-detect` cargo feature.
+  Uses `tokio::task::spawn_blocking` to avoid blocking the async runtime.
+- **CLI `--watch <secs>` mode**: re-detects on interval with screen clear and
+  device-count change notifications.
+- **CLI `--sort` flag**: sort `--table` output by `mem`, `name`, or `family`.
+- **CLI `--family` flag**: filter `--table` output to a specific family
+  (`gpu`, `tpu`, `npu`, `asic`, `cpu`).
+- **C FFI** (`src/ffi.rs` + `include/ai_hwaccel.h`): `extern "C"` API with
+  `ai_hwaccel_detect()`, `ai_hwaccel_device_count()`,
+  `ai_hwaccel_has_accelerator()`, `ai_hwaccel_accelerator_memory()`,
+  `ai_hwaccel_json()` and corresponding free functions.
+- **Framework integration guide**: `docs/guides/framework-integration.md` with
+  code examples for `candle`, `burn`, `tch-rs`, `ort`, multi-device sharding,
+  and training memory budgeting.
+- `tokio` optional dependency (behind `async-detect` feature).
 - **Feature flags**: each of the 11 hardware backends is gated behind a cargo
   feature (`cuda`, `rocm`, `apple`, `vulkan`, `intel-npu`, `amd-xdna`, `tpu`,
   `gaudi`, `aws-neuron`, `intel-oneapi`, `qualcomm`). All enabled by default

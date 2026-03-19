@@ -1,25 +1,35 @@
 //! CLI binary for ai-hwaccel — outputs the accelerator registry as JSON.
 //!
 //! Usage:
-//!   ai-hwaccel              # Full registry JSON (compact)
-//!   ai-hwaccel --pretty     # Full registry JSON (formatted)
-//!   ai-hwaccel --table      # Human-readable table
-//!   ai-hwaccel --summary    # Compact summary JSON
-//!   ai-hwaccel --debug      # Verbose detection diagnostics to stderr
-//!   ai-hwaccel --version    # Print version
+//!   ai-hwaccel                     # Full registry JSON (compact)
+//!   ai-hwaccel --pretty            # Full registry JSON (formatted)
+//!   ai-hwaccel --table             # Human-readable table
+//!   ai-hwaccel --table --sort mem  # Table sorted by memory (desc)
+//!   ai-hwaccel --table --family gpu  # Table filtered to GPUs only
+//!   ai-hwaccel --summary           # Compact summary JSON
+//!   ai-hwaccel --watch 5           # Re-detect every 5 seconds (table)
+//!   ai-hwaccel --debug             # Verbose detection diagnostics
+//!   ai-hwaccel --version           # Print version
 //!
 //! Logging:
 //!   Set `RUST_LOG` to control verbosity (e.g. `RUST_LOG=debug ai-hwaccel`).
 //!   Use `--json-log` to emit structured JSON logs to stderr.
 
+use std::time::Duration;
+
 use tracing::{error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt};
 
-use ai_hwaccel::{AcceleratorFamily, AcceleratorRegistry};
+use ai_hwaccel::{AcceleratorFamily, AcceleratorProfile, AcceleratorRegistry};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let has = |flag: &str| args.iter().any(|a| a == flag);
+    let get_val = |flag: &str| -> Option<String> {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1).cloned())
+    };
 
     let debug_mode = has("--debug") || has("-d");
     let json_log = has("--json-log");
@@ -30,23 +40,25 @@ fn main() {
         return;
     }
 
-    info!("starting accelerator detection");
-    let registry = AcceleratorRegistry::detect();
-    info!(
-        device_count = registry.all_profiles().len(),
-        has_accelerator = registry.has_accelerator(),
-        warnings = registry.warnings().len(),
-        "detection complete"
-    );
-
-    for w in registry.warnings() {
-        warn!("{}", w);
+    // --watch <seconds>: re-detect on interval
+    if let Some(interval_str) = get_val("--watch") {
+        let secs: u64 = interval_str.parse().unwrap_or(10);
+        let sort = get_val("--sort");
+        let family_filter = get_val("--family");
+        run_watch(Duration::from_secs(secs), sort, family_filter);
+        return;
     }
 
+    info!("starting accelerator detection");
+    let registry = AcceleratorRegistry::detect();
+    log_detection(&registry);
+
     let pretty = has("--pretty") || has("-p");
+    let sort = get_val("--sort");
+    let family_filter = get_val("--family");
 
     if has("--table") || has("-t") {
-        print_table(&registry);
+        print_table(&registry, sort.as_deref(), family_filter.as_deref());
     } else if has("--summary") || has("-s") {
         let summary = build_summary(&registry);
         emit_json(&summary, pretty);
@@ -55,14 +67,85 @@ fn main() {
     }
 }
 
-fn print_table(registry: &AcceleratorRegistry) {
+fn log_detection(registry: &AcceleratorRegistry) {
+    info!(
+        device_count = registry.all_profiles().len(),
+        has_accelerator = registry.has_accelerator(),
+        warnings = registry.warnings().len(),
+        "detection complete"
+    );
+    for w in registry.warnings() {
+        warn!("{}", w);
+    }
+}
+
+fn run_watch(interval: Duration, sort: Option<String>, family: Option<String>) {
+    let mut prev_count = 0usize;
+    loop {
+        // Clear screen
+        print!("\x1b[2J\x1b[H");
+        let registry = AcceleratorRegistry::detect();
+        let count = registry.all_profiles().len();
+
+        print_table(&registry, sort.as_deref(), family.as_deref());
+
+        if prev_count > 0 && count != prev_count {
+            println!(
+                "\n  [device count changed: {} -> {}]",
+                prev_count, count
+            );
+        }
+        prev_count = count;
+
+        println!(
+            "\nRefreshing every {}s... (Ctrl+C to stop)",
+            interval.as_secs()
+        );
+        std::thread::sleep(interval);
+    }
+}
+
+fn print_table(
+    registry: &AcceleratorRegistry,
+    sort_by: Option<&str>,
+    family_filter: Option<&str>,
+) {
+    let mut profiles: Vec<&AcceleratorProfile> = registry.all_profiles().iter().collect();
+
+    // Filter by family
+    if let Some(f) = family_filter {
+        let target = parse_family(f);
+        if let Some(fam) = target {
+            profiles.retain(|p| p.accelerator.family() == fam);
+        }
+    }
+
+    // Sort
+    match sort_by {
+        Some("mem" | "memory") => {
+            profiles.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes));
+        }
+        Some("name" | "device") => {
+            profiles.sort_by(|a, b| a.accelerator.to_string().cmp(&b.accelerator.to_string()));
+        }
+        Some("family") => {
+            profiles.sort_by(|a, b| {
+                a.accelerator
+                    .family()
+                    .to_string()
+                    .cmp(&b.accelerator.family().to_string())
+            });
+        }
+        _ => {} // default order (detection order)
+    }
+
     println!(
         "{:<6} {:<35} {:>10} {:>8} {:>12}",
         "ID", "Device", "Memory", "Family", "Status"
     );
     println!("{}", "-".repeat(75));
 
-    for (i, p) in registry.all_profiles().iter().enumerate() {
+    for (i, p) in profiles.iter().enumerate() {
         let mem_gb = p.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
         let family = p.accelerator.family();
         let status = if p.available { "ok" } else { "unavail" };
@@ -118,6 +201,17 @@ fn print_table(registry: &AcceleratorRegistry) {
     }
 }
 
+fn parse_family(s: &str) -> Option<AcceleratorFamily> {
+    match s.to_lowercase().as_str() {
+        "cpu" => Some(AcceleratorFamily::Cpu),
+        "gpu" => Some(AcceleratorFamily::Gpu),
+        "npu" => Some(AcceleratorFamily::Npu),
+        "tpu" => Some(AcceleratorFamily::Tpu),
+        "asic" | "ai-asic" | "ai_asic" => Some(AcceleratorFamily::AiAsic),
+        _ => None,
+    }
+}
+
 fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
@@ -169,7 +263,7 @@ fn build_summary(registry: &AcceleratorRegistry) -> serde_json::Value {
     let accel_memory = registry.total_accelerator_memory();
 
     serde_json::json!({
-        "schema_version": 1,
+        "schema_version": ai_hwaccel::SCHEMA_VERSION,
         "version": env!("CARGO_PKG_VERSION"),
         "device_count": available.len(),
         "has_accelerator": registry.has_accelerator(),
@@ -182,10 +276,10 @@ fn build_summary(registry: &AcceleratorRegistry) -> serde_json::Value {
             "driver_version": b.driver_version,
         })),
         "families": {
-            "gpu": registry.by_family(ai_hwaccel::AcceleratorFamily::Gpu).len(),
-            "tpu": registry.by_family(ai_hwaccel::AcceleratorFamily::Tpu).len(),
-            "npu": registry.by_family(ai_hwaccel::AcceleratorFamily::Npu).len(),
-            "ai_asic": registry.by_family(ai_hwaccel::AcceleratorFamily::AiAsic).len(),
+            "gpu": registry.by_family(AcceleratorFamily::Gpu).len(),
+            "tpu": registry.by_family(AcceleratorFamily::Tpu).len(),
+            "npu": registry.by_family(AcceleratorFamily::Npu).len(),
+            "ai_asic": registry.by_family(AcceleratorFamily::AiAsic).len(),
         },
         "warnings": registry.warnings().iter().map(|w| w.to_string()).collect::<Vec<_>>(),
     })

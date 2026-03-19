@@ -4,33 +4,8 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
-## Phase 4: Ecosystem (2026-03-20)
-
-### Integration guides
-
-- [ ] Document usage with `candle`, `burn`, `tch-rs`, and `ort`.
-- [ ] Expand examples with framework-specific code.
-
-### Async API
-
-- [ ] `tokio` feature flag: async `detect()` via `tokio::process`.
-- [ ] Async builder: `AcceleratorRegistry::builder().detect_async().await`.
-
-### CLI polish
-
-- [ ] `--table` column sorting and filtering flags.
-- [ ] `--watch` mode: re-detect on interval, show diffs.
-
-### Language bindings
-
-- [ ] C FFI: `ai_hwaccel_detect()`, `ai_hwaccel_best_available()`, etc.
-- [ ] Python bindings scaffold via PyO3.
-
----
-
 ## Remaining pre-v1
 
-- [ ] Switch from CalVer to SemVer (`1.0.0`).
 - [ ] Publish to crates.io.
 - [ ] `cargo-vet`: supply-chain audits for all dependencies.
 
@@ -80,7 +55,7 @@ These are longer-term items that don't block any release.
 - [ ] **Hot-plug support** -- `udev`/`inotify` watch for device add/remove.
 - [ ] **Cost-aware planning** -- cloud pricing data for cheapest config.
 - [ ] **WASM target** -- browser-based ML dashboards with stubbed detection.
-- [ ] **Python bindings** -- full PyO3 package for the ML ecosystem.
+- [ ] **Full Python bindings** -- complete PyO3 package for the ML ecosystem.
 - [ ] **Reduce allocations** -- `Cow<str>` for device names, `SmallVec` for
   profiles.
 - [ ] **Lazy detection** -- detect only backends the caller queries.
