@@ -72,7 +72,7 @@ impl AcceleratorRegistry {
                 .collect();
 
             // Throughput estimate: base multiplier * chip count, scaled by
-            // quantisation efficiency (INT4 = 8x reduction → ~2x faster than FP32).
+            // quantisation memory reduction factor (e.g. FP16 = 2x, INT4 = 8x).
             let tpu_multiplier = tpu_devices
                 .iter()
                 .map(|d| d.accelerator.throughput_multiplier())

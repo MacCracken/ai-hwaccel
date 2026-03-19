@@ -235,3 +235,50 @@ fn detection_error_is_std_error() {
     });
     assert!(!e.to_string().is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// CachedRegistry
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cached_registry_debug() {
+    let cache = CachedRegistry::new(std::time::Duration::from_secs(60));
+    let debug = format!("{:?}", cache);
+    assert!(debug.contains("CachedRegistry"));
+    assert!(debug.contains("ttl"));
+}
+
+#[test]
+fn cached_registry_returns_same_on_second_call() {
+    let cache = CachedRegistry::new(std::time::Duration::from_secs(300));
+    let first = cache.get();
+    let second = cache.get();
+    assert_eq!(first.all_profiles().len(), second.all_profiles().len());
+}
+
+#[test]
+fn cached_registry_invalidate_forces_redetect() {
+    let cache = CachedRegistry::new(std::time::Duration::from_secs(300));
+    let _first = cache.get();
+    cache.invalidate();
+    let after = cache.get(); // should re-detect
+    assert!(!after.all_profiles().is_empty());
+}
+
+#[test]
+fn cached_registry_ttl_accessor() {
+    let cache = CachedRegistry::new(std::time::Duration::from_secs(42));
+    assert_eq!(cache.ttl(), std::time::Duration::from_secs(42));
+}
+
+// ---------------------------------------------------------------------------
+// Overflow safety: large chip counts don't panic
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tpu_large_chip_count_no_overflow_panic() {
+    // u32::MAX chips * 95 GiB would overflow u64 without saturating_mul.
+    let p = AcceleratorProfile::tpu(0, u32::MAX, TpuVersion::V5p);
+    // Should saturate to u64::MAX, not panic.
+    assert!(p.memory_bytes > 0);
+}

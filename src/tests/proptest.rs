@@ -104,6 +104,37 @@ proptest! {
 // ---------------------------------------------------------------------------
 
 proptest! {
+    // Overflow safety: large chip counts must not panic.
+    #[test]
+    fn tpu_convenience_large_chip_count_no_panic(
+        chip_count in 1u32..10_000,
+    ) {
+        let p = AcceleratorProfile::tpu(0, chip_count, TpuVersion::V5p);
+        // Must not panic, and must produce a finite value.
+        prop_assert!(p.memory_bytes > 0);
+    }
+
+    // Zero-param models never produce NaN or Inf.
+    #[test]
+    fn zero_params_finite_throughput(
+        gpu_mem_gb in 1u64..256,
+    ) {
+        let reg = AcceleratorRegistry::from_profiles(vec![
+            AcceleratorProfile::cpu(64 * 1024 * 1024 * 1024),
+            AcceleratorProfile::cuda(0, gpu_mem_gb * 1024 * 1024 * 1024),
+        ]);
+        for q in [
+            QuantizationLevel::None,
+            QuantizationLevel::Float16,
+            QuantizationLevel::Int4,
+        ] {
+            let plan = reg.plan_sharding(0, &q);
+            if let Some(tps) = plan.estimated_tokens_per_sec {
+                prop_assert!(tps.is_finite(), "NaN/Inf at quant {:?}", q);
+            }
+        }
+    }
+
     #[test]
     fn training_memory_components_sum(
         params_m in 100u64..100_000,

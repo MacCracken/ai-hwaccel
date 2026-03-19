@@ -150,7 +150,7 @@ fn detect_cpu_memory() -> u64 {
                 if let Some(kb_str) = parts.get(1)
                     && let Ok(kb) = kb_str.parse::<u64>()
                 {
-                    return kb * 1024;
+                    return kb.saturating_mul(1024);
                 }
             }
         }
@@ -170,7 +170,6 @@ fn detect_cpu_memory() -> u64 {
 }
 
 /// Read a u64 from a sysfs file.
-#[allow(dead_code)]
 pub(super) fn read_sysfs_u64(path: &Path) -> Option<u64> {
     std::fs::read_to_string(path)
         .ok()

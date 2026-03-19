@@ -133,7 +133,9 @@ impl AcceleratorProfile {
 
     /// Create a TPU profile.
     pub fn tpu(device_id: u32, chip_count: u32, version: crate::hardware::TpuVersion) -> Self {
-        let hbm = version.hbm_per_chip_bytes() * chip_count as u64;
+        let hbm = version
+            .hbm_per_chip_bytes()
+            .saturating_mul(chip_count as u64);
         Self {
             accelerator: AcceleratorType::Tpu {
                 device_id,

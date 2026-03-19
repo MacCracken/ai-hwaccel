@@ -21,7 +21,9 @@ pub(crate) fn detect_aws_neuron(
                 let model = device["model"].as_str().unwrap_or("Neuron Device");
                 let nc_count = device["nc_count"].as_u64().unwrap_or(2) as u32;
                 let mem_per_nc = device["memory_per_nc_mb"].as_u64().unwrap_or(8192);
-                let mem_total = nc_count as u64 * mem_per_nc * 1024 * 1024;
+                let mem_total = (nc_count as u64)
+                    .saturating_mul(mem_per_nc)
+                    .saturating_mul(1024 * 1024);
 
                 let chip_type = if model.contains("trn") || model.contains("Trainium") {
                     NeuronChipType::Trainium

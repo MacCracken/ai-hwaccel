@@ -35,7 +35,9 @@ pub(crate) fn detect_tpu(
 
         let version = detect_tpu_version(device_id);
         let chip_count = detect_tpu_chip_count(device_id);
-        let hbm = version.hbm_per_chip_bytes() * chip_count as u64;
+        let hbm = version
+            .hbm_per_chip_bytes()
+            .saturating_mul(chip_count as u64);
 
         debug!(device_id, %version, chip_count, "Google TPU detected");
         profiles.push(AcceleratorProfile {

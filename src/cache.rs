@@ -30,6 +30,18 @@ pub struct CachedRegistry {
     inner: Mutex<CacheState>,
 }
 
+impl std::fmt::Debug for CachedRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CachedRegistry")
+            .field("ttl", &self.ttl)
+            .field(
+                "cached",
+                &self.inner.lock().is_ok_and(|s| s.registry.is_some()),
+            )
+            .finish()
+    }
+}
+
 struct CacheState {
     registry: Option<AcceleratorRegistry>,
     last_detect: Option<Instant>,
