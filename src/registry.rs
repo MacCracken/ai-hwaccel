@@ -86,11 +86,13 @@ impl AcceleratorRegistry {
     }
 
     /// All registered profiles (including unavailable ones).
+    #[inline]
     pub fn all_profiles(&self) -> &[AcceleratorProfile] {
         &self.profiles
     }
 
     /// Non-fatal warnings from detection (tool not found, parse errors, etc.).
+    #[inline]
     pub fn warnings(&self) -> &[DetectionError] {
         &self.warnings
     }
@@ -157,6 +159,7 @@ impl AcceleratorRegistry {
     /// Estimate memory required for `model_params` parameters at the given quantisation.
     ///
     /// Formula: `params * (bits / 8)` plus 20% overhead for activations/KV cache.
+    #[inline]
     pub fn estimate_memory(model_params: u64, quant: &QuantizationLevel) -> u64 {
         let bytes_per_param = quant.bits_per_param() as u64;
         let raw = model_params * bytes_per_param / 8;
@@ -173,58 +176,79 @@ impl AcceleratorRegistry {
     /// Note: this is a heuristic. For production deployments, verify the
     /// returned level against [`AcceleratorProfile::supports_quantization`].
     pub fn suggest_quantization(&self, model_params: u64) -> QuantizationLevel {
-        // Check for TPU first — TPUs strongly prefer BFloat16
-        if let Some(tpu_mem) = self.best_memory_for(AcceleratorFamily::Tpu) {
-            if Self::estimate_memory(model_params, &QuantizationLevel::BFloat16) <= tpu_mem {
+        // Single pass: collect best memory per family and check for Gaudi.
+        let mut best_tpu: u64 = 0;
+        let mut best_gaudi: u64 = 0;
+        let mut best_gpu: u64 = 0;
+        let mut best_npu: u64 = 0;
+        let mut best_cpu: u64 = 0;
+
+        for p in &self.profiles {
+            if !p.available {
+                continue;
+            }
+            let mem = p.memory_bytes;
+            match p.accelerator.family() {
+                AcceleratorFamily::Tpu => best_tpu = best_tpu.max(mem),
+                AcceleratorFamily::Gpu => best_gpu = best_gpu.max(mem),
+                AcceleratorFamily::Npu => best_npu = best_npu.max(mem),
+                AcceleratorFamily::Cpu => best_cpu = best_cpu.max(mem),
+                AcceleratorFamily::AiAsic => {
+                    if matches!(p.accelerator, AcceleratorType::Gaudi { .. }) {
+                        best_gaudi = best_gaudi.max(mem);
+                    }
+                }
+            }
+        }
+
+        // TPU → BF16 preferred
+        if best_tpu > 0 {
+            if Self::estimate_memory(model_params, &QuantizationLevel::BFloat16) <= best_tpu {
                 return QuantizationLevel::BFloat16;
             }
-            if Self::estimate_memory(model_params, &QuantizationLevel::Int8) <= tpu_mem {
+            if Self::estimate_memory(model_params, &QuantizationLevel::Int8) <= best_tpu {
                 return QuantizationLevel::Int8;
             }
         }
 
-        // Check for Gaudi specifically (not all AI ASICs — Neuron and Qualcomm
-        // have different preferred levels).
-        let has_gaudi = self
-            .profiles
-            .iter()
-            .any(|p| p.available && matches!(p.accelerator, AcceleratorType::Gaudi { .. }));
-        if has_gaudi && let Some(gaudi_mem) = self.best_gaudi_memory() {
-            if Self::estimate_memory(model_params, &QuantizationLevel::BFloat16) <= gaudi_mem {
+        // Gaudi → BF16 preferred
+        if best_gaudi > 0 {
+            if Self::estimate_memory(model_params, &QuantizationLevel::BFloat16) <= best_gaudi {
                 return QuantizationLevel::BFloat16;
             }
-            if Self::estimate_memory(model_params, &QuantizationLevel::Int8) <= gaudi_mem {
+            if Self::estimate_memory(model_params, &QuantizationLevel::Int8) <= best_gaudi {
                 return QuantizationLevel::Int8;
             }
         }
 
-        // Check GPU (supports all quant levels)
-        if let Some(gpu_mem) = self.best_memory_for(AcceleratorFamily::Gpu) {
+        // GPU → FP16 preferred, step down
+        if best_gpu > 0 {
             for quant in &[
                 QuantizationLevel::Float16,
                 QuantizationLevel::Int8,
                 QuantizationLevel::Int4,
             ] {
-                if Self::estimate_memory(model_params, quant) <= gpu_mem {
+                if Self::estimate_memory(model_params, quant) <= best_gpu {
                     return *quant;
                 }
             }
         }
 
-        // Check NPU (INT8/INT4 only — device capability respected)
-        if let Some(npu_mem) = self.best_memory_for(AcceleratorFamily::Npu) {
+        // NPU → INT8/INT4 only
+        if best_npu > 0 {
             for quant in &[QuantizationLevel::Int8, QuantizationLevel::Int4] {
-                if Self::estimate_memory(model_params, quant) <= npu_mem {
+                if Self::estimate_memory(model_params, quant) <= best_npu {
                     return *quant;
                 }
             }
         }
 
-        // Fallback: step down quantisation until it fits in CPU memory, or
-        // return INT4 as last resort.
-        let cpu_mem = self
-            .best_memory_for(AcceleratorFamily::Cpu)
-            .unwrap_or(16 * 1024 * 1024 * 1024);
+        // CPU fallback — step down until it fits
+        let cpu_mem = if best_cpu > 0 {
+            best_cpu
+        } else {
+            16 * 1024 * 1024 * 1024
+        };
         for quant in &[
             QuantizationLevel::Float16,
             QuantizationLevel::Int8,
@@ -235,24 +259,6 @@ impl AcceleratorRegistry {
             }
         }
         QuantizationLevel::Int4
-    }
-
-    /// Returns the largest device memory for available devices of a given family.
-    fn best_memory_for(&self, family: AcceleratorFamily) -> Option<u64> {
-        self.profiles
-            .iter()
-            .filter(|p| p.available && p.accelerator.family() == family)
-            .map(|p| p.memory_bytes)
-            .max()
-    }
-
-    /// Returns the largest memory among available Gaudi devices specifically.
-    fn best_gaudi_memory(&self) -> Option<u64> {
-        self.profiles
-            .iter()
-            .filter(|p| p.available && matches!(p.accelerator, AcceleratorType::Gaudi { .. }))
-            .map(|p| p.memory_bytes)
-            .max()
     }
 }
 
@@ -418,5 +424,10 @@ impl Default for DetectBuilder {
 impl DetectBuilder {
     pub(crate) fn backend_enabled(&self, backend: Backend) -> bool {
         self.is_enabled(backend)
+    }
+
+    /// Count of enabled backends (for deciding sequential vs parallel).
+    pub(crate) fn enabled_count(&self) -> usize {
+        self.enabled.iter().filter(|&&e| e).count()
     }
 }

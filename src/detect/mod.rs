@@ -54,54 +54,118 @@ impl AcceleratorRegistry {
 }
 
 /// Run detection with a builder's backend selection.
+///
+/// When 2+ backends are enabled, runs them in parallel via `std::thread::scope`.
+/// When 0-1 are enabled, runs sequentially to avoid thread spawn overhead.
 pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry {
     let mut all_profiles = vec![cpu_profile()];
     let mut all_warnings: Vec<DetectionError> = Vec::new();
 
-    std::thread::scope(|s| {
-        let mut handles: Vec<std::thread::ScopedJoinHandle<'_, DetectResult>> = Vec::new();
+    let use_threads = builder.enabled_count() >= 2;
 
-        macro_rules! spawn_backend {
-            ($feature:literal, $backend:expr, $detect_fn:expr) => {
-                #[cfg(feature = $feature)]
-                if builder.backend_enabled($backend) {
-                    handles.push(s.spawn(|| {
-                        let mut p = Vec::new();
-                        let mut w = Vec::new();
-                        $detect_fn(&mut p, &mut w);
-                        (p, w)
-                    }));
+    macro_rules! run_backend {
+        ($feature:literal, $backend:expr, $detect_fn:expr) => {
+            #[cfg(feature = $feature)]
+            if builder.backend_enabled($backend) {
+                $detect_fn(&mut all_profiles, &mut all_warnings);
+            }
+        };
+    }
+
+    macro_rules! spawn_backend {
+        ($feature:literal, $backend:expr, $detect_fn:expr, $handles:expr, $s:expr) => {
+            #[cfg(feature = $feature)]
+            if builder.backend_enabled($backend) {
+                $handles.push($s.spawn(|| {
+                    let mut p = Vec::new();
+                    let mut w = Vec::new();
+                    $detect_fn(&mut p, &mut w);
+                    (p, w)
+                }));
+            }
+        };
+    }
+
+    if use_threads {
+        std::thread::scope(|s| {
+            let mut handles: Vec<std::thread::ScopedJoinHandle<'_, DetectResult>> = Vec::new();
+
+            spawn_backend!("cuda", Backend::Cuda, cuda::detect_cuda, handles, s);
+            spawn_backend!("rocm", Backend::Rocm, rocm::detect_rocm, handles, s);
+            spawn_backend!(
+                "apple",
+                Backend::Apple,
+                apple::detect_metal_and_ane,
+                handles,
+                s
+            );
+            spawn_backend!("vulkan", Backend::Vulkan, vulkan::detect_vulkan, handles, s);
+            spawn_backend!(
+                "intel-npu",
+                Backend::IntelNpu,
+                intel_npu::detect_intel_npu,
+                handles,
+                s
+            );
+            spawn_backend!(
+                "amd-xdna",
+                Backend::AmdXdna,
+                amd_xdna::detect_amd_xdna,
+                handles,
+                s
+            );
+            spawn_backend!("tpu", Backend::Tpu, tpu::detect_tpu, handles, s);
+            spawn_backend!("gaudi", Backend::Gaudi, gaudi::detect_gaudi, handles, s);
+            spawn_backend!(
+                "aws-neuron",
+                Backend::AwsNeuron,
+                neuron::detect_aws_neuron,
+                handles,
+                s
+            );
+            spawn_backend!(
+                "intel-oneapi",
+                Backend::IntelOneApi,
+                intel_oneapi::detect_intel_oneapi,
+                handles,
+                s
+            );
+            spawn_backend!(
+                "qualcomm",
+                Backend::Qualcomm,
+                qualcomm::detect_qualcomm_ai100,
+                handles,
+                s
+            );
+
+            for handle in handles {
+                if let Ok((profiles, warnings)) = handle.join() {
+                    all_profiles.extend(profiles);
+                    all_warnings.extend(warnings);
                 }
-            };
-        }
-
-        spawn_backend!("cuda", Backend::Cuda, cuda::detect_cuda);
-        spawn_backend!("rocm", Backend::Rocm, rocm::detect_rocm);
-        spawn_backend!("apple", Backend::Apple, apple::detect_metal_and_ane);
-        spawn_backend!("vulkan", Backend::Vulkan, vulkan::detect_vulkan);
-        spawn_backend!("intel-npu", Backend::IntelNpu, intel_npu::detect_intel_npu);
-        spawn_backend!("amd-xdna", Backend::AmdXdna, amd_xdna::detect_amd_xdna);
-        spawn_backend!("tpu", Backend::Tpu, tpu::detect_tpu);
-        spawn_backend!("gaudi", Backend::Gaudi, gaudi::detect_gaudi);
-        spawn_backend!("aws-neuron", Backend::AwsNeuron, neuron::detect_aws_neuron);
-        spawn_backend!(
+            }
+        });
+    } else {
+        run_backend!("cuda", Backend::Cuda, cuda::detect_cuda);
+        run_backend!("rocm", Backend::Rocm, rocm::detect_rocm);
+        run_backend!("apple", Backend::Apple, apple::detect_metal_and_ane);
+        run_backend!("vulkan", Backend::Vulkan, vulkan::detect_vulkan);
+        run_backend!("intel-npu", Backend::IntelNpu, intel_npu::detect_intel_npu);
+        run_backend!("amd-xdna", Backend::AmdXdna, amd_xdna::detect_amd_xdna);
+        run_backend!("tpu", Backend::Tpu, tpu::detect_tpu);
+        run_backend!("gaudi", Backend::Gaudi, gaudi::detect_gaudi);
+        run_backend!("aws-neuron", Backend::AwsNeuron, neuron::detect_aws_neuron);
+        run_backend!(
             "intel-oneapi",
             Backend::IntelOneApi,
             intel_oneapi::detect_intel_oneapi
         );
-        spawn_backend!(
+        run_backend!(
             "qualcomm",
             Backend::Qualcomm,
             qualcomm::detect_qualcomm_ai100
         );
-
-        for handle in handles {
-            if let Ok((profiles, warnings)) = handle.join() {
-                all_profiles.extend(profiles);
-                all_warnings.extend(warnings);
-            }
-        }
-    });
+    }
 
     // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found.
     let has_dedicated = all_profiles.iter().any(|p| {
