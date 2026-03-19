@@ -144,12 +144,35 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ### Fixed
 
+- **`suggest_quantization` semantic bugs**: no longer returns BF16 for
+  Qualcomm/Neuron AI ASICs (only Gaudi). Falls back through FP16→INT8→INT4
+  on CPU instead of unconditionally returning FP16 for models that don't fit.
+- **CPU memory detection**: macOS `sysctl` fallback now uses the safe command
+  runner (`run_tool`) with absolute path resolution and timeout, matching all
+  other CLI tool invocations.
+- **Integer overflow safety**: all memory multiplications (TPU HBM × chip
+  count, Neuron cores × memory, KB→bytes) use `saturating_mul` to prevent
+  panics on extreme values.
+- **Pipeline parallel layer assignment**: last shard now captures all remaining
+  layers instead of potentially leaving a gap when layer count doesn't divide
+  evenly across devices.
+- **Per-chip memory precision**: TPU tensor-parallel uses ceiling division
+  (`div_ceil`) so no bytes are lost to rounding.
+- **Cache mutex poisoning**: `CachedRegistry` recovers from poisoned locks
+  instead of panicking.
+- **UTF-8 safe truncation**: CLI table column truncation uses `chars().take()`
+  instead of byte slicing.
+- **Windows compatibility**: mock detection tests gate Unix symlinks behind
+  `#[cfg(unix)]` so the test file compiles on Windows.
+- **Gaudi detection**: malformed CSV lines now produce `ParseError` warnings
+  instead of being silently skipped. Device IDs and memory values are
+  validated with `validate_device_id` / `validate_memory_mb`.
 - `Cargo.toml` license field corrected from `AGPL-3.0` to the SPDX-correct
   `AGPL-3.0-only`.
 - Added missing `homepage` and `readme` fields to `Cargo.toml` for crates.io
   compliance.
 
-## [2026.3.19] - 2026-03-19
+## [2026.3.19] - 2026-03-19 (CalVer, pre-SemVer switch)
 
 ### Added
 

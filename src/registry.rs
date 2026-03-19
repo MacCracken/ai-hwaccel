@@ -189,9 +189,7 @@ impl AcceleratorRegistry {
             .profiles
             .iter()
             .any(|p| p.available && matches!(p.accelerator, AcceleratorType::Gaudi { .. }));
-        if has_gaudi
-            && let Some(gaudi_mem) = self.best_gaudi_memory()
-        {
+        if has_gaudi && let Some(gaudi_mem) = self.best_gaudi_memory() {
             if Self::estimate_memory(model_params, &QuantizationLevel::BFloat16) <= gaudi_mem {
                 return QuantizationLevel::BFloat16;
             }

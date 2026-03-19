@@ -155,13 +155,9 @@ fn detect_cpu_memory() -> u64 {
             }
         }
     }
-    if let Ok(output) = std::process::Command::new("sysctl")
-        .args(["-n", "hw.memsize"])
-        .output()
-        && output.status.success()
-        && let Ok(bytes) = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .parse::<u64>()
+    // macOS fallback via safe command runner (absolute path, timeout).
+    if let Ok(output) = command::run_tool("sysctl", &["-n", "hw.memsize"], command::DEFAULT_TIMEOUT)
+        && let Ok(bytes) = output.stdout.trim().parse::<u64>()
     {
         return bytes;
     }
