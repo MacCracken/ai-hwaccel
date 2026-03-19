@@ -71,7 +71,8 @@ impl AcceleratorProfile {
                                 | QuantizationLevel::Int8
                         )
                     }
-                    // Qualcomm AI 100 optimised for INT8/INT4 inference
+                    // Qualcomm AI 100: no native FP32/BF16 — hardware is
+                    // optimised for quantised INT8/INT4 inference.
                     AcceleratorType::QualcommAi100 { .. } => {
                         matches!(
                             level,

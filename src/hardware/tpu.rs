@@ -14,6 +14,11 @@ pub enum TpuVersion {
 
 impl TpuVersion {
     /// HBM (High Bandwidth Memory) per chip in bytes.
+    ///
+    /// Sources: Google Cloud TPU documentation (2024).
+    /// - V4: 32 GiB HBM2e per chip
+    /// - V5e: 16 GiB HBM2e per chip
+    /// - V5p: 95 GiB HBM2e per chip
     pub fn hbm_per_chip_bytes(&self) -> u64 {
         match self {
             Self::V4 => 32 * 1024 * 1024 * 1024,

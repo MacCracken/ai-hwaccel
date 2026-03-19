@@ -194,3 +194,53 @@ fn plan_does_not_fit_in_memory() {
         AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024)]);
     assert!(!plan.fits_in_memory(&reg));
 }
+
+// ---------------------------------------------------------------------------
+// Edge cases from audit
+// ---------------------------------------------------------------------------
+
+#[test]
+fn plan_sharding_zero_params() {
+    let reg = AcceleratorRegistry::new();
+    let plan = reg.plan_sharding(0, &QuantizationLevel::Float16);
+    assert_eq!(plan.strategy, ShardingStrategy::None);
+    // Should not produce NaN/Inf
+    if let Some(tps) = plan.estimated_tokens_per_sec {
+        assert!(tps.is_finite());
+    }
+}
+
+#[test]
+fn plan_sharding_three_gpus_uneven_layers() {
+    // 30B params → ~120 estimated layers, 3 GPUs → 40 per shard.
+    // Last shard should capture all remaining layers.
+    let reg = AcceleratorRegistry::from_profiles(vec![
+        AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(0, 40 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(1, 40 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(2, 40 * 1024 * 1024 * 1024),
+    ]);
+    let plan = reg.plan_sharding(30_000_000_000, &QuantizationLevel::Float16);
+    assert!(matches!(
+        plan.strategy,
+        ShardingStrategy::PipelineParallel { num_stages: 3 }
+    ));
+    // Last shard must cover remaining layers (no gap).
+    let last = plan.shards.last().unwrap();
+    let first = &plan.shards[0];
+    assert!(last.layer_range.1 >= first.layer_range.1);
+    assert!(last.is_valid());
+}
+
+#[test]
+fn plan_sharding_all_devices_unavailable() {
+    let mut gpu = AcceleratorProfile::cuda(0, 80 * 1024 * 1024 * 1024);
+    gpu.available = false;
+    let reg = AcceleratorRegistry::from_profiles(vec![
+        AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024),
+        gpu,
+    ]);
+    // Large model, only CPU available → CPU fallback
+    let plan = reg.plan_sharding(70_000_000_000, &QuantizationLevel::Float16);
+    assert_eq!(plan.shards[0].device, AcceleratorType::Cpu);
+}

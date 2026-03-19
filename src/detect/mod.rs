@@ -165,6 +165,7 @@ fn detect_cpu_memory() -> u64 {
     {
         return bytes;
     }
+    tracing::debug!("could not read system memory, defaulting to 16 GiB");
     16 * 1024 * 1024 * 1024
 }
 

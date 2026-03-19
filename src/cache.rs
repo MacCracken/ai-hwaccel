@@ -49,7 +49,7 @@ impl CachedRegistry {
 
     /// Get the cached registry, re-detecting if the TTL has expired.
     pub fn get(&self) -> AcceleratorRegistry {
-        let mut state = self.inner.lock().unwrap();
+        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
 
         if let Some(ref reg) = state.registry
@@ -67,7 +67,7 @@ impl CachedRegistry {
 
     /// Force the next call to [`get`](Self::get) to re-detect.
     pub fn invalidate(&self) {
-        let mut state = self.inner.lock().unwrap();
+        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         state.registry = None;
         state.last_detect = None;
     }

@@ -13,6 +13,10 @@ pub enum GaudiGeneration {
 
 impl GaudiGeneration {
     /// HBM per device in bytes.
+    ///
+    /// Sources: Intel Habana Labs product specifications.
+    /// - Gaudi2: 96 GiB HBM2e
+    /// - Gaudi3: 128 GiB HBM2e
     pub fn hbm_bytes(&self) -> u64 {
         match self {
             Self::Gaudi2 => 96 * 1024 * 1024 * 1024,

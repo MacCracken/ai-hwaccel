@@ -71,12 +71,14 @@ impl AcceleratorRegistry {
                 })
                 .collect();
 
+            // Throughput estimate: base multiplier * chip count, scaled by
+            // quantisation efficiency (INT4 = 8x reduction → ~2x faster than FP32).
             let tpu_multiplier = tpu_devices
                 .iter()
                 .map(|d| d.accelerator.throughput_multiplier())
                 .fold(f64::INFINITY, f64::min);
-            let tps =
-                tpu_multiplier * total_chips as f64 * 8.0 / (quant.bits_per_param() as f64 / 4.0);
+            let quant_factor = quant.memory_reduction_factor();
+            let tps = tpu_multiplier * total_chips as f64 * quant_factor * 2.0;
 
             return ShardingPlan {
                 shards,
@@ -112,7 +114,12 @@ impl AcceleratorRegistry {
                 .enumerate()
                 .map(|(i, dev)| {
                     let start = i as u32 * layers_per_shard;
-                    let end = start + layers_per_shard - 1;
+                    // Last shard captures all remaining layers.
+                    let end = if i as u32 == num_stages - 1 {
+                        estimated_layers.saturating_sub(1)
+                    } else {
+                        start + layers_per_shard - 1
+                    };
                     ModelShard {
                         shard_id: i as u32,
                         layer_range: (start, end),
@@ -126,7 +133,8 @@ impl AcceleratorRegistry {
                 .iter()
                 .map(|d| d.accelerator.throughput_multiplier())
                 .fold(f64::INFINITY, f64::min);
-            let tps = slowest * 10.0 / (quant.bits_per_param() as f64 / 4.0);
+            let quant_factor = quant.memory_reduction_factor();
+            let tps = slowest * quant_factor * 2.5;
 
             return ShardingPlan {
                 shards,
@@ -165,6 +173,9 @@ fn estimate_tokens_per_sec(
     model_params: u64,
     quant: &QuantizationLevel,
 ) -> f64 {
+    if model_params == 0 {
+        return 0.0;
+    }
     let base = 1_000_000_000.0 / model_params as f64;
     let quant_speedup = quant.memory_reduction_factor();
     base * accel.throughput_multiplier() * quant_speedup

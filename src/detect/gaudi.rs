@@ -6,7 +6,7 @@ use crate::error::DetectionError;
 use crate::hardware::{AcceleratorType, GaudiGeneration};
 use crate::profile::AcceleratorProfile;
 
-use super::command::{DEFAULT_TIMEOUT, run_tool, validate_memory_mb};
+use super::command::{DEFAULT_TIMEOUT, run_tool, validate_device_id, validate_memory_mb};
 
 pub(crate) fn detect_gaudi(
     profiles: &mut Vec<AcceleratorProfile>,
@@ -31,9 +31,19 @@ pub(crate) fn detect_gaudi(
     for line in output.stdout.lines() {
         let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
         if parts.len() < 4 {
+            warnings.push(DetectionError::ParseError {
+                backend: "gaudi".into(),
+                message: format!("expected 4 CSV fields, got {}: {}", parts.len(), line),
+            });
             continue;
         }
-        let device_id: u32 = parts[0].parse().unwrap_or(0);
+        let device_id = match validate_device_id(parts[0], "gaudi") {
+            Ok(id) => id,
+            Err(e) => {
+                warnings.push(e);
+                continue;
+            }
+        };
         let name = parts[1].to_lowercase();
         let mem_total_mb = match validate_memory_mb(parts[2], "gaudi") {
             Ok(mb) => mb,

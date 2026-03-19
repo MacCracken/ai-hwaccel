@@ -206,11 +206,12 @@ fn parse_family(s: &str) -> Option<AcceleratorFamily> {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max - 3])
+    if max < 4 || s.len() <= max {
+        return s.to_string();
     }
+    // UTF-8 safe: use chars to avoid splitting multi-byte characters.
+    let truncated: String = s.chars().take(max - 3).collect();
+    format!("{}...", truncated)
 }
 
 fn emit_json<T: serde::Serialize>(value: &T, pretty: bool) {
