@@ -6,7 +6,7 @@ use crate::error::DetectionError;
 use crate::hardware::{AcceleratorType, GaudiGeneration};
 use crate::profile::AcceleratorProfile;
 
-use super::command::{run_tool, validate_memory_mb, DEFAULT_TIMEOUT};
+use super::command::{DEFAULT_TIMEOUT, run_tool, validate_memory_mb};
 
 pub(crate) fn detect_gaudi(
     profiles: &mut Vec<AcceleratorProfile>,

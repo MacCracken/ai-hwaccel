@@ -129,9 +129,7 @@ fn estimate_tpu_training(base_gb: f64, method: TrainingMethod) -> MemoryEstimate
             (base_gb * qf, base_gb * 0.15, base_gb * 0.12 * qf)
         }
         TrainingMethod::Prefix => (base_gb, base_gb * 0.05, base_gb * 0.05),
-        TrainingMethod::DPO | TrainingMethod::RLHF => {
-            (base_gb * 2.0, base_gb * 1.5, base_gb * 1.2)
-        }
+        TrainingMethod::DPO | TrainingMethod::RLHF => (base_gb * 2.0, base_gb * 1.5, base_gb * 1.2),
         TrainingMethod::Distillation => (base_gb * 1.5, base_gb * 0.8, base_gb * 0.6),
     };
     MemoryEstimate {
@@ -153,9 +151,7 @@ fn estimate_gaudi_training(base_gb: f64, method: TrainingMethod) -> MemoryEstima
             (base_gb * qf, base_gb * 0.12, base_gb * 0.12 * qf)
         }
         TrainingMethod::Prefix => (base_gb, base_gb * 0.05, base_gb * 0.06),
-        TrainingMethod::DPO | TrainingMethod::RLHF => {
-            (base_gb * 2.0, base_gb * 1.5, base_gb * 1.3)
-        }
+        TrainingMethod::DPO | TrainingMethod::RLHF => (base_gb * 2.0, base_gb * 1.5, base_gb * 1.3),
         TrainingMethod::Distillation => (base_gb * 1.5, base_gb * 0.9, base_gb * 0.7),
     };
     MemoryEstimate {

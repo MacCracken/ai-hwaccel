@@ -6,7 +6,7 @@ use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
-use super::command::{run_tool, DEFAULT_TIMEOUT};
+use super::command::{DEFAULT_TIMEOUT, run_tool};
 
 /// Detect Vulkan devices.
 ///

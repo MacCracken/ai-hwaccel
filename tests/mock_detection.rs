@@ -59,10 +59,7 @@ fn mock_multi_device_registry() {
     // profile entry, so it fits on the single "device" → no sharding needed.
     let plan = reg.plan_sharding(70_000_000_000, &QuantizationLevel::BFloat16);
     assert_eq!(plan.strategy, ShardingStrategy::None);
-    assert!(matches!(
-        plan.shards[0].device,
-        AcceleratorType::Tpu { .. }
-    ));
+    assert!(matches!(plan.shards[0].device, AcceleratorType::Tpu { .. }));
 }
 
 // ---------------------------------------------------------------------------
@@ -130,10 +127,7 @@ fn mock_amd_xdna_sysfs() {
 
     let driver_link = device_dir.join("driver");
     let target = fs::read_link(&driver_link).unwrap();
-    assert_eq!(
-        target.file_name().unwrap().to_string_lossy(),
-        "amdxdna"
-    );
+    assert_eq!(target.file_name().unwrap().to_string_lossy(), "amdxdna");
 }
 
 // ---------------------------------------------------------------------------

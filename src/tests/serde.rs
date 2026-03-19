@@ -320,9 +320,8 @@ fn serde_registry_roundtrip() {
 
 #[test]
 fn serde_registry_warnings_omitted_when_empty() {
-    let reg = AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(
-        16 * 1024 * 1024 * 1024,
-    )]);
+    let reg =
+        AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024)]);
     let json = serde_json::to_string(&reg).unwrap();
     assert!(!json.contains("warnings"));
 }

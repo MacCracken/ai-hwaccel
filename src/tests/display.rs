@@ -31,10 +31,7 @@ fn display_accelerator_type_all_variants() {
         AcceleratorType::AmdXdnaNpu { device_id: 2 }.to_string(),
         "AMD XDNA NPU (device 2)"
     );
-    assert_eq!(
-        AcceleratorType::AppleNpu.to_string(),
-        "Apple Neural Engine"
-    );
+    assert_eq!(AcceleratorType::AppleNpu.to_string(), "Apple Neural Engine");
     assert_eq!(
         AcceleratorType::Tpu {
             device_id: 0,

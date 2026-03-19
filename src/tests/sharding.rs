@@ -190,8 +190,7 @@ fn plan_does_not_fit_in_memory() {
         total_memory_bytes: 999 * 1024 * 1024 * 1024,
         estimated_tokens_per_sec: None,
     };
-    let reg = AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(
-        16 * 1024 * 1024 * 1024,
-    )]);
+    let reg =
+        AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024)]);
     assert!(!plan.fits_in_memory(&reg));
 }

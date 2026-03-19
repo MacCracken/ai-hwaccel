@@ -9,10 +9,7 @@ use ai_hwaccel::{AcceleratorRegistry, QuantizationLevel};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let model_params_b: u64 = args
-        .get(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(7);
+    let model_params_b: u64 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(7);
     let model_params = model_params_b * 1_000_000_000;
 
     let registry = AcceleratorRegistry::detect();
@@ -34,10 +31,6 @@ fn main() {
         QuantizationLevel::Int4,
     ] {
         let mem = AcceleratorRegistry::estimate_memory(model_params, &q);
-        println!(
-            "  {}: {:.1} GB",
-            q,
-            mem as f64 / (1024.0 * 1024.0 * 1024.0)
-        );
+        println!("  {}: {:.1} GB", q, mem as f64 / (1024.0 * 1024.0 * 1024.0));
     }
 }

@@ -200,7 +200,7 @@ pub use quantization::QuantizationLevel;
 pub use registry::{AcceleratorRegistry, Backend, DetectBuilder, SCHEMA_VERSION};
 pub use requirement::AcceleratorRequirement;
 pub use sharding::{ModelShard, ShardingPlan, ShardingStrategy};
-pub use training::{estimate_training_memory, MemoryEstimate, TrainingMethod, TrainingTarget};
+pub use training::{MemoryEstimate, TrainingMethod, TrainingTarget, estimate_training_memory};
 
 #[cfg(test)]
 mod tests;

@@ -4,7 +4,7 @@
 //! cargo run --example training
 //! ```
 
-use ai_hwaccel::{estimate_training_memory, TrainingMethod, TrainingTarget};
+use ai_hwaccel::{TrainingMethod, TrainingTarget, estimate_training_memory};
 
 fn main() {
     let model_params_m: u64 = 7000; // 7B

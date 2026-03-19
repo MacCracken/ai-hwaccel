@@ -84,8 +84,16 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
         spawn_backend!("tpu", Backend::Tpu, tpu::detect_tpu);
         spawn_backend!("gaudi", Backend::Gaudi, gaudi::detect_gaudi);
         spawn_backend!("aws-neuron", Backend::AwsNeuron, neuron::detect_aws_neuron);
-        spawn_backend!("intel-oneapi", Backend::IntelOneApi, intel_oneapi::detect_intel_oneapi);
-        spawn_backend!("qualcomm", Backend::Qualcomm, qualcomm::detect_qualcomm_ai100);
+        spawn_backend!(
+            "intel-oneapi",
+            Backend::IntelOneApi,
+            intel_oneapi::detect_intel_oneapi
+        );
+        spawn_backend!(
+            "qualcomm",
+            Backend::Qualcomm,
+            qualcomm::detect_qualcomm_ai100
+        );
 
         for handle in handles {
             if let Ok((profiles, warnings)) = handle.join() {

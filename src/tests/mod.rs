@@ -3,8 +3,8 @@
 mod builder;
 mod classification;
 mod command;
-mod proptest;
 mod display;
+mod proptest;
 mod quantization;
 mod registry;
 mod requirement;

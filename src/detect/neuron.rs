@@ -6,7 +6,7 @@ use crate::error::DetectionError;
 use crate::hardware::{AcceleratorType, NeuronChipType};
 use crate::profile::AcceleratorProfile;
 
-use super::command::{run_tool, DEFAULT_TIMEOUT};
+use super::command::{DEFAULT_TIMEOUT, run_tool};
 
 pub(crate) fn detect_aws_neuron(
     profiles: &mut Vec<AcceleratorProfile>,

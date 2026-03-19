@@ -1,15 +1,14 @@
-# cargo-deny configuration
-# Run: cargo deny check
-# CI: cargo deny check advisories bans licenses sources
+# cargo-deny 0.19+ configuration
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+targets = []
+all-features = true
 
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
-yanked = "warn"
-notice = "warn"
+# Advisory database is checked by default; no additional config needed.
 
 [licenses]
-unlicensed = "deny"
 allow = [
     "MIT",
     "Apache-2.0",
@@ -20,14 +19,11 @@ allow = [
     "Unicode-DFS-2016",
     "AGPL-3.0-only",
 ]
-copyleft = "warn"
-default = "deny"
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
 highlight = "all"
-skip = []
 
 [sources]
 unknown-registry = "deny"

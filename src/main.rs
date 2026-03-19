@@ -90,10 +90,7 @@ fn run_watch(interval: Duration, sort: Option<String>, family: Option<String>) {
         print_table(&registry, sort.as_deref(), family.as_deref());
 
         if prev_count > 0 && count != prev_count {
-            println!(
-                "\n  [device count changed: {} -> {}]",
-                prev_count, count
-            );
+            println!("\n  [device count changed: {} -> {}]", prev_count, count);
         }
         prev_count = count;
 
@@ -105,11 +102,7 @@ fn run_watch(interval: Duration, sort: Option<String>, family: Option<String>) {
     }
 }
 
-fn print_table(
-    registry: &AcceleratorRegistry,
-    sort_by: Option<&str>,
-    family_filter: Option<&str>,
-) {
+fn print_table(registry: &AcceleratorRegistry, sort_by: Option<&str>, family_filter: Option<&str>) {
     let mut profiles: Vec<&AcceleratorProfile> = registry.all_profiles().iter().collect();
 
     // Filter by family

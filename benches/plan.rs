@@ -1,6 +1,6 @@
 //! Benchmarks for sharding planning and memory estimation.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 use ai_hwaccel::*;
 

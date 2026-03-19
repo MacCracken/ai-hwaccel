@@ -95,9 +95,7 @@ fn manual_registry_plan() {
 fn training_estimate_consistency() {
     let est = estimate_training_memory(7000, TrainingMethod::FullFineTune, TrainingTarget::Gpu);
     assert!(est.total_gb > 0.0);
-    assert!(
-        (est.model_gb + est.optimizer_gb + est.activation_gb - est.total_gb).abs() < 0.001
-    );
+    assert!((est.model_gb + est.optimizer_gb + est.activation_gb - est.total_gb).abs() < 0.001);
 }
 
 // ---------------------------------------------------------------------------

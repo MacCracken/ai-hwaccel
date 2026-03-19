@@ -103,9 +103,8 @@ fn registry_total_memory_includes_cpu() {
 
 #[test]
 fn registry_has_accelerator() {
-    let cpu_only = AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(
-        16 * 1024 * 1024 * 1024,
-    )]);
+    let cpu_only =
+        AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024)]);
     assert!(!cpu_only.has_accelerator());
 
     let with_gpu = AcceleratorRegistry::from_profiles(vec![
@@ -148,11 +147,23 @@ fn registry_satisfying() {
     ]);
     assert_eq!(reg.satisfying(&AcceleratorRequirement::Gpu).len(), 1);
     assert_eq!(reg.satisfying(&AcceleratorRequirement::GpuOrTpu).len(), 2);
-    assert_eq!(reg.satisfying(&AcceleratorRequirement::AnyAccelerator).len(), 3);
+    assert_eq!(
+        reg.satisfying(&AcceleratorRequirement::AnyAccelerator)
+            .len(),
+        3
+    );
     assert_eq!(reg.satisfying(&AcceleratorRequirement::None).len(), 4);
     assert_eq!(reg.satisfying(&AcceleratorRequirement::Gaudi).len(), 1);
-    assert_eq!(reg.satisfying(&AcceleratorRequirement::Tpu { min_chips: 4 }).len(), 1);
-    assert_eq!(reg.satisfying(&AcceleratorRequirement::Tpu { min_chips: 8 }).len(), 0);
+    assert_eq!(
+        reg.satisfying(&AcceleratorRequirement::Tpu { min_chips: 4 })
+            .len(),
+        1
+    );
+    assert_eq!(
+        reg.satisfying(&AcceleratorRequirement::Tpu { min_chips: 8 })
+            .len(),
+        0
+    );
 }
 
 #[test]
@@ -261,9 +272,8 @@ fn suggest_quantization_npu_prefers_int8() {
 
 #[test]
 fn suggest_quantization_cpu_only_fallback() {
-    let reg = AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(
-        16 * 1024 * 1024 * 1024,
-    )]);
+    let reg =
+        AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024)]);
     // CPU-only falls back to FP16
     assert_eq!(
         reg.suggest_quantization(7_000_000_000),

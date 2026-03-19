@@ -24,9 +24,7 @@ use serde::{Deserialize, Serialize};
 #[non_exhaustive]
 pub enum DetectionError {
     /// A required CLI tool was not found on `$PATH`.
-    ToolNotFound {
-        tool: String,
-    },
+    ToolNotFound { tool: String },
 
     /// A CLI tool was found but exited with a non-zero status.
     ToolFailed {
@@ -36,16 +34,10 @@ pub enum DetectionError {
     },
 
     /// Output from a CLI tool or sysfs file could not be parsed.
-    ParseError {
-        backend: String,
-        message: String,
-    },
+    ParseError { backend: String, message: String },
 
     /// A sysfs or procfs path could not be read.
-    SysfsReadError {
-        path: String,
-        message: String,
-    },
+    SysfsReadError { path: String, message: String },
 }
 
 impl fmt::Display for DetectionError {

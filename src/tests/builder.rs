@@ -94,9 +94,8 @@ fn warnings_are_accessible() {
 
 #[test]
 fn from_profiles_has_no_warnings() {
-    let reg = AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(
-        16 * 1024 * 1024 * 1024,
-    )]);
+    let reg =
+        AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024)]);
     assert!(reg.warnings().is_empty());
 }
 

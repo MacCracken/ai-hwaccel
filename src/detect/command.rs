@@ -38,9 +38,7 @@ pub(crate) fn run_tool(
     timeout: Duration,
 ) -> Result<ToolOutput, DetectionError> {
     // 1. Resolve absolute path.
-    let abs_path = which(tool).ok_or_else(|| DetectionError::ToolNotFound {
-        tool: tool.into(),
-    })?;
+    let abs_path = which(tool).ok_or_else(|| DetectionError::ToolNotFound { tool: tool.into() })?;
 
     // 2. Spawn with piped stdout/stderr.
     let mut child = Command::new(&abs_path)
@@ -48,9 +46,7 @@ pub(crate) fn run_tool(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| DetectionError::ToolNotFound {
-            tool: tool.into(),
-        })?;
+        .map_err(|_| DetectionError::ToolNotFound { tool: tool.into() })?;
 
     // Take pipes before the wait loop.
     let stdout_pipe = child.stdout.take();

@@ -71,7 +71,7 @@ fn memory_mb_at_limit_is_ok() {
 
 #[test]
 fn run_tool_not_found() {
-    use crate::detect::command::{run_tool, DEFAULT_TIMEOUT};
+    use crate::detect::command::{DEFAULT_TIMEOUT, run_tool};
     let err = run_tool("nonexistent-tool-xyz-12345", &[], DEFAULT_TIMEOUT).unwrap_err();
     assert!(matches!(err, DetectionError::ToolNotFound { .. }));
 }
@@ -82,7 +82,7 @@ fn run_tool_not_found() {
 
 #[test]
 fn run_tool_echo() {
-    use crate::detect::command::{run_tool, DEFAULT_TIMEOUT};
+    use crate::detect::command::{DEFAULT_TIMEOUT, run_tool};
     // `true` is a tool that always exits 0 with no output.
     // It should be on every Unix system.
     if let Ok(output) = run_tool("true", &[], DEFAULT_TIMEOUT) {
@@ -97,7 +97,7 @@ fn run_tool_echo() {
 
 #[test]
 fn run_tool_failure() {
-    use crate::detect::command::{run_tool, DEFAULT_TIMEOUT};
+    use crate::detect::command::{DEFAULT_TIMEOUT, run_tool};
     let result = run_tool("false", &[], DEFAULT_TIMEOUT);
     assert!(result.is_err());
     if let Err(DetectionError::ToolFailed { exit_code, .. }) = result {

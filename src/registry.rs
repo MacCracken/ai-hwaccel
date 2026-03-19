@@ -296,29 +296,73 @@ impl DetectBuilder {
         self.enabled[backend as usize]
     }
 
-    pub fn with_cuda(self) -> Self { self.set(Backend::Cuda, true) }
-    pub fn with_rocm(self) -> Self { self.set(Backend::Rocm, true) }
-    pub fn with_apple(self) -> Self { self.set(Backend::Apple, true) }
-    pub fn with_vulkan(self) -> Self { self.set(Backend::Vulkan, true) }
-    pub fn with_intel_npu(self) -> Self { self.set(Backend::IntelNpu, true) }
-    pub fn with_amd_xdna(self) -> Self { self.set(Backend::AmdXdna, true) }
-    pub fn with_tpu(self) -> Self { self.set(Backend::Tpu, true) }
-    pub fn with_gaudi(self) -> Self { self.set(Backend::Gaudi, true) }
-    pub fn with_aws_neuron(self) -> Self { self.set(Backend::AwsNeuron, true) }
-    pub fn with_intel_oneapi(self) -> Self { self.set(Backend::IntelOneApi, true) }
-    pub fn with_qualcomm(self) -> Self { self.set(Backend::Qualcomm, true) }
+    pub fn with_cuda(self) -> Self {
+        self.set(Backend::Cuda, true)
+    }
+    pub fn with_rocm(self) -> Self {
+        self.set(Backend::Rocm, true)
+    }
+    pub fn with_apple(self) -> Self {
+        self.set(Backend::Apple, true)
+    }
+    pub fn with_vulkan(self) -> Self {
+        self.set(Backend::Vulkan, true)
+    }
+    pub fn with_intel_npu(self) -> Self {
+        self.set(Backend::IntelNpu, true)
+    }
+    pub fn with_amd_xdna(self) -> Self {
+        self.set(Backend::AmdXdna, true)
+    }
+    pub fn with_tpu(self) -> Self {
+        self.set(Backend::Tpu, true)
+    }
+    pub fn with_gaudi(self) -> Self {
+        self.set(Backend::Gaudi, true)
+    }
+    pub fn with_aws_neuron(self) -> Self {
+        self.set(Backend::AwsNeuron, true)
+    }
+    pub fn with_intel_oneapi(self) -> Self {
+        self.set(Backend::IntelOneApi, true)
+    }
+    pub fn with_qualcomm(self) -> Self {
+        self.set(Backend::Qualcomm, true)
+    }
 
-    pub fn without_cuda(self) -> Self { self.set(Backend::Cuda, false) }
-    pub fn without_rocm(self) -> Self { self.set(Backend::Rocm, false) }
-    pub fn without_apple(self) -> Self { self.set(Backend::Apple, false) }
-    pub fn without_vulkan(self) -> Self { self.set(Backend::Vulkan, false) }
-    pub fn without_intel_npu(self) -> Self { self.set(Backend::IntelNpu, false) }
-    pub fn without_amd_xdna(self) -> Self { self.set(Backend::AmdXdna, false) }
-    pub fn without_tpu(self) -> Self { self.set(Backend::Tpu, false) }
-    pub fn without_gaudi(self) -> Self { self.set(Backend::Gaudi, false) }
-    pub fn without_aws_neuron(self) -> Self { self.set(Backend::AwsNeuron, false) }
-    pub fn without_intel_oneapi(self) -> Self { self.set(Backend::IntelOneApi, false) }
-    pub fn without_qualcomm(self) -> Self { self.set(Backend::Qualcomm, false) }
+    pub fn without_cuda(self) -> Self {
+        self.set(Backend::Cuda, false)
+    }
+    pub fn without_rocm(self) -> Self {
+        self.set(Backend::Rocm, false)
+    }
+    pub fn without_apple(self) -> Self {
+        self.set(Backend::Apple, false)
+    }
+    pub fn without_vulkan(self) -> Self {
+        self.set(Backend::Vulkan, false)
+    }
+    pub fn without_intel_npu(self) -> Self {
+        self.set(Backend::IntelNpu, false)
+    }
+    pub fn without_amd_xdna(self) -> Self {
+        self.set(Backend::AmdXdna, false)
+    }
+    pub fn without_tpu(self) -> Self {
+        self.set(Backend::Tpu, false)
+    }
+    pub fn without_gaudi(self) -> Self {
+        self.set(Backend::Gaudi, false)
+    }
+    pub fn without_aws_neuron(self) -> Self {
+        self.set(Backend::AwsNeuron, false)
+    }
+    pub fn without_intel_oneapi(self) -> Self {
+        self.set(Backend::IntelOneApi, false)
+    }
+    pub fn without_qualcomm(self) -> Self {
+        self.set(Backend::Qualcomm, false)
+    }
 
     /// Run detection with only the enabled backends.
     pub fn detect(self) -> AcceleratorRegistry {
