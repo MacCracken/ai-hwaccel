@@ -11,6 +11,15 @@ use serde::{Deserialize, Serialize};
 ///
 /// These are non-fatal — detection continues even when individual backends
 /// fail. The registry collects them as [`AcceleratorRegistry::warnings`].
+///
+/// # Examples
+///
+/// ```rust
+/// use ai_hwaccel::DetectionError;
+///
+/// let err = DetectionError::ToolNotFound { tool: "nvidia-smi".into() };
+/// assert!(err.to_string().contains("nvidia-smi"));
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum DetectionError {

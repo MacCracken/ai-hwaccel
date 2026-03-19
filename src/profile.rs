@@ -8,6 +8,16 @@ use crate::hardware::{AcceleratorFamily, AcceleratorType};
 use crate::quantization::QuantizationLevel;
 
 /// A detected hardware accelerator and its capabilities.
+///
+/// # Examples
+///
+/// ```rust
+/// use ai_hwaccel::{AcceleratorProfile, QuantizationLevel};
+///
+/// let gpu = AcceleratorProfile::cuda(0, 24 * 1024 * 1024 * 1024);
+/// assert!(gpu.supports_quantization(&QuantizationLevel::Float16));
+/// assert_eq!(gpu.preferred_quantization(), QuantizationLevel::Float16);
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcceleratorProfile {

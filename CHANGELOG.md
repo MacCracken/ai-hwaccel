@@ -9,6 +9,20 @@ This project uses [calendar versioning](https://calver.org/) (`YYYY.M.D`).
 
 ### Added
 
+- **Integration tests**: `tests/integration.rs` with 9 end-to-end tests
+  covering the detect→query→plan pipeline, builder, JSON roundtrip,
+  manual registry, training estimation, Display impls, and warnings.
+- **Benchmark suite**: `criterion` benchmarks in `benches/` for `detect()`,
+  `plan_sharding()`, `suggest_quantization()`, `estimate_memory()`, and
+  `estimate_training_memory()`.
+- **`examples/` directory**: four runnable examples — `detect.rs`, `plan.rs`,
+  `training.rs`, `json_output.rs`.
+- **Rustdoc examples**: `# Examples` sections on `AcceleratorRegistry`,
+  `AcceleratorProfile`, `QuantizationLevel`, `DetectionError`, and
+  `estimate_training_memory()`. All compile as doc-tests.
+- **CI improvements**: cross-platform matrix (Linux + macOS), MSRV job
+  (Rust 1.89), coverage via `cargo-llvm-cov` + Codecov, `cargo-deny`
+  supply-chain checks.
 - **Parallel detection**: all backends now run concurrently via
   `std::thread::scope`, reducing wall-clock latency on multi-tool systems.
   Vulkan deduplication moved to a post-pass.

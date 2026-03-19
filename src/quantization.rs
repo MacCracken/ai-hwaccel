@@ -5,6 +5,16 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 /// Model weight quantisation levels.
+///
+/// # Examples
+///
+/// ```rust
+/// use ai_hwaccel::QuantizationLevel;
+///
+/// let q = QuantizationLevel::Int8;
+/// assert_eq!(q.bits_per_param(), 8);
+/// assert!((q.memory_reduction_factor() - 4.0).abs() < f64::EPSILON);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum QuantizationLevel {

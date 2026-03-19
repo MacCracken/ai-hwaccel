@@ -128,35 +128,35 @@ This document outlines the gaps, improvements, and milestones needed to take
 
 ## Milestone 5: Testing and CI
 
-- [ ] **Integration tests**: add a `tests/` directory (crate-level) with
-  integration tests that exercise the public API end-to-end.
+- [x] **Integration tests**: `tests/integration.rs` with 9 tests covering
+  detect→query→plan pipeline, builder, JSON roundtrip, manual registry,
+  training estimation, Display impls, and warnings.
 - [ ] **Mock detection**: create a test harness that simulates sysfs trees and
   CLI tool outputs so detectors can be unit-tested without real hardware.
   Use `tempdir` + symlinks to build fake `/sys/class/drm/card0/...` trees.
 - [ ] **Property-based testing**: use `proptest` or `quickcheck` to fuzz
   `estimate_memory`, `plan_sharding`, and `suggest_quantization` across
   random parameter counts and device configurations.
-- [ ] **Benchmark suite**: add `criterion` benchmarks for `detect()`,
-  `plan_sharding()`, and `estimate_training_memory()`.
-- [ ] **CI matrix**: test on `x86_64-unknown-linux-gnu`,
-  `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`,
-  `aarch64-apple-darwin`, and `x86_64-pc-windows-msvc`.
-- [ ] **MSRV CI job**: dedicated CI job that builds with the declared MSRV
-  to prevent accidental breakage.
-- [ ] **Coverage**: add `cargo-llvm-cov` or `tarpaulin` to CI and track
-  coverage over time.
+- [x] **Benchmark suite**: `criterion` benchmarks in `benches/` for
+  `detect()`, `detect_none()`, `plan_sharding()`, `suggest_quantization()`,
+  `estimate_memory()`, and `estimate_training_memory()`.
+- [x] **CI matrix**: test on `ubuntu-latest` (x86_64-linux) and
+  `macos-latest` (aarch64-apple-darwin). Windows deferred.
+- [x] **MSRV CI job**: dedicated job building and testing with Rust 1.89.
+- [x] **Coverage**: `cargo-llvm-cov` in CI with Codecov upload on main.
 
 ---
 
 ## Milestone 6: Documentation and ecosystem
 
-- [ ] **Rustdoc examples**: add `# Examples` sections to every public function
-  and type. Ensure all examples compile as doc-tests.
+- [x] **Rustdoc examples**: `# Examples` sections on `AcceleratorRegistry`,
+  `AcceleratorProfile`, `QuantizationLevel`, `DetectionError`, and
+  `estimate_training_memory`. All compile as doc-tests (7 total).
 - [ ] **Crate-level guide**: expand `lib.rs` docs with a guided walkthrough
   covering detection → querying → planning → training estimation.
 - [ ] **Architecture decision records (ADRs)**: document key design choices
   (e.g. "why sysfs over vendor SDKs", "why calendar versioning").
-- [ ] **`examples/` directory**: add runnable examples:
+- [x] **`examples/` directory**: four runnable examples:
   - `detect.rs` -- print detected hardware.
   - `plan.rs` -- plan sharding for a user-specified model.
   - `training.rs` -- estimate training memory.

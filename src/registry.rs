@@ -7,6 +7,23 @@ use crate::quantization::QuantizationLevel;
 use crate::requirement::AcceleratorRequirement;
 
 /// Registry of detected hardware accelerators with planning helpers.
+///
+/// # Examples
+///
+/// ```rust
+/// use ai_hwaccel::{AcceleratorRegistry, AcceleratorProfile, QuantizationLevel};
+///
+/// // Build a registry manually for testing.
+/// let registry = AcceleratorRegistry::from_profiles(vec![
+///     AcceleratorProfile::cpu(64 * 1024 * 1024 * 1024),
+///     AcceleratorProfile::cuda(0, 24 * 1024 * 1024 * 1024),
+/// ]);
+///
+/// assert!(registry.has_accelerator());
+/// let quant = registry.suggest_quantization(7_000_000_000);
+/// let plan = registry.plan_sharding(7_000_000_000, &quant);
+/// assert!(!plan.shards.is_empty());
+/// ```
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcceleratorRegistry {
