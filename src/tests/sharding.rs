@@ -2,70 +2,30 @@
 
 use crate::*;
 
-#[test]
-fn plan_sharding_small_model_single_device() {
-    let reg = AcceleratorRegistry::new();
-    let plan = reg.plan_sharding(1_000_000_000, &QuantizationLevel::Int4);
-    assert_eq!(plan.strategy, ShardingStrategy::None);
-    assert_eq!(plan.shards.len(), 1);
-}
+// ---------------------------------------------------------------------------
+// ShardingStrategy
+// ---------------------------------------------------------------------------
 
 #[test]
-fn plan_sharding_tpu_tensor_parallel() {
-    let mut reg = AcceleratorRegistry::new();
-    // 4 separate TPU chips, each with 95 GB — model too large for any single chip
-    for i in 0..4 {
-        reg.add_profile(AcceleratorProfile {
-            accelerator: AcceleratorType::Tpu {
-                device_id: i,
-                chip_count: 1,
-                version: TpuVersion::V5p,
-            },
-            available: true,
-            memory_bytes: 95 * 1024 * 1024 * 1024,
-            compute_capability: None,
-            driver_version: None,
-        });
-    }
-    // 70B at BF16 = ~168 GB — doesn't fit on one 95GB chip, but fits on 4
-    let plan = reg.plan_sharding(70_000_000_000, &QuantizationLevel::BFloat16);
-    assert!(matches!(
-        plan.strategy,
-        ShardingStrategy::TensorParallel { num_devices: 4 }
-    ));
+fn sharding_strategy_min_devices() {
+    assert_eq!(ShardingStrategy::None.min_devices(), 1);
+    assert_eq!(
+        ShardingStrategy::PipelineParallel { num_stages: 4 }.min_devices(),
+        4
+    );
+    assert_eq!(
+        ShardingStrategy::TensorParallel { num_devices: 8 }.min_devices(),
+        8
+    );
+    assert_eq!(
+        ShardingStrategy::DataParallel { num_replicas: 2 }.min_devices(),
+        2
+    );
 }
 
-#[test]
-fn plan_sharding_multi_gpu_pipeline() {
-    let mut reg = AcceleratorRegistry::new();
-    reg.add_profile(AcceleratorProfile {
-        accelerator: AcceleratorType::CudaGpu { device_id: 0 },
-        available: true,
-        memory_bytes: 8 * 1024 * 1024 * 1024,
-        compute_capability: None,
-        driver_version: None,
-    });
-    reg.add_profile(AcceleratorProfile {
-        accelerator: AcceleratorType::CudaGpu { device_id: 1 },
-        available: true,
-        memory_bytes: 8 * 1024 * 1024 * 1024,
-        compute_capability: None,
-        driver_version: None,
-    });
-    let plan = reg.plan_sharding(7_000_000_000, &QuantizationLevel::Float16);
-    assert!(matches!(
-        plan.strategy,
-        ShardingStrategy::PipelineParallel { .. }
-    ));
-    assert_eq!(plan.shards.len(), 2);
-}
-
-#[test]
-fn plan_sharding_cpu_fallback() {
-    let reg = AcceleratorRegistry::new();
-    let plan = reg.plan_sharding(70_000_000_000, &QuantizationLevel::None);
-    assert_eq!(plan.shards[0].device, AcceleratorType::Cpu);
-}
+// ---------------------------------------------------------------------------
+// ModelShard
+// ---------------------------------------------------------------------------
 
 #[test]
 fn model_shard_num_layers() {
@@ -80,6 +40,18 @@ fn model_shard_num_layers() {
 }
 
 #[test]
+fn model_shard_single_layer() {
+    let shard = ModelShard {
+        shard_id: 0,
+        layer_range: (5, 5),
+        device: AcceleratorType::Cpu,
+        memory_bytes: 0,
+    };
+    assert_eq!(shard.num_layers(), 1);
+    assert!(shard.is_valid());
+}
+
+#[test]
 fn model_shard_invalid_range() {
     let shard = ModelShard {
         shard_id: 0,
@@ -89,4 +61,137 @@ fn model_shard_invalid_range() {
     };
     assert_eq!(shard.num_layers(), 0);
     assert!(!shard.is_valid());
+}
+
+// ---------------------------------------------------------------------------
+// plan_sharding — strategy selection
+// ---------------------------------------------------------------------------
+
+#[test]
+fn plan_sharding_small_model_single_device() {
+    let reg = AcceleratorRegistry::new();
+    let plan = reg.plan_sharding(1_000_000_000, &QuantizationLevel::Int4);
+    assert_eq!(plan.strategy, ShardingStrategy::None);
+    assert_eq!(plan.shards.len(), 1);
+    assert!(plan.estimated_tokens_per_sec.is_some());
+}
+
+#[test]
+fn plan_sharding_tpu_tensor_parallel() {
+    let mut profiles = vec![AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024)];
+    for i in 0..4 {
+        profiles.push(AcceleratorProfile::tpu(i, 1, TpuVersion::V5p));
+    }
+    let reg = AcceleratorRegistry::from_profiles(profiles);
+    let plan = reg.plan_sharding(70_000_000_000, &QuantizationLevel::BFloat16);
+    assert!(matches!(
+        plan.strategy,
+        ShardingStrategy::TensorParallel { num_devices: 4 }
+    ));
+    assert_eq!(plan.shards.len(), 4);
+}
+
+#[test]
+fn plan_sharding_multi_gpu_pipeline() {
+    let reg = AcceleratorRegistry::from_profiles(vec![
+        AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(0, 8 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(1, 8 * 1024 * 1024 * 1024),
+    ]);
+    let plan = reg.plan_sharding(7_000_000_000, &QuantizationLevel::Float16);
+    assert!(matches!(
+        plan.strategy,
+        ShardingStrategy::PipelineParallel { .. }
+    ));
+    assert_eq!(plan.shards.len(), 2);
+    // Verify layer ranges are contiguous
+    assert_eq!(plan.shards[0].layer_range.0, 0);
+    assert!(plan.shards[1].layer_range.0 > 0);
+}
+
+#[test]
+fn plan_sharding_cpu_fallback() {
+    let reg = AcceleratorRegistry::new();
+    let plan = reg.plan_sharding(70_000_000_000, &QuantizationLevel::None);
+    assert_eq!(plan.shards[0].device, AcceleratorType::Cpu);
+    assert_eq!(plan.strategy, ShardingStrategy::None);
+}
+
+#[test]
+fn plan_sharding_fits_single_gpu() {
+    let reg = AcceleratorRegistry::from_profiles(vec![
+        AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(0, 80 * 1024 * 1024 * 1024), // A100 80 GB
+    ]);
+    let plan = reg.plan_sharding(7_000_000_000, &QuantizationLevel::Float16);
+    assert_eq!(plan.strategy, ShardingStrategy::None);
+    assert_eq!(plan.shards.len(), 1);
+    assert!(matches!(
+        plan.shards[0].device,
+        AcceleratorType::CudaGpu { .. }
+    ));
+}
+
+#[test]
+fn plan_sharding_gaudi_pipeline() {
+    let reg = AcceleratorRegistry::from_profiles(vec![
+        AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024),
+        AcceleratorProfile::gaudi(0, GaudiGeneration::Gaudi3),
+        AcceleratorProfile::gaudi(1, GaudiGeneration::Gaudi3),
+    ]);
+    // 70B FP32 needs ~336 GB, each Gaudi3 has 128 GB = 256 GB total
+    // 70B BF16 needs ~168 GB, fits on 2x Gaudi3
+    let plan = reg.plan_sharding(70_000_000_000, &QuantizationLevel::BFloat16);
+    assert!(matches!(
+        plan.strategy,
+        ShardingStrategy::PipelineParallel { num_stages: 2 }
+    ));
+}
+
+#[test]
+fn plan_sharding_model_exactly_fits_single_device() {
+    // 1B params at INT4 = 600 MB needed
+    let reg = AcceleratorRegistry::from_profiles(vec![
+        AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(0, 600_000_000), // exactly 600 MB
+    ]);
+    let plan = reg.plan_sharding(1_000_000_000, &QuantizationLevel::Int4);
+    assert_eq!(plan.strategy, ShardingStrategy::None);
+    assert!(matches!(
+        plan.shards[0].device,
+        AcceleratorType::CudaGpu { .. }
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// ShardingPlan::fits_in_memory
+// ---------------------------------------------------------------------------
+
+#[test]
+fn plan_fits_in_memory() {
+    let reg = AcceleratorRegistry::from_profiles(vec![
+        AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(0, 24 * 1024 * 1024 * 1024),
+    ]);
+    let plan = reg.plan_sharding(1_000_000_000, &QuantizationLevel::Float16);
+    assert!(plan.fits_in_memory(&reg));
+}
+
+#[test]
+fn plan_does_not_fit_in_memory() {
+    let plan = ShardingPlan {
+        shards: vec![ModelShard {
+            shard_id: 0,
+            layer_range: (0, 0),
+            device: AcceleratorType::Cpu,
+            memory_bytes: 999 * 1024 * 1024 * 1024,
+        }],
+        strategy: ShardingStrategy::None,
+        total_memory_bytes: 999 * 1024 * 1024 * 1024,
+        estimated_tokens_per_sec: None,
+    };
+    let reg = AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(
+        16 * 1024 * 1024 * 1024,
+    )]);
+    assert!(!plan.fits_in_memory(&reg));
 }
