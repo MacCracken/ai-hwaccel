@@ -60,7 +60,9 @@ impl AcceleratorRegistry {
                     _ => None,
                 })
                 .sum();
-            let per_chip = needed / total_chips.max(1) as u64;
+            // Ceiling division so no bytes are unaccounted for.
+            let chips = total_chips.max(1) as u64;
+            let per_chip = needed.div_ceil(chips);
 
             let shards: Vec<ModelShard> = (0..total_chips)
                 .map(|i| ModelShard {

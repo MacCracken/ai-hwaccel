@@ -164,6 +164,14 @@ impl AcceleratorRegistry {
     }
 
     /// Suggest a quantisation level based on available hardware and model size.
+    ///
+    /// The suggestion considers device-specific preferences (TPU → BF16,
+    /// GPU → FP16, NPU → INT8) and falls back through progressively smaller
+    /// quantisation levels until the model fits. The returned level is always
+    /// supported by at least one available device (or the CPU fallback).
+    ///
+    /// Note: this is a heuristic. For production deployments, verify the
+    /// returned level against [`AcceleratorProfile::supports_quantization`].
     pub fn suggest_quantization(&self, model_params: u64) -> QuantizationLevel {
         // Check for TPU first — TPUs strongly prefer BFloat16
         if let Some(tpu_mem) = self.best_memory_for(AcceleratorFamily::Tpu) {
@@ -175,14 +183,24 @@ impl AcceleratorRegistry {
             }
         }
 
-        // Check for Gaudi — also prefers BFloat16
-        if let Some(gaudi_mem) = self.best_memory_for(AcceleratorFamily::AiAsic)
-            && Self::estimate_memory(model_params, &QuantizationLevel::BFloat16) <= gaudi_mem
+        // Check for Gaudi specifically (not all AI ASICs — Neuron and Qualcomm
+        // have different preferred levels).
+        let has_gaudi = self
+            .profiles
+            .iter()
+            .any(|p| p.available && matches!(p.accelerator, AcceleratorType::Gaudi { .. }));
+        if has_gaudi
+            && let Some(gaudi_mem) = self.best_gaudi_memory()
         {
-            return QuantizationLevel::BFloat16;
+            if Self::estimate_memory(model_params, &QuantizationLevel::BFloat16) <= gaudi_mem {
+                return QuantizationLevel::BFloat16;
+            }
+            if Self::estimate_memory(model_params, &QuantizationLevel::Int8) <= gaudi_mem {
+                return QuantizationLevel::Int8;
+            }
         }
 
-        // Check GPU
+        // Check GPU (supports all quant levels)
         if let Some(gpu_mem) = self.best_memory_for(AcceleratorFamily::Gpu) {
             for quant in &[
                 QuantizationLevel::Float16,
@@ -195,7 +213,7 @@ impl AcceleratorRegistry {
             }
         }
 
-        // Check NPU (INT8/INT4 only)
+        // Check NPU (INT8/INT4 only — device capability respected)
         if let Some(npu_mem) = self.best_memory_for(AcceleratorFamily::Npu) {
             for quant in &[QuantizationLevel::Int8, QuantizationLevel::Int4] {
                 if Self::estimate_memory(model_params, quant) <= npu_mem {
@@ -204,8 +222,21 @@ impl AcceleratorRegistry {
             }
         }
 
-        // Fallback: FP16 on CPU
-        QuantizationLevel::Float16
+        // Fallback: step down quantisation until it fits in CPU memory, or
+        // return INT4 as last resort.
+        let cpu_mem = self
+            .best_memory_for(AcceleratorFamily::Cpu)
+            .unwrap_or(16 * 1024 * 1024 * 1024);
+        for quant in &[
+            QuantizationLevel::Float16,
+            QuantizationLevel::Int8,
+            QuantizationLevel::Int4,
+        ] {
+            if Self::estimate_memory(model_params, quant) <= cpu_mem {
+                return *quant;
+            }
+        }
+        QuantizationLevel::Int4
     }
 
     /// Returns the largest device memory for available devices of a given family.
@@ -213,6 +244,15 @@ impl AcceleratorRegistry {
         self.profiles
             .iter()
             .filter(|p| p.available && p.accelerator.family() == family)
+            .map(|p| p.memory_bytes)
+            .max()
+    }
+
+    /// Returns the largest memory among available Gaudi devices specifically.
+    fn best_gaudi_memory(&self) -> Option<u64> {
+        self.profiles
+            .iter()
+            .filter(|p| p.available && matches!(p.accelerator, AcceleratorType::Gaudi { .. }))
             .map(|p| p.memory_bytes)
             .max()
     }

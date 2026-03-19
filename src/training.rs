@@ -70,6 +70,15 @@ pub struct MemoryEstimate {
 
 /// Estimate device memory for a fine-tuning job on a specific accelerator family.
 ///
+/// This is a heuristic approximation assuming:
+/// - FP16/BF16 model weights (2 bytes per parameter)
+/// - Adam optimizer states (2x model weights for full fine-tune)
+/// - Batch size 1, moderate sequence length
+///
+/// Real memory usage depends on batch size, sequence length, gradient
+/// checkpointing, and precision mixing. Use these estimates as lower-bound
+/// guidance, not exact predictions.
+///
 /// # Examples
 ///
 /// ```rust
