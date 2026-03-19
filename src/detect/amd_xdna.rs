@@ -4,10 +4,14 @@ use std::path::Path;
 
 use tracing::debug;
 
+use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
-pub(crate) fn detect_amd_xdna(profiles: &mut Vec<AcceleratorProfile>) {
+pub(crate) fn detect_amd_xdna(
+    profiles: &mut Vec<AcceleratorProfile>,
+    _warnings: &mut Vec<DetectionError>,
+) {
     let accel_dir = Path::new("/sys/class/accel");
     if !accel_dir.exists() {
         return;
@@ -30,7 +34,7 @@ pub(crate) fn detect_amd_xdna(profiles: &mut Vec<AcceleratorProfile>) {
                 profiles.push(AcceleratorProfile {
                     accelerator: AcceleratorType::AmdXdnaNpu { device_id },
                     available: true,
-                    memory_bytes: 2 * 1024 * 1024 * 1024, // shared system memory
+                    memory_bytes: 2 * 1024 * 1024 * 1024,
                     compute_capability: None,
                     driver_version: None,
                 });

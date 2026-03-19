@@ -2,17 +2,29 @@
 
 use tracing::debug;
 
+use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
-pub(crate) fn detect_intel_oneapi(profiles: &mut Vec<AcceleratorProfile>) {
+pub(crate) fn detect_intel_oneapi(
+    profiles: &mut Vec<AcceleratorProfile>,
+    warnings: &mut Vec<DetectionError>,
+) {
     let output = std::process::Command::new("xpu-smi")
         .args(["discovery", "--dump", "1,2,18,19"])
         .output();
 
     let output = match output {
         Ok(o) if o.status.success() => o,
-        _ => return,
+        Ok(o) => {
+            warnings.push(DetectionError::ToolFailed {
+                tool: "xpu-smi".into(),
+                exit_code: o.status.code(),
+                stderr: String::from_utf8_lossy(&o.stderr).to_string(),
+            });
+            return;
+        }
+        Err(_) => return,
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);

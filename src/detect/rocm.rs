@@ -4,12 +4,16 @@ use std::path::Path;
 
 use tracing::debug;
 
+use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
 use super::read_sysfs_u64;
 
-pub(crate) fn detect_rocm(profiles: &mut Vec<AcceleratorProfile>) {
+pub(crate) fn detect_rocm(
+    profiles: &mut Vec<AcceleratorProfile>,
+    _warnings: &mut Vec<DetectionError>,
+) {
     let drm = Path::new("/sys/class/drm");
     if !drm.exists() {
         return;

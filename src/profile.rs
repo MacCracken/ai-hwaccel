@@ -92,6 +92,79 @@ impl AcceleratorProfile {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Convenience constructors
+// ---------------------------------------------------------------------------
+
+impl AcceleratorProfile {
+    /// Create a CUDA GPU profile (for testing or manual config).
+    pub fn cuda(device_id: u32, vram_bytes: u64) -> Self {
+        Self {
+            accelerator: AcceleratorType::CudaGpu { device_id },
+            available: true,
+            memory_bytes: vram_bytes,
+            compute_capability: None,
+            driver_version: None,
+        }
+    }
+
+    /// Create a ROCm GPU profile.
+    pub fn rocm(device_id: u32, vram_bytes: u64) -> Self {
+        Self {
+            accelerator: AcceleratorType::RocmGpu { device_id },
+            available: true,
+            memory_bytes: vram_bytes,
+            compute_capability: None,
+            driver_version: None,
+        }
+    }
+
+    /// Create a TPU profile.
+    pub fn tpu(
+        device_id: u32,
+        chip_count: u32,
+        version: crate::hardware::TpuVersion,
+    ) -> Self {
+        let hbm = version.hbm_per_chip_bytes() * chip_count as u64;
+        Self {
+            accelerator: AcceleratorType::Tpu {
+                device_id,
+                chip_count,
+                version,
+            },
+            available: true,
+            memory_bytes: hbm,
+            compute_capability: Some(format!("TPU {}", version)),
+            driver_version: None,
+        }
+    }
+
+    /// Create an Intel Gaudi HPU profile.
+    pub fn gaudi(device_id: u32, generation: crate::hardware::GaudiGeneration) -> Self {
+        Self {
+            accelerator: AcceleratorType::Gaudi {
+                device_id,
+                generation,
+            },
+            available: true,
+            memory_bytes: generation.hbm_bytes(),
+            compute_capability: Some(generation.to_string()),
+            driver_version: None,
+        }
+    }
+
+    /// Create a CPU profile with the given amount of system RAM.
+    pub fn cpu(memory_bytes: u64) -> Self {
+        Self {
+            accelerator: AcceleratorType::Cpu,
+            available: true,
+            memory_bytes,
+            compute_capability: None,
+            driver_version: None,
+        }
+    }
+}
+
 impl fmt::Display for AcceleratorProfile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

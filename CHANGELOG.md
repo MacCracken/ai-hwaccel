@@ -26,12 +26,45 @@ This project uses [calendar versioning](https://calver.org/) (`YYYY.M.D`).
 
 ### Added
 
+- **`DetectionError` type** (`src/error.rs`): non-fatal detection errors are now
+  captured as structured warnings (`ToolNotFound`, `ToolFailed`, `ParseError`,
+  `SysfsReadError`) and accessible via `AcceleratorRegistry::warnings()`.
+- **`DetectBuilder`**: selective backend detection via builder pattern —
+  `AcceleratorRegistry::builder().with_cuda().without_vulkan().detect()`.
+  Includes `Backend` enum with `ALL` constant.
+- **`#[non_exhaustive]`** on `AcceleratorType`, `AcceleratorFamily`,
+  `QuantizationLevel`, `AcceleratorRequirement`, and `DetectionError` for
+  semver-safe enum extension.
+- **Convenience constructors** on `AcceleratorProfile`: `cuda()`, `rocm()`,
+  `tpu()`, `gaudi()`, `cpu()` for test and manual-config ergonomics.
+- **`Display` for `ShardingPlan`**: human-readable multi-line plan summary
+  showing strategy, memory, throughput, and per-shard device assignments.
+- **CLI `--pretty` / `-p` flag**: pretty-printed JSON output.
+- **CLI warnings**: detection warnings now appear in `--summary` JSON output
+  and are logged at `warn` level.
 - **Structured logging**: CLI binary now uses `tracing-subscriber` with
   `RUST_LOG` environment variable support and optional `--json-log` flag for
   structured JSON output to stderr.
-- Added `tracing-subscriber` dependency (with `env-filter` and `json` features)
-  for the CLI binary.
-- `ROADMAP.md` documenting the path to v1.0.
+- `tracing-subscriber` dependency (with `env-filter` and `json` features).
+- `docs/development/roadmap.md` documenting the path to v1.0.
+- 12 new tests (58 total) covering builder, convenience constructors, warnings,
+  and `ShardingPlan` display.
+
+### Changed
+
+- **NVIDIA detection**: now parses `driver_version` from `nvidia-smi` and
+  reports structured `DetectionError` on tool failure or parse errors.
+- **Vulkan detection**: parses `vulkaninfo --summary` for real device names,
+  memory heap sizes, API version, and driver version instead of registering a
+  generic placeholder device.
+- **Apple detection**: macOS support via `system_profiler SPHardwareDataType`
+  for chip name and unified memory size. ANE memory estimate now varies by
+  chip generation (M1: 4 GB, M2: 6 GB, M3/M4: 8 GB). Linux Asahi detection
+  preserved as fallback.
+- **CPU memory detection**: macOS fallback via `sysctl hw.memsize` when
+  `/proc/meminfo` is unavailable.
+- All detection backends now accept a `warnings` parameter for structured
+  error reporting.
 
 ### Fixed
 

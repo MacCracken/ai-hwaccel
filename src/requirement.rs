@@ -9,6 +9,7 @@ use crate::profile::AcceleratorProfile;
 
 /// Hardware accelerator requirement for a workload (scheduling integration).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[non_exhaustive]
 pub enum AcceleratorRequirement {
     /// No accelerator needed — CPU is sufficient.
     #[default]

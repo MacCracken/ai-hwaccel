@@ -18,31 +18,50 @@ use tracing::debug;
 
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
-use crate::registry::AcceleratorRegistry;
+use crate::registry::{AcceleratorRegistry, Backend, DetectBuilder};
 
 impl AcceleratorRegistry {
     /// Probes the system for all available accelerators.
     ///
     /// Detection is best-effort: missing tools or sysfs entries simply mean
-    /// the corresponding accelerator is not registered.
+    /// the corresponding accelerator is not registered. Non-fatal issues are
+    /// collected in [`AcceleratorRegistry::warnings`].
     pub fn detect() -> Self {
-        let mut profiles = vec![cpu_profile()];
-
-        cuda::detect_cuda(&mut profiles);
-        rocm::detect_rocm(&mut profiles);
-        apple::detect_metal_and_ane(&mut profiles);
-        vulkan::detect_vulkan(&mut profiles);
-        intel_npu::detect_intel_npu(&mut profiles);
-        amd_xdna::detect_amd_xdna(&mut profiles);
-        tpu::detect_tpu(&mut profiles);
-        gaudi::detect_gaudi(&mut profiles);
-        neuron::detect_aws_neuron(&mut profiles);
-        intel_oneapi::detect_intel_oneapi(&mut profiles);
-        qualcomm::detect_qualcomm_ai100(&mut profiles);
-
-        debug!(count = profiles.len(), "accelerator detection complete");
-        Self::from_profiles(profiles)
+        detect_with_builder(DetectBuilder::new())
     }
+}
+
+/// Run detection with a builder's backend selection.
+pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry {
+    let mut profiles = vec![cpu_profile()];
+    let mut warnings = Vec::new();
+
+    macro_rules! run_backend {
+        ($backend:expr, $detect_fn:expr) => {
+            if builder.backend_enabled($backend) {
+                $detect_fn(&mut profiles, &mut warnings);
+            }
+        };
+    }
+
+    run_backend!(Backend::Cuda, cuda::detect_cuda);
+    run_backend!(Backend::Rocm, rocm::detect_rocm);
+    run_backend!(Backend::Apple, apple::detect_metal_and_ane);
+    run_backend!(Backend::Vulkan, vulkan::detect_vulkan);
+    run_backend!(Backend::IntelNpu, intel_npu::detect_intel_npu);
+    run_backend!(Backend::AmdXdna, amd_xdna::detect_amd_xdna);
+    run_backend!(Backend::Tpu, tpu::detect_tpu);
+    run_backend!(Backend::Gaudi, gaudi::detect_gaudi);
+    run_backend!(Backend::AwsNeuron, neuron::detect_aws_neuron);
+    run_backend!(Backend::IntelOneApi, intel_oneapi::detect_intel_oneapi);
+    run_backend!(Backend::Qualcomm, qualcomm::detect_qualcomm_ai100);
+
+    debug!(
+        count = profiles.len(),
+        warnings = warnings.len(),
+        "accelerator detection complete"
+    );
+    AcceleratorRegistry { profiles, warnings }
 }
 
 // ---------------------------------------------------------------------------
@@ -74,19 +93,18 @@ fn detect_cpu_memory() -> u64 {
             }
         }
     }
-    16 * 1024 * 1024 * 1024
-}
-
-/// Check if an executable is on `$PATH`.
-pub(super) fn which_exists(name: &str) -> bool {
-    if let Ok(path) = std::env::var("PATH") {
-        for dir in path.split(':') {
-            if Path::new(dir).join(name).exists() {
-                return true;
-            }
-        }
+    // macOS fallback: sysctl hw.memsize
+    if let Ok(output) = std::process::Command::new("sysctl")
+        .args(["-n", "hw.memsize"])
+        .output()
+        && output.status.success()
+        && let Ok(bytes) = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u64>()
+    {
+        return bytes;
     }
-    false
+    16 * 1024 * 1024 * 1024
 }
 
 /// Read a u64 from a sysfs file.

@@ -2,10 +2,14 @@
 
 use tracing::debug;
 
+use crate::error::DetectionError;
 use crate::hardware::{AcceleratorType, NeuronChipType};
 use crate::profile::AcceleratorProfile;
 
-pub(crate) fn detect_aws_neuron(profiles: &mut Vec<AcceleratorProfile>) {
+pub(crate) fn detect_aws_neuron(
+    profiles: &mut Vec<AcceleratorProfile>,
+    warnings: &mut Vec<DetectionError>,
+) {
     // Use neuron-ls JSON output
     let output = std::process::Command::new("neuron-ls")
         .args(["--json-output"])
@@ -44,6 +48,11 @@ pub(crate) fn detect_aws_neuron(profiles: &mut Vec<AcceleratorProfile>) {
                 });
             }
             return;
+        } else {
+            warnings.push(DetectionError::ParseError {
+                backend: "aws-neuron".into(),
+                message: "neuron-ls JSON output could not be parsed".into(),
+            });
         }
     }
 
@@ -60,7 +69,6 @@ pub(crate) fn detect_aws_neuron(profiles: &mut Vec<AcceleratorProfile>) {
         }
         let device_id: u32 = suffix.parse().unwrap_or(0);
 
-        // Check DMI for instance type hint
         let chip_type = if std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_name")
             .unwrap_or_default()
             .contains("trn")

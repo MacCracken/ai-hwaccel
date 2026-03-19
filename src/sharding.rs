@@ -83,3 +83,34 @@ pub struct ShardingPlan {
     pub total_memory_bytes: u64,
     pub estimated_tokens_per_sec: Option<f64>,
 }
+
+impl fmt::Display for ShardingPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Strategy: {}", self.strategy)?;
+        writeln!(
+            f,
+            "Total memory: {:.1} GB",
+            self.total_memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+        )?;
+        if let Some(tps) = self.estimated_tokens_per_sec {
+            writeln!(f, "Est. throughput: {:.0} tok/s", tps)?;
+        }
+        if self.shards.len() > 1 {
+            writeln!(f, "Shards:")?;
+            for shard in &self.shards {
+                writeln!(
+                    f,
+                    "  [{}] {} — layers {}-{} ({:.1} GB)",
+                    shard.shard_id,
+                    shard.device,
+                    shard.layer_range.0,
+                    shard.layer_range.1,
+                    shard.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+                )?;
+            }
+        } else if let Some(shard) = self.shards.first() {
+            writeln!(f, "Device: {}", shard.device)?;
+        }
+        Ok(())
+    }
+}

@@ -1,5 +1,6 @@
 //! Test suite for ai-hwaccel, split by concern.
 
+mod builder;
 mod classification;
 mod display;
 mod quantization;

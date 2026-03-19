@@ -9,15 +9,16 @@ This document outlines the gaps, improvements, and milestones needed to take
 
 ### Detection accuracy
 
-- [ ] **NVIDIA**: parse driver version from `nvidia-smi`, detect multi-GPU
-  NVLink/NVSwitch topology for smarter sharding decisions.
+- [x] **NVIDIA**: parse driver version from `nvidia-smi`. Structured error
+  reporting on tool failure. ~~detect multi-GPU NVLink/NVSwitch topology for
+  smarter sharding decisions~~ (deferred to Milestone 7).
 - [ ] **AMD ROCm**: query `rocm-smi` for clock speeds, firmware version, and
   XGMI topology when available.
-- [ ] **Apple Metal/ANE**: use `system_profiler` or `IOKit` on macOS instead of
-  `/proc/device-tree` (Linux-only today). Detect unified memory size per
-  chip (M1 8 GB vs M4 Max 128 GB).
-- [ ] **Vulkan**: actually parse `vulkaninfo` output for device name, memory
-  heaps, and compute queue families instead of registering a generic device.
+- [x] **Apple Metal/ANE**: macOS detection via `system_profiler
+  SPHardwareDataType` for chip name and unified memory. ANE memory estimate
+  varies by generation. Linux Asahi device-tree preserved as fallback.
+- [x] **Vulkan**: parse `vulkaninfo --summary` for device names, memory heap
+  sizes, API version, and driver version. ~~compute queue families~~ (deferred).
 - [ ] **Google TPU**: validate detection on real GCE VMs; handle multi-host pod
   slices where chips span multiple `/dev/accel*` nodes.
 - [ ] **Intel Gaudi**: test on real Gaudi 3 hardware; parse firmware version.
@@ -36,8 +37,9 @@ This document outlines the gaps, improvements, and milestones needed to take
 
 ### Platform support
 
-- [ ] **macOS native**: Metal detection via `objc` / `metal-rs` bindings rather
-  than device-tree. ANE detection via IOKit.
+- [x] **macOS native**: Metal detection via `system_profiler` (chip name,
+  unified memory). ~~`objc` / `metal-rs` bindings~~ deferred to post-v1.
+  ANE detection via IOKit still TODO.
 - [ ] **Windows**: WMI queries for GPU detection, DirectML device enumeration.
 - [ ] **Android**: HAL `hwbinder` queries for NNAPI accelerator list.
 - [ ] **FreeBSD**: DRM sysctl equivalents.
@@ -48,31 +50,31 @@ This document outlines the gaps, improvements, and milestones needed to take
 
 ### API design
 
-- [ ] **Error types**: replace silent fallbacks with a proper `DetectionError`
-  enum. Callers should be able to distinguish "tool not found" from "tool
-  crashed" from "parse failure". Detection remains best-effort but errors
-  are queryable.
-- [ ] **Builder pattern for registry**: allow callers to opt in/out of specific
-  backends (`AcceleratorRegistry::builder().with_cuda().without_vulkan().detect()`).
+- [x] **Error types**: `DetectionError` enum with `ToolNotFound`, `ToolFailed`,
+  `ParseError`, `SysfsReadError` variants. Collected as non-fatal warnings in
+  `AcceleratorRegistry::warnings()`.
+- [x] **Builder pattern for registry**: `AcceleratorRegistry::builder()` with
+  `with_*()` / `without_*()` methods per backend, plus `DetectBuilder::none()`
+  for opt-in-only detection.
 - [ ] **Async detection**: some CLI tools (`nvidia-smi`, `neuron-ls`) take
   hundreds of milliseconds. Offer an async `detect()` variant that runs
   them concurrently via `tokio::process` behind a feature flag.
 - [ ] **Feature flags**: gate each backend behind a cargo feature so
   downstream crates can slim their dependency tree
   (e.g. `features = ["cuda", "tpu"]`).
-- [ ] **`#[non_exhaustive]`**: mark `AcceleratorType`, `AcceleratorFamily`,
-  `QuantizationLevel`, and `AcceleratorRequirement` as `#[non_exhaustive]`
-  so new variants can be added without breaking downstream `match` arms.
+- [x] **`#[non_exhaustive]`**: applied to `AcceleratorType`, `AcceleratorFamily`,
+  `QuantizationLevel`, `AcceleratorRequirement`, and `DetectionError`.
 - [ ] **Stable serde format**: define and document the JSON schema so external
   tools can consume serialized registries. Consider a schema version field.
 
 ### Ergonomics
 
-- [ ] **Pretty-print CLI output**: `--pretty` flag for human-readable formatted
-  JSON, `--table` for tabular output.
-- [ ] **`Display` for `ShardingPlan`**: human-readable multi-line plan summary.
-- [ ] **Convenience constructors**: `AcceleratorProfile::cuda(device_id, vram)`
-  etc. for test/mock setups.
+- [x] **Pretty-print CLI output**: `--pretty` / `-p` flag for formatted JSON.
+  `--table` for tabular output still TODO.
+- [x] **`Display` for `ShardingPlan`**: multi-line summary with strategy,
+  memory, throughput, and per-shard device assignments.
+- [x] **Convenience constructors**: `AcceleratorProfile::cuda()`, `rocm()`,
+  `tpu()`, `gaudi()`, `cpu()` for test/mock setups.
 
 ---
 

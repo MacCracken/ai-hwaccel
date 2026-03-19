@@ -201,7 +201,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for the path to v1.0 and beyond.
+See [docs/development/roadmap.md](docs/development/roadmap.md) for the path to v1.0 and beyond.
 
 ## License
 

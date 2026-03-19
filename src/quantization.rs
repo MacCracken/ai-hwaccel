@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Model weight quantisation levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum QuantizationLevel {
     /// Full precision — FP32, 32 bits per parameter.
     None,

@@ -50,6 +50,7 @@
 //! ```
 
 pub mod detect;
+pub mod error;
 pub mod hardware;
 pub mod plan;
 pub mod profile;
@@ -59,12 +60,13 @@ pub mod requirement;
 pub mod sharding;
 pub mod training;
 
+pub use error::DetectionError;
 pub use hardware::{
     AcceleratorFamily, AcceleratorType, GaudiGeneration, NeuronChipType, TpuVersion,
 };
 pub use profile::AcceleratorProfile;
 pub use quantization::QuantizationLevel;
-pub use registry::AcceleratorRegistry;
+pub use registry::{AcceleratorRegistry, Backend, DetectBuilder};
 pub use requirement::AcceleratorRequirement;
 pub use sharding::{ModelShard, ShardingPlan, ShardingStrategy};
 pub use training::{estimate_training_memory, MemoryEstimate, TrainingMethod, TrainingTarget};

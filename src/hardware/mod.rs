@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 
 /// Broad device family categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum AcceleratorFamily {
     Cpu,
     Gpu,
@@ -47,6 +48,7 @@ impl fmt::Display for AcceleratorFamily {
 
 /// Every supported hardware accelerator family.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum AcceleratorType {
     /// Default CPU execution — always available.
     Cpu,

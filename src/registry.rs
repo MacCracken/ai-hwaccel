@@ -1,5 +1,6 @@
 //! Accelerator registry: query, filter, and memory estimation helpers.
 
+use crate::error::DetectionError;
 use crate::hardware::{AcceleratorFamily, AcceleratorType};
 use crate::profile::AcceleratorProfile;
 use crate::quantization::QuantizationLevel;
@@ -9,6 +10,9 @@ use crate::requirement::AcceleratorRequirement;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AcceleratorRegistry {
     pub(crate) profiles: Vec<AcceleratorProfile>,
+    /// Non-fatal warnings encountered during detection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) warnings: Vec<DetectionError>,
 }
 
 impl AcceleratorRegistry {
@@ -16,17 +20,44 @@ impl AcceleratorRegistry {
     pub fn new() -> Self {
         Self {
             profiles: vec![crate::detect::cpu_profile()],
+            warnings: vec![],
         }
     }
 
     /// Build a registry from a pre-built list of profiles (for testing or config-driven setups).
     pub fn from_profiles(profiles: Vec<AcceleratorProfile>) -> Self {
-        Self { profiles }
+        Self {
+            profiles,
+            warnings: vec![],
+        }
+    }
+
+    /// Returns a [`DetectBuilder`] for fine-grained control over which backends
+    /// to probe.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use ai_hwaccel::AcceleratorRegistry;
+    ///
+    /// let registry = AcceleratorRegistry::builder()
+    ///     .with_cuda()
+    ///     .with_rocm()
+    ///     .without_vulkan()
+    ///     .detect();
+    /// ```
+    pub fn builder() -> DetectBuilder {
+        DetectBuilder::new()
     }
 
     /// All registered profiles (including unavailable ones).
     pub fn all_profiles(&self) -> &[AcceleratorProfile] {
         &self.profiles
+    }
+
+    /// Non-fatal warnings from detection (tool not found, parse errors, etc.).
+    pub fn warnings(&self) -> &[DetectionError] {
+        &self.warnings
     }
 
     /// Only the available accelerator profiles.
@@ -155,5 +186,120 @@ impl AcceleratorRegistry {
 impl Default for AcceleratorRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DetectBuilder
+// ---------------------------------------------------------------------------
+
+/// Which backends are enabled in the builder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Backend {
+    Cuda,
+    Rocm,
+    Apple,
+    Vulkan,
+    IntelNpu,
+    AmdXdna,
+    Tpu,
+    Gaudi,
+    AwsNeuron,
+    IntelOneApi,
+    Qualcomm,
+}
+
+impl Backend {
+    /// All known backends.
+    pub const ALL: &[Backend] = &[
+        Backend::Cuda,
+        Backend::Rocm,
+        Backend::Apple,
+        Backend::Vulkan,
+        Backend::IntelNpu,
+        Backend::AmdXdna,
+        Backend::Tpu,
+        Backend::Gaudi,
+        Backend::AwsNeuron,
+        Backend::IntelOneApi,
+        Backend::Qualcomm,
+    ];
+}
+
+/// Builder for selective hardware detection.
+///
+/// By default all backends are enabled. Use `without_*` methods to disable
+/// specific backends, or start from `none()` and use `with_*` to enable only
+/// the ones you need.
+#[derive(Debug, Clone)]
+pub struct DetectBuilder {
+    enabled: Vec<bool>,
+}
+
+impl DetectBuilder {
+    /// All backends enabled (default).
+    pub fn new() -> Self {
+        Self {
+            enabled: vec![true; Backend::ALL.len()],
+        }
+    }
+
+    /// No backends enabled — start from scratch with `with_*` methods.
+    pub fn none() -> Self {
+        Self {
+            enabled: vec![false; Backend::ALL.len()],
+        }
+    }
+
+    fn set(mut self, backend: Backend, enabled: bool) -> Self {
+        self.enabled[backend as usize] = enabled;
+        self
+    }
+
+    fn is_enabled(&self, backend: Backend) -> bool {
+        self.enabled[backend as usize]
+    }
+
+    pub fn with_cuda(self) -> Self { self.set(Backend::Cuda, true) }
+    pub fn with_rocm(self) -> Self { self.set(Backend::Rocm, true) }
+    pub fn with_apple(self) -> Self { self.set(Backend::Apple, true) }
+    pub fn with_vulkan(self) -> Self { self.set(Backend::Vulkan, true) }
+    pub fn with_intel_npu(self) -> Self { self.set(Backend::IntelNpu, true) }
+    pub fn with_amd_xdna(self) -> Self { self.set(Backend::AmdXdna, true) }
+    pub fn with_tpu(self) -> Self { self.set(Backend::Tpu, true) }
+    pub fn with_gaudi(self) -> Self { self.set(Backend::Gaudi, true) }
+    pub fn with_aws_neuron(self) -> Self { self.set(Backend::AwsNeuron, true) }
+    pub fn with_intel_oneapi(self) -> Self { self.set(Backend::IntelOneApi, true) }
+    pub fn with_qualcomm(self) -> Self { self.set(Backend::Qualcomm, true) }
+
+    pub fn without_cuda(self) -> Self { self.set(Backend::Cuda, false) }
+    pub fn without_rocm(self) -> Self { self.set(Backend::Rocm, false) }
+    pub fn without_apple(self) -> Self { self.set(Backend::Apple, false) }
+    pub fn without_vulkan(self) -> Self { self.set(Backend::Vulkan, false) }
+    pub fn without_intel_npu(self) -> Self { self.set(Backend::IntelNpu, false) }
+    pub fn without_amd_xdna(self) -> Self { self.set(Backend::AmdXdna, false) }
+    pub fn without_tpu(self) -> Self { self.set(Backend::Tpu, false) }
+    pub fn without_gaudi(self) -> Self { self.set(Backend::Gaudi, false) }
+    pub fn without_aws_neuron(self) -> Self { self.set(Backend::AwsNeuron, false) }
+    pub fn without_intel_oneapi(self) -> Self { self.set(Backend::IntelOneApi, false) }
+    pub fn without_qualcomm(self) -> Self { self.set(Backend::Qualcomm, false) }
+
+    /// Run detection with only the enabled backends.
+    pub fn detect(self) -> AcceleratorRegistry {
+        crate::detect::detect_with_builder(self)
+    }
+}
+
+impl Default for DetectBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Make is_enabled accessible to detect module
+impl DetectBuilder {
+    pub(crate) fn backend_enabled(&self, backend: Backend) -> bool {
+        self.is_enabled(backend)
     }
 }

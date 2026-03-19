@@ -4,10 +4,14 @@ use std::path::Path;
 
 use tracing::debug;
 
+use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
-pub(crate) fn detect_intel_npu(profiles: &mut Vec<AcceleratorProfile>) {
+pub(crate) fn detect_intel_npu(
+    profiles: &mut Vec<AcceleratorProfile>,
+    _warnings: &mut Vec<DetectionError>,
+) {
     if Path::new("/sys/class/misc/intel_npu").exists() {
         debug!("Intel NPU detected via sysfs");
         profiles.push(AcceleratorProfile {

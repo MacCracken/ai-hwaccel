@@ -4,10 +4,14 @@ use std::path::Path;
 
 use tracing::debug;
 
+use crate::error::DetectionError;
 use crate::hardware::{AcceleratorType, TpuVersion};
 use crate::profile::AcceleratorProfile;
 
-pub(crate) fn detect_tpu(profiles: &mut Vec<AcceleratorProfile>) {
+pub(crate) fn detect_tpu(
+    profiles: &mut Vec<AcceleratorProfile>,
+    _warnings: &mut Vec<DetectionError>,
+) {
     let dev_dir = Path::new("/dev");
     for entry in std::fs::read_dir(dev_dir).into_iter().flatten().flatten() {
         let name = entry.file_name();
@@ -60,7 +64,7 @@ fn detect_tpu_version(device_id: u32) -> TpuVersion {
             return TpuVersion::V4;
         }
     }
-    TpuVersion::V5e // default — most common cloud TPU
+    TpuVersion::V5e
 }
 
 fn detect_tpu_chip_count(device_id: u32) -> u32 {
