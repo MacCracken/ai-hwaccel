@@ -190,19 +190,30 @@ contain breaking changes between minor versions. The version is read from the
 `VERSION` file at the repo root and kept in sync with `Cargo.toml` via
 `scripts/version-bump.sh`.
 
+## Documentation
+
+| Document | Description |
+|---|---|
+| [Production guide](docs/guides/production.md) | Deployment, caching, security, containers, C FFI |
+| [Testing guide](docs/guides/testing.md) | Running tests, hardware setup, CI matrix |
+| [Framework integration](docs/guides/framework-integration.md) | candle, burn, tch-rs, ort examples |
+| [Threat model](docs/development/threat-model.md) | Security boundaries and mitigations |
+| [JSON schema](docs/schema.json) | Serialized registry format specification |
+| [Architecture decisions](docs/decisions/) | ADRs for key design choices |
+| [Roadmap](docs/development/roadmap.md) | Remaining work and future plans |
+| [Contributing](CONTRIBUTING.md) | How to contribute |
+| [Changelog](CHANGELOG.md) | Release history |
+
 ## Development
 
 ```sh
 make check   # fmt + clippy + test (same as CI)
+make audit   # cargo-audit (vulnerabilities)
+make deny    # cargo-deny (licenses, advisories)
+make vet     # cargo-vet (dependency audits)
 make doc     # generate rustdoc
 make build   # release build
 ```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.
-
-## Roadmap
-
-See [docs/development/roadmap.md](docs/development/roadmap.md) for the path to v1.0 and beyond.
 
 ## License
 

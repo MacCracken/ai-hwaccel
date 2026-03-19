@@ -1,2 +1,31 @@
-/target
-Cargo.lock
+# Build artifacts
+/target/
+
+# Editor / IDE
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Debugging
+*.pdb
+core
+core.*
+
+# Coverage
+lcov.info
+tarpaulin-report.html
+coverage/
+
+# Benchmark output (generated, not tracked)
+criterion/
+
+# Environment / secrets
+.env
+.env.*
