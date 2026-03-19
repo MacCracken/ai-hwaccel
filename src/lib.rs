@@ -49,13 +49,25 @@
 //!     plan.estimated_tokens_per_sec.unwrap_or(0.0));
 //! ```
 
-mod detect;
-mod plan;
-mod types;
+pub mod detect;
+pub mod hardware;
+pub mod plan;
+pub mod profile;
+pub mod quantization;
+pub mod registry;
+pub mod requirement;
+pub mod sharding;
+pub mod training;
 
-pub use detect::*;
-pub use plan::*;
-pub use types::*;
+pub use hardware::{
+    AcceleratorFamily, AcceleratorType, GaudiGeneration, NeuronChipType, TpuVersion,
+};
+pub use profile::AcceleratorProfile;
+pub use quantization::QuantizationLevel;
+pub use registry::AcceleratorRegistry;
+pub use requirement::AcceleratorRequirement;
+pub use sharding::{ModelShard, ShardingPlan, ShardingStrategy};
+pub use training::{estimate_training_memory, MemoryEstimate, TrainingMethod, TrainingTarget};
 
 #[cfg(test)]
 mod tests;
