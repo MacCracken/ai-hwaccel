@@ -145,13 +145,11 @@ pub(crate) fn cpu_profile() -> AcceleratorProfile {
 fn detect_cpu_memory() -> u64 {
     if let Ok(info) = std::fs::read_to_string("/proc/meminfo") {
         for line in info.lines() {
-            if line.starts_with("MemTotal:") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if let Some(kb_str) = parts.get(1)
-                    && let Ok(kb) = kb_str.parse::<u64>()
-                {
-                    return kb.saturating_mul(1024);
-                }
+            if line.starts_with("MemTotal:")
+                && let Some(kb_str) = line.split_whitespace().nth(1)
+                && let Ok(kb) = kb_str.parse::<u64>()
+            {
+                return kb.saturating_mul(1024);
             }
         }
     }

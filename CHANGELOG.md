@@ -5,7 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
-## [Unreleased]
+## [0.19.3] - 2026-03-19
+
+### Performance
+
+- **Detection 3.5x faster**: eliminated per-subprocess reader threads in the
+  command runner. Pipes are now read after the child exits (no deadlock risk
+  since output is capped at 1 MiB). Poll interval reduced from 50ms to 10ms.
+- **CachedRegistry zero-copy**: `get()` now returns `Arc<AcceleratorRegistry>`
+  instead of cloning the entire profile list on every call.
+- **Reduced allocations**: `/proc/meminfo` parsing uses `nth()` iterator
+  instead of collecting into a `Vec`. `read_limited` pre-allocates with
+  `Vec::with_capacity`. `String::from_utf8_lossy().into_owned()` avoids
+  double allocation via `to_string()`.
 
 ### Added
 

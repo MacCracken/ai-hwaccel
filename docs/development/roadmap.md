@@ -7,7 +7,27 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 ## Remaining pre-v1
 
 - [ ] Publish to crates.io.
-- [ ] `cargo-vet`: supply-chain audits for all dependencies.
+
+---
+
+## Next release: System I/O and monitoring
+
+- [ ] **VRAM read/write bandwidth probing** -- benchmark actual memory throughput
+  per device using vendor tools (`nvidia-smi -q -d MEMORY`, `rocm-smi
+  --showmeminfo`). Expose as `AcceleratorProfile::memory_bandwidth_gbps`.
+- [ ] **Network topology detection** -- detect InfiniBand, RoCE, NVLink
+  interconnects for multi-node training planning. Parse `ibstat`, `ibv_devinfo`,
+  or `nvidia-smi nvlink -s`.
+- [ ] **Disk I/O throughput** -- estimate data loading bottlenecks by probing
+  `/sys/block/*/queue/` for NVMe vs HDD and detecting RAID configurations.
+- [ ] **NUMA topology** -- parse `/sys/devices/system/node/` to map which GPUs
+  are on which NUMA node for optimal CPU-GPU data placement.
+- [ ] **PCIe bandwidth detection** -- read `lspci -vv` for link width/speed to
+  estimate host-to-device transfer rates.
+- [ ] **Runtime memory monitoring** -- expose current VRAM usage (not just
+  total) via `nvidia-smi -q -d MEMORY` for live capacity planning.
+- [ ] **Network ingestion estimation** -- given a dataset size and detected
+  network bandwidth, estimate data loading time for training jobs.
 
 ---
 

@@ -48,19 +48,11 @@ pub(crate) fn run_tool(
         .spawn()
         .map_err(|_| DetectionError::ToolNotFound { tool: tool.into() })?;
 
-    // Take pipes before the wait loop.
-    let stdout_pipe = child.stdout.take();
-    let stderr_pipe = child.stderr.take();
-
-    // 3. Read stdout in background thread with size limit.
-    let stdout_handle = std::thread::spawn(move || read_limited(stdout_pipe, MAX_STDOUT_BYTES));
-    let stderr_handle = std::thread::spawn(move || read_limited(stderr_pipe, MAX_STDERR_BYTES));
-
-    // 4. Wait with timeout.
+    // 3. Wait with timeout (poll loop at 10ms intervals).
     let start = Instant::now();
-    let status = loop {
+    loop {
         match child.try_wait() {
-            Ok(Some(s)) => break s,
+            Ok(Some(_)) => break,
             Ok(None) if start.elapsed() > timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -70,7 +62,7 @@ pub(crate) fn run_tool(
                     stderr: format!("timed out after {:.1}s", timeout.as_secs_f64()),
                 });
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
             Err(e) => {
                 return Err(DetectionError::ToolFailed {
                     tool: tool.into(),
@@ -79,22 +71,29 @@ pub(crate) fn run_tool(
                 });
             }
         }
-    };
+    }
 
-    let stdout_bytes = stdout_handle.join().unwrap_or_default();
-    let stderr_bytes = stderr_handle.join().unwrap_or_default();
+    // 4. Process exited — read pipes with size limits. No threads needed
+    //    since the child has already exited and the pipes are buffered.
+    let stdout_bytes = read_limited(child.stdout.take(), MAX_STDOUT_BYTES);
+    let stderr_bytes = read_limited(child.stderr.take(), MAX_STDERR_BYTES);
+
+    let status = child.wait().map_err(|e| DetectionError::ToolFailed {
+        tool: tool.into(),
+        exit_code: None,
+        stderr: e.to_string(),
+    })?;
 
     if !status.success() {
-        let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
         return Err(DetectionError::ToolFailed {
             tool: tool.into(),
             exit_code: status.code(),
-            stderr: stderr_str,
+            stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
         });
     }
 
     Ok(ToolOutput {
-        stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
+        stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
     })
 }
 
@@ -103,18 +102,18 @@ fn read_limited(pipe: Option<impl Read>, limit: usize) -> Vec<u8> {
     let Some(mut reader) = pipe else {
         return Vec::new();
     };
-    let mut buf = vec![0u8; 8192];
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(limit.min(8192));
+    let mut buf = [0u8; 8192];
     loop {
-        let n = match reader.read(&mut buf) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
         let remaining = limit.saturating_sub(out.len());
         if remaining == 0 {
             break;
         }
-        out.extend_from_slice(&buf[..n.min(remaining)]);
+        let to_read = buf.len().min(remaining);
+        match reader.read(&mut buf[..to_read]) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => out.extend_from_slice(&buf[..n]),
+        }
     }
     out
 }
@@ -158,7 +157,6 @@ pub(crate) fn validate_memory_mb(raw: &str, backend: &str) -> Result<u64, Detect
         message: format!("invalid memory '{}': {}", raw, e),
     })?;
     if mb > 16 * 1024 * 1024 {
-        // 16 TiB is absurdly high — likely a parse error
         return Err(DetectionError::ParseError {
             backend: backend.into(),
             message: format!("memory {} MB exceeds sanity limit (16 TiB)", mb),

@@ -12,19 +12,18 @@
 //!
 //! let cache = CachedRegistry::new(Duration::from_secs(60));
 //! let registry = cache.get(); // first call: runs detection
-//! let registry = cache.get(); // second call within 60s: returns cached
+//! let registry = cache.get(); // second call within 60s: returns cached (Arc, no clone)
 //! ```
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::registry::AcceleratorRegistry;
 
 /// A thread-safe cache for [`AcceleratorRegistry`] detection results.
 ///
-/// The cache is populated on the first call to [`get`](Self::get) and
-/// refreshed after the TTL expires. The cache can be manually invalidated
-/// with [`invalidate`](Self::invalidate).
+/// Uses `Arc` internally so [`get`](Self::get) returns a cheap reference-counted
+/// pointer instead of cloning the entire registry on every call.
 pub struct CachedRegistry {
     ttl: Duration,
     inner: Mutex<CacheState>,
@@ -43,7 +42,7 @@ impl std::fmt::Debug for CachedRegistry {
 }
 
 struct CacheState {
-    registry: Option<AcceleratorRegistry>,
+    registry: Option<Arc<AcceleratorRegistry>>,
     last_detect: Option<Instant>,
 }
 
@@ -60,7 +59,10 @@ impl CachedRegistry {
     }
 
     /// Get the cached registry, re-detecting if the TTL has expired.
-    pub fn get(&self) -> AcceleratorRegistry {
+    ///
+    /// Returns an `Arc` — cloning this is a cheap pointer increment, not a
+    /// deep copy of all profiles.
+    pub fn get(&self) -> Arc<AcceleratorRegistry> {
         let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
 
@@ -68,11 +70,11 @@ impl CachedRegistry {
             && let Some(last) = state.last_detect
             && now.duration_since(last) < self.ttl
         {
-            return reg.clone();
+            return Arc::clone(reg);
         }
 
-        let reg = AcceleratorRegistry::detect();
-        state.registry = Some(reg.clone());
+        let reg = Arc::new(AcceleratorRegistry::detect());
+        state.registry = Some(Arc::clone(&reg));
         state.last_detect = Some(now);
         reg
     }
