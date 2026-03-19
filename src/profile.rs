@@ -9,6 +9,7 @@ use crate::quantization::QuantizationLevel;
 
 /// A detected hardware accelerator and its capabilities.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AcceleratorProfile {
     /// The accelerator type.
     pub accelerator: AcceleratorType,

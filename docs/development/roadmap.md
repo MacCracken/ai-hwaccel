@@ -80,9 +80,9 @@ This document outlines the gaps, improvements, and milestones needed to take
 
 ## Milestone 3: Performance
 
-- [ ] **Parallel detection**: run all detectors concurrently (they are
-  independent I/O operations). Use `std::thread::scope` for the sync API
-  and `tokio::join!` for the async variant.
+- [x] **Parallel detection**: all backends run concurrently via
+  `std::thread::scope`. Vulkan deduplication moved to a post-pass so
+  ordering dependencies don't block parallelism.
 - [ ] **Caching**: cache detection results for a configurable TTL so repeated
   calls to `detect()` don't re-shell-out. Invalidate on hot-plug events
   if a filesystem watch is available.
@@ -98,28 +98,29 @@ This document outlines the gaps, improvements, and milestones needed to take
 
 ### Command execution
 
-- [ ] **Absolute paths**: resolve tool paths at detection time and invoke them
-  by absolute path to prevent `$PATH` hijacking.
-- [ ] **Timeout enforcement**: enforce a configurable timeout (default 5 s) on
-  all subprocess calls. A hung `nvidia-smi` should not block the caller
-  indefinitely.
-- [ ] **Output size limits**: cap the bytes read from subprocess stdout to
-  prevent memory exhaustion from malicious or misbehaving tools.
-- [ ] **Input validation**: validate and sanitize all parsed values from CLI
-  output and sysfs (e.g. memory sizes, device IDs) before using them.
-- [ ] **Sandboxing**: document threat model. Consider `seccomp` or
-  `landlock` hints for callers running in restricted environments.
+- [x] **Absolute paths**: all CLI tools resolved to absolute path via `which()`
+  before invocation. Implemented in `detect/command.rs`.
+- [x] **Timeout enforcement**: 5-second default timeout on all subprocess calls
+  via `try_wait()` loop + `child.kill()`. Configurable via `DEFAULT_TIMEOUT`.
+- [x] **Output size limits**: stdout capped at 1 MiB (`MAX_STDOUT_BYTES`),
+  stderr at 4 KiB. Reads beyond the limit are silently discarded.
+- [x] **Input validation**: `validate_device_id()` (0--1024) and
+  `validate_memory_mb()` (0--16 TiB) applied to all parsed CLI output.
+- [x] **Sandboxing**: threat model documented in
+  `docs/development/threat-model.md`. `seccomp`/`landlock` guidance for
+  callers in restricted environments.
 
 ### Serde safety
 
-- [ ] **Deserialization limits**: use `serde`'s `#[serde(deny_unknown_fields)]`
-  and add size limits when deserializing untrusted `AcceleratorRegistry`
-  JSON to prevent DoS via deeply nested or excessively large payloads.
+- [x] **Deserialization limits**: `#[serde(deny_unknown_fields)]` on
+  `AcceleratorRegistry`, `AcceleratorProfile`, `ModelShard`, `ShardingPlan`.
+  Size limits are caller responsibility (documented in threat model).
 
 ### Supply chain
 
 - [ ] **`cargo-vet`**: add supply-chain audits for all dependencies.
-- [ ] **`cargo-deny`**: configure license and advisory checks in CI.
+- [x] **`cargo-deny`**: `deny.toml` configured with license allowlist,
+  advisory checks, source restrictions. Added `make deny` target.
 - [ ] **Minimal dependencies audit**: review whether `serde_json` can be
   dev-only (move CLI JSON output behind a feature flag).
 

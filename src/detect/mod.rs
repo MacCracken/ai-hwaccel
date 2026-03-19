@@ -2,6 +2,7 @@
 
 mod amd_xdna;
 mod apple;
+pub(crate) mod command;
 mod cuda;
 mod gaudi;
 mod intel_npu;
@@ -16,9 +17,13 @@ use std::path::Path;
 
 use tracing::debug;
 
+use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 use crate::registry::{AcceleratorRegistry, Backend, DetectBuilder};
+
+/// Per-backend detection result.
+type DetectResult = (Vec<AcceleratorProfile>, Vec<DetectionError>);
 
 impl AcceleratorRegistry {
     /// Probes the system for all available accelerators.
@@ -26,42 +31,81 @@ impl AcceleratorRegistry {
     /// Detection is best-effort: missing tools or sysfs entries simply mean
     /// the corresponding accelerator is not registered. Non-fatal issues are
     /// collected in [`AcceleratorRegistry::warnings`].
+    ///
+    /// All backends run **in parallel** via [`std::thread::scope`] for
+    /// lower wall-clock latency on systems with multiple CLI tools.
     pub fn detect() -> Self {
         detect_with_builder(DetectBuilder::new())
     }
 }
 
 /// Run detection with a builder's backend selection.
+///
+/// Backends are executed in parallel via `std::thread::scope`. Results are
+/// merged after all threads complete. Post-processing deduplicates Vulkan
+/// GPUs when a dedicated CUDA/ROCm driver was also found.
 pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry {
-    let mut profiles = vec![cpu_profile()];
-    let mut warnings = Vec::new();
+    let mut all_profiles = vec![cpu_profile()];
+    let mut all_warnings: Vec<DetectionError> = Vec::new();
 
-    macro_rules! run_backend {
-        ($backend:expr, $detect_fn:expr) => {
-            if builder.backend_enabled($backend) {
-                $detect_fn(&mut profiles, &mut warnings);
+    // Spawn all enabled backends in parallel.
+    std::thread::scope(|s| {
+        let mut handles: Vec<std::thread::ScopedJoinHandle<'_, DetectResult>> = Vec::new();
+
+        macro_rules! spawn_backend {
+            ($backend:expr, $detect_fn:expr) => {
+                if builder.backend_enabled($backend) {
+                    handles.push(s.spawn(|| {
+                        let mut p = Vec::new();
+                        let mut w = Vec::new();
+                        $detect_fn(&mut p, &mut w);
+                        (p, w)
+                    }));
+                }
+            };
+        }
+
+        spawn_backend!(Backend::Cuda, cuda::detect_cuda);
+        spawn_backend!(Backend::Rocm, rocm::detect_rocm);
+        spawn_backend!(Backend::Apple, apple::detect_metal_and_ane);
+        spawn_backend!(Backend::Vulkan, vulkan::detect_vulkan);
+        spawn_backend!(Backend::IntelNpu, intel_npu::detect_intel_npu);
+        spawn_backend!(Backend::AmdXdna, amd_xdna::detect_amd_xdna);
+        spawn_backend!(Backend::Tpu, tpu::detect_tpu);
+        spawn_backend!(Backend::Gaudi, gaudi::detect_gaudi);
+        spawn_backend!(Backend::AwsNeuron, neuron::detect_aws_neuron);
+        spawn_backend!(Backend::IntelOneApi, intel_oneapi::detect_intel_oneapi);
+        spawn_backend!(Backend::Qualcomm, qualcomm::detect_qualcomm_ai100);
+
+        for handle in handles {
+            if let Ok((profiles, warnings)) = handle.join() {
+                all_profiles.extend(profiles);
+                all_warnings.extend(warnings);
             }
-        };
+        }
+    });
+
+    // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found
+    // (avoids double-counting the same physical device).
+    let has_dedicated = all_profiles.iter().any(|p| {
+        matches!(
+            p.accelerator,
+            AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
+        )
+    });
+    if has_dedicated {
+        all_profiles.retain(|p| !matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
     }
 
-    run_backend!(Backend::Cuda, cuda::detect_cuda);
-    run_backend!(Backend::Rocm, rocm::detect_rocm);
-    run_backend!(Backend::Apple, apple::detect_metal_and_ane);
-    run_backend!(Backend::Vulkan, vulkan::detect_vulkan);
-    run_backend!(Backend::IntelNpu, intel_npu::detect_intel_npu);
-    run_backend!(Backend::AmdXdna, amd_xdna::detect_amd_xdna);
-    run_backend!(Backend::Tpu, tpu::detect_tpu);
-    run_backend!(Backend::Gaudi, gaudi::detect_gaudi);
-    run_backend!(Backend::AwsNeuron, neuron::detect_aws_neuron);
-    run_backend!(Backend::IntelOneApi, intel_oneapi::detect_intel_oneapi);
-    run_backend!(Backend::Qualcomm, qualcomm::detect_qualcomm_ai100);
-
     debug!(
-        count = profiles.len(),
-        warnings = warnings.len(),
+        count = all_profiles.len(),
+        warnings = all_warnings.len(),
         "accelerator detection complete"
     );
-    AcceleratorRegistry { profiles, warnings }
+    AcceleratorRegistry {
+        profiles: all_profiles,
+        warnings: all_warnings,
+    }
 }
 
 // ---------------------------------------------------------------------------

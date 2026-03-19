@@ -2,6 +2,7 @@
 
 mod builder;
 mod classification;
+mod command;
 mod display;
 mod quantization;
 mod registry;

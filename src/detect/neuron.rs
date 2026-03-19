@@ -6,20 +6,15 @@ use crate::error::DetectionError;
 use crate::hardware::{AcceleratorType, NeuronChipType};
 use crate::profile::AcceleratorProfile;
 
+use super::command::{run_tool, DEFAULT_TIMEOUT};
+
 pub(crate) fn detect_aws_neuron(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
 ) {
-    // Use neuron-ls JSON output
-    let output = std::process::Command::new("neuron-ls")
-        .args(["--json-output"])
-        .output();
-
-    if let Ok(o) = output
-        && o.status.success()
-    {
-        let stdout = String::from_utf8_lossy(&o.stdout);
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout)
+    // Use neuron-ls JSON output via safe runner.
+    if let Ok(output) = run_tool("neuron-ls", &["--json-output"], DEFAULT_TIMEOUT) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&output.stdout)
             && let Some(devices) = json.as_array()
         {
             for (i, device) in devices.iter().enumerate() {

@@ -6,29 +6,26 @@ use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
+use super::command::{run_tool, validate_memory_mb, DEFAULT_TIMEOUT};
+
 pub(crate) fn detect_intel_oneapi(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
 ) {
-    let output = std::process::Command::new("xpu-smi")
-        .args(["discovery", "--dump", "1,2,18,19"])
-        .output();
-
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        Ok(o) => {
-            warnings.push(DetectionError::ToolFailed {
-                tool: "xpu-smi".into(),
-                exit_code: o.status.code(),
-                stderr: String::from_utf8_lossy(&o.stderr).to_string(),
-            });
+    let output = match run_tool(
+        "xpu-smi",
+        &["discovery", "--dump", "1,2,18,19"],
+        DEFAULT_TIMEOUT,
+    ) {
+        Ok(o) => o,
+        Err(DetectionError::ToolNotFound { .. }) => return,
+        Err(e) => {
+            warnings.push(e);
             return;
         }
-        Err(_) => return,
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
+    for line in output.stdout.lines() {
         if line.starts_with("DeviceId") || line.trim().is_empty() {
             continue;
         }
@@ -38,7 +35,13 @@ pub(crate) fn detect_intel_oneapi(
         }
         let device_id: u32 = parts[0].parse().unwrap_or(0);
         let _name = parts[1].to_string();
-        let mem_total_mb: u64 = parts[2].parse().unwrap_or(0);
+        let mem_total_mb = match validate_memory_mb(parts[2], "intel-oneapi") {
+            Ok(mb) => mb,
+            Err(e) => {
+                warnings.push(e);
+                continue;
+            }
+        };
 
         debug!(device_id, "Intel oneAPI GPU detected via xpu-smi");
         profiles.push(AcceleratorProfile {

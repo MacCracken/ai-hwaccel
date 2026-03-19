@@ -1,7 +1,7 @@
-.PHONY: check fmt clippy test build doc clean
+.PHONY: check fmt clippy test audit deny build doc clean
 
 # Run all CI checks locally
-check: fmt clippy test
+check: fmt clippy test audit
 
 # Format check
 fmt:
@@ -14,6 +14,14 @@ clippy:
 # Run test suite
 test:
 	cargo test
+
+# Security audit
+audit:
+	cargo audit
+
+# Supply-chain checks (license + advisory + source)
+deny:
+	cargo deny check
 
 # Build release
 build:

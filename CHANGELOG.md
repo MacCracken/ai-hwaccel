@@ -7,6 +7,28 @@ This project uses [calendar versioning](https://calver.org/) (`YYYY.M.D`).
 
 ## [Unreleased]
 
+### Added
+
+- **Parallel detection**: all backends now run concurrently via
+  `std::thread::scope`, reducing wall-clock latency on multi-tool systems.
+  Vulkan deduplication moved to a post-pass.
+- **Safe command runner** (`detect/command.rs`): all CLI-based detectors now
+  use `run_tool()` which enforces:
+  - **Absolute path resolution** via `which()` to prevent `$PATH` hijacking.
+  - **5-second timeout** with `child.kill()` on expiry.
+  - **Output size limits**: stdout capped at 1 MiB, stderr at 4 KiB.
+- **Input validation helpers**: `validate_device_id()` (0--1024) and
+  `validate_memory_mb()` (0--16 TiB) reject out-of-range parsed values.
+- **`#[serde(deny_unknown_fields)]`** on `AcceleratorRegistry`,
+  `AcceleratorProfile`, `ModelShard`, `ShardingPlan` to reject unexpected
+  JSON fields during deserialization.
+- **`deny.toml`**: `cargo-deny` configuration for license allowlist, advisory
+  checks, and source restrictions. New `make deny` target.
+- **Threat model**: `docs/development/threat-model.md` documenting attack
+  surface, trust assumptions, and mitigations.
+- 11 new tests (133 total) for command runner, input validation, and tool
+  execution.
+
 ### Changed
 
 - **Modular architecture**: refactored monolithic source files into focused

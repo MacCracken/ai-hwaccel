@@ -6,42 +6,28 @@ use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
+use super::command::{run_tool, DEFAULT_TIMEOUT};
+
+/// Detect Vulkan devices.
+///
+/// Note: deduplication against CUDA/ROCm GPUs is handled by the orchestrator
+/// in `detect/mod.rs` after all backends complete (since detection is parallel).
 pub(crate) fn detect_vulkan(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
 ) {
-    // Skip if we already found a CUDA or ROCm GPU (avoid double-counting).
-    let has_dedicated_gpu = profiles.iter().any(|p| {
-        matches!(
-            p.accelerator,
-            AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
-        )
-    });
-    if has_dedicated_gpu {
-        return;
-    }
-
-    let output = match std::process::Command::new("vulkaninfo")
-        .arg("--summary")
-        .output()
-    {
-        Ok(o) if o.status.success() => o,
-        Ok(o) => {
-            warnings.push(DetectionError::ToolFailed {
-                tool: "vulkaninfo".into(),
-                exit_code: o.status.code(),
-                stderr: String::from_utf8_lossy(&o.stderr).to_string(),
-            });
+    let output = match run_tool("vulkaninfo", &["--summary"], DEFAULT_TIMEOUT) {
+        Ok(o) => o,
+        Err(DetectionError::ToolNotFound { .. }) => return,
+        Err(e) => {
+            warnings.push(e);
             return;
         }
-        Err(_) => return,
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let devices = parse_vulkan_summary(&stdout);
+    let devices = parse_vulkan_summary(&output.stdout);
 
     if devices.is_empty() {
-        // Fallback: register a generic device if vulkaninfo ran but we couldn't parse
         debug!("vulkaninfo found but no devices parsed, registering generic Vulkan GPU");
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::VulkanGpu {
@@ -78,17 +64,6 @@ struct VulkanDevice {
 }
 
 /// Parse `vulkaninfo --summary` output for device details.
-///
-/// The summary format has blocks like:
-/// ```text
-/// GPU0:
-///     apiVersion    = 1.3.277
-///     driverVersion = 545.29.6
-///     deviceName    = NVIDIA GeForce RTX 4090
-///     ...
-///     deviceMemoryHeap[0]:
-///         size = 24564 MB (...)
-/// ```
 fn parse_vulkan_summary(output: &str) -> Vec<VulkanDevice> {
     let mut devices = Vec::new();
     let mut current_name = String::new();
@@ -100,7 +75,6 @@ fn parse_vulkan_summary(output: &str) -> Vec<VulkanDevice> {
     for line in output.lines() {
         let trimmed = line.trim();
 
-        // New GPU block
         if trimmed.starts_with("GPU") && trimmed.ends_with(':') {
             if in_device && !current_name.is_empty() {
                 devices.push(VulkanDevice {
@@ -135,7 +109,6 @@ fn parse_vulkan_summary(output: &str) -> Vec<VulkanDevice> {
             }
         }
 
-        // Parse memory heap size: "size = 24564 MB (...)"
         if trimmed.starts_with("size")
             && let Some((_, rest)) = trimmed.split_once('=')
         {
@@ -149,7 +122,6 @@ fn parse_vulkan_summary(output: &str) -> Vec<VulkanDevice> {
         }
     }
 
-    // Flush last device
     if in_device && !current_name.is_empty() {
         devices.push(VulkanDevice {
             name: current_name,

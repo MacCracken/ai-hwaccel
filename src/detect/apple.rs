@@ -9,6 +9,8 @@ use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
+use super::command::{run_tool, DEFAULT_TIMEOUT};
+
 pub(crate) fn detect_metal_and_ane(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
@@ -27,38 +29,25 @@ fn detect_macos(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
 ) -> bool {
-    let output = match std::process::Command::new("system_profiler")
-        .args(["SPHardwareDataType"])
-        .output()
-    {
-        Ok(o) if o.status.success() => o,
-        Ok(o) => {
-            // system_profiler exists but failed — we're on macOS but something is wrong
-            if o.status.code() != Some(127) {
-                warnings.push(DetectionError::ToolFailed {
-                    tool: "system_profiler".into(),
-                    exit_code: o.status.code(),
-                    stderr: String::from_utf8_lossy(&o.stderr).to_string(),
-                });
-            }
+    let output = match run_tool("system_profiler", &["SPHardwareDataType"], DEFAULT_TIMEOUT) {
+        Ok(o) => o,
+        Err(DetectionError::ToolNotFound { .. }) => return false, // not macOS
+        Err(e) => {
+            warnings.push(e);
             return false;
         }
-        Err(_) => return false, // not macOS
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let chip_name = extract_field(&stdout, "Chip");
-    let memory_str = extract_field(&stdout, "Memory");
+    let chip_name = extract_field(&output.stdout, "Chip");
+    let memory_str = extract_field(&output.stdout, "Memory");
 
-    // Parse memory (e.g. "36 GB" → bytes)
     let memory_bytes = memory_str
         .as_deref()
         .and_then(parse_memory_string)
         .unwrap_or(16 * 1024 * 1024 * 1024);
 
-    // Only register if this looks like Apple Silicon (has a chip field)
-    if chip_name.is_none() && !stdout.contains("Apple") {
-        return true; // We're on macOS but not Apple Silicon (Intel Mac)
+    if chip_name.is_none() && !output.stdout.contains("Apple") {
+        return true; // macOS but Intel Mac
     }
 
     let compute_cap = chip_name.clone();
@@ -69,7 +58,6 @@ fn detect_macos(
         "Apple Silicon detected via system_profiler"
     );
 
-    // Metal GPU — unified memory, so it gets the full system memory
     profiles.push(AcceleratorProfile {
         accelerator: AcceleratorType::MetalGpu,
         available: true,
@@ -78,7 +66,6 @@ fn detect_macos(
         driver_version: None,
     });
 
-    // ANE — shares unified memory but has its own budget (~4 GB typical)
     profiles.push(AcceleratorProfile {
         accelerator: AcceleratorType::AppleNpu,
         available: true,
@@ -113,7 +100,6 @@ fn detect_linux_device_tree(profiles: &mut Vec<AcceleratorProfile>) {
     }
 }
 
-/// Extract a "Key: Value" field from system_profiler output.
 fn extract_field(output: &str, key: &str) -> Option<String> {
     for line in output.lines() {
         let trimmed = line.trim();
@@ -129,7 +115,6 @@ fn extract_field(output: &str, key: &str) -> Option<String> {
     None
 }
 
-/// Parse a memory string like "36 GB" or "128 GB" into bytes.
 fn parse_memory_string(s: &str) -> Option<u64> {
     let parts: Vec<&str> = s.split_whitespace().collect();
     if parts.len() < 2 {
@@ -145,7 +130,6 @@ fn parse_memory_string(s: &str) -> Option<u64> {
     }
 }
 
-/// Estimate ANE memory budget based on chip generation.
 fn estimate_ane_memory(chip: &Option<String>) -> u64 {
     let chip = match chip {
         Some(c) => c.to_lowercase(),

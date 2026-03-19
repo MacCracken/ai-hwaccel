@@ -8,6 +8,7 @@ use crate::requirement::AcceleratorRequirement;
 
 /// Registry of detected hardware accelerators with planning helpers.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AcceleratorRegistry {
     pub(crate) profiles: Vec<AcceleratorProfile>,
     /// Non-fatal warnings encountered during detection.

@@ -6,39 +6,42 @@ use crate::error::DetectionError;
 use crate::hardware::{AcceleratorType, GaudiGeneration};
 use crate::profile::AcceleratorProfile;
 
+use super::command::{run_tool, validate_memory_mb, DEFAULT_TIMEOUT};
+
 pub(crate) fn detect_gaudi(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
 ) {
-    let output = std::process::Command::new("hl-smi")
-        .args([
+    let output = match run_tool(
+        "hl-smi",
+        &[
             "--query-aip=index,name,memory.total,memory.free",
             "--format=csv,noheader,nounits",
-        ])
-        .output();
-
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        Ok(o) => {
-            warnings.push(DetectionError::ToolFailed {
-                tool: "hl-smi".into(),
-                exit_code: o.status.code(),
-                stderr: String::from_utf8_lossy(&o.stderr).to_string(),
-            });
+        ],
+        DEFAULT_TIMEOUT,
+    ) {
+        Ok(o) => o,
+        Err(DetectionError::ToolNotFound { .. }) => return,
+        Err(e) => {
+            warnings.push(e);
             return;
         }
-        Err(_) => return,
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
+    for line in output.stdout.lines() {
         let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
         if parts.len() < 4 {
             continue;
         }
         let device_id: u32 = parts[0].parse().unwrap_or(0);
         let name = parts[1].to_lowercase();
-        let mem_total_mb: u64 = parts[2].parse().unwrap_or(0);
+        let mem_total_mb = match validate_memory_mb(parts[2], "gaudi") {
+            Ok(mb) => mb,
+            Err(e) => {
+                warnings.push(e);
+                continue;
+            }
+        };
 
         let generation = if name.contains("gaudi3") || name.contains("hl-325") {
             GaudiGeneration::Gaudi3

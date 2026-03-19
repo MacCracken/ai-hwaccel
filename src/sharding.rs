@@ -50,6 +50,7 @@ impl fmt::Display for ShardingStrategy {
 
 /// A slice of model layers assigned to a specific device.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelShard {
     pub shard_id: u32,
     /// Inclusive layer range `(start, end)`.
@@ -77,6 +78,7 @@ impl ModelShard {
 
 /// A concrete plan for distributing model shards across devices.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ShardingPlan {
     pub shards: Vec<ModelShard>,
     pub strategy: ShardingStrategy,
