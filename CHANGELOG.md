@@ -9,6 +9,28 @@ This project uses [calendar versioning](https://calver.org/) (`YYYY.M.D`).
 
 ### Added
 
+- **Feature flags**: each of the 11 hardware backends is gated behind a cargo
+  feature (`cuda`, `rocm`, `apple`, `vulkan`, `intel-npu`, `amd-xdna`, `tpu`,
+  `gaudi`, `aws-neuron`, `intel-oneapi`, `qualcomm`). All enabled by default
+  via `all-backends`. Disabled backends are not compiled.
+- **CLI `--table` / `-t` flag**: human-readable tabular device listing with
+  device ID, name, memory, family, and status columns.
+- **CLI `--debug` / `-d` flag**: sets `RUST_LOG=debug` for verbose detection
+  diagnostics without manually setting the environment variable.
+- **Serde schema version**: `AcceleratorRegistry` now serializes a
+  `schema_version` field (currently `1`) for forward-compatibility. Accessible
+  via `registry.schema_version()` and `SCHEMA_VERSION` constant.
+- **Property-based tests**: `proptest` fuzzing for `estimate_memory`,
+  `plan_sharding`, `suggest_quantization`, and `estimate_training_memory`
+  across random parameter counts and device configurations.
+- **Architecture decision records**: `docs/decisions/` with 4 ADRs:
+  sysfs-over-vendor-SDKs, calendar versioning, parallel detection, and
+  feature flags per backend.
+- **Crate-level guide**: expanded `lib.rs` documentation with a 4-step
+  walkthrough (detect → query → plan → train) and cargo feature reference
+  table.
+- `proptest` dev-dependency for property-based testing.
+- Test suite expanded to 161 tests (140 unit + 9 integration + 12 doc-tests).
 - **Modular architecture**: refactored 3 monolithic source files into 23
   focused modules with single responsibilities.
   - `types.rs` (714 lines) split into `hardware/` (with `tpu.rs`, `gaudi.rs`,

@@ -3,7 +3,9 @@
 //! Usage:
 //!   ai-hwaccel              # Full registry JSON (compact)
 //!   ai-hwaccel --pretty     # Full registry JSON (formatted)
+//!   ai-hwaccel --table      # Human-readable table
 //!   ai-hwaccel --summary    # Compact summary JSON
+//!   ai-hwaccel --debug      # Verbose detection diagnostics to stderr
 //!   ai-hwaccel --version    # Print version
 //!
 //! Logging:
@@ -13,15 +15,17 @@
 use tracing::{error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt};
 
-use ai_hwaccel::AcceleratorRegistry;
+use ai_hwaccel::{AcceleratorFamily, AcceleratorRegistry};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    let has = |flag: &str| args.iter().any(|a| a == flag);
 
-    let json_log = args.iter().any(|a| a == "--json-log");
-    init_logging(json_log);
+    let debug_mode = has("--debug") || has("-d");
+    let json_log = has("--json-log");
+    init_logging(json_log, debug_mode);
 
-    if args.iter().any(|a| a == "--version" || a == "-V") {
+    if has("--version") || has("-V") {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return;
     }
@@ -39,13 +43,86 @@ fn main() {
         warn!("{}", w);
     }
 
-    let pretty = args.iter().any(|a| a == "--pretty" || a == "-p");
+    let pretty = has("--pretty") || has("-p");
 
-    if args.iter().any(|a| a == "--summary" || a == "-s") {
+    if has("--table") || has("-t") {
+        print_table(&registry);
+    } else if has("--summary") || has("-s") {
         let summary = build_summary(&registry);
         emit_json(&summary, pretty);
     } else {
         emit_json(&registry, pretty);
+    }
+}
+
+fn print_table(registry: &AcceleratorRegistry) {
+    println!(
+        "{:<6} {:<35} {:>10} {:>8} {:>12}",
+        "ID", "Device", "Memory", "Family", "Status"
+    );
+    println!("{}", "-".repeat(75));
+
+    for (i, p) in registry.all_profiles().iter().enumerate() {
+        let mem_gb = p.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+        let family = p.accelerator.family();
+        let status = if p.available { "ok" } else { "unavail" };
+        println!(
+            "{:<6} {:<35} {:>7.1} GB {:>8} {:>12}",
+            i,
+            truncate(&p.accelerator.to_string(), 35),
+            mem_gb,
+            family,
+            status,
+        );
+    }
+
+    println!();
+    println!(
+        "Total: {} device(s), {:.1} GB system, {:.1} GB accelerator",
+        registry.all_profiles().len(),
+        registry.total_memory() as f64 / (1024.0 * 1024.0 * 1024.0),
+        registry.total_accelerator_memory() as f64 / (1024.0 * 1024.0 * 1024.0),
+    );
+
+    if let Some(best) = registry.best_available() {
+        println!("Best:  {}", best);
+    }
+
+    let families = [
+        AcceleratorFamily::Gpu,
+        AcceleratorFamily::Tpu,
+        AcceleratorFamily::Npu,
+        AcceleratorFamily::AiAsic,
+    ];
+    let counts: Vec<String> = families
+        .iter()
+        .filter_map(|f| {
+            let n = registry.by_family(*f).len();
+            if n > 0 {
+                Some(format!("{} {}", n, f))
+            } else {
+                None
+            }
+        })
+        .collect();
+    if !counts.is_empty() {
+        println!("       {}", counts.join(", "));
+    }
+
+    if !registry.warnings().is_empty() {
+        println!();
+        println!("Warnings:");
+        for w in registry.warnings() {
+            println!("  {}", w);
+        }
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max - 3])
     }
 }
 
@@ -64,8 +141,12 @@ fn emit_json<T: serde::Serialize>(value: &T, pretty: bool) {
     }
 }
 
-fn init_logging(json: bool) {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+fn init_logging(json: bool, debug_mode: bool) {
+    let filter = if debug_mode {
+        EnvFilter::new("debug")
+    } else {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"))
+    };
 
     if json {
         fmt()
@@ -88,6 +169,7 @@ fn build_summary(registry: &AcceleratorRegistry) -> serde_json::Value {
     let accel_memory = registry.total_accelerator_memory();
 
     serde_json::json!({
+        "schema_version": 1,
         "version": env!("CARGO_PKG_VERSION"),
         "device_count": available.len(),
         "has_accelerator": registry.has_accelerator(),

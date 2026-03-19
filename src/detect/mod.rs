@@ -1,16 +1,27 @@
 //! Hardware detection: probes sysfs, /dev, and PATH tools to discover accelerators.
 
+#[cfg(feature = "amd-xdna")]
 mod amd_xdna;
+#[cfg(feature = "apple")]
 mod apple;
 pub(crate) mod command;
+#[cfg(feature = "cuda")]
 mod cuda;
+#[cfg(feature = "gaudi")]
 mod gaudi;
+#[cfg(feature = "intel-npu")]
 mod intel_npu;
+#[cfg(feature = "intel-oneapi")]
 mod intel_oneapi;
+#[cfg(feature = "aws-neuron")]
 mod neuron;
+#[cfg(feature = "qualcomm")]
 mod qualcomm;
+#[cfg(feature = "rocm")]
 mod rocm;
+#[cfg(feature = "tpu")]
 mod tpu;
+#[cfg(feature = "vulkan")]
 mod vulkan;
 
 use std::path::Path;
@@ -34,26 +45,25 @@ impl AcceleratorRegistry {
     ///
     /// All backends run **in parallel** via [`std::thread::scope`] for
     /// lower wall-clock latency on systems with multiple CLI tools.
+    ///
+    /// Backends can be disabled at compile time via cargo features
+    /// (e.g. `default-features = false, features = ["cuda", "tpu"]`).
     pub fn detect() -> Self {
         detect_with_builder(DetectBuilder::new())
     }
 }
 
 /// Run detection with a builder's backend selection.
-///
-/// Backends are executed in parallel via `std::thread::scope`. Results are
-/// merged after all threads complete. Post-processing deduplicates Vulkan
-/// GPUs when a dedicated CUDA/ROCm driver was also found.
 pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry {
     let mut all_profiles = vec![cpu_profile()];
     let mut all_warnings: Vec<DetectionError> = Vec::new();
 
-    // Spawn all enabled backends in parallel.
     std::thread::scope(|s| {
         let mut handles: Vec<std::thread::ScopedJoinHandle<'_, DetectResult>> = Vec::new();
 
         macro_rules! spawn_backend {
-            ($backend:expr, $detect_fn:expr) => {
+            ($feature:literal, $backend:expr, $detect_fn:expr) => {
+                #[cfg(feature = $feature)]
                 if builder.backend_enabled($backend) {
                     handles.push(s.spawn(|| {
                         let mut p = Vec::new();
@@ -65,17 +75,17 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
             };
         }
 
-        spawn_backend!(Backend::Cuda, cuda::detect_cuda);
-        spawn_backend!(Backend::Rocm, rocm::detect_rocm);
-        spawn_backend!(Backend::Apple, apple::detect_metal_and_ane);
-        spawn_backend!(Backend::Vulkan, vulkan::detect_vulkan);
-        spawn_backend!(Backend::IntelNpu, intel_npu::detect_intel_npu);
-        spawn_backend!(Backend::AmdXdna, amd_xdna::detect_amd_xdna);
-        spawn_backend!(Backend::Tpu, tpu::detect_tpu);
-        spawn_backend!(Backend::Gaudi, gaudi::detect_gaudi);
-        spawn_backend!(Backend::AwsNeuron, neuron::detect_aws_neuron);
-        spawn_backend!(Backend::IntelOneApi, intel_oneapi::detect_intel_oneapi);
-        spawn_backend!(Backend::Qualcomm, qualcomm::detect_qualcomm_ai100);
+        spawn_backend!("cuda", Backend::Cuda, cuda::detect_cuda);
+        spawn_backend!("rocm", Backend::Rocm, rocm::detect_rocm);
+        spawn_backend!("apple", Backend::Apple, apple::detect_metal_and_ane);
+        spawn_backend!("vulkan", Backend::Vulkan, vulkan::detect_vulkan);
+        spawn_backend!("intel-npu", Backend::IntelNpu, intel_npu::detect_intel_npu);
+        spawn_backend!("amd-xdna", Backend::AmdXdna, amd_xdna::detect_amd_xdna);
+        spawn_backend!("tpu", Backend::Tpu, tpu::detect_tpu);
+        spawn_backend!("gaudi", Backend::Gaudi, gaudi::detect_gaudi);
+        spawn_backend!("aws-neuron", Backend::AwsNeuron, neuron::detect_aws_neuron);
+        spawn_backend!("intel-oneapi", Backend::IntelOneApi, intel_oneapi::detect_intel_oneapi);
+        spawn_backend!("qualcomm", Backend::Qualcomm, qualcomm::detect_qualcomm_ai100);
 
         for handle in handles {
             if let Ok((profiles, warnings)) = handle.join() {
@@ -85,8 +95,7 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
         }
     });
 
-    // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found
-    // (avoids double-counting the same physical device).
+    // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found.
     let has_dedicated = all_profiles.iter().any(|p| {
         matches!(
             p.accelerator,
@@ -103,6 +112,7 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
         "accelerator detection complete"
     );
     AcceleratorRegistry {
+        schema_version: crate::registry::SCHEMA_VERSION,
         profiles: all_profiles,
         warnings: all_warnings,
     }
@@ -137,7 +147,6 @@ fn detect_cpu_memory() -> u64 {
             }
         }
     }
-    // macOS fallback: sysctl hw.memsize
     if let Ok(output) = std::process::Command::new("sysctl")
         .args(["-n", "hw.memsize"])
         .output()
@@ -152,6 +161,7 @@ fn detect_cpu_memory() -> u64 {
 }
 
 /// Read a u64 from a sysfs file.
+#[allow(dead_code)]
 pub(super) fn read_sysfs_u64(path: &Path) -> Option<u64> {
     std::fs::read_to_string(path)
         .ok()

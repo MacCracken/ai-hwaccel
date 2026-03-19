@@ -24,19 +24,30 @@ use crate::requirement::AcceleratorRequirement;
 /// let plan = registry.plan_sharding(7_000_000_000, &quant);
 /// assert!(!plan.shards.is_empty());
 /// ```
+/// Current schema version for serialized registries.
+pub const SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcceleratorRegistry {
+    /// Schema version for forward-compatibility checking.
+    #[serde(default = "default_schema_version")]
+    pub(crate) schema_version: u32,
     pub(crate) profiles: Vec<AcceleratorProfile>,
     /// Non-fatal warnings encountered during detection.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) warnings: Vec<DetectionError>,
 }
 
+fn default_schema_version() -> u32 {
+    SCHEMA_VERSION
+}
+
 impl AcceleratorRegistry {
     /// Creates a registry containing only a default CPU profile.
     pub fn new() -> Self {
         Self {
+            schema_version: SCHEMA_VERSION,
             profiles: vec![crate::detect::cpu_profile()],
             warnings: vec![],
         }
@@ -45,9 +56,15 @@ impl AcceleratorRegistry {
     /// Build a registry from a pre-built list of profiles (for testing or config-driven setups).
     pub fn from_profiles(profiles: Vec<AcceleratorProfile>) -> Self {
         Self {
+            schema_version: SCHEMA_VERSION,
             profiles,
             warnings: vec![],
         }
+    }
+
+    /// Schema version of this registry (for forward-compatibility checks).
+    pub fn schema_version(&self) -> u32 {
+        self.schema_version
     }
 
     /// Returns a [`DetectBuilder`] for fine-grained control over which backends

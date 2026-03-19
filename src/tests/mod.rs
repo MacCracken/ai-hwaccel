@@ -3,6 +3,7 @@
 mod builder;
 mod classification;
 mod command;
+mod proptest;
 mod display;
 mod quantization;
 mod registry;

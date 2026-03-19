@@ -11,6 +11,24 @@ readme = "README.md"
 keywords = ["gpu", "tpu", "npu", "cuda", "accelerator"]
 categories = ["hardware-support", "science"]
 
+[features]
+default = ["all-backends"]
+all-backends = [
+    "cuda", "rocm", "apple", "vulkan", "intel-npu", "amd-xdna",
+    "tpu", "gaudi", "aws-neuron", "intel-oneapi", "qualcomm",
+]
+cuda = []
+rocm = []
+apple = []
+vulkan = []
+intel-npu = []
+amd-xdna = []
+tpu = []
+gaudi = []
+aws-neuron = []
+intel-oneapi = []
+qualcomm = []
+
 [[bin]]
 name = "ai-hwaccel"
 path = "src/main.rs"
@@ -23,6 +41,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1"
 
 [[bench]]
 name = "detect"
