@@ -12,12 +12,19 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 - **Detection 3.5x faster**: eliminated per-subprocess reader threads in the
   command runner. Pipes are now read after the child exits (no deadlock risk
   since output is capped at 1 MiB). Poll interval reduced from 50ms to 10ms.
+- **Single-pass `suggest_quantization`**: replaced 5 separate profile scans
+  (`best_memory_for` per family) with one loop collecting all family maxima.
+  Reduces O(5n) → O(n) on the profile list.
+- **Sequential path for ≤1 backend**: `DetectBuilder::none().with_cuda()`
+  skips `std::thread::scope` entirely, avoiding thread spawn/join overhead
+  for selective single-backend detection.
 - **CachedRegistry zero-copy**: `get()` now returns `Arc<AcceleratorRegistry>`
   instead of cloning the entire profile list on every call.
 - **Reduced allocations**: `/proc/meminfo` parsing uses `nth()` iterator
   instead of collecting into a `Vec`. `read_limited` pre-allocates with
   `Vec::with_capacity`. `String::from_utf8_lossy().into_owned()` avoids
-  double allocation via `to_string()`.
+  double allocation. `#[inline]` on hot accessors (`all_profiles`,
+  `warnings`, `estimate_memory`).
 
 ### Added
 
