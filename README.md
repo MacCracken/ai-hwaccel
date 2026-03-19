@@ -42,6 +42,8 @@ Add to your `Cargo.toml`:
 ai-hwaccel = "2026.3"
 ```
 
+### Library usage
+
 ```rust
 use ai_hwaccel::{AcceleratorRegistry, QuantizationLevel};
 
@@ -60,6 +62,57 @@ println!(
     plan.strategy,
     plan.estimated_tokens_per_sec.unwrap_or(0.0)
 );
+```
+
+### CLI usage
+
+```sh
+ai-hwaccel                  # Full registry JSON to stdout
+ai-hwaccel --summary        # Compact summary JSON
+ai-hwaccel --version        # Print version
+
+# Logging (logs go to stderr, data to stdout)
+RUST_LOG=debug ai-hwaccel   # Verbose detection diagnostics
+ai-hwaccel --json-log       # Structured JSON logs to stderr
+```
+
+## Architecture
+
+The crate is organized into focused modules, each with a single responsibility:
+
+```
+src/
+├── lib.rs                  # Crate root, re-exports
+├── main.rs                 # CLI binary
+├── hardware/               # Device type definitions
+│   ├── mod.rs              #   AcceleratorType, AcceleratorFamily
+│   ├── tpu.rs              #   TpuVersion (v4/v5e/v5p)
+│   ├── gaudi.rs            #   GaudiGeneration (Gaudi2/Gaudi3)
+│   └── neuron.rs           #   NeuronChipType (Inferentia/Trainium)
+├── profile.rs              # AcceleratorProfile (capabilities per device)
+├── quantization.rs         # QuantizationLevel (FP32 → INT4)
+├── requirement.rs          # AcceleratorRequirement (scheduling constraints)
+├── sharding.rs             # ShardingStrategy, ModelShard, ShardingPlan
+├── training.rs             # TrainingMethod, MemoryEstimate
+├── registry.rs             # AcceleratorRegistry (query + suggest APIs)
+├── detect/                 # Hardware detection (one file per backend)
+│   ├── mod.rs              #   Orchestrator + shared helpers
+│   ├── cuda.rs             #   NVIDIA via nvidia-smi
+│   ├── rocm.rs             #   AMD via sysfs /sys/class/drm
+│   ├── apple.rs            #   Metal + ANE via device-tree
+│   ├── vulkan.rs           #   Vulkan via vulkaninfo
+│   ├── intel_npu.rs        #   Intel NPU via sysfs
+│   ├── amd_xdna.rs         #   AMD XDNA via sysfs
+│   ├── tpu.rs              #   Google TPU via /dev/accel*
+│   ├── gaudi.rs            #   Intel Gaudi via hl-smi
+│   ├── neuron.rs           #   AWS Neuron via neuron-ls
+│   ├── intel_oneapi.rs     #   Intel oneAPI via xpu-smi
+│   └── qualcomm.rs         #   Qualcomm AI 100 via sysfs
+├── plan.rs                 # Sharding planner (impl on AcceleratorRegistry)
+└── tests/                  # Test suite (one file per concern)
+    ├── classification.rs, display.rs, quantization.rs,
+    ├── requirement.rs, registry.rs, sharding.rs,
+    ├── training.rs, serde.rs
 ```
 
 ## Core concepts
@@ -114,6 +167,18 @@ All detection is best-effort and non-destructive:
 If a tool or sysfs path is absent the accelerator simply isn't registered --
 no errors, no panics.
 
+## Logging
+
+The library uses [`tracing`](https://docs.rs/tracing) for all diagnostic output.
+No logs are emitted unless the consuming application installs a tracing
+subscriber. The CLI binary ships with `tracing-subscriber` and respects the
+standard `RUST_LOG` environment variable:
+
+```sh
+RUST_LOG=ai_hwaccel=debug   # Library-level debug messages
+RUST_LOG=trace               # Everything including dependency traces
+```
+
 ## Minimum supported Rust version (MSRV)
 
 **Rust 1.89** (edition 2024). Tracked in `rust-toolchain.toml`.
@@ -133,6 +198,10 @@ make build   # release build
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the path to v1.0 and beyond.
 
 ## License
 

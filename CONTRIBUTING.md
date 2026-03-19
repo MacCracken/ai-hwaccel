@@ -25,12 +25,12 @@ CI runs the same `check` pipeline, so if it passes locally it will pass in CI.
 
 Contributions are welcome in several areas:
 
-- **New accelerator backends** -- if you have access to hardware not yet
-  supported, detection functions are self-contained in `src/detect.rs`.
+- **New accelerator backends** -- each detector is a self-contained file under
+  `src/detect/` (e.g. `src/detect/cuda.rs`).
 - **Improved detection accuracy** -- better sysfs paths, parser robustness,
   version identification.
 - **Training/inference planning** -- more accurate memory models, new sharding
-  strategies.
+  strategies in `src/plan.rs` and `src/training.rs`.
 - **Documentation** -- rustdoc improvements, examples, guides.
 - **Bug fixes** -- always welcome.
 
@@ -42,15 +42,37 @@ Contributions are welcome in several areas:
 - Every public item must have a doc comment (`///`).
 - Keep dependencies minimal. This crate intentionally avoids vendor SDKs.
 
+## Project layout
+
+```
+src/
+├── hardware/           # Type definitions per hardware family
+│   ├── mod.rs          #   AcceleratorType, AcceleratorFamily
+│   ├── tpu.rs          #   TpuVersion
+│   ├── gaudi.rs        #   GaudiGeneration
+│   └── neuron.rs       #   NeuronChipType
+├── profile.rs          # AcceleratorProfile
+├── quantization.rs     # QuantizationLevel
+├── requirement.rs      # AcceleratorRequirement
+├── sharding.rs         # ShardingStrategy, ModelShard, ShardingPlan
+├── training.rs         # TrainingMethod, TrainingTarget, MemoryEstimate
+├── registry.rs         # AcceleratorRegistry (struct + query methods)
+├── detect/             # One file per hardware backend
+│   ├── mod.rs          #   detect() orchestrator + helpers
+│   ├── cuda.rs         #   ...through qualcomm.rs
+├── plan.rs             # Sharding planner (impl on AcceleratorRegistry)
+└── tests/              # One file per concern
+```
+
 ## Adding a new accelerator
 
-1. Add a variant to `AcceleratorType` in `src/types.rs`.
+1. Add a variant to `AcceleratorType` in `src/hardware/mod.rs`.
 2. Implement the classification methods (`is_gpu()`, `family()`, `rank()`,
    `throughput_multiplier()`, etc.) for the new variant.
-3. Write a `detect_<name>()` function in `src/detect.rs` following the pattern
-   of existing detectors.
-4. Call it from `AcceleratorRegistry::detect()`.
-5. Add tests in `src/tests.rs` covering the new type and detection.
+3. Create a new `src/detect/<name>.rs` file with a `detect_<name>()` function,
+   following the pattern of existing detectors.
+4. Register the new module in `src/detect/mod.rs` and call it from `detect()`.
+5. Add tests in `src/tests/` covering the new type and detection.
 6. Update the hardware table in `src/lib.rs` and `README.md`.
 
 ## Commit messages
