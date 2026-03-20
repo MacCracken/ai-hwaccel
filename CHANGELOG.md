@@ -146,8 +146,37 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ### Performance
 
-- **Pre-allocated profile collection**: `Vec::with_capacity(8)` avoids
-  reallocation for typical systems with fewer than 8 accelerators.
+- **Batched nvidia-smi**: CUDA detection and bandwidth probing merged into
+  a single subprocess call, eliminating one nvidia-smi invocation per
+  detection cycle (~5-10ms saved on NVIDIA systems).
+- **Shared PCI address lists**: PCIe and NUMA enrichment now share a single
+  `list_driver_pci_addrs()` computation instead of scanning sysfs twice.
+- **Single-pass plan_sharding**: TPU and GPU device collection fused into
+  one iteration over profiles instead of two separate filter passes.
+- **Cached sort keys**: `--table` sort uses `sort_by_cached_key` for O(n)
+  string allocations instead of O(n log n).
+- **Stack buffer for sysfs reads**: `read_sysfs_string()` uses a 512-byte
+  stack buffer for common small reads, avoiding heap allocation.
+- **Pre-allocated collections**: profile collection uses `with_capacity(8)`,
+  plan_sharding device vectors use `with_capacity(8/16)`.
+- **`tracing-subscriber` made optional**: moved behind `cli` feature flag.
+  Library users no longer pull 23 transitive crates.
+- **`#[inline]` on hot-path queries**: `available()`, `total_memory()`,
+  `has_accelerator()`, `by_family()`.
+- **Vulkan output cap**: full `vulkaninfo` output parsing capped at 256 KiB.
+- **Apple field cap**: `system_profiler` field values capped at 256 chars.
+
+### CI
+
+- **Cross-platform test matrix**: Ubuntu, macOS, and Windows runners for
+  unit, integration, and doc tests.
+- **Benchmark regression tracking**: `github-action-benchmark` on main with
+  120% alert threshold.
+- **Fuzz CI**: all 9 fuzz targets run for 30s each on every push/PR.
+- **Minimal feature testing**: `--no-default-features` and single-backend
+  builds verified in CI.
+- **Cross-platform release builds**: Linux AMD64/ARM64, Windows AMD64, macOS
+  ARM64 binaries built and published on tag.
 
 ## [0.19.3] - 2026-03-19
 
