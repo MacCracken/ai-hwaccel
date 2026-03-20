@@ -29,6 +29,7 @@ aws-neuron = []
 intel-oneapi = []
 qualcomm = []
 async-detect = ["dep:tokio"]
+fuzz = []
 
 [[bin]]
 name = "ai-hwaccel"

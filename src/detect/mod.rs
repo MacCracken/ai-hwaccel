@@ -1,33 +1,33 @@
 //! Hardware detection: probes sysfs, /dev, and PATH tools to discover accelerators.
 
 #[cfg(feature = "amd-xdna")]
-mod amd_xdna;
+pub(crate) mod amd_xdna;
 #[cfg(feature = "apple")]
-mod apple;
-mod bandwidth;
+pub(crate) mod apple;
+pub(crate) mod bandwidth;
 pub(crate) mod command;
 #[cfg(feature = "cuda")]
-mod cuda;
+pub(crate) mod cuda;
 pub(crate) mod disk;
 #[cfg(feature = "gaudi")]
-mod gaudi;
+pub(crate) mod gaudi;
 pub(crate) mod interconnect;
 #[cfg(feature = "intel-npu")]
-mod intel_npu;
+pub(crate) mod intel_npu;
 #[cfg(feature = "intel-oneapi")]
-mod intel_oneapi;
+pub(crate) mod intel_oneapi;
 #[cfg(feature = "aws-neuron")]
-mod neuron;
-mod numa;
-mod pcie;
+pub(crate) mod neuron;
+pub(crate) mod numa;
+pub(crate) mod pcie;
 #[cfg(feature = "qualcomm")]
-mod qualcomm;
+pub(crate) mod qualcomm;
 #[cfg(feature = "rocm")]
-mod rocm;
+pub(crate) mod rocm;
 #[cfg(feature = "tpu")]
-mod tpu;
+pub(crate) mod tpu;
 #[cfg(feature = "vulkan")]
-mod vulkan;
+pub(crate) mod vulkan;
 
 use std::path::Path;
 

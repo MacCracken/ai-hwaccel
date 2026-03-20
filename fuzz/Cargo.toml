@@ -1,0 +1,80 @@
+[package]
+name = "ai-hwaccel-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.ai-hwaccel]
+path = ".."
+features = ["fuzz", "all-backends"]
+
+# --- Fuzz targets ---
+
+[[bin]]
+name = "fuzz_cuda"
+path = "fuzz_targets/fuzz_cuda.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_gaudi"
+path = "fuzz_targets/fuzz_gaudi.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_vulkan"
+path = "fuzz_targets/fuzz_vulkan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_neuron"
+path = "fuzz_targets/fuzz_neuron.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_apple"
+path = "fuzz_targets/fuzz_apple.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_intel_oneapi"
+path = "fuzz_targets/fuzz_intel_oneapi.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_nvlink"
+path = "fuzz_targets/fuzz_nvlink.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_bandwidth"
+path = "fuzz_targets/fuzz_bandwidth.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_small_parsers"
+path = "fuzz_targets/fuzz_small_parsers.rs"
+test = false
+doc = false
+bench = false

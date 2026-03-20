@@ -44,7 +44,7 @@ pub(crate) async fn detect_cuda_async() -> super::DetectResult {
     (profiles, warnings)
 }
 
-fn parse_cuda_output(
+pub(crate) fn parse_cuda_output(
     stdout: &str,
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
@@ -73,8 +73,8 @@ fn parse_cuda_output(
                 continue;
             }
         };
-        let mem_used_mb: Option<u64> = parts[2].parse().ok();
-        let mem_free_mb: Option<u64> = parts[3].parse().ok();
+        let mem_used_mb: Option<u64> = parts[2].parse().ok().filter(|&v| v <= 16 * 1024 * 1024);
+        let mem_free_mb: Option<u64> = parts[3].parse().ok().filter(|&v| v <= 16 * 1024 * 1024);
         let compute_cap = parts[4].to_string();
         let driver_version = parts[5].to_string();
 
@@ -82,7 +82,7 @@ fn parse_cuda_output(
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::CudaGpu { device_id },
             available: true,
-            memory_bytes: mem_total_mb * 1024 * 1024,
+            memory_bytes: mem_total_mb.saturating_mul(1024 * 1024),
             compute_capability: if compute_cap.is_empty() {
                 None
             } else {
@@ -94,8 +94,8 @@ fn parse_cuda_output(
                 Some(driver_version)
             },
             memory_bandwidth_gbps: None,
-            memory_used_bytes: mem_used_mb.map(|mb| mb * 1024 * 1024),
-            memory_free_bytes: mem_free_mb.map(|mb| mb * 1024 * 1024),
+            memory_used_bytes: mem_used_mb.map(|mb| mb.saturating_mul(1024 * 1024)),
+            memory_free_bytes: mem_free_mb.map(|mb| mb.saturating_mul(1024 * 1024)),
             pcie_bandwidth_gbps: None,
             numa_node: None,
         });

@@ -57,7 +57,7 @@ pub(crate) async fn detect_vulkan_async() -> super::DetectResult {
     (profiles, warnings)
 }
 
-fn parse_vulkan_output(
+pub(crate) fn parse_vulkan_output(
     summary_stdout: &str,
     full_stdout: Option<&str>,
     profiles: &mut Vec<AcceleratorProfile>,
@@ -117,7 +117,7 @@ fn parse_vulkan_output(
                     device_name: dev.name,
                 },
                 available: true,
-                memory_bytes: dev.memory_mb * 1024 * 1024,
+                memory_bytes: dev.memory_mb.saturating_mul(1024 * 1024),
                 compute_capability: compute_cap,
                 driver_version: dev.driver_version,
                 memory_bandwidth_gbps: None,

@@ -266,6 +266,9 @@ pub mod cache;
 pub mod detect;
 pub mod error;
 pub mod ffi;
+#[cfg(feature = "fuzz")]
+#[doc(hidden)]
+pub mod fuzz_helpers;
 pub mod hardware;
 pub mod plan;
 pub mod profile;

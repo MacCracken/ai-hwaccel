@@ -61,7 +61,7 @@ fn detect_macos(
 
 /// Parse `system_profiler SPHardwareDataType` output. Returns `true` if this
 /// is a macOS system (even Intel Mac with no Apple Silicon).
-fn parse_system_profiler_output(
+pub(crate) fn parse_system_profiler_output(
     stdout: &str,
     profiles: &mut Vec<AcceleratorProfile>,
     _warnings: &mut Vec<DetectionError>,

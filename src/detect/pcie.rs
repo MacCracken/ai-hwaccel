@@ -96,7 +96,7 @@ fn read_pcie_bandwidth(device_path: &Path) -> Option<f64> {
 }
 
 /// Parse a PCIe link speed string like "16 GT/s" or "8.0 GT/s" to GT/s.
-fn parse_link_speed(s: &str) -> Option<f64> {
+pub(crate) fn parse_link_speed(s: &str) -> Option<f64> {
     // Formats: "16 GT/s", "8.0 GT/s PCIe", "2.5 GT/s"
     let numeric = s
         .split_whitespace()

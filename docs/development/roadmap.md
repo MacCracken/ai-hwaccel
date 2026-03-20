@@ -57,8 +57,10 @@ becomes available.
   safe under concurrency.
 - [x] **System I/O benchmarks** — per-backend detection, serialization,
   deserialization, and system I/O query benchmarks in `benches/detect.rs`.
-- [ ] **Fuzz testing for parsers** — fuzz `vulkaninfo`, `nvidia-smi`, `hl-smi`
-  output parsers with `cargo-fuzz` or AFL to find crash/panic paths.
+- [x] **Fuzz testing for parsers** — 9 fuzz targets via `cargo-fuzz` covering
+  cuda, gaudi, vulkan, neuron, apple, intel_oneapi, nvlink, bandwidth, and
+  small parsers (IB rate, PCIe speed, DPM clock). Found and fixed integer
+  overflow in CUDA parser.
 - [ ] **Windows integration tests** — current mock tests gate symlinks behind
   `#[cfg(unix)]`. Need Windows-native mock strategies.
 - [ ] **Benchmark regression CI** — track benchmark numbers across releases

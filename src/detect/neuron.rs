@@ -43,7 +43,7 @@ pub(crate) async fn detect_aws_neuron_async() -> super::DetectResult {
 /// Parse `neuron-ls --json-output` stdout. Returns `true` if devices were
 /// successfully parsed (even if the list was empty), `false` if JSON parsing
 /// failed so the caller should fall back to `/dev` probing.
-fn parse_neuron_output(
+pub(crate) fn parse_neuron_output(
     stdout: &str,
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,

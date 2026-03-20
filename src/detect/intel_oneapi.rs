@@ -41,7 +41,7 @@ pub(crate) async fn detect_intel_oneapi_async() -> super::DetectResult {
     (profiles, warnings)
 }
 
-fn parse_xpu_smi_output(
+pub(crate) fn parse_xpu_smi_output(
     stdout: &str,
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,

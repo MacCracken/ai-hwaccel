@@ -83,7 +83,7 @@ fn query_nvidia_bandwidth(_warnings: &mut Vec<DetectionError>) -> Vec<Option<f64
 }
 
 /// Parse nvidia-smi bandwidth query output into per-GPU bandwidth values.
-fn parse_nvidia_bandwidth_output(stdout: &str) -> Vec<Option<f64>> {
+pub(crate) fn parse_nvidia_bandwidth_output(stdout: &str) -> Vec<Option<f64>> {
     stdout
         .lines()
         .map(|line| {
@@ -230,7 +230,7 @@ fn read_rocm_bandwidth(device_dir: &Path) -> Option<f64> {
 /// Parse the highest clock entry from `pp_dpm_mclk`.
 ///
 /// Format: lines like `0: 96Mhz`, `1: 1000Mhz *`
-fn parse_max_dpm_clock(content: &str) -> Option<f64> {
+pub(crate) fn parse_max_dpm_clock(content: &str) -> Option<f64> {
     let mut max_clock = 0.0f64;
     for line in content.lines() {
         // e.g. "1: 1000Mhz *"
