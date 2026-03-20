@@ -87,7 +87,7 @@ pub(crate) fn parse_vulkan_output(
             gpu_utilization_percent: None,
         });
     } else {
-        for (i, dev) in devices.into_iter().enumerate() {
+        for (i, dev) in devices.into_iter().take(1024).enumerate() {
             let extra = compute_info.get(i);
             let mut cap_parts = Vec::new();
             if let Some(api) = &dev.api_version {
