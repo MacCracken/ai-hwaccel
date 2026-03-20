@@ -37,7 +37,7 @@ fn suggest_quantization_npu_drops_to_int4() {
         AcceleratorProfile {
             accelerator: AcceleratorType::IntelNpu,
             available: true,
-            memory_bytes: 1 * 1024 * 1024 * 1024, // 1 GB
+            memory_bytes: 1024 * 1024 * 1024, // 1 GB
             compute_capability: None,
             driver_version: None,
             memory_bandwidth_gbps: None,
@@ -58,9 +58,8 @@ fn suggest_quantization_npu_drops_to_int4() {
 #[test]
 fn suggest_quantization_cpu_fallback_tiny_memory() {
     // Only CPU with very limited memory
-    let reg = AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(
-        2 * 1024 * 1024 * 1024,
-    )]);
+    let reg =
+        AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(2 * 1024 * 1024 * 1024)]);
     // 70B model: won't fit even at INT4 on 2 GB → returns INT4 anyway (best effort)
     let q = reg.suggest_quantization(70_000_000_000);
     assert_eq!(q, QuantizationLevel::Int4);
@@ -260,17 +259,46 @@ fn hardware_mod_all_variants_have_rank() {
         AcceleratorType::CudaGpu { device_id: 0 },
         AcceleratorType::RocmGpu { device_id: 0 },
         AcceleratorType::MetalGpu,
-        AcceleratorType::VulkanGpu { device_id: 0, device_name: "x".into() },
+        AcceleratorType::VulkanGpu {
+            device_id: 0,
+            device_name: "x".into(),
+        },
         AcceleratorType::IntelNpu,
         AcceleratorType::AppleNpu,
         AcceleratorType::AmdXdnaNpu { device_id: 0 },
-        AcceleratorType::Tpu { device_id: 0, chip_count: 1, version: TpuVersion::V4 },
-        AcceleratorType::Tpu { device_id: 0, chip_count: 1, version: TpuVersion::V5e },
-        AcceleratorType::Tpu { device_id: 0, chip_count: 1, version: TpuVersion::V5p },
-        AcceleratorType::Gaudi { device_id: 0, generation: GaudiGeneration::Gaudi2 },
-        AcceleratorType::Gaudi { device_id: 0, generation: GaudiGeneration::Gaudi3 },
-        AcceleratorType::AwsNeuron { device_id: 0, chip_type: NeuronChipType::Inferentia, core_count: 2 },
-        AcceleratorType::AwsNeuron { device_id: 0, chip_type: NeuronChipType::Trainium, core_count: 2 },
+        AcceleratorType::Tpu {
+            device_id: 0,
+            chip_count: 1,
+            version: TpuVersion::V4,
+        },
+        AcceleratorType::Tpu {
+            device_id: 0,
+            chip_count: 1,
+            version: TpuVersion::V5e,
+        },
+        AcceleratorType::Tpu {
+            device_id: 0,
+            chip_count: 1,
+            version: TpuVersion::V5p,
+        },
+        AcceleratorType::Gaudi {
+            device_id: 0,
+            generation: GaudiGeneration::Gaudi2,
+        },
+        AcceleratorType::Gaudi {
+            device_id: 0,
+            generation: GaudiGeneration::Gaudi3,
+        },
+        AcceleratorType::AwsNeuron {
+            device_id: 0,
+            chip_type: NeuronChipType::Inferentia,
+            core_count: 2,
+        },
+        AcceleratorType::AwsNeuron {
+            device_id: 0,
+            chip_type: NeuronChipType::Trainium,
+            core_count: 2,
+        },
         AcceleratorType::QualcommAi100 { device_id: 0 },
         AcceleratorType::IntelOneApi { device_id: 0 },
         AcceleratorType::CerebrasWse { device_id: 0 },
@@ -281,7 +309,11 @@ fn hardware_mod_all_variants_have_rank() {
     ];
     for t in &types {
         assert!(t.rank() > 0, "{:?} should have rank > 0", t);
-        assert!(t.throughput_multiplier() > 0.0, "{:?} should have positive throughput", t);
+        assert!(
+            t.throughput_multiplier() > 0.0,
+            "{:?} should have positive throughput",
+            t
+        );
     }
 }
 
@@ -326,7 +358,11 @@ fn cuda_parser_grace_hopper() {
     assert_eq!(profiles.len(), 1);
     // Should have added 480 GB unified memory
     let mem_gb = profiles[0].memory_bytes / (1024 * 1024 * 1024);
-    assert!(mem_gb > 500, "Grace Hopper should report >500 GB, got {}", mem_gb);
+    assert!(
+        mem_gb > 500,
+        "Grace Hopper should report >500 GB, got {}",
+        mem_gb
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +381,10 @@ fn gaudi_parser_valid_line() {
     assert_eq!(profiles.len(), 1);
     assert!(matches!(
         profiles[0].accelerator,
-        AcceleratorType::Gaudi { generation: GaudiGeneration::Gaudi3, .. }
+        AcceleratorType::Gaudi {
+            generation: GaudiGeneration::Gaudi3,
+            ..
+        }
     ));
 }
 

@@ -180,7 +180,10 @@ fn cerebras_quantization_support() {
     assert!(profile.supports_quantization(&QuantizationLevel::Float16));
     assert!(profile.supports_quantization(&QuantizationLevel::Int8));
     assert!(!profile.supports_quantization(&QuantizationLevel::Int4));
-    assert_eq!(profile.preferred_quantization(), QuantizationLevel::BFloat16);
+    assert_eq!(
+        profile.preferred_quantization(),
+        QuantizationLevel::BFloat16
+    );
 }
 
 #[test]

@@ -43,7 +43,9 @@ pub(crate) fn enrich_pcie(
         if let Some(addr) = addr {
             let device_path = format!("/sys/bus/pci/devices/{}", addr);
             if let Ok(canonical) = std::fs::canonicalize(&device_path) {
-                if !canonical.starts_with("/sys/") { continue; }
+                if !canonical.starts_with("/sys/") {
+                    continue;
+                }
                 if let Some(bw) = read_pcie_bandwidth(&canonical) {
                     debug!(addr = %addr, bandwidth_gbps = bw, "PCIe link detected");
                     profile.pcie_bandwidth_gbps = Some(bw);
@@ -80,9 +82,7 @@ fn read_pcie_bandwidth(device_path: &Path) -> Option<f64> {
 /// Parse a PCIe link speed string like "16 GT/s" or "8.0 GT/s" to GT/s.
 pub(crate) fn parse_link_speed(s: &str) -> Option<f64> {
     // Formats: "16 GT/s", "8.0 GT/s PCIe", "2.5 GT/s"
-    let numeric = s
-        .split_whitespace()
-        .next()?;
+    let numeric = s.split_whitespace().next()?;
     numeric.parse::<f64>().ok()
 }
 

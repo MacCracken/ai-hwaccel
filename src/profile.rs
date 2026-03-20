@@ -33,7 +33,6 @@ pub struct AcceleratorProfile {
     pub driver_version: Option<String>,
 
     // --- System I/O fields (0.20) -------------------------------------------
-
     /// Measured memory bandwidth in GB/s (e.g. HBM throughput).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_bandwidth_gbps: Option<f64>,
@@ -51,7 +50,6 @@ pub struct AcceleratorProfile {
     pub numa_node: Option<u32>,
 
     // --- Power and thermal (0.20) -------------------------------------------
-
     /// GPU temperature in degrees Celsius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature_c: Option<u32>,

@@ -324,14 +324,14 @@ fn serde_registry_roundtrip() {
         memory_bytes: 24 * 1024 * 1024 * 1024,
         compute_capability: Some("8.6".into()),
         driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+        memory_bandwidth_gbps: None,
+        memory_used_bytes: None,
+        memory_free_bytes: None,
+        pcie_bandwidth_gbps: None,
+        numa_node: None,
+        temperature_c: None,
+        power_watts: None,
+        gpu_utilization_percent: None,
     });
     let json = serde_json::to_string(&reg).unwrap();
     let back: AcceleratorRegistry = serde_json::from_str(&json).unwrap();

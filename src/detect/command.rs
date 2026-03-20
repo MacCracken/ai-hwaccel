@@ -71,9 +71,7 @@ pub(crate) fn run_tool(
 
     // 2. Spawn with piped stdout/stderr and sanitized environment.
     let mut cmd = Command::new(&abs_path);
-    cmd.args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
     for var in SANITIZED_ENV_VARS {
         cmd.env_remove(var);
     }
@@ -90,7 +88,9 @@ pub(crate) fn run_tool(
                 let _ = child.kill();
                 // Brief wait for process to exit after kill (max 100ms).
                 for _ in 0..10 {
-                    if let Ok(Some(_)) = child.try_wait() { break; }
+                    if let Ok(Some(_)) = child.try_wait() {
+                        break;
+                    }
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 return Err(DetectionError::Timeout {

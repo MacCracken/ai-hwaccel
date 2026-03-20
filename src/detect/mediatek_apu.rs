@@ -16,7 +16,11 @@ pub(crate) fn detect_mediatek_apu(
     _warnings: &mut Vec<DetectionError>,
 ) {
     if Path::new("/sys/class/misc/mtk_apu").exists() {
-        debug!(device_id = 0, memory_mb = 2048, "MediaTek APU detected via sysfs");
+        debug!(
+            device_id = 0,
+            memory_mb = 2048,
+            "MediaTek APU detected via sysfs"
+        );
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::MediaTekApu { device_id: 0 },
             available: true,
@@ -38,7 +42,11 @@ pub(crate) fn detect_mediatek_apu(
     for entry in std::fs::read_dir("/dev").into_iter().flatten().flatten() {
         let name = entry.file_name();
         if name.to_string_lossy().starts_with("mtk_mdla") {
-            debug!(device_id = 0, memory_mb = 2048, "MediaTek APU detected via /dev");
+            debug!(
+                device_id = 0,
+                memory_mb = 2048,
+                "MediaTek APU detected via /dev"
+            );
             profiles.push(AcceleratorProfile {
                 accelerator: AcceleratorType::MediaTekApu { device_id: 0 },
                 available: true,
@@ -50,9 +58,9 @@ pub(crate) fn detect_mediatek_apu(
                 memory_free_bytes: None,
                 pcie_bandwidth_gbps: None,
                 numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+                temperature_c: None,
+                power_watts: None,
+                gpu_utilization_percent: None,
             });
             return;
         }

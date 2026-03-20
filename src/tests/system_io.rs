@@ -195,14 +195,16 @@ fn from_json_current_version() {
 
 #[test]
 fn from_json_old_version_ok() {
-    let json = r#"{"schema_version":1,"profiles":[],"system_io":{"interconnects":[],"storage":[]}}"#;
+    let json =
+        r#"{"schema_version":1,"profiles":[],"system_io":{"interconnects":[],"storage":[]}}"#;
     let reg = AcceleratorRegistry::from_json(json).unwrap();
     assert_eq!(reg.schema_version(), 1);
 }
 
 #[test]
 fn from_json_future_version_warns_but_succeeds() {
-    let json = r#"{"schema_version":999,"profiles":[],"system_io":{"interconnects":[],"storage":[]}}"#;
+    let json =
+        r#"{"schema_version":999,"profiles":[],"system_io":{"interconnects":[],"storage":[]}}"#;
     // Should succeed (just warns, doesn't reject)
     let reg = AcceleratorRegistry::from_json(json).unwrap();
     assert_eq!(reg.schema_version(), 999);

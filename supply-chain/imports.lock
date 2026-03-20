@@ -9,8 +9,8 @@ user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
 [[publisher.itoa]]
-version = "1.0.17"
-when = "2025-12-27"
+version = "1.0.18"
+when = "2026-03-20"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"

@@ -65,8 +65,12 @@ pub(crate) fn parse_neuron_output(
     {
         for (i, device) in devices.iter().take(256).enumerate() {
             let model = device["model"].as_str().unwrap_or("Neuron Device");
-            let Some(nc_count) = device["nc_count"].as_u64().map(|n| n as u32) else { continue };
-            let Some(mem_per_nc) = device["memory_per_nc_mb"].as_u64() else { continue };
+            let Some(nc_count) = device["nc_count"].as_u64().map(|n| n as u32) else {
+                continue;
+            };
+            let Some(mem_per_nc) = device["memory_per_nc_mb"].as_u64() else {
+                continue;
+            };
             let mem_total = (nc_count as u64)
                 .saturating_mul(mem_per_nc)
                 .saturating_mul(1024 * 1024);
@@ -94,9 +98,9 @@ pub(crate) fn parse_neuron_output(
                 memory_free_bytes: None,
                 pcie_bandwidth_gbps: None,
                 numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+                temperature_c: None,
+                power_watts: None,
+                gpu_utilization_percent: None,
             });
         }
         true
@@ -126,9 +130,12 @@ fn detect_neuron_dev_fallback(profiles: &mut Vec<AcceleratorProfile>) {
             Err(_) => continue,
         };
 
-        let chip_type = if super::read_sysfs_string(&std::path::Path::new("/sys/devices/virtual/dmi/id/product_name"), 256)
-            .unwrap_or_default()
-            .contains("trn")
+        let chip_type = if super::read_sysfs_string(
+            std::path::Path::new("/sys/devices/virtual/dmi/id/product_name"),
+            256,
+        )
+        .unwrap_or_default()
+        .contains("trn")
         {
             NeuronChipType::Trainium
         } else {

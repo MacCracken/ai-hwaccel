@@ -13,7 +13,11 @@ pub(crate) fn detect_qualcomm_ai100(
     _warnings: &mut Vec<DetectionError>,
 ) {
     if Path::new("/sys/class/qaic").exists() {
-        debug!(device_id = 0, memory_gb = 32, "Qualcomm Cloud AI 100 detected via sysfs");
+        debug!(
+            device_id = 0,
+            memory_gb = 32,
+            "Qualcomm Cloud AI 100 detected via sysfs"
+        );
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::QualcommAi100 { device_id: 0 },
             available: true,
@@ -35,21 +39,25 @@ pub(crate) fn detect_qualcomm_ai100(
     for entry in std::fs::read_dir("/dev").into_iter().flatten().flatten() {
         let name = entry.file_name();
         if name.to_string_lossy().starts_with("qaic_") {
-            debug!(device_id = 0, memory_gb = 32, "Qualcomm Cloud AI 100 detected via /dev");
+            debug!(
+                device_id = 0,
+                memory_gb = 32,
+                "Qualcomm Cloud AI 100 detected via /dev"
+            );
             profiles.push(AcceleratorProfile {
                 accelerator: AcceleratorType::QualcommAi100 { device_id: 0 },
                 available: true,
                 memory_bytes: 32 * 1024 * 1024 * 1024,
                 compute_capability: Some("AI 100".into()),
                 driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+                memory_bandwidth_gbps: None,
+                memory_used_bytes: None,
+                memory_free_bytes: None,
+                pcie_bandwidth_gbps: None,
+                numa_node: None,
+                temperature_c: None,
+                power_watts: None,
+                gpu_utilization_percent: None,
             });
             return;
         }

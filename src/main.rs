@@ -75,7 +75,14 @@ fn main() {
 
     if has("--table") || has("-t") || tsv {
         let cols = columns.as_deref().unwrap_or(Column::ALL);
-        print_table(&registry, sort.as_deref(), family_filter.as_deref(), cols, tsv, None);
+        print_table(
+            &registry,
+            sort.as_deref(),
+            family_filter.as_deref(),
+            cols,
+            tsv,
+            None,
+        );
     } else if has("--summary") || has("-s") {
         let summary = build_summary(&registry);
         emit_json(&summary, pretty);
@@ -270,11 +277,10 @@ fn print_table(
     let mut profiles: Vec<&AcceleratorProfile> = registry.all_profiles().iter().collect();
 
     // Filter by family
-    if let Some(f) = family_filter {
-        if let Some(fam) = parse_family(f) {
+    if let Some(f) = family_filter
+        && let Some(fam) = parse_family(f) {
             profiles.retain(|p| p.accelerator.family() == fam);
         }
-    }
 
     // Sort
     match sort_by {
@@ -318,7 +324,10 @@ fn print_table(
 
     // Rows
     for (i, p) in profiles.iter().enumerate() {
-        let mem_gb = format!("{:.1} GB", p.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0));
+        let mem_gb = format!(
+            "{:.1} GB",
+            p.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+        );
 
         let free_str = match p.memory_free_bytes {
             Some(b) => format!("{:.1} GB", b as f64 / (1024.0 * 1024.0 * 1024.0)),
@@ -364,7 +373,13 @@ fn print_table(
             .iter()
             .map(|c| match c {
                 Column::Id => i.to_string(),
-                Column::Name => if tsv { device_name.clone() } else { truncate(&device_name, 28) },
+                Column::Name => {
+                    if tsv {
+                        device_name.clone()
+                    } else {
+                        truncate(&device_name, 28)
+                    }
+                }
                 Column::Memory => mem_gb.clone(),
                 Column::Free => free_with_delta.clone(),
                 Column::Bandwidth => bw_str.clone(),

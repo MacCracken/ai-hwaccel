@@ -39,7 +39,9 @@ pub(crate) fn enrich_numa(
         if let Some(addr) = addr {
             let device_path = format!("/sys/bus/pci/devices/{}", addr);
             if let Ok(canonical) = std::fs::canonicalize(&device_path) {
-                if !canonical.starts_with("/sys/") { continue; }
+                if !canonical.starts_with("/sys/") {
+                    continue;
+                }
                 let numa_path = canonical.join("numa_node");
                 if let Some(contents) = super::read_sysfs_string(&numa_path, 64)
                     && let Ok(node) = contents.trim().parse::<i32>()
@@ -54,4 +56,3 @@ pub(crate) fn enrich_numa(
     }
     debug!(enriched = count, "NUMA topology enrichment complete");
 }
-

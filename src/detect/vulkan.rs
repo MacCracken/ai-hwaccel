@@ -44,7 +44,13 @@ pub(crate) fn detect_vulkan(
 pub(crate) async fn detect_vulkan_async() -> super::DetectResult {
     let mut profiles = Vec::new();
     let mut warnings = Vec::new();
-    let output = match super::command::run_tool_async("vulkaninfo", VULKANINFO_SUMMARY_ARGS, DEFAULT_TIMEOUT).await {
+    let output = match super::command::run_tool_async(
+        "vulkaninfo",
+        VULKANINFO_SUMMARY_ARGS,
+        DEFAULT_TIMEOUT,
+    )
+    .await
+    {
         Ok(o) => o,
         Err(DetectionError::ToolNotFound { .. }) => {
             debug!("vulkaninfo not found on $PATH, skipping Vulkan detection");
@@ -55,7 +61,10 @@ pub(crate) async fn detect_vulkan_async() -> super::DetectResult {
             return (profiles, warnings);
         }
     };
-    let full_output = super::command::run_tool_async("vulkaninfo", VULKANINFO_FULL_ARGS, DEFAULT_TIMEOUT).await.ok();
+    let full_output =
+        super::command::run_tool_async("vulkaninfo", VULKANINFO_FULL_ARGS, DEFAULT_TIMEOUT)
+            .await
+            .ok();
     let full_stdout = full_output.as_ref().map(|o| o.stdout.as_str());
     parse_vulkan_output(&output.stdout, full_stdout, &mut profiles, &mut warnings);
     (profiles, warnings)
@@ -104,9 +113,7 @@ pub(crate) fn parse_vulkan_output(
             if let Some(info) = extra {
                 cap_parts.push(format!(
                     "compute queues: {}x{}, subgroup: {}",
-                    info.compute_queue_count,
-                    info.compute_queue_family_count,
-                    info.subgroup_size,
+                    info.compute_queue_count, info.compute_queue_family_count, info.subgroup_size,
                 ));
             }
             let compute_cap = if cap_parts.is_empty() {
@@ -136,9 +143,9 @@ pub(crate) fn parse_vulkan_output(
                 memory_free_bytes: None,
                 pcie_bandwidth_gbps: None,
                 numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+                temperature_c: None,
+                power_watts: None,
+                gpu_utilization_percent: None,
             });
         }
     }
@@ -168,7 +175,10 @@ struct VulkanComputeInfo {
 
 /// Parse `vulkaninfo --summary` output for device details.
 fn parse_vulkan_summary(output: &str) -> Vec<VulkanDevice> {
-    trace!(line_count = output.lines().count(), "parsing vulkaninfo summary");
+    trace!(
+        line_count = output.lines().count(),
+        "parsing vulkaninfo summary"
+    );
     let mut devices = Vec::new();
     let mut current_name = String::new();
     let mut current_mem: u64 = 0;
@@ -267,13 +277,11 @@ fn parse_vulkan_full(output: &str) -> Vec<VulkanComputeInfo> {
         }
 
         // Subgroup size.
-        if trimmed.starts_with("subgroupSize") && !trimmed.contains("Control") {
-            if let Some(val) = extract_value(trimmed) {
-                if let Ok(size) = val.parse::<u32>() {
+        if trimmed.starts_with("subgroupSize") && !trimmed.contains("Control")
+            && let Some(val) = extract_value(trimmed)
+                && let Ok(size) = val.parse::<u32>() {
                     current.subgroup_size = size;
                 }
-            }
-        }
 
         // Queue family section.
         if trimmed.starts_with("VkQueueFamilyProperties") {
@@ -288,9 +296,9 @@ fn parse_vulkan_full(output: &str) -> Vec<VulkanComputeInfo> {
                 // The queueCount for this family should follow shortly.
             }
 
-            if trimmed.starts_with("queueCount") {
-                if let Some(val) = extract_value(trimmed) {
-                    if let Ok(count) = val.parse::<u32>() {
+            if trimmed.starts_with("queueCount")
+                && let Some(val) = extract_value(trimmed)
+                    && let Ok(count) = val.parse::<u32>() {
                         // Only add to compute_queue_count if the previous queueFlags
                         // included COMPUTE_BIT. We track this by checking if family
                         // count just incremented. This is a heuristic — the queueFlags
@@ -300,8 +308,6 @@ fn parse_vulkan_full(output: &str) -> Vec<VulkanComputeInfo> {
                             current.compute_queue_count += count;
                         }
                     }
-                }
-            }
 
             // End of queue section.
             if trimmed.is_empty() || trimmed.starts_with("Vk") && !trimmed.starts_with("VkQueue") {

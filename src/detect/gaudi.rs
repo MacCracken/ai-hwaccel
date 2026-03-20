@@ -35,7 +35,8 @@ pub(crate) fn detect_gaudi(
 pub(crate) async fn detect_gaudi_async() -> super::DetectResult {
     let mut profiles = Vec::new();
     let mut warnings = Vec::new();
-    let output = match super::command::run_tool_async("hl-smi", HL_SMI_ARGS, DEFAULT_TIMEOUT).await {
+    let output = match super::command::run_tool_async("hl-smi", HL_SMI_ARGS, DEFAULT_TIMEOUT).await
+    {
         Ok(o) => o,
         Err(DetectionError::ToolNotFound { .. }) => {
             debug!("hl-smi not found on $PATH, skipping Gaudi detection");

@@ -53,10 +53,7 @@ impl AcceleratorRegistry {
     /// Requires the `async-detect` feature.
     #[cfg(feature = "async-detect")]
     pub async fn detect_async() -> Result<Self, AsyncDetectError> {
-        Ok(crate::detect::detect_with_builder_async(
-            crate::registry::DetectBuilder::new(),
-        )
-        .await)
+        Ok(crate::detect::detect_with_builder_async(crate::registry::DetectBuilder::new()).await)
     }
 }
 

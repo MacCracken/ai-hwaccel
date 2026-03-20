@@ -7,6 +7,9 @@ version = "0.10"
 [imports.mozilla]
 url = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
+[policy.ai-hwaccel]
+audit-as-crates-io = false
+
 [[exemptions.anes]]
 version = "0.1.6"
 criteria = "safe-to-run"

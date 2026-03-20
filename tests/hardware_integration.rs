@@ -5,8 +5,7 @@
 //! relevant hardware/tool is present, and skips gracefully if not.
 
 use ai_hwaccel::{
-    AcceleratorFamily, AcceleratorProfile, AcceleratorRegistry, AcceleratorType, DetectBuilder,
-    SystemIo,
+    AcceleratorFamily, AcceleratorRegistry, AcceleratorType, DetectBuilder,
 };
 
 // ---------------------------------------------------------------------------
@@ -51,11 +50,10 @@ fn has_rocm() -> bool {
         if !name_str.starts_with("card") || name_str.contains('-') {
             continue;
         }
-        if let Ok(target) = std::fs::read_link(entry.path().join("device/driver")) {
-            if target.to_string_lossy().contains("amdgpu") {
+        if let Ok(target) = std::fs::read_link(entry.path().join("device/driver"))
+            && target.to_string_lossy().contains("amdgpu") {
                 return true;
             }
-        }
     }
     false
 }
@@ -171,8 +169,8 @@ fn vulkan_compute_queues_when_present() {
     }
     let reg = DetectBuilder::none().with_vulkan().detect();
     for p in reg.all_profiles() {
-        if let AcceleratorType::VulkanGpu { .. } = &p.accelerator {
-            if let Some(cc) = &p.compute_capability {
+        if let AcceleratorType::VulkanGpu { .. } = &p.accelerator
+            && let Some(cc) = &p.compute_capability {
                 // Should mention subgroup size if full vulkaninfo worked.
                 if cc.contains("subgroup") {
                     assert!(
@@ -181,7 +179,6 @@ fn vulkan_compute_queues_when_present() {
                     );
                 }
             }
-        }
     }
 }
 
@@ -214,7 +211,7 @@ fn pcie_bandwidth_is_reasonable() {
         if let Some(bw) = p.pcie_bandwidth_gbps {
             // PCIe bandwidth should be between 0.5 GB/s (Gen1 x1) and 128 GB/s (Gen5 x16).
             assert!(
-                bw >= 0.5 && bw <= 128.0,
+                (0.5..=128.0).contains(&bw),
                 "PCIe bandwidth {bw} GB/s out of range for {}",
                 p.accelerator
             );
@@ -233,7 +230,7 @@ fn memory_bandwidth_is_reasonable() {
         if let Some(bw) = p.memory_bandwidth_gbps {
             // Memory bandwidth should be between 10 GB/s and 10 TB/s.
             assert!(
-                bw >= 10.0 && bw <= 10000.0,
+                (10.0..=10000.0).contains(&bw),
                 "Memory bandwidth {bw} GB/s out of range for {}",
                 p.accelerator
             );

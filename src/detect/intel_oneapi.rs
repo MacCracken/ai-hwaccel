@@ -32,17 +32,18 @@ pub(crate) fn detect_intel_oneapi(
 pub(crate) async fn detect_intel_oneapi_async() -> super::DetectResult {
     let mut profiles = Vec::new();
     let mut warnings = Vec::new();
-    let output = match super::command::run_tool_async("xpu-smi", XPU_SMI_ARGS, DEFAULT_TIMEOUT).await {
-        Ok(o) => o,
-        Err(DetectionError::ToolNotFound { .. }) => {
-            debug!("xpu-smi not found on $PATH, skipping Intel oneAPI detection");
-            return (profiles, warnings);
-        }
-        Err(e) => {
-            warnings.push(e);
-            return (profiles, warnings);
-        }
-    };
+    let output =
+        match super::command::run_tool_async("xpu-smi", XPU_SMI_ARGS, DEFAULT_TIMEOUT).await {
+            Ok(o) => o,
+            Err(DetectionError::ToolNotFound { .. }) => {
+                debug!("xpu-smi not found on $PATH, skipping Intel oneAPI detection");
+                return (profiles, warnings);
+            }
+            Err(e) => {
+                warnings.push(e);
+                return (profiles, warnings);
+            }
+        };
     parse_xpu_smi_output(&output.stdout, &mut profiles, &mut warnings);
     (profiles, warnings)
 }

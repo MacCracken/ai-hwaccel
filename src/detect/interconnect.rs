@@ -31,7 +31,9 @@ pub(crate) async fn detect_interconnects_async() -> (Vec<Interconnect>, Vec<Dete
     detect_infiniband(&mut interconnects, &mut warnings);
 
     // NVLink: async CLI call.
-    if let Ok(output) = super::command::run_tool_async("nvidia-smi", NVLINK_ARGS, DEFAULT_TIMEOUT).await {
+    if let Ok(output) =
+        super::command::run_tool_async("nvidia-smi", NVLINK_ARGS, DEFAULT_TIMEOUT).await
+    {
         parse_nvlink_output(&output.stdout, &mut interconnects);
     }
 
@@ -39,10 +41,7 @@ pub(crate) async fn detect_interconnects_async() -> (Vec<Interconnect>, Vec<Dete
 }
 
 /// Detect InfiniBand / RoCE devices via sysfs (`/sys/class/infiniband/`).
-fn detect_infiniband(
-    interconnects: &mut Vec<Interconnect>,
-    _warnings: &mut Vec<DetectionError>,
-) {
+fn detect_infiniband(interconnects: &mut Vec<Interconnect>, _warnings: &mut Vec<DetectionError>) {
     let ib_dir = std::path::Path::new("/sys/class/infiniband");
     if !ib_dir.exists() {
         return;
@@ -57,17 +56,16 @@ fn detect_infiniband(
             continue;
         }
 
-        let state = super::read_sysfs_string(&port_dir.join("state"), 256)
-            .map(|s| s.trim().to_string());
+        let state =
+            super::read_sysfs_string(&port_dir.join("state"), 256).map(|s| s.trim().to_string());
 
-        let rate_str = super::read_sysfs_string(&port_dir.join("rate"), 256)
-            .unwrap_or_default();
+        let rate_str = super::read_sysfs_string(&port_dir.join("rate"), 256).unwrap_or_default();
 
         let bandwidth_gbps = parse_ib_rate(rate_str.trim());
 
         // Determine if IB or RoCE from link_layer file
-        let link_layer = super::read_sysfs_string(&port_dir.join("link_layer"), 256)
-            .unwrap_or_default();
+        let link_layer =
+            super::read_sysfs_string(&port_dir.join("link_layer"), 256).unwrap_or_default();
         let kind = if link_layer.trim().eq_ignore_ascii_case("Ethernet") {
             InterconnectKind::RoCE
         } else {
@@ -97,10 +95,7 @@ pub(crate) fn parse_ib_rate(s: &str) -> f64 {
 }
 
 /// Detect NVLink topology via `nvidia-smi nvlink -s`.
-fn detect_nvlink(
-    interconnects: &mut Vec<Interconnect>,
-    warnings: &mut Vec<DetectionError>,
-) {
+fn detect_nvlink(interconnects: &mut Vec<Interconnect>, warnings: &mut Vec<DetectionError>) {
     let output = match run_tool("nvidia-smi", NVLINK_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
         Err(DetectionError::ToolNotFound { .. }) => return,
@@ -141,13 +136,12 @@ pub(crate) fn parse_nvlink_output(stdout: &str, interconnects: &mut Vec<Intercon
         } else if trimmed.starts_with("Link ") {
             link_count += 1;
             // Parse "Link N: <bw> GB/s"
-            if let Some(bw_part) = trimmed.split(':').nth(1) {
-                if let Some(bw_str) = bw_part.trim().split_whitespace().next()
+            if let Some(bw_part) = trimmed.split(':').nth(1)
+                && let Some(bw_str) = bw_part.split_whitespace().next()
                     && let Ok(bw) = bw_str.parse::<f64>()
                 {
                     link_bw = bw;
                 }
-            }
         }
     }
 

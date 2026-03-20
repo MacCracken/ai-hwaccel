@@ -167,8 +167,7 @@ fn find_hwmon_dir(device_dir: &Path) -> Option<std::path::PathBuf> {
 fn detect_cxl_memory(device_dir: &Path) -> u64 {
     // Method 1: Check if visible VRAM exceeds regular VRAM (indicates CXL pool).
     let vram_total = read_sysfs_u64(&device_dir.join("mem_info_vram_total")).unwrap_or(0);
-    let vis_vram_total =
-        read_sysfs_u64(&device_dir.join("mem_info_vis_vram_total")).unwrap_or(0);
+    let vis_vram_total = read_sysfs_u64(&device_dir.join("mem_info_vis_vram_total")).unwrap_or(0);
     if vis_vram_total > vram_total && vram_total > 0 {
         let cxl = vis_vram_total.saturating_sub(vram_total);
         if cxl > 0 {

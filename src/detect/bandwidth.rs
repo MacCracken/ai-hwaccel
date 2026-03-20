@@ -50,10 +50,11 @@ pub(crate) async fn enrich_bandwidth_async(
     profiles: &mut [AcceleratorProfile],
     warnings: &mut Vec<DetectionError>,
 ) {
-    let cuda_bw = match super::command::run_tool_async("nvidia-smi", NVIDIA_BW_ARGS, DEFAULT_TIMEOUT).await {
-        Ok(o) => parse_nvidia_bandwidth_output(&o.stdout),
-        Err(_) => Vec::new(),
-    };
+    let cuda_bw =
+        match super::command::run_tool_async("nvidia-smi", NVIDIA_BW_ARGS, DEFAULT_TIMEOUT).await {
+            Ok(o) => parse_nvidia_bandwidth_output(&o.stdout),
+            Err(_) => Vec::new(),
+        };
     let count = apply_bandwidth(profiles, &cuda_bw);
     debug!(enriched = count, "memory bandwidth enrichment complete");
     let _ = warnings; // no additional warnings from async path
@@ -190,15 +191,15 @@ pub(crate) fn nvidia_bus_width_bits(cc: &str) -> Option<u32> {
 /// published specs (GB/s). Used when nvidia-smi doesn't report clock speed.
 pub(crate) fn estimate_nvidia_bandwidth_from_cc(cc: &str) -> Option<f64> {
     match cc {
-        "10.0" => Some(8000.0),  // B200: ~8 TB/s
-        "9.0" => Some(3350.0),   // H100 SXM: 3.35 TB/s
-        "8.9" => Some(1008.0),   // RTX 4090: 1 TB/s
-        "8.6" => Some(936.0),    // RTX 3090: 936 GB/s
-        "8.0" => Some(2039.0),   // A100 SXM: 2 TB/s
-        "7.5" => Some(616.0),    // RTX 2080 Ti: 616 GB/s
-        "7.0" => Some(900.0),    // V100 SXM: 900 GB/s
-        "6.1" => Some(484.0),    // GTX 1080 Ti: 484 GB/s
-        "6.0" => Some(732.0),    // P100: 732 GB/s
+        "10.0" => Some(8000.0), // B200: ~8 TB/s
+        "9.0" => Some(3350.0),  // H100 SXM: 3.35 TB/s
+        "8.9" => Some(1008.0),  // RTX 4090: 1 TB/s
+        "8.6" => Some(936.0),   // RTX 3090: 936 GB/s
+        "8.0" => Some(2039.0),  // A100 SXM: 2 TB/s
+        "7.5" => Some(616.0),   // RTX 2080 Ti: 616 GB/s
+        "7.0" => Some(900.0),   // V100 SXM: 900 GB/s
+        "6.1" => Some(484.0),   // GTX 1080 Ti: 484 GB/s
+        "6.0" => Some(732.0),   // P100: 732 GB/s
         _ => None,
     }
 }
@@ -271,13 +272,15 @@ pub(crate) fn parse_max_dpm_clock(content: &str) -> Option<f64> {
             .split_whitespace()
             .nth(1)
             .and_then(|s| s.strip_suffix("Mhz").or_else(|| s.strip_suffix("MHz")))
-        {
-            if let Ok(mhz) = mhz_str.parse::<f64>() {
+            && let Ok(mhz) = mhz_str.parse::<f64>() {
                 max_clock = max_clock.max(mhz);
             }
-        }
     }
-    if max_clock > 0.0 { Some(max_clock) } else { None }
+    if max_clock > 0.0 {
+        Some(max_clock)
+    } else {
+        None
+    }
 }
 
 /// Determine AMD GPU memory bus width from sysfs device info.
@@ -308,7 +311,10 @@ fn read_amd_bus_width(device_dir: &Path) -> u32 {
 /// Look up bus width from PCI device ID.
 fn read_amd_bus_width_from_device_id(device_dir: &Path) -> Option<u32> {
     let device_id = super::read_sysfs_string(&device_dir.join("device"), 64)?;
-    let device_id = device_id.trim().strip_prefix("0x").unwrap_or(device_id.trim());
+    let device_id = device_id
+        .trim()
+        .strip_prefix("0x")
+        .unwrap_or(device_id.trim());
 
     // AMD PCI device IDs → bus width
     match device_id {

@@ -126,6 +126,82 @@ platforms.
 
 ---
 
+## 0.23.3 — Fleet & Scale
+
+Focus: fleet-wide inventory, health monitoring, capacity planning at
+datacenter scale.
+
+### Fleet inventory
+
+- [ ] **Fleet registry** — `FleetRegistry` aggregates `AcceleratorRegistry`
+  from multiple nodes into a unified view. Tracks node hostname, IP, rack,
+  zone. Queryable: "show all H100 nodes in us-east-1".
+- [ ] **Discovery protocols** — auto-discover nodes via mDNS/DNS-SD on
+  local network, Consul service catalog, or Kubernetes node labels.
+  Pluggable discovery backends.
+- [ ] **Inventory persistence** — serialize fleet state to SQLite or JSON
+  lines. Diff against previous scan to detect changes (new nodes, failed
+  GPUs, memory degradation).
+- [ ] **Fleet CLI** — `ai-hwaccel fleet scan --subnet 10.0.0.0/24` or
+  `ai-hwaccel fleet scan --kubeconfig ~/.kube/config`. Table output with
+  per-node summary, aggregate stats.
+
+### Health monitoring
+
+- [ ] **Continuous health checks** — periodic re-detection on fleet nodes.
+  Track `temperature_c`, `power_watts`, `gpu_utilization_percent`,
+  `memory_used_bytes` over time. Detect degradation trends.
+- [ ] **Alert rules engine** — configurable thresholds:
+  `gpu_temp > 85`, `mem_used > 95%`, `pcie_bandwidth < 50%_of_expected`,
+  `device_disappeared`. Notify via webhook, Slack, PagerDuty.
+- [ ] **Dead GPU detection** — compare detected device count against
+  expected (from previous scan or manifest). Flag nodes with missing or
+  failed accelerators.
+- [ ] **ECC error tracking** — parse `nvidia-smi -q -d ECC` and ROCm
+  `ras_features` for correctable/uncorrectable memory errors. Alert on
+  threshold.
+
+### Capacity planning
+
+- [ ] **Fleet-wide sharding** — given a model + quantisation + fleet
+  inventory, recommend which nodes to use and how to distribute. Consider
+  inter-node bandwidth (IB/RoCE), intra-node topology (NVLink/NVSwitch),
+  and power budget.
+- [ ] **Bin packing** — pack multiple models onto a fleet. Given N models
+  and M nodes, find optimal placement minimizing fragmentation and
+  maximizing utilization.
+- [ ] **Scaling recommendations** — "you need 3 more H100 nodes to run
+  Llama 405B at BF16 with pipeline parallel". Based on current fleet
+  capacity vs requested workload.
+- [ ] **What-if analysis** — simulate adding/removing nodes before
+  provisioning. "If I add 4x MI300X, can I fit two 70B models at FP16?"
+
+### Observability & export
+
+- [ ] **Prometheus metrics** — `/metrics` endpoint exposing per-device
+  gauges: `hwaccel_gpu_temperature_celsius`, `hwaccel_gpu_power_watts`,
+  `hwaccel_gpu_memory_used_bytes`, `hwaccel_gpu_utilization_percent`.
+  Fleet-wide aggregates: `hwaccel_fleet_total_vram_bytes`,
+  `hwaccel_fleet_gpu_count`.
+- [ ] **OpenTelemetry spans** — instrument detection with OTel traces
+  for observability platforms. Span per backend, attributes for device
+  count and duration.
+- [ ] **Grafana dashboard template** — JSON dashboard for fleet GPU
+  utilization, temperature heatmap, memory usage per node.
+- [ ] **Structured event log** — JSON lines log of detection events,
+  device changes, alerts. Ingestible by ELK/Loki/Datadog.
+
+### Multi-tenancy
+
+- [ ] **Device reservation** — mark devices as reserved/in-use to prevent
+  double-allocation across teams. `registry.reserve(device_id, owner)`.
+- [ ] **Namespace isolation** — in Kubernetes, scope detection to the
+  pod's allocated devices (GPU device plugin, resource limits).
+- [ ] **Quota management** — per-team GPU hour budgets. Track usage via
+  `gpu_utilization_percent` × time.
+
+---
+
 ## Future (post-v1)
 
 Items that don't fit in a specific release yet.

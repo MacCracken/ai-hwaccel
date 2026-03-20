@@ -32,7 +32,10 @@ pub(crate) async fn detect_metal_and_ane_async() -> super::DetectResult {
     let mut warnings = Vec::new();
 
     // Try macOS detection via system_profiler (async CLI call).
-    if let Ok(output) = super::command::run_tool_async("system_profiler", SYSTEM_PROFILER_ARGS, DEFAULT_TIMEOUT).await {
+    if let Ok(output) =
+        super::command::run_tool_async("system_profiler", SYSTEM_PROFILER_ARGS, DEFAULT_TIMEOUT)
+            .await
+    {
         if parse_system_profiler_output(&output.stdout, &mut profiles, &mut warnings) {
             return (profiles, warnings);
         }
@@ -100,9 +103,9 @@ pub(crate) fn parse_system_profiler_output(
         memory_free_bytes: None,
         pcie_bandwidth_gbps: None,
         numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+        temperature_c: None,
+        power_watts: None,
+        gpu_utilization_percent: None,
     });
 
     profiles.push(AcceleratorProfile {
@@ -116,9 +119,9 @@ pub(crate) fn parse_system_profiler_output(
         memory_free_bytes: None,
         pcie_bandwidth_gbps: None,
         numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+        temperature_c: None,
+        power_watts: None,
+        gpu_utilization_percent: None,
     });
 
     true
@@ -126,10 +129,14 @@ pub(crate) fn parse_system_profiler_output(
 
 /// Linux (Asahi) detection via `/proc/device-tree/compatible`.
 fn detect_linux_device_tree(profiles: &mut Vec<AcceleratorProfile>) {
-    if let Some(compat) = super::read_sysfs_string(&std::path::Path::new("/proc/device-tree/compatible"), 4096)
+    if let Some(compat) =
+        super::read_sysfs_string(std::path::Path::new("/proc/device-tree/compatible"), 4096)
         && compat.contains("apple")
     {
-        debug!(memory_gb = 16, "Apple device detected via device-tree, registering Metal GPU + ANE");
+        debug!(
+            memory_gb = 16,
+            "Apple device detected via device-tree, registering Metal GPU + ANE"
+        );
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::MetalGpu,
             available: true,

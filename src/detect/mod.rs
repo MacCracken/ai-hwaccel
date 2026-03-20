@@ -5,17 +5,25 @@ pub(crate) mod amd_xdna;
 #[cfg(feature = "apple")]
 pub(crate) mod apple;
 pub(crate) mod bandwidth;
+#[cfg(feature = "cerebras")]
+pub(crate) mod cerebras;
 pub(crate) mod command;
 #[cfg(feature = "cuda")]
 pub(crate) mod cuda;
 pub(crate) mod disk;
 #[cfg(feature = "gaudi")]
 pub(crate) mod gaudi;
-pub(crate) mod interconnect;
+#[cfg(feature = "graphcore")]
+pub(crate) mod graphcore;
+#[cfg(feature = "groq")]
+pub(crate) mod groq;
 #[cfg(feature = "intel-npu")]
 pub(crate) mod intel_npu;
 #[cfg(feature = "intel-oneapi")]
 pub(crate) mod intel_oneapi;
+pub(crate) mod interconnect;
+#[cfg(feature = "mediatek-apu")]
+pub(crate) mod mediatek_apu;
 #[cfg(feature = "aws-neuron")]
 pub(crate) mod neuron;
 pub(crate) mod numa;
@@ -24,20 +32,12 @@ pub(crate) mod pcie;
 pub(crate) mod qualcomm;
 #[cfg(feature = "rocm")]
 pub(crate) mod rocm;
+#[cfg(feature = "samsung-npu")]
+pub(crate) mod samsung_npu;
 #[cfg(feature = "tpu")]
 pub(crate) mod tpu;
 #[cfg(feature = "vulkan")]
 pub(crate) mod vulkan;
-#[cfg(feature = "cerebras")]
-pub(crate) mod cerebras;
-#[cfg(feature = "graphcore")]
-pub(crate) mod graphcore;
-#[cfg(feature = "groq")]
-pub(crate) mod groq;
-#[cfg(feature = "samsung-npu")]
-pub(crate) mod samsung_npu;
-#[cfg(feature = "mediatek-apu")]
-pub(crate) mod mediatek_apu;
 
 use std::path::Path;
 
@@ -169,13 +169,7 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
                 handles,
                 s
             );
-            spawn_backend!(
-                "groq",
-                Backend::Groq,
-                groq::detect_groq_lpu,
-                handles,
-                s
-            );
+            spawn_backend!("groq", Backend::Groq, groq::detect_groq_lpu, handles, s);
             spawn_backend!(
                 "samsung-npu",
                 Backend::SamsungNpu,
@@ -218,11 +212,7 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
             Backend::Qualcomm,
             qualcomm::detect_qualcomm_ai100
         );
-        run_backend!(
-            "cerebras",
-            Backend::Cerebras,
-            cerebras::detect_cerebras_wse
-        );
+        run_backend!("cerebras", Backend::Cerebras, cerebras::detect_cerebras_wse);
         run_backend!(
             "graphcore",
             Backend::Graphcore,
@@ -301,7 +291,12 @@ pub(super) fn list_driver_pci_addrs(driver: &str) -> Vec<String> {
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
             // PCI addresses look like "0000:01:00.0"
-            if name.contains(':') && name.contains('.') && name.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') {
+            if name.contains(':')
+                && name.contains('.')
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.')
+            {
                 Some(name)
             } else {
                 None
@@ -325,9 +320,9 @@ pub(crate) fn cpu_profile() -> AcceleratorProfile {
         memory_free_bytes: None,
         pcie_bandwidth_gbps: None,
         numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+        temperature_c: None,
+        power_watts: None,
+        gpu_utilization_percent: None,
     }
 }
 
@@ -355,8 +350,7 @@ fn detect_cpu_memory() -> u64 {
 
 /// Read a u64 from a sysfs file, capped at 64 bytes.
 pub(super) fn read_sysfs_u64(path: &Path) -> Option<u64> {
-    read_sysfs_string(path, 64)
-        .and_then(|s| s.trim().parse().ok())
+    read_sysfs_string(path, 64).and_then(|s| s.trim().parse().ok())
 }
 
 /// Read a string from a sysfs file, capped at `max_bytes` to prevent DoS.
@@ -401,13 +395,14 @@ pub(super) fn read_sysfs_string(path: &Path, max_bytes: usize) -> Option<String>
 /// fast filesystem reads. Post-passes (bandwidth, PCIe, NUMA) run after all
 /// backends complete.
 #[cfg(feature = "async-detect")]
-pub(crate) async fn detect_with_builder_async(
-    builder: DetectBuilder,
-) -> AcceleratorRegistry {
+pub(crate) async fn detect_with_builder_async(builder: DetectBuilder) -> AcceleratorRegistry {
     let mut all_profiles = vec![cpu_profile()];
     let mut all_warnings: Vec<DetectionError> = Vec::new();
 
-    debug!(backends = builder.enabled_count(), "starting async detection");
+    debug!(
+        backends = builder.enabled_count(),
+        "starting async detection"
+    );
 
     // Spawn async CLI backends as concurrent tokio tasks.
     let mut handles: Vec<tokio::task::JoinHandle<DetectResult>> = Vec::new();
@@ -424,9 +419,17 @@ pub(crate) async fn detect_with_builder_async(
     spawn_async_backend!("cuda", Backend::Cuda, cuda::detect_cuda_async);
     spawn_async_backend!("vulkan", Backend::Vulkan, vulkan::detect_vulkan_async);
     spawn_async_backend!("gaudi", Backend::Gaudi, gaudi::detect_gaudi_async);
-    spawn_async_backend!("aws-neuron", Backend::AwsNeuron, neuron::detect_aws_neuron_async);
+    spawn_async_backend!(
+        "aws-neuron",
+        Backend::AwsNeuron,
+        neuron::detect_aws_neuron_async
+    );
     spawn_async_backend!("apple", Backend::Apple, apple::detect_metal_and_ane_async);
-    spawn_async_backend!("intel-oneapi", Backend::IntelOneApi, intel_oneapi::detect_intel_oneapi_async);
+    spawn_async_backend!(
+        "intel-oneapi",
+        Backend::IntelOneApi,
+        intel_oneapi::detect_intel_oneapi_async
+    );
 
     // Sysfs-only backends run in a single blocking task.
     let sysfs_builder = builder.clone();
@@ -447,12 +450,28 @@ pub(crate) async fn detect_with_builder_async(
         run_sysfs!("intel-npu", Backend::IntelNpu, intel_npu::detect_intel_npu);
         run_sysfs!("amd-xdna", Backend::AmdXdna, amd_xdna::detect_amd_xdna);
         run_sysfs!("tpu", Backend::Tpu, tpu::detect_tpu);
-        run_sysfs!("qualcomm", Backend::Qualcomm, qualcomm::detect_qualcomm_ai100);
+        run_sysfs!(
+            "qualcomm",
+            Backend::Qualcomm,
+            qualcomm::detect_qualcomm_ai100
+        );
         run_sysfs!("cerebras", Backend::Cerebras, cerebras::detect_cerebras_wse);
-        run_sysfs!("graphcore", Backend::Graphcore, graphcore::detect_graphcore_ipu);
+        run_sysfs!(
+            "graphcore",
+            Backend::Graphcore,
+            graphcore::detect_graphcore_ipu
+        );
         run_sysfs!("groq", Backend::Groq, groq::detect_groq_lpu);
-        run_sysfs!("samsung-npu", Backend::SamsungNpu, samsung_npu::detect_samsung_npu);
-        run_sysfs!("mediatek-apu", Backend::MediaTekApu, mediatek_apu::detect_mediatek_apu);
+        run_sysfs!(
+            "samsung-npu",
+            Backend::SamsungNpu,
+            samsung_npu::detect_samsung_npu
+        );
+        run_sysfs!(
+            "mediatek-apu",
+            Backend::MediaTekApu,
+            mediatek_apu::detect_mediatek_apu
+        );
 
         (profiles, warnings)
     });
@@ -490,8 +509,7 @@ pub(crate) async fn detect_with_builder_async(
     numa::enrich_numa(&mut all_profiles, &nvidia_pci, &amdgpu_pci);
 
     // System I/O: async interconnects + blocking storage.
-    let (system_interconnects, ic_warnings) =
-        interconnect::detect_interconnects_async().await;
+    let (system_interconnects, ic_warnings) = interconnect::detect_interconnects_async().await;
     all_warnings.extend(ic_warnings);
 
     let system_storage = tokio::task::spawn_blocking(disk::detect_storage)

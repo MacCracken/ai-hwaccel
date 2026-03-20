@@ -40,10 +40,7 @@ pub enum DetectionError {
     ///
     /// The process was killed. This is distinct from [`ToolFailed`](Self::ToolFailed)
     /// to allow callers to implement retry logic for transient slowness.
-    Timeout {
-        tool: String,
-        timeout_secs: f64,
-    },
+    Timeout { tool: String, timeout_secs: f64 },
 
     /// Output from a CLI tool or sysfs file could not be parsed.
     ParseError { backend: String, message: String },
@@ -73,10 +70,7 @@ impl fmt::Display for DetectionError {
                     stderr.lines().next().unwrap_or("(no output)")
                 )
             }
-            Self::Timeout {
-                tool,
-                timeout_secs,
-            } => {
+            Self::Timeout { tool, timeout_secs } => {
                 write!(f, "{}: timed out after {:.1}s", tool, timeout_secs)
             }
             Self::ParseError { backend, message } => {

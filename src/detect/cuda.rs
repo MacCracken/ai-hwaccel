@@ -6,7 +6,7 @@ use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
-use super::bandwidth::{nvidia_bus_width_bits, estimate_nvidia_bandwidth_from_cc};
+use super::bandwidth::{estimate_nvidia_bandwidth_from_cc, nvidia_bus_width_bits};
 use super::command::{DEFAULT_TIMEOUT, run_tool, validate_device_id, validate_memory_mb};
 
 const NVIDIA_SMI_ARGS: &[&str] = &[
@@ -36,7 +36,13 @@ pub(crate) fn detect_cuda(
 pub(crate) async fn detect_cuda_async() -> super::DetectResult {
     let mut profiles = Vec::new();
     let mut warnings = Vec::new();
-    let output = match super::command::run_tool_async("nvidia-smi", NVIDIA_SMI_ARGS, DEFAULT_TIMEOUT).await {
+    let output = match super::command::run_tool_async(
+        "nvidia-smi",
+        NVIDIA_SMI_ARGS,
+        DEFAULT_TIMEOUT,
+    )
+    .await
+    {
         Ok(o) => o,
         Err(DetectionError::ToolNotFound { .. }) => {
             debug!("nvidia-smi not found on $PATH, skipping CUDA detection");
@@ -101,15 +107,16 @@ pub(crate) fn parse_cuda_output(
         if is_grace_hopper {
             debug!(
                 device_id,
-                gpu_name,
-                "Grace Hopper detected — unified CPU+GPU memory via NVLink-C2C"
+                gpu_name, "Grace Hopper detected — unified CPU+GPU memory via NVLink-C2C"
             );
         }
 
         let mut effective_mem = mem_total_mb.saturating_mul(1024 * 1024);
         // Grace Hopper GH200 has 96 GB HBM3 + up to 480 GB LPDDR5X unified.
         // nvidia-smi reports only HBM. Add system memory estimate for planning.
-        if is_grace_hopper && effective_mem >= 80 * 1024 * 1024 * 1024 && effective_mem < 100 * 1024 * 1024 * 1024 {
+        if is_grace_hopper
+            && (80 * 1024 * 1024 * 1024..100 * 1024 * 1024 * 1024).contains(&effective_mem)
+        {
             // HBM reported, add unified CPU memory (typical GH200: 480 GB).
             effective_mem = effective_mem.saturating_add(480 * 1024 * 1024 * 1024);
         }
