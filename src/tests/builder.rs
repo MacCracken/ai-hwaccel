@@ -79,7 +79,7 @@ fn builder_from_registry_shortcut() {
 
 #[test]
 fn backend_all_constant() {
-    assert_eq!(Backend::ALL.len(), 11);
+    assert_eq!(Backend::ALL.len(), 16);
 }
 
 // ---------------------------------------------------------------------------

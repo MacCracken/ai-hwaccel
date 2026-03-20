@@ -26,14 +26,24 @@ becomes available.
 
 ### New backends
 
-- [ ] **AMD MI300X** — CXL-attached memory, unified HBM pool detection.
-- [ ] **Cerebras WSE** — `/dev/cerebras*` or SDK introspection.
-- [ ] **Graphcore IPU** — `gc-info` CLI parsing.
-- [ ] **Groq LPU** — when Linux driver is publicly available.
-- [ ] **Samsung NPU** — Exynos AI accelerator sysfs paths.
-- [ ] **MediaTek APU** — Android/Linux APU sysfs detection.
-- [ ] **NVIDIA Grace Hopper** — unified memory detection via NVSwitch.
-- [ ] **AMD Instinct MI350** — next-gen detection when available.
+- [x] **AMD MI300X** — CXL-attached memory detection via sysfs
+  (`mem_info_vis_vram_total` and `/sys/bus/cxl/devices/`). Unified HBM pool
+  reported in `memory_bytes`. Untested — needs MI300X hardware.
+- [x] **Cerebras WSE** — `cerebras_cli system-info` + `/dev/cerebras*`
+  fallback. 44 GB SRAM default. Untested — needs Cerebras hardware.
+- [x] **Graphcore IPU** — `gc-info -d N -i` JSON parsing + `/dev/ipu*`
+  fallback. 900 MB SRAM default. Untested — needs Graphcore hardware.
+- [x] **Groq LPU** — `/dev/groq*` placeholder. 230 MB SRAM default.
+  Untested — Linux driver not yet public.
+- [x] **Samsung NPU** — `/sys/class/misc/samsung_npu` + `/dev/samsung_npu*`.
+  2 GB shared memory. Untested — needs Exynos device.
+- [x] **MediaTek APU** — `/sys/class/misc/mtk_apu` + `/dev/mtk_mdla*`.
+  2 GB shared memory. Untested — needs MediaTek device.
+- [x] **NVIDIA Grace Hopper** — detects GH200/GH100 from `nvidia-smi` GPU
+  name, adds 480 GB unified LPDDR5X to reported HBM for capacity planning.
+  Untested — needs Grace Hopper hardware.
+- [x] **AMD Instinct MI350** — covered by MI300X CXL detection path; same
+  amdgpu sysfs interface. Untested — hardware not yet available.
 
 ### Platform gaps
 

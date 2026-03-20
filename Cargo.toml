@@ -16,6 +16,7 @@ default = ["all-backends"]
 all-backends = [
     "cuda", "rocm", "apple", "vulkan", "intel-npu", "amd-xdna",
     "tpu", "gaudi", "aws-neuron", "intel-oneapi", "qualcomm",
+    "cerebras", "graphcore", "groq", "samsung-npu", "mediatek-apu",
 ]
 cuda = []
 rocm = []
@@ -28,6 +29,11 @@ gaudi = []
 aws-neuron = []
 intel-oneapi = []
 qualcomm = []
+cerebras = []
+graphcore = []
+groq = []
+samsung-npu = []
+mediatek-apu = []
 async-detect = ["dep:tokio"]
 fuzz = []
 

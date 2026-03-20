@@ -306,6 +306,11 @@ pub enum Backend {
     AwsNeuron,
     IntelOneApi,
     Qualcomm,
+    Cerebras,
+    Graphcore,
+    Groq,
+    SamsungNpu,
+    MediaTekApu,
 }
 
 impl Backend {
@@ -322,6 +327,11 @@ impl Backend {
         Backend::AwsNeuron,
         Backend::IntelOneApi,
         Backend::Qualcomm,
+        Backend::Cerebras,
+        Backend::Graphcore,
+        Backend::Groq,
+        Backend::SamsungNpu,
+        Backend::MediaTekApu,
     ];
 }
 
@@ -392,6 +402,21 @@ impl DetectBuilder {
     pub fn with_qualcomm(self) -> Self {
         self.set(Backend::Qualcomm, true)
     }
+    pub fn with_cerebras(self) -> Self {
+        self.set(Backend::Cerebras, true)
+    }
+    pub fn with_graphcore(self) -> Self {
+        self.set(Backend::Graphcore, true)
+    }
+    pub fn with_groq(self) -> Self {
+        self.set(Backend::Groq, true)
+    }
+    pub fn with_samsung_npu(self) -> Self {
+        self.set(Backend::SamsungNpu, true)
+    }
+    pub fn with_mediatek_apu(self) -> Self {
+        self.set(Backend::MediaTekApu, true)
+    }
 
     pub fn without_cuda(self) -> Self {
         self.set(Backend::Cuda, false)
@@ -425,6 +450,21 @@ impl DetectBuilder {
     }
     pub fn without_qualcomm(self) -> Self {
         self.set(Backend::Qualcomm, false)
+    }
+    pub fn without_cerebras(self) -> Self {
+        self.set(Backend::Cerebras, false)
+    }
+    pub fn without_graphcore(self) -> Self {
+        self.set(Backend::Graphcore, false)
+    }
+    pub fn without_groq(self) -> Self {
+        self.set(Backend::Groq, false)
+    }
+    pub fn without_samsung_npu(self) -> Self {
+        self.set(Backend::SamsungNpu, false)
+    }
+    pub fn without_mediatek_apu(self) -> Self {
+        self.set(Backend::MediaTekApu, false)
     }
 
     /// Run detection with only the enabled backends.

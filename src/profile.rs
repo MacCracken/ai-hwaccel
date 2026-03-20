@@ -99,6 +99,34 @@ impl AcceleratorProfile {
                                 | QuantizationLevel::Int4
                         )
                     }
+                    // Cerebras WSE: FP32, BF16, FP16, INT8
+                    AcceleratorType::CerebrasWse { .. } => {
+                        matches!(
+                            level,
+                            QuantizationLevel::None
+                                | QuantizationLevel::BFloat16
+                                | QuantizationLevel::Float16
+                                | QuantizationLevel::Int8
+                        )
+                    }
+                    // Graphcore IPU: FP32, FP16, INT8
+                    AcceleratorType::GraphcoreIpu { .. } => {
+                        matches!(
+                            level,
+                            QuantizationLevel::None
+                                | QuantizationLevel::Float16
+                                | QuantizationLevel::Int8
+                        )
+                    }
+                    // Groq LPU: FP16, INT8, INT4
+                    AcceleratorType::GroqLpu { .. } => {
+                        matches!(
+                            level,
+                            QuantizationLevel::Float16
+                                | QuantizationLevel::Int8
+                                | QuantizationLevel::Int4
+                        )
+                    }
                     _ => true,
                 }
             }
@@ -116,6 +144,9 @@ impl AcceleratorProfile {
                 AcceleratorType::Gaudi { .. } => QuantizationLevel::BFloat16,
                 AcceleratorType::AwsNeuron { .. } => QuantizationLevel::BFloat16,
                 AcceleratorType::QualcommAi100 { .. } => QuantizationLevel::Int8,
+                AcceleratorType::CerebrasWse { .. } => QuantizationLevel::BFloat16,
+                AcceleratorType::GraphcoreIpu { .. } => QuantizationLevel::Float16,
+                AcceleratorType::GroqLpu { .. } => QuantizationLevel::Int8,
                 _ => QuantizationLevel::Float16,
             },
         }

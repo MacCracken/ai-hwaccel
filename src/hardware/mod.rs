@@ -87,6 +87,16 @@ pub enum AcceleratorType {
     QualcommAi100 { device_id: u32 },
     /// Intel Arc / Data Center GPU Max (oneAPI / SYCL).
     IntelOneApi { device_id: u32 },
+    /// Cerebras Wafer-Scale Engine (WSE-2/WSE-3).
+    CerebrasWse { device_id: u32 },
+    /// Graphcore Intelligence Processing Unit (IPU).
+    GraphcoreIpu { device_id: u32 },
+    /// Groq Language Processing Unit (LPU).
+    GroqLpu { device_id: u32 },
+    /// Samsung Exynos AI NPU.
+    SamsungNpu { device_id: u32 },
+    /// MediaTek APU (MDLA-based).
+    MediaTekApu { device_id: u32 },
 }
 
 impl AcceleratorType {
@@ -106,7 +116,11 @@ impl AcceleratorType {
     pub fn is_npu(&self) -> bool {
         matches!(
             self,
-            Self::IntelNpu | Self::AppleNpu | Self::AmdXdnaNpu { .. }
+            Self::IntelNpu
+                | Self::AppleNpu
+                | Self::AmdXdnaNpu { .. }
+                | Self::SamsungNpu { .. }
+                | Self::MediaTekApu { .. }
         )
     }
 
@@ -115,11 +129,16 @@ impl AcceleratorType {
         matches!(self, Self::Tpu { .. })
     }
 
-    /// Returns `true` for any cloud/data-centre AI ASIC (Gaudi, Neuron, Qualcomm).
+    /// Returns `true` for any cloud/data-centre AI ASIC (Gaudi, Neuron, Qualcomm, Cerebras, Graphcore, Groq).
     pub fn is_ai_asic(&self) -> bool {
         matches!(
             self,
-            Self::Gaudi { .. } | Self::AwsNeuron { .. } | Self::QualcommAi100 { .. }
+            Self::Gaudi { .. }
+                | Self::AwsNeuron { .. }
+                | Self::QualcommAi100 { .. }
+                | Self::CerebrasWse { .. }
+                | Self::GraphcoreIpu { .. }
+                | Self::GroqLpu { .. }
         )
     }
 
@@ -132,11 +151,18 @@ impl AcceleratorType {
             | Self::MetalGpu
             | Self::VulkanGpu { .. }
             | Self::IntelOneApi { .. } => AcceleratorFamily::Gpu,
-            Self::IntelNpu | Self::AppleNpu | Self::AmdXdnaNpu { .. } => AcceleratorFamily::Npu,
+            Self::IntelNpu
+            | Self::AppleNpu
+            | Self::AmdXdnaNpu { .. }
+            | Self::SamsungNpu { .. }
+            | Self::MediaTekApu { .. } => AcceleratorFamily::Npu,
             Self::Tpu { .. } => AcceleratorFamily::Tpu,
-            Self::Gaudi { .. } | Self::AwsNeuron { .. } | Self::QualcommAi100 { .. } => {
-                AcceleratorFamily::AiAsic
-            }
+            Self::Gaudi { .. }
+            | Self::AwsNeuron { .. }
+            | Self::QualcommAi100 { .. }
+            | Self::CerebrasWse { .. }
+            | Self::GraphcoreIpu { .. }
+            | Self::GroqLpu { .. } => AcceleratorFamily::AiAsic,
         }
     }
 
@@ -173,6 +199,11 @@ impl AcceleratorType {
             }
             Self::QualcommAi100 { .. } => 14.0,
             Self::IntelOneApi { .. } => 13.0,
+            Self::CerebrasWse { .. } => 50.0,
+            Self::GraphcoreIpu { .. } => 16.0,
+            Self::GroqLpu { .. } => 30.0,
+            Self::SamsungNpu { .. } => 6.0,
+            Self::MediaTekApu { .. } => 5.0,
         }
     }
 
@@ -186,7 +217,11 @@ impl AcceleratorType {
             Self::RocmGpu { .. } => 15.0,
             Self::MetalGpu => 10.0,
             Self::VulkanGpu { .. } => 6.0, // Vulkan compute shaders, limited training support
-            Self::IntelNpu | Self::AppleNpu | Self::AmdXdnaNpu { .. } => 0.0, // NPUs: inference only
+            Self::IntelNpu
+            | Self::AppleNpu
+            | Self::AmdXdnaNpu { .. }
+            | Self::SamsungNpu { .. }
+            | Self::MediaTekApu { .. } => 0.0, // NPUs: inference only
             Self::Tpu { version, .. } => match version {
                 TpuVersion::V4 => 28.0,
                 TpuVersion::V5e => 20.0,
@@ -206,6 +241,9 @@ impl AcceleratorType {
             },
             Self::QualcommAi100 { .. } => 0.0, // inference only
             Self::IntelOneApi { .. } => 10.0,  // oneAPI training support via SYCL
+            Self::CerebrasWse { .. } => 60.0,
+            Self::GraphcoreIpu { .. } => 18.0,
+            Self::GroqLpu { .. } => 0.0, // inference only
         }
     }
 
@@ -217,6 +255,7 @@ impl AcceleratorType {
     /// Priority rank for [`crate::AcceleratorRegistry::best_available`] (higher = preferred).
     pub(crate) fn rank(&self) -> u32 {
         match self {
+            Self::CerebrasWse { .. } => 85,
             Self::Tpu {
                 version: TpuVersion::V5p,
                 ..
@@ -242,7 +281,9 @@ impl AcceleratorType {
                 version: TpuVersion::V5e,
                 ..
             } => 55,
+            Self::GroqLpu { .. } => 55,
             Self::RocmGpu { .. } => 50,
+            Self::GraphcoreIpu { .. } => 48,
             Self::AwsNeuron {
                 chip_type: NeuronChipType::Inferentia,
                 ..
@@ -254,6 +295,8 @@ impl AcceleratorType {
             Self::AppleNpu => 30,
             Self::AmdXdnaNpu { .. } => 25,
             Self::IntelNpu => 20,
+            Self::SamsungNpu { .. } => 18,
+            Self::MediaTekApu { .. } => 15,
             Self::Cpu => 10,
         }
     }
@@ -308,6 +351,21 @@ impl fmt::Display for AcceleratorType {
             }
             Self::IntelOneApi { device_id } => {
                 write!(f, "Intel oneAPI GPU (device {})", device_id)
+            }
+            Self::CerebrasWse { device_id } => {
+                write!(f, "Cerebras WSE (device {})", device_id)
+            }
+            Self::GraphcoreIpu { device_id } => {
+                write!(f, "Graphcore IPU (device {})", device_id)
+            }
+            Self::GroqLpu { device_id } => {
+                write!(f, "Groq LPU (device {})", device_id)
+            }
+            Self::SamsungNpu { device_id } => {
+                write!(f, "Samsung NPU (device {})", device_id)
+            }
+            Self::MediaTekApu { device_id } => {
+                write!(f, "MediaTek APU (device {})", device_id)
             }
         }
     }

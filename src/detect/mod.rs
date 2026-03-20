@@ -28,6 +28,16 @@ pub(crate) mod rocm;
 pub(crate) mod tpu;
 #[cfg(feature = "vulkan")]
 pub(crate) mod vulkan;
+#[cfg(feature = "cerebras")]
+pub(crate) mod cerebras;
+#[cfg(feature = "graphcore")]
+pub(crate) mod graphcore;
+#[cfg(feature = "groq")]
+pub(crate) mod groq;
+#[cfg(feature = "samsung-npu")]
+pub(crate) mod samsung_npu;
+#[cfg(feature = "mediatek-apu")]
+pub(crate) mod mediatek_apu;
 
 use std::path::Path;
 
@@ -143,6 +153,41 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
                 handles,
                 s
             );
+            spawn_backend!(
+                "cerebras",
+                Backend::Cerebras,
+                cerebras::detect_cerebras_wse,
+                handles,
+                s
+            );
+            spawn_backend!(
+                "graphcore",
+                Backend::Graphcore,
+                graphcore::detect_graphcore_ipu,
+                handles,
+                s
+            );
+            spawn_backend!(
+                "groq",
+                Backend::Groq,
+                groq::detect_groq_lpu,
+                handles,
+                s
+            );
+            spawn_backend!(
+                "samsung-npu",
+                Backend::SamsungNpu,
+                samsung_npu::detect_samsung_npu,
+                handles,
+                s
+            );
+            spawn_backend!(
+                "mediatek-apu",
+                Backend::MediaTekApu,
+                mediatek_apu::detect_mediatek_apu,
+                handles,
+                s
+            );
 
             for handle in handles {
                 if let Ok((profiles, warnings)) = handle.join() {
@@ -170,6 +215,27 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
             "qualcomm",
             Backend::Qualcomm,
             qualcomm::detect_qualcomm_ai100
+        );
+        run_backend!(
+            "cerebras",
+            Backend::Cerebras,
+            cerebras::detect_cerebras_wse
+        );
+        run_backend!(
+            "graphcore",
+            Backend::Graphcore,
+            graphcore::detect_graphcore_ipu
+        );
+        run_backend!("groq", Backend::Groq, groq::detect_groq_lpu);
+        run_backend!(
+            "samsung-npu",
+            Backend::SamsungNpu,
+            samsung_npu::detect_samsung_npu
+        );
+        run_backend!(
+            "mediatek-apu",
+            Backend::MediaTekApu,
+            mediatek_apu::detect_mediatek_apu
         );
     }
 
@@ -317,6 +383,11 @@ pub(crate) async fn detect_with_builder_async(
         run_sysfs!("amd-xdna", Backend::AmdXdna, amd_xdna::detect_amd_xdna);
         run_sysfs!("tpu", Backend::Tpu, tpu::detect_tpu);
         run_sysfs!("qualcomm", Backend::Qualcomm, qualcomm::detect_qualcomm_ai100);
+        run_sysfs!("cerebras", Backend::Cerebras, cerebras::detect_cerebras_wse);
+        run_sysfs!("graphcore", Backend::Graphcore, graphcore::detect_graphcore_ipu);
+        run_sysfs!("groq", Backend::Groq, groq::detect_groq_lpu);
+        run_sysfs!("samsung-npu", Backend::SamsungNpu, samsung_npu::detect_samsung_npu);
+        run_sysfs!("mediatek-apu", Backend::MediaTekApu, mediatek_apu::detect_mediatek_apu);
 
         (profiles, warnings)
     });
