@@ -51,7 +51,7 @@ pub(crate) fn parse_neuron_output(
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(stdout)
         && let Some(devices) = json.as_array()
     {
-        for (i, device) in devices.iter().enumerate() {
+        for (i, device) in devices.iter().take(256).enumerate() {
             let model = device["model"].as_str().unwrap_or("Neuron Device");
             let Some(nc_count) = device["nc_count"].as_u64().map(|n| n as u32) else { continue };
             let Some(mem_per_nc) = device["memory_per_nc_mb"].as_u64() else { continue };
@@ -65,10 +65,11 @@ pub(crate) fn parse_neuron_output(
                 NeuronChipType::Inferentia
             };
 
-            debug!(device_id = i, %chip_type, nc_count, "AWS Neuron device detected");
+            let device_id = i as u32; // Safe: capped at 256 by .take()
+            debug!(device_id, %chip_type, nc_count, "AWS Neuron device detected");
             profiles.push(AcceleratorProfile {
                 accelerator: AcceleratorType::AwsNeuron {
-                    device_id: i as u32,
+                    device_id,
                     chip_type,
                     core_count: nc_count,
                 },

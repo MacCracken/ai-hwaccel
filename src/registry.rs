@@ -80,6 +80,23 @@ impl AcceleratorRegistry {
         self.schema_version
     }
 
+    /// Deserialize from JSON with schema version validation.
+    ///
+    /// Returns `Err` if the JSON is malformed. Logs a warning if the schema
+    /// version is newer than the current library version (forward-incompatible).
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        let registry: Self = serde_json::from_str(json)?;
+        if registry.schema_version > SCHEMA_VERSION {
+            tracing::warn!(
+                json_version = registry.schema_version,
+                lib_version = SCHEMA_VERSION,
+                "registry JSON has newer schema version than this library — \
+                 some fields may be missing or ignored"
+            );
+        }
+        Ok(registry)
+    }
+
     /// Returns a [`DetectBuilder`] for fine-grained control over which backends
     /// to probe.
     ///

@@ -107,9 +107,9 @@ impl AcceleratorRegistry {
 
         if !gpu_devices.is_empty() && gpu_memory >= needed {
             let num_stages = gpu_devices.len() as u32;
-            let per_shard = needed / num_stages as u64;
+            let per_shard = needed.div_ceil(num_stages as u64);
             let estimated_layers = (model_params / 250_000_000).max(1) as u32;
-            let layers_per_shard = (estimated_layers / num_stages).max(1);
+            let layers_per_shard = estimated_layers.div_ceil(num_stages).max(1);
 
             let shards: Vec<ModelShard> = gpu_devices
                 .iter()

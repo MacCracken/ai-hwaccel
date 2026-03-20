@@ -6,7 +6,7 @@ use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
-use super::command::{DEFAULT_TIMEOUT, run_tool, validate_memory_mb};
+use super::command::{DEFAULT_TIMEOUT, run_tool, validate_device_id, validate_memory_mb};
 
 const XPU_SMI_ARGS: &[&str] = &["discovery", "--dump", "1,2,18,19"];
 
@@ -50,11 +50,17 @@ pub(crate) fn parse_xpu_smi_output(
         if line.starts_with("DeviceId") || line.trim().is_empty() {
             continue;
         }
-        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        let parts: Vec<&str> = line.split(',').take(20).map(|s| s.trim()).collect();
         if parts.len() < 4 {
             continue;
         }
-        let device_id: u32 = parts[0].parse().unwrap_or(0);
+        let device_id = match validate_device_id(parts[0], "intel-oneapi") {
+            Ok(id) => id,
+            Err(e) => {
+                warnings.push(e);
+                continue;
+            }
+        };
         let _name = parts[1].to_string();
         let mem_total_mb = match validate_memory_mb(parts[2], "intel-oneapi") {
             Ok(mb) => mb,

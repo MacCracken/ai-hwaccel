@@ -48,8 +48,6 @@ becomes available.
 Items identified during code audit. Not blocking release but should be
 addressed over time.
 
-- [ ] **Gaudi/oneAPI CSV parsers** — apply same `.take(20)` CSV field cap
-  and `.get()` bounds as CUDA parser for consistency.
 - [ ] **Vulkan full output size** — `vulkaninfo` (no `--summary`) can
   produce 50+ KB output. Consider capping or streaming the parse.
 - [ ] **Apple parser field length caps** — `system_profiler` output parsing

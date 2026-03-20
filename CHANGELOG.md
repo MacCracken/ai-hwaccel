@@ -133,6 +133,16 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 - **Cache lock poisoning**: `CachedRegistry` now invalidates cached state
   when the mutex is poisoned instead of continuing with potentially corrupt
   data.
+- **Shard memory truncation**: `plan.rs` pipeline sharding now uses
+  `div_ceil` instead of truncating division, preventing unallocated bytes.
+- **Gaudi/oneAPI CSV caps**: both parsers now use `.take(20)` field limit
+  matching CUDA, preventing DoS from malicious CLI output.
+- **Intel oneAPI device ID validation**: uses `validate_device_id()` instead
+  of `unwrap_or(0)`.
+- **Neuron JSON array bounded**: capped at 256 devices to prevent DoS from
+  crafted `neuron-ls` output. Device index truncation eliminated.
+- **Schema version validation**: new `AcceleratorRegistry::from_json()` warns
+  when deserializing registries with newer schema versions.
 
 ### Performance
 

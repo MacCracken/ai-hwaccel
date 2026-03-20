@@ -50,7 +50,7 @@ pub(crate) fn parse_gaudi_output(
     warnings: &mut Vec<DetectionError>,
 ) {
     for line in stdout.lines() {
-        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        let parts: Vec<&str> = line.split(',').take(20).map(|s| s.trim()).collect();
         if parts.len() < 4 {
             warnings.push(DetectionError::ParseError {
                 backend: "gaudi".into(),
