@@ -63,7 +63,16 @@ impl CachedRegistry {
     /// Returns an `Arc` — cloning this is a cheap pointer increment, not a
     /// deep copy of all profiles.
     pub fn get(&self) -> Arc<AcceleratorRegistry> {
-        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("CachedRegistry lock was poisoned, invalidating cache");
+                let mut guard = poisoned.into_inner();
+                guard.registry = None;
+                guard.last_detect = None;
+                guard
+            }
+        };
         let now = Instant::now();
 
         if let Some(ref reg) = state.registry
@@ -81,7 +90,16 @@ impl CachedRegistry {
 
     /// Force the next call to [`get`](Self::get) to re-detect.
     pub fn invalidate(&self) {
-        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("CachedRegistry lock was poisoned, invalidating cache");
+                let mut guard = poisoned.into_inner();
+                guard.registry = None;
+                guard.last_detect = None;
+                guard
+            }
+        };
         state.registry = None;
         state.last_detect = None;
     }

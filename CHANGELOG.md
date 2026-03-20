@@ -121,12 +121,18 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
   instead of direct indexing.
 - **Neuron JSON defaults removed**: malformed `neuron-ls` JSON devices are
   now skipped instead of using fabricated defaults (2 cores, 8192 MB).
-- **Sysfs file size cap**: new `read_sysfs_string()` helper checks file
-  size before reading (default 4 KiB cap) to prevent DoS via oversized
-  sysfs files. Applied to ROCm VBIOS, revision, and DPM clock reads.
+- **Sysfs read size cap**: all sysfs reads across the codebase now use
+  `read_sysfs_string()` with byte limits (64 B for values, 256 B for
+  strings, 4 KiB for multi-line files, 64 KiB for /proc/meminfo).
+  Handles sysfs pseudo-files correctly (they report 4096 as size regardless
+  of content). Applied to: ROCm, TPU, PCIe, NUMA, interconnect, disk,
+  bandwidth, neuron, and apple detectors.
 - **Subprocess zombie prevention**: `child.kill()` in timeout handler now
   polls `try_wait()` for up to 100ms instead of blocking `wait()` to avoid
   hanging on zombie processes.
+- **Cache lock poisoning**: `CachedRegistry` now invalidates cached state
+  when the mutex is poisoned instead of continuing with potentially corrupt
+  data.
 
 ### Performance
 

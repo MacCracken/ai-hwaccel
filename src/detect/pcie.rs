@@ -80,8 +80,8 @@ fn list_driver_pci_addrs(driver: &str) -> Vec<String> {
 ///
 /// `current_link_width` × `current_link_speed` → GB/s.
 fn read_pcie_bandwidth(device_path: &Path) -> Option<f64> {
-    let width_str = std::fs::read_to_string(device_path.join("current_link_width")).ok()?;
-    let speed_str = std::fs::read_to_string(device_path.join("current_link_speed")).ok()?;
+    let width_str = super::read_sysfs_string(&device_path.join("current_link_width"), 256)?;
+    let speed_str = super::read_sysfs_string(&device_path.join("current_link_speed"), 256)?;
 
     let width: f64 = width_str.trim().parse().ok()?;
     let speed_gts = parse_link_speed(speed_str.trim())?;

@@ -123,7 +123,7 @@ pub(crate) fn parse_system_profiler_output(
 
 /// Linux (Asahi) detection via `/proc/device-tree/compatible`.
 fn detect_linux_device_tree(profiles: &mut Vec<AcceleratorProfile>) {
-    if let Ok(compat) = std::fs::read_to_string("/proc/device-tree/compatible")
+    if let Some(compat) = super::read_sysfs_string(&std::path::Path::new("/proc/device-tree/compatible"), 4096)
         && compat.contains("apple")
     {
         debug!("Apple device detected via device-tree, registering Metal GPU + ANE");

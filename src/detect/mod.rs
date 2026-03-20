@@ -305,7 +305,7 @@ pub(crate) fn cpu_profile() -> AcceleratorProfile {
 
 /// System memory from /proc/meminfo (fallback: 16 GiB).
 fn detect_cpu_memory() -> u64 {
-    if let Ok(info) = std::fs::read_to_string("/proc/meminfo") {
+    if let Some(info) = read_sysfs_string(std::path::Path::new("/proc/meminfo"), 64 * 1024) {
         for line in info.lines() {
             if line.starts_with("MemTotal:")
                 && let Some(kb_str) = line.split_whitespace().nth(1)
@@ -325,20 +325,27 @@ fn detect_cpu_memory() -> u64 {
     16 * 1024 * 1024 * 1024
 }
 
-/// Read a u64 from a sysfs file.
+/// Read a u64 from a sysfs file, capped at 64 bytes.
 pub(super) fn read_sysfs_u64(path: &Path) -> Option<u64> {
-    std::fs::read_to_string(path)
-        .ok()
+    read_sysfs_string(path, 64)
         .and_then(|s| s.trim().parse().ok())
 }
 
 /// Read a string from a sysfs file, capped at `max_bytes` to prevent DoS.
+///
+/// Sysfs pseudo-files report `st_size = 4096` regardless of actual content,
+/// so we can't use metadata for size checking. Instead, we read up to
+/// `max_bytes` and discard if truncated.
 pub(super) fn read_sysfs_string(path: &Path, max_bytes: usize) -> Option<String> {
-    let meta = std::fs::metadata(path).ok()?;
-    if meta.len() > max_bytes as u64 {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buf = vec![0u8; max_bytes + 1];
+    let n = file.read(&mut buf).ok()?;
+    if n > max_bytes {
+        // File exceeds limit — likely not a normal sysfs value.
         return None;
     }
-    std::fs::read_to_string(path).ok()
+    String::from_utf8(buf[..n].to_vec()).ok()
 }
 
 // ---------------------------------------------------------------------------

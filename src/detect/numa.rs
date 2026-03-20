@@ -41,7 +41,7 @@ pub(crate) fn enrich_numa(profiles: &mut [AcceleratorProfile]) {
             if let Ok(canonical) = std::fs::canonicalize(&device_path) {
                 if !canonical.starts_with("/sys/") { continue; }
                 let numa_path = canonical.join("numa_node");
-                if let Ok(contents) = std::fs::read_to_string(&numa_path)
+                if let Some(contents) = super::read_sysfs_string(&numa_path, 64)
                     && let Ok(node) = contents.trim().parse::<i32>()
                     && node >= 0
                 {

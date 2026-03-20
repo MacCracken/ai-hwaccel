@@ -59,8 +59,7 @@ fn detect_storage_kind(name: &str, queue_dir: &Path) -> StorageKind {
     }
 
     // Check rotational flag: 0 = SSD, 1 = HDD
-    let rotational = std::fs::read_to_string(queue_dir.join("rotational"))
-        .ok()
+    let rotational = super::read_sysfs_string(&queue_dir.join("rotational"), 64)
         .and_then(|s| s.trim().parse::<u32>().ok());
 
     match rotational {
@@ -76,8 +75,7 @@ fn detect_storage_kind(name: &str, queue_dir: &Path) -> StorageKind {
 /// conservative estimates — real throughput depends on workload and queue depth.
 fn estimate_bandwidth(kind: &StorageKind, queue_dir: &Path) -> f64 {
     // Try to read max_hw_sectors_kb for a rough capability indicator
-    let _max_sectors_kb = std::fs::read_to_string(queue_dir.join("max_hw_sectors_kb"))
-        .ok()
+    let _max_sectors_kb = super::read_sysfs_string(&queue_dir.join("max_hw_sectors_kb"), 64)
         .and_then(|s| s.trim().parse::<u64>().ok());
 
     // Use known typical throughput by device class

@@ -67,7 +67,7 @@ pub(crate) fn detect_tpu(
 
 fn detect_tpu_version(device_id: u32) -> TpuVersion {
     let path = format!("/sys/class/accel/accel{}/device/tpu_version", device_id);
-    if let Ok(ver) = std::fs::read_to_string(&path) {
+    if let Some(ver) = super::read_sysfs_string(std::path::Path::new(&path), 256) {
         let ver = ver.trim();
         if ver.contains("v5p") {
             return TpuVersion::V5p;
@@ -82,7 +82,7 @@ fn detect_tpu_version(device_id: u32) -> TpuVersion {
 
 fn detect_tpu_chip_count(device_id: u32) -> u32 {
     let path = format!("/sys/class/accel/accel{}/device/chip_count", device_id);
-    if let Ok(count) = std::fs::read_to_string(&path)
+    if let Some(count) = super::read_sysfs_string(std::path::Path::new(&path), 64)
         && let Ok(n) = count.trim().parse::<u32>()
         && n > 0
     {

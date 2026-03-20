@@ -113,7 +113,7 @@ fn detect_neuron_dev_fallback(profiles: &mut Vec<AcceleratorProfile>) {
             Err(_) => continue,
         };
 
-        let chip_type = if std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_name")
+        let chip_type = if super::read_sysfs_string(&std::path::Path::new("/sys/devices/virtual/dmi/id/product_name"), 256)
             .unwrap_or_default()
             .contains("trn")
         {

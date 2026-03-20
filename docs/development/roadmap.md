@@ -48,17 +48,12 @@ becomes available.
 Items identified during code audit. Not blocking release but should be
 addressed over time.
 
-- [ ] **`read_sysfs_u64` size cap** — the `read_sysfs_u64` helper in
-  `detect/mod.rs` still uses raw `read_to_string` without the size cap
-  that `read_sysfs_string` enforces. Migrate to capped reads.
 - [ ] **Gaudi/oneAPI CSV parsers** — apply same `.take(20)` CSV field cap
   and `.get()` bounds as CUDA parser for consistency.
 - [ ] **Vulkan full output size** — `vulkaninfo` (no `--summary`) can
   produce 50+ KB output. Consider capping or streaming the parse.
 - [ ] **Apple parser field length caps** — `system_profiler` output parsing
   doesn't cap field lengths (chip name, memory string).
-- [ ] **Interconnect/bandwidth sysfs reads** — some `read_to_string` calls
-  in `interconnect.rs` and `bandwidth.rs` still bypass size cap.
 - [ ] **Watch mode device identity** — `--watch` delta tracking uses
   `Display` string as HashMap key. Consider using `(family, device_id)`
   tuple for more robust matching across detection runs.

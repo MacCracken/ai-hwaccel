@@ -274,8 +274,7 @@ fn read_amd_bus_width(device_dir: &Path) -> u32 {
 
 /// Look up bus width from PCI device ID.
 fn read_amd_bus_width_from_device_id(device_dir: &Path) -> Option<u32> {
-    let device_id = std::fs::read_to_string(device_dir.join("device"))
-        .ok()?;
+    let device_id = super::read_sysfs_string(&device_dir.join("device"), 64)?;
     let device_id = device_id.trim().strip_prefix("0x").unwrap_or(device_id.trim());
 
     // AMD PCI device IDs → bus width

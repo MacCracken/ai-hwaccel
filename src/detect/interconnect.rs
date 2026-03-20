@@ -57,19 +57,16 @@ fn detect_infiniband(
             continue;
         }
 
-        let state = std::fs::read_to_string(port_dir.join("state"))
-            .ok()
+        let state = super::read_sysfs_string(&port_dir.join("state"), 256)
             .map(|s| s.trim().to_string());
 
-        let rate_str = std::fs::read_to_string(port_dir.join("rate"))
-            .ok()
+        let rate_str = super::read_sysfs_string(&port_dir.join("rate"), 256)
             .unwrap_or_default();
 
         let bandwidth_gbps = parse_ib_rate(rate_str.trim());
 
         // Determine if IB or RoCE from link_layer file
-        let link_layer = std::fs::read_to_string(port_dir.join("link_layer"))
-            .ok()
+        let link_layer = super::read_sysfs_string(&port_dir.join("link_layer"), 256)
             .unwrap_or_default();
         let kind = if link_layer.trim().eq_ignore_ascii_case("Ethernet") {
             InterconnectKind::RoCE
