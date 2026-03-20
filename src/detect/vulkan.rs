@@ -68,7 +68,11 @@ pub(crate) fn parse_vulkan_output(
     _warnings: &mut Vec<DetectionError>,
 ) {
     let devices = parse_vulkan_summary(summary_stdout);
-    let compute_info = full_stdout.map(parse_vulkan_full).unwrap_or_default();
+    // Cap full output parse at 256 KiB to bound memory usage on verbose drivers.
+    let compute_info = full_stdout
+        .filter(|s| s.len() <= 256 * 1024)
+        .map(parse_vulkan_full)
+        .unwrap_or_default();
 
     if devices.is_empty() {
         debug!("vulkaninfo found but no devices parsed, registering generic Vulkan GPU");

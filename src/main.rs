@@ -213,10 +213,11 @@ fn run_watch(
         print!("\x1b[2J\x1b[H");
         let registry = AcceleratorRegistry::detect();
 
-        // Build delta map: device key → change in memory_used_bytes
+        // Build delta map: device key → change in memory_used_bytes.
+        // Uses Debug format as key for unique device identity across runs.
         let mut deltas: HashMap<String, i64> = HashMap::new();
         for p in registry.all_profiles() {
-            let key = format!("{}", p.accelerator);
+            let key = format!("{:?}", p.accelerator);
             if let Some(used) = p.memory_used_bytes {
                 if let Some(&prev) = prev_used.get(&key) {
                     let delta = used as i64 - prev as i64;
@@ -343,9 +344,10 @@ fn print_table(
         let status = if p.available { "ok" } else { "unavail" };
         let device_name = p.accelerator.to_string();
 
-        // Check for memory delta annotation
+        // Check for memory delta annotation (keyed by Debug format for unique identity).
+        let debug_key = format!("{:?}", p.accelerator);
         let delta_annotation = deltas
-            .and_then(|d| d.get(&device_name))
+            .and_then(|d| d.get(&debug_key))
             .map(|&d| {
                 let gb = d.abs() as f64 / (1024.0 * 1024.0 * 1024.0);
                 if d > 0 {

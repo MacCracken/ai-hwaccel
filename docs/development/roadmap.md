@@ -43,21 +43,6 @@ becomes available.
 
 ---
 
-## Engineering backlog
-
-Items identified during code audit. Not blocking release but should be
-addressed over time.
-
-- [ ] **Vulkan full output size** — `vulkaninfo` (no `--summary`) can
-  produce 50+ KB output. Consider capping or streaming the parse.
-- [ ] **Apple parser field length caps** — `system_profiler` output parsing
-  doesn't cap field lengths (chip name, memory string).
-- [ ] **Watch mode device identity** — `--watch` delta tracking uses
-  `Display` string as HashMap key. Consider using `(family, device_id)`
-  tuple for more robust matching across detection runs.
-
----
-
 ## Testing gaps
 
 - [ ] **Windows integration tests** — current mock tests gate symlinks behind

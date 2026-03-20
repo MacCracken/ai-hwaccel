@@ -171,7 +171,8 @@ fn extract_field(output: &str, key: &str) -> Option<String> {
         {
             let value = value.trim();
             if !value.is_empty() {
-                return Some(value.to_string());
+                // Cap field length to prevent unbounded allocation.
+                return Some(value.chars().take(256).collect());
             }
         }
     }
