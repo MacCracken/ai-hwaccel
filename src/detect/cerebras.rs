@@ -85,9 +85,10 @@ fn parse_memory_from_cli(stdout: &str) -> Option<u64> {
             // Look for a number followed by "gb" or "GB".
             for word in line.split_whitespace() {
                 if let Some(num_str) = word.strip_suffix("GB").or_else(|| word.strip_suffix("gb"))
-                    && let Ok(gb) = num_str.parse::<u64>() {
-                        return Some(gb * 1024 * 1024 * 1024);
-                    }
+                    && let Ok(gb) = num_str.parse::<u64>()
+                {
+                    return Some(gb * 1024 * 1024 * 1024);
+                }
             }
         }
     }

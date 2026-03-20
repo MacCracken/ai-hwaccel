@@ -278,9 +278,10 @@ fn print_table(
 
     // Filter by family
     if let Some(f) = family_filter
-        && let Some(fam) = parse_family(f) {
-            profiles.retain(|p| p.accelerator.family() == fam);
-        }
+        && let Some(fam) = parse_family(f)
+    {
+        profiles.retain(|p| p.accelerator.family() == fam);
+    }
 
     // Sort
     match sort_by {

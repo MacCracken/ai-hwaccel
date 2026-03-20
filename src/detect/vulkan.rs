@@ -277,11 +277,13 @@ fn parse_vulkan_full(output: &str) -> Vec<VulkanComputeInfo> {
         }
 
         // Subgroup size.
-        if trimmed.starts_with("subgroupSize") && !trimmed.contains("Control")
+        if trimmed.starts_with("subgroupSize")
+            && !trimmed.contains("Control")
             && let Some(val) = extract_value(trimmed)
-                && let Ok(size) = val.parse::<u32>() {
-                    current.subgroup_size = size;
-                }
+            && let Ok(size) = val.parse::<u32>()
+        {
+            current.subgroup_size = size;
+        }
 
         // Queue family section.
         if trimmed.starts_with("VkQueueFamilyProperties") {
@@ -298,16 +300,17 @@ fn parse_vulkan_full(output: &str) -> Vec<VulkanComputeInfo> {
 
             if trimmed.starts_with("queueCount")
                 && let Some(val) = extract_value(trimmed)
-                    && let Ok(count) = val.parse::<u32>() {
-                        // Only add to compute_queue_count if the previous queueFlags
-                        // included COMPUTE_BIT. We track this by checking if family
-                        // count just incremented. This is a heuristic — the queueFlags
-                        // line always precedes its queueCount.
-                        if current.compute_queue_family_count > 0 {
-                            // Count the latest family's queues.
-                            current.compute_queue_count += count;
-                        }
-                    }
+                && let Ok(count) = val.parse::<u32>()
+            {
+                // Only add to compute_queue_count if the previous queueFlags
+                // included COMPUTE_BIT. We track this by checking if family
+                // count just incremented. This is a heuristic — the queueFlags
+                // line always precedes its queueCount.
+                if current.compute_queue_family_count > 0 {
+                    // Count the latest family's queues.
+                    current.compute_queue_count += count;
+                }
+            }
 
             // End of queue section.
             if trimmed.is_empty() || trimmed.starts_with("Vk") && !trimmed.starts_with("VkQueue") {

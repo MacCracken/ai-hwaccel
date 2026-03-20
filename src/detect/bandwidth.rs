@@ -272,9 +272,10 @@ pub(crate) fn parse_max_dpm_clock(content: &str) -> Option<f64> {
             .split_whitespace()
             .nth(1)
             .and_then(|s| s.strip_suffix("Mhz").or_else(|| s.strip_suffix("MHz")))
-            && let Ok(mhz) = mhz_str.parse::<f64>() {
-                max_clock = max_clock.max(mhz);
-            }
+            && let Ok(mhz) = mhz_str.parse::<f64>()
+        {
+            max_clock = max_clock.max(mhz);
+        }
     }
     if max_clock > 0.0 {
         Some(max_clock)

@@ -138,10 +138,10 @@ pub(crate) fn parse_nvlink_output(stdout: &str, interconnects: &mut Vec<Intercon
             // Parse "Link N: <bw> GB/s"
             if let Some(bw_part) = trimmed.split(':').nth(1)
                 && let Some(bw_str) = bw_part.split_whitespace().next()
-                    && let Ok(bw) = bw_str.parse::<f64>()
-                {
-                    link_bw = bw;
-                }
+                && let Ok(bw) = bw_str.parse::<f64>()
+            {
+                link_bw = bw;
+            }
         }
     }
 

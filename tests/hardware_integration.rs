@@ -4,9 +4,7 @@
 //! machine. Each test is gated on conditions that detect whether the
 //! relevant hardware/tool is present, and skips gracefully if not.
 
-use ai_hwaccel::{
-    AcceleratorFamily, AcceleratorRegistry, AcceleratorType, DetectBuilder,
-};
+use ai_hwaccel::{AcceleratorFamily, AcceleratorRegistry, AcceleratorType, DetectBuilder};
 
 // ---------------------------------------------------------------------------
 // CPU (always present)
@@ -51,9 +49,10 @@ fn has_rocm() -> bool {
             continue;
         }
         if let Ok(target) = std::fs::read_link(entry.path().join("device/driver"))
-            && target.to_string_lossy().contains("amdgpu") {
-                return true;
-            }
+            && target.to_string_lossy().contains("amdgpu")
+        {
+            return true;
+        }
     }
     false
 }
@@ -170,15 +169,16 @@ fn vulkan_compute_queues_when_present() {
     let reg = DetectBuilder::none().with_vulkan().detect();
     for p in reg.all_profiles() {
         if let AcceleratorType::VulkanGpu { .. } = &p.accelerator
-            && let Some(cc) = &p.compute_capability {
-                // Should mention subgroup size if full vulkaninfo worked.
-                if cc.contains("subgroup") {
-                    assert!(
-                        cc.contains("subgroup: "),
-                        "subgroup info should be present: {cc}"
-                    );
-                }
+            && let Some(cc) = &p.compute_capability
+        {
+            // Should mention subgroup size if full vulkaninfo worked.
+            if cc.contains("subgroup") {
+                assert!(
+                    cc.contains("subgroup: "),
+                    "subgroup info should be present: {cc}"
+                );
             }
+        }
     }
 }
 
