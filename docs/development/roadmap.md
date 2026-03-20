@@ -4,36 +4,6 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
-## Pre-v1
-
-- [x] Publish `0.19.3` to crates.io.
-
----
-
-## System I/O and monitoring (0.20)
-
-Hardware bandwidth and topology detection beyond device enumeration.
-
-- [x] **VRAM bandwidth probing** — calculate memory bandwidth from clock speed
-  and bus width. NVIDIA via `nvidia-smi --query-gpu=clocks.max.memory`, AMD
-  via sysfs `pp_dpm_mclk`. Exposed as `AcceleratorProfile::memory_bandwidth_gbps`.
-- [x] **Runtime VRAM usage** — current used/free VRAM (not just total) for
-  live capacity planning. Parse `nvidia-smi` and ROCm sysfs for used/free.
-- [x] **PCIe link detection** — read sysfs `current_link_width`/`current_link_speed`
-  to estimate host-to-device transfer rates. Expose as
-  `AcceleratorProfile::pcie_bandwidth_gbps`.
-- [x] **NUMA topology** — read `/sys/bus/pci/devices/<addr>/numa_node` to map
-  which GPUs are on which NUMA node. Expose as `AcceleratorProfile::numa_node`.
-- [x] **Network interconnect detection** — detect InfiniBand, RoCE via
-  `/sys/class/infiniband/`, NVLink via `nvidia-smi nvlink -s`. Critical for
-  multi-node training planning.
-- [x] **Disk I/O throughput** — probe `/sys/block/*/queue/` for NVMe vs HDD.
-  Estimate data loading bottlenecks.
-- [x] **Network ingestion estimation** — `SystemIo::estimate_ingestion_secs()`
-  estimates data loading time given dataset size + detected storage bandwidth.
-
----
-
 ## Detection gaps (hardware-dependent)
 
 Require real hardware or cloud instances. No deadline — addressed as access
@@ -41,8 +11,9 @@ becomes available.
 
 ### Accuracy improvements
 
-- [ ] **AMD ROCm** — `rocm-smi` for clock speeds, firmware version, XGMI
-  topology, power draw.
+- [x] **AMD ROCm** — sysfs for clock speeds (`pp_dpm_sclk`, `pp_dpm_mclk`),
+  VBIOS version, GPU temperature, power draw, utilization. XGMI topology
+  deferred (needs multi-GPU system).
 - [ ] **Google TPU** — validate on real GCE VMs. Multi-host pod slices where
   chips span `/dev/accel*` nodes across hosts.
 - [ ] **Intel Gaudi** — test on Gaudi 3. Parse firmware version from `hl-smi`.
@@ -50,8 +21,8 @@ becomes available.
   `neuron-ls` output format across SDK versions.
 - [ ] **Intel oneAPI** — Data Center GPU Max (Ponte Vecchio) HBM vs DDR memory
   tiers. Test `xpu-smi` on real hardware.
-- [ ] **Vulkan** — parse compute queue families and subgroup sizes from
-  `vulkaninfo` full output (not just `--summary`).
+- [x] **Vulkan** — full `vulkaninfo` parsing for compute queue families,
+  queue counts, and subgroup sizes. Exposed in `compute_capability` field.
 
 ### New backends
 
@@ -76,60 +47,22 @@ becomes available.
 
 ---
 
-## API gaps
-
-- [x] **Async detection** — `detect_async` now uses `tokio::process::Command`
-  for true async subprocess I/O. CLI backends run as concurrent tokio tasks,
-  sysfs backends in a single `spawn_blocking`. No more blocking thread per
-  subprocess.
-- [x] **Stable JSON schema v2** — bumped `SCHEMA_VERSION` to 2. Includes
-  device topology, bandwidth, NUMA, and system I/O fields.
-- [x] **`--table` enhancements** — `--columns name,mem,bw` for column
-  selection, `--tsv` for machine-readable tab-separated output.
-- [x] **`--watch` improvements** — shows delta diffs (memory usage changes
-  between refreshes), `--alert mem>90` for threshold alerts.
-- [x] **Error recovery** — `DetectionError::Timeout` as distinct variant,
-  separate from `ToolFailed`. Enables retry logic for slow tools.
-
----
-
 ## Testing gaps
 
-- [ ] **Hardware-in-the-loop CI** — run detection tests on cloud instances
-  with real GPUs (GitHub Actions self-hosted runner or cloud CI).
+- [x] **Hardware integration tests** — `tests/hardware_integration.rs` with
+  17 tests covering CPU, ROCm, Vulkan, PCIe, bandwidth, storage, interconnects,
+  JSON roundtrip, and concurrent detection. Auto-skips when hardware is absent.
+- [x] **Load testing** — concurrent 4-thread detection test + benchmark in
+  `benches/detect.rs`. Verifies `detect()` and `CachedRegistry::get()` are
+  safe under concurrency.
+- [x] **System I/O benchmarks** — per-backend detection, serialization,
+  deserialization, and system I/O query benchmarks in `benches/detect.rs`.
 - [ ] **Fuzz testing for parsers** — fuzz `vulkaninfo`, `nvidia-smi`, `hl-smi`
   output parsers with `cargo-fuzz` or AFL to find crash/panic paths.
 - [ ] **Windows integration tests** — current mock tests gate symlinks behind
   `#[cfg(unix)]`. Need Windows-native mock strategies.
 - [ ] **Benchmark regression CI** — track benchmark numbers across releases
   to catch performance regressions.
-- [ ] **Load testing** — verify detection under high concurrency (many threads
-  calling `detect()` or `CachedRegistry::get()` simultaneously).
-
----
-
-## Security gaps
-
-- [x] **Windows `which()` improvements** — tries `.exe`, `.cmd`, `.bat`
-  extensions when name has no extension. Matches standard `PATHEXT` behavior.
-- [x] **Subprocess environment sanitization** — `run_tool()` strips
-  `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`,
-  `DYLD_LIBRARY_PATH` from child processes.
-- [x] **TOCTOU in `which()`** — documented as accepted risk in `run_tool()`
-  and `which()` doc comments. Equivalent to shell behavior.
-
----
-
-## Documentation gaps
-
-- [x] **Crate-level guide expansion** — added sections on error handling
-  patterns, custom backend implementation, serde integration, and system I/O.
-- [x] **Troubleshooting guide** — `docs/troubleshooting.md` covers common
-  issues with detection, permissions, and configuration.
-- [x] **Performance tuning guide** — `docs/performance.md` covers caching,
-  selective detection, feature flags, and async usage.
-- [x] **Migration guide** — `docs/migration.md` documents all breaking
-  changes from v0.19.3 to v0.20.3.
 
 ---
 
