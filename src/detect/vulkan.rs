@@ -31,11 +31,9 @@ pub(crate) fn detect_vulkan(
             return;
         }
     };
-
-    // Parse full output for compute queue details.
+    // Full output for compute queue details (separate format from --summary).
     let full_output = run_tool("vulkaninfo", VULKANINFO_FULL_ARGS, DEFAULT_TIMEOUT).ok();
     let full_stdout = full_output.as_ref().map(|o| o.stdout.as_str());
-
     parse_vulkan_output(&output.stdout, full_stdout, profiles, warnings);
 }
 

@@ -30,7 +30,17 @@ pub(crate) fn enrich_bandwidth(
     profiles: &mut [AcceleratorProfile],
     warnings: &mut Vec<DetectionError>,
 ) {
-    let cuda_bw = query_nvidia_bandwidth(warnings);
+    // Skip the separate nvidia-smi call if all CUDA GPUs already have bandwidth
+    // (set during the batched CUDA detection pass).
+    let all_cuda_have_bw = profiles.iter().all(|p| {
+        !matches!(p.accelerator, AcceleratorType::CudaGpu { .. })
+            || p.memory_bandwidth_gbps.is_some()
+    });
+    let cuda_bw = if all_cuda_have_bw {
+        Vec::new()
+    } else {
+        query_nvidia_bandwidth(warnings)
+    };
     apply_bandwidth(profiles, &cuda_bw);
 }
 
@@ -53,11 +63,14 @@ fn apply_bandwidth(profiles: &mut [AcceleratorProfile], cuda_bw: &[Option<f64>])
     for profile in profiles.iter_mut() {
         match &profile.accelerator {
             AcceleratorType::CudaGpu { .. } => {
-                if let Some(bw) = cuda_bw.get(nvidia_idx).copied().flatten() {
-                    profile.memory_bandwidth_gbps = Some(bw);
-                } else if let Some(cc) = &profile.compute_capability {
-                    // Fallback: estimate from compute capability alone
-                    profile.memory_bandwidth_gbps = estimate_nvidia_bandwidth_from_cc(cc);
+                // Skip CUDA GPUs that already got bandwidth from the batched parse.
+                if profile.memory_bandwidth_gbps.is_none() {
+                    if let Some(bw) = cuda_bw.get(nvidia_idx).copied().flatten() {
+                        profile.memory_bandwidth_gbps = Some(bw);
+                    } else if let Some(cc) = &profile.compute_capability {
+                        // Fallback: estimate from compute capability alone
+                        profile.memory_bandwidth_gbps = estimate_nvidia_bandwidth_from_cc(cc);
+                    }
                 }
                 nvidia_idx += 1;
             }
@@ -123,7 +136,7 @@ fn calculate_bandwidth(clock_mhz: f64, bus_width_bits: u32) -> f64 {
 /// wrong width is bounded — consumer cards usually have narrower buses
 /// but also lower memory clocks, so the bandwidth estimate stays in the
 /// right ballpark.
-fn nvidia_bus_width_bits(cc: &str) -> Option<u32> {
+pub(crate) fn nvidia_bus_width_bits(cc: &str) -> Option<u32> {
     match cc {
         // Hopper (H100/H200)
         "9.0" => Some(5120), // HBM3, 5120-bit
@@ -155,7 +168,7 @@ fn nvidia_bus_width_bits(cc: &str) -> Option<u32> {
 
 /// Fallback: estimate bandwidth from compute capability using known
 /// published specs (GB/s). Used when nvidia-smi doesn't report clock speed.
-fn estimate_nvidia_bandwidth_from_cc(cc: &str) -> Option<f64> {
+pub(crate) fn estimate_nvidia_bandwidth_from_cc(cc: &str) -> Option<f64> {
     match cc {
         "10.0" => Some(8000.0),  // B200: ~8 TB/s
         "9.0" => Some(3350.0),   // H100 SXM: 3.35 TB/s

@@ -253,9 +253,12 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
     }
 
     // Post-pass: enrich profiles with memory bandwidth, PCIe, and NUMA.
+    // Compute PCI address lists once, shared between PCIe and NUMA passes.
     bandwidth::enrich_bandwidth(&mut all_profiles, &mut all_warnings);
-    pcie::enrich_pcie(&mut all_profiles);
-    numa::enrich_numa(&mut all_profiles);
+    let nvidia_pci = list_driver_pci_addrs("nvidia");
+    let amdgpu_pci = list_driver_pci_addrs("amdgpu");
+    pcie::enrich_pcie(&mut all_profiles, &nvidia_pci, &amdgpu_pci);
+    numa::enrich_numa(&mut all_profiles, &nvidia_pci, &amdgpu_pci);
 
     // Detect system-level I/O: interconnects and storage.
     let system_interconnects = interconnect::detect_interconnects(&mut all_warnings);
@@ -283,6 +286,31 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
+
+/// List PCI addresses bound to a given driver (sorted).
+pub(super) fn list_driver_pci_addrs(driver: &str) -> Vec<String> {
+    let driver_path = format!("/sys/bus/pci/drivers/{}", driver);
+    let dir = Path::new(&driver_path);
+    if !dir.exists() {
+        return Vec::new();
+    }
+    let mut addrs: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            // PCI addresses look like "0000:01:00.0"
+            if name.contains(':') && name.contains('.') && name.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect();
+    addrs.sort();
+    addrs
+}
 
 /// Build a default CPU profile with detected system memory.
 pub(crate) fn cpu_profile() -> AcceleratorProfile {
@@ -336,13 +364,27 @@ pub(super) fn read_sysfs_u64(path: &Path) -> Option<u64> {
 /// Sysfs pseudo-files report `st_size = 4096` regardless of actual content,
 /// so we can't use metadata for size checking. Instead, we read up to
 /// `max_bytes` and discard if truncated.
+///
+/// Uses a stack buffer for small reads (≤ 512 bytes) to avoid heap allocation
+/// in the common case.
 pub(super) fn read_sysfs_string(path: &Path, max_bytes: usize) -> Option<String> {
     use std::io::Read;
     let mut file = std::fs::File::open(path).ok()?;
+
+    // Stack buffer for common small reads, heap for larger ones.
+    const STACK_SIZE: usize = 512;
+    if max_bytes < STACK_SIZE {
+        let mut buf = [0u8; STACK_SIZE];
+        let n = file.read(&mut buf[..max_bytes + 1]).ok()?;
+        if n > max_bytes {
+            return None;
+        }
+        return String::from_utf8(buf[..n].to_vec()).ok();
+    }
+
     let mut buf = vec![0u8; max_bytes + 1];
     let n = file.read(&mut buf).ok()?;
     if n > max_bytes {
-        // File exceeds limit — likely not a normal sysfs value.
         return None;
     }
     String::from_utf8(buf[..n].to_vec()).ok()
@@ -440,8 +482,10 @@ pub(crate) async fn detect_with_builder_async(
 
     // Post-pass: enrich with bandwidth (async), PCIe, NUMA.
     bandwidth::enrich_bandwidth_async(&mut all_profiles, &mut all_warnings).await;
-    pcie::enrich_pcie(&mut all_profiles);
-    numa::enrich_numa(&mut all_profiles);
+    let nvidia_pci = list_driver_pci_addrs("nvidia");
+    let amdgpu_pci = list_driver_pci_addrs("amdgpu");
+    pcie::enrich_pcie(&mut all_profiles, &nvidia_pci, &amdgpu_pci);
+    numa::enrich_numa(&mut all_profiles, &nvidia_pci, &amdgpu_pci);
 
     // System I/O: async interconnects + blocking storage.
     let (system_interconnects, ic_warnings) =

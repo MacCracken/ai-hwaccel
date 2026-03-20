@@ -281,15 +281,10 @@ fn print_table(
             profiles.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes));
         }
         Some("name" | "device") => {
-            profiles.sort_by(|a, b| a.accelerator.to_string().cmp(&b.accelerator.to_string()));
+            profiles.sort_by_cached_key(|p| p.accelerator.to_string());
         }
         Some("family") => {
-            profiles.sort_by(|a, b| {
-                a.accelerator
-                    .family()
-                    .to_string()
-                    .cmp(&b.accelerator.family().to_string())
-            });
+            profiles.sort_by_cached_key(|p| p.accelerator.family().to_string());
         }
         _ => {}
     }

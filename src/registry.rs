@@ -128,6 +128,7 @@ impl AcceleratorRegistry {
     }
 
     /// Only the available accelerator profiles.
+    #[inline]
     pub fn available(&self) -> Vec<&AcceleratorProfile> {
         self.profiles.iter().filter(|p| p.available).collect()
     }
@@ -141,6 +142,7 @@ impl AcceleratorRegistry {
     }
 
     /// Total memory across all **available** devices.
+    #[inline]
     pub fn total_memory(&self) -> u64 {
         self.profiles
             .iter()
@@ -159,6 +161,7 @@ impl AcceleratorRegistry {
     }
 
     /// Whether any non-CPU accelerator is available.
+    #[inline]
     pub fn has_accelerator(&self) -> bool {
         self.profiles
             .iter()
@@ -166,6 +169,7 @@ impl AcceleratorRegistry {
     }
 
     /// All profiles matching a given [`AcceleratorFamily`].
+    #[inline]
     pub fn by_family(&self, family: AcceleratorFamily) -> Vec<&AcceleratorProfile> {
         self.profiles
             .iter()

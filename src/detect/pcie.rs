@@ -16,9 +16,11 @@ use crate::profile::AcceleratorProfile;
 /// For CUDA GPUs, the PCI address is found via `/sys/bus/pci/drivers/nvidia/`.
 /// For ROCm GPUs, via `/sys/bus/pci/drivers/amdgpu/`.
 /// Falls back to scanning `/sys/class/drm/card*/device/` for any GPU.
-pub(crate) fn enrich_pcie(profiles: &mut [AcceleratorProfile]) {
-    let nvidia_addrs = list_driver_pci_addrs("nvidia");
-    let amdgpu_addrs = list_driver_pci_addrs("amdgpu");
+pub(crate) fn enrich_pcie(
+    profiles: &mut [AcceleratorProfile],
+    nvidia_addrs: &[String],
+    amdgpu_addrs: &[String],
+) {
 
     let mut nvidia_idx = 0usize;
     let mut amdgpu_idx = 0usize;
@@ -49,31 +51,6 @@ pub(crate) fn enrich_pcie(profiles: &mut [AcceleratorProfile]) {
             }
         }
     }
-}
-
-/// List PCI addresses bound to a given driver (sorted).
-fn list_driver_pci_addrs(driver: &str) -> Vec<String> {
-    let driver_path = format!("/sys/bus/pci/drivers/{}", driver);
-    let dir = Path::new(&driver_path);
-    if !dir.exists() {
-        return Vec::new();
-    }
-    let mut addrs: Vec<String> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            // PCI addresses look like "0000:01:00.0"
-            if name.contains(':') && name.contains('.') && name.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') {
-                Some(name)
-            } else {
-                None
-            }
-        })
-        .collect();
-    addrs.sort();
-    addrs
 }
 
 /// Read PCIe link width and speed from sysfs and compute theoretical bandwidth.

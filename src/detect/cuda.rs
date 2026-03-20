@@ -6,10 +6,11 @@ use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
+use super::bandwidth::{nvidia_bus_width_bits, estimate_nvidia_bandwidth_from_cc};
 use super::command::{DEFAULT_TIMEOUT, run_tool, validate_device_id, validate_memory_mb};
 
 const NVIDIA_SMI_ARGS: &[&str] = &[
-    "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name,temperature.gpu,power.draw,utilization.gpu",
+    "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name,temperature.gpu,power.draw,utilization.gpu,clocks.max.memory",
     "--format=csv,noheader,nounits",
 ];
 
@@ -82,6 +83,7 @@ pub(crate) fn parse_cuda_output(
         let temp_c: Option<u32> = parts.get(7).and_then(|s| s.parse().ok());
         let power_w: Option<f64> = parts.get(8).and_then(|s| s.parse().ok());
         let gpu_util: Option<u32> = parts.get(9).and_then(|s| s.parse().ok());
+        let max_mem_clock_mhz: Option<f64> = parts.get(10).and_then(|s| s.parse().ok());
 
         // Grace Hopper detection: GH200 has unified CPU+GPU memory via NVLink-C2C.
         // The GPU can access system memory seamlessly, so the effective memory
@@ -105,6 +107,16 @@ pub(crate) fn parse_cuda_output(
             effective_mem = effective_mem.saturating_add(480 * 1024 * 1024 * 1024);
         }
 
+        // Calculate memory bandwidth inline from max memory clock + bus width lookup.
+        let memory_bandwidth_gbps = max_mem_clock_mhz
+            .and_then(|clock_mhz| {
+                nvidia_bus_width_bits(&compute_cap).map(|bus_width| {
+                    let bw = clock_mhz * bus_width as f64 * 2.0 / 8.0 / 1000.0;
+                    (bw * 10.0).round() / 10.0
+                })
+            })
+            .or_else(|| estimate_nvidia_bandwidth_from_cc(&compute_cap));
+
         debug!(device_id, mem_total_mb, ?mem_used_mb, ?mem_free_mb, %driver_version, gpu_name, "NVIDIA CUDA GPU detected");
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::CudaGpu { device_id },
@@ -120,7 +132,7 @@ pub(crate) fn parse_cuda_output(
             } else {
                 Some(driver_version)
             },
-            memory_bandwidth_gbps: None,
+            memory_bandwidth_gbps,
             memory_used_bytes: mem_used_mb.map(|mb| mb.saturating_mul(1024 * 1024)),
             memory_free_bytes: mem_free_mb.map(|mb| mb.saturating_mul(1024 * 1024)),
             pcie_bandwidth_gbps: None,

@@ -44,48 +44,53 @@ impl AcceleratorRegistry {
             };
         }
 
-        // Case 2: TPU tensor parallel (ICI mesh has high inter-chip bandwidth).
-        let tpu_devices: Vec<_> = self
-            .all_profiles()
-            .iter()
-            .filter(|p| p.available && p.accelerator.is_tpu())
-            .collect();
-        let tpu_memory: u64 = tpu_devices.iter().map(|p| p.memory_bytes).sum();
+        // Single pass: collect TPU and GPU/ASIC device groups + totals.
+        let mut tpu_devices: Vec<_> = Vec::with_capacity(8);
+        let mut tpu_memory: u64 = 0;
+        let mut tpu_chips: u32 = 0;
+        let mut tpu_min_mult: f64 = f64::INFINITY;
+        let mut gpu_devices: Vec<_> = Vec::with_capacity(16);
+        let mut gpu_memory: u64 = 0;
 
+        for p in self.all_profiles() {
+            if !p.available {
+                continue;
+            }
+            if p.accelerator.is_tpu() {
+                tpu_memory += p.memory_bytes;
+                tpu_min_mult = tpu_min_mult.min(p.accelerator.throughput_multiplier());
+                if let AcceleratorType::Tpu { chip_count, .. } = &p.accelerator {
+                    tpu_chips += chip_count;
+                }
+                tpu_devices.push(p);
+            }
+            if p.accelerator.is_gpu() || p.accelerator.is_ai_asic() || p.accelerator.is_tpu() {
+                gpu_memory += p.memory_bytes;
+                gpu_devices.push(p);
+            }
+        }
+
+        // Case 2: TPU tensor parallel (ICI mesh has high inter-chip bandwidth).
         if !tpu_devices.is_empty() && tpu_memory >= needed {
-            let total_chips: u32 = tpu_devices
-                .iter()
-                .filter_map(|p| match &p.accelerator {
-                    AcceleratorType::Tpu { chip_count, .. } => Some(*chip_count),
-                    _ => None,
-                })
-                .sum();
-            // Ceiling division so no bytes are unaccounted for.
-            let chips = total_chips.max(1) as u64;
+            let chips = tpu_chips.max(1) as u64;
             let per_chip = needed.div_ceil(chips);
 
-            let shards: Vec<ModelShard> = (0..total_chips)
+            let shards: Vec<ModelShard> = (0..tpu_chips)
                 .map(|i| ModelShard {
                     shard_id: i,
-                    layer_range: (0, 0), // tensor parallel: all chips see all layers
+                    layer_range: (0, 0),
                     device: tpu_devices[0].accelerator.clone(),
                     memory_bytes: per_chip,
                 })
                 .collect();
 
-            // Throughput estimate: base multiplier * chip count, scaled by
-            // quantisation memory reduction factor (e.g. FP16 = 2x, INT4 = 8x).
-            let tpu_multiplier = tpu_devices
-                .iter()
-                .map(|d| d.accelerator.throughput_multiplier())
-                .fold(f64::INFINITY, f64::min);
             let quant_factor = quant.memory_reduction_factor();
-            let tps = tpu_multiplier * total_chips as f64 * quant_factor * 2.0;
+            let tps = tpu_min_mult * tpu_chips as f64 * quant_factor * 2.0;
 
             return ShardingPlan {
                 shards,
                 strategy: ShardingStrategy::TensorParallel {
-                    num_devices: total_chips,
+                    num_devices: tpu_chips,
                 },
                 total_memory_bytes: needed,
                 estimated_tokens_per_sec: Some(tps),
@@ -93,17 +98,6 @@ impl AcceleratorRegistry {
         }
 
         // Case 3: GPU / AI ASIC pipeline parallel.
-        let gpu_devices: Vec<_> = self
-            .all_profiles()
-            .iter()
-            .filter(|p| {
-                p.available
-                    && (p.accelerator.is_gpu()
-                        || p.accelerator.is_ai_asic()
-                        || p.accelerator.is_tpu())
-            })
-            .collect();
-        let gpu_memory: u64 = gpu_devices.iter().map(|p| p.memory_bytes).sum();
 
         if !gpu_devices.is_empty() && gpu_memory >= needed {
             let num_stages = gpu_devices.len() as u32;

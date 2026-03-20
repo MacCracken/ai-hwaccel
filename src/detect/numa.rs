@@ -3,8 +3,6 @@
 //! Maps GPUs to their NUMA nodes by reading
 //! `/sys/bus/pci/devices/<addr>/numa_node`.
 
-use std::path::Path;
-
 use tracing::debug;
 
 use crate::hardware::AcceleratorType;
@@ -14,9 +12,11 @@ use crate::profile::AcceleratorProfile;
 ///
 /// Uses the same PCI address mapping as the PCIe module to find each device's
 /// NUMA affinity.
-pub(crate) fn enrich_numa(profiles: &mut [AcceleratorProfile]) {
-    let nvidia_addrs = list_driver_pci_addrs("nvidia");
-    let amdgpu_addrs = list_driver_pci_addrs("amdgpu");
+pub(crate) fn enrich_numa(
+    profiles: &mut [AcceleratorProfile],
+    nvidia_addrs: &[String],
+    amdgpu_addrs: &[String],
+) {
 
     let mut nvidia_idx = 0usize;
     let mut amdgpu_idx = 0usize;
@@ -53,26 +53,3 @@ pub(crate) fn enrich_numa(profiles: &mut [AcceleratorProfile]) {
     }
 }
 
-/// List PCI addresses bound to a given driver (sorted).
-fn list_driver_pci_addrs(driver: &str) -> Vec<String> {
-    let driver_path = format!("/sys/bus/pci/drivers/{}", driver);
-    let dir = Path::new(&driver_path);
-    if !dir.exists() {
-        return Vec::new();
-    }
-    let mut addrs: Vec<String> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            if name.contains(':') && name.contains('.') && name.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') {
-                Some(name)
-            } else {
-                None
-            }
-        })
-        .collect();
-    addrs.sort();
-    addrs
-}
