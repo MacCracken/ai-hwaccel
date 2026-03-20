@@ -19,8 +19,11 @@ use serde::{Deserialize, Serialize};
 ///
 /// let err = DetectionError::ToolNotFound { tool: "nvidia-smi".into() };
 /// assert!(err.to_string().contains("nvidia-smi"));
+///
+/// let err = DetectionError::Timeout { tool: "hl-smi".into(), timeout_secs: 5.0 };
+/// assert!(err.to_string().contains("timed out"));
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum DetectionError {
     /// A required CLI tool was not found on `$PATH`.
@@ -31,6 +34,15 @@ pub enum DetectionError {
         tool: String,
         exit_code: Option<i32>,
         stderr: String,
+    },
+
+    /// A CLI tool did not exit within the allowed timeout.
+    ///
+    /// The process was killed. This is distinct from [`ToolFailed`](Self::ToolFailed)
+    /// to allow callers to implement retry logic for transient slowness.
+    Timeout {
+        tool: String,
+        timeout_secs: f64,
     },
 
     /// Output from a CLI tool or sysfs file could not be parsed.
@@ -60,6 +72,12 @@ impl fmt::Display for DetectionError {
                         .unwrap_or_else(|| "signal".into()),
                     stderr.lines().next().unwrap_or("(no output)")
                 )
+            }
+            Self::Timeout {
+                tool,
+                timeout_secs,
+            } => {
+                write!(f, "{}: timed out after {:.1}s", tool, timeout_secs)
             }
             Self::ParseError { backend, message } => {
                 write!(f, "{}: parse error — {}", backend, message)

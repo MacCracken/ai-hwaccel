@@ -29,8 +29,28 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
   data loading time given dataset size and detected storage throughput.
 - **New types**: `SystemIo`, `Interconnect`, `InterconnectKind`,
   `StorageDevice`, `StorageKind` — all serializable.
-- **CLI table**: now shows Free VRAM, PCIe bandwidth, NUMA node columns,
+- **CLI table**: now shows Free VRAM, BW, PCIe bandwidth, NUMA node columns,
   plus Interconnects and Storage sections.
+- **`--columns`**: select specific table columns (`--columns name,mem,bw`).
+- **`--tsv`**: tab-separated output for machine-readable table data.
+- **`--watch` deltas**: memory usage changes shown between refreshes.
+- **`--alert`**: threshold alerts during watch mode (`--alert mem>90`).
+- **`DetectionError::Timeout`**: new error variant for timed-out tools,
+  separate from `ToolFailed`. Enables programmatic retry logic.
+- **Schema v2**: `SCHEMA_VERSION` bumped to 2, formalizing all system I/O
+  fields and the new `Timeout` error variant.
+- **Docs**: troubleshooting guide, performance tuning guide, migration guide.
+  Expanded crate-level docs with error handling, custom backends, and serde.
+
+### Security
+
+- **Subprocess environment sanitization**: `run_tool()` now strips
+  `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, and
+  `DYLD_LIBRARY_PATH` from child processes to prevent library injection.
+- **Windows `which()` improvements**: tries `.exe`, `.cmd`, `.bat`
+  extensions when the tool name has no extension.
+- **TOCTOU documentation**: the inherent time-of-check-time-of-use gap
+  between path resolution and execution is documented as an accepted risk.
 
 ## [0.19.3] - 2026-03-19
 

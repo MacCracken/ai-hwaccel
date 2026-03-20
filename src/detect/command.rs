@@ -20,6 +20,19 @@ pub(crate) const MAX_STDOUT_BYTES: usize = 1024 * 1024;
 /// Maximum bytes to read from subprocess stderr (4 KiB).
 const MAX_STDERR_BYTES: usize = 4096;
 
+/// Environment variables stripped from child processes for security.
+///
+/// These variables can be used to inject shared libraries into processes.
+/// Since we invoke CLI tools for hardware detection (running as the current
+/// user), stripping these prevents a compromised environment from injecting
+/// code into detection subprocesses.
+const SANITIZED_ENV_VARS: &[&str] = &[
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+];
+
 /// Successful output from a tool invocation.
 #[derive(Debug)]
 pub(crate) struct ToolOutput {
@@ -30,8 +43,24 @@ pub(crate) struct ToolOutput {
 ///
 /// 1. **Absolute path resolution** — the tool is resolved via `$PATH` and
 ///    invoked by absolute path to prevent `$PATH` hijacking.
-/// 2. **Timeout** — the process is killed if it doesn't exit within `timeout`.
-/// 3. **Output size limit** — stdout is capped at [`MAX_STDOUT_BYTES`].
+/// 2. **Environment sanitization** — `LD_PRELOAD`, `LD_LIBRARY_PATH`,
+///    `DYLD_INSERT_LIBRARIES`, and `DYLD_LIBRARY_PATH` are stripped from
+///    the child process environment to prevent library injection.
+/// 3. **Timeout** — the process is killed if it doesn't exit within `timeout`.
+///    Returns [`DetectionError::Timeout`] (not `ToolFailed`) so callers can
+///    distinguish slow tools from broken ones.
+/// 4. **Output size limit** — stdout is capped at [`MAX_STDOUT_BYTES`].
+///
+/// # Security
+///
+/// There is an inherent TOCTOU (time-of-check-time-of-use) gap between
+/// `which()` resolving the tool path and `Command::new()` executing it.
+/// An attacker with write access to the resolved path could replace the
+/// binary between these two operations. This is an accepted risk — it is
+/// equivalent to how shells resolve and execute commands, and mitigating it
+/// would require `fexecve(2)` which is not portable. The combination of
+/// absolute path resolution, environment sanitization, and timeouts limits
+/// the attack surface.
 pub(crate) fn run_tool(
     tool: &str,
     args: &[&str],
@@ -40,11 +69,15 @@ pub(crate) fn run_tool(
     // 1. Resolve absolute path.
     let abs_path = which(tool).ok_or_else(|| DetectionError::ToolNotFound { tool: tool.into() })?;
 
-    // 2. Spawn with piped stdout/stderr.
-    let mut child = Command::new(&abs_path)
-        .args(args)
+    // 2. Spawn with piped stdout/stderr and sanitized environment.
+    let mut cmd = Command::new(&abs_path);
+    cmd.args(args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    for var in SANITIZED_ENV_VARS {
+        cmd.env_remove(var);
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|_| DetectionError::ToolNotFound { tool: tool.into() })?;
 
@@ -56,10 +89,9 @@ pub(crate) fn run_tool(
             Ok(None) if start.elapsed() > timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(DetectionError::ToolFailed {
+                return Err(DetectionError::Timeout {
                     tool: tool.into(),
-                    exit_code: None,
-                    stderr: format!("timed out after {:.1}s", timeout.as_secs_f64()),
+                    timeout_secs: timeout.as_secs_f64(),
                 });
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
@@ -119,13 +151,36 @@ fn read_limited(pipe: Option<impl Read>, limit: usize) -> Vec<u8> {
 }
 
 /// Resolve an executable name to its absolute path via `$PATH`.
+///
+/// On Windows, if `name` has no extension, tries appending `.exe`, `.cmd`,
+/// and `.bat` (matching standard `PATHEXT` behavior).
+///
+/// # Security
+///
+/// See [`run_tool`] for discussion of the TOCTOU gap between resolution
+/// and execution.
 fn which(name: &str) -> Option<PathBuf> {
     let path_var = std::env::var("PATH").ok()?;
     let sep = if cfg!(windows) { ';' } else { ':' };
+
+    // On Windows, try common executable extensions if the name has none.
+    let extensions: &[&str] = if cfg!(windows) && !name.contains('.') {
+        &["", ".exe", ".cmd", ".bat"]
+    } else {
+        &[""]
+    };
+
     for dir in path_var.split(sep) {
-        let candidate = Path::new(dir).join(name);
-        if candidate.is_file() {
-            return Some(candidate);
+        for ext in extensions {
+            let mut candidate = Path::new(dir).join(name);
+            if !ext.is_empty() {
+                let mut with_ext = candidate.as_os_str().to_os_string();
+                with_ext.push(ext);
+                candidate = PathBuf::from(with_ext);
+            }
+            if candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
     None

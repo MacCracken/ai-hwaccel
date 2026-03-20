@@ -104,3 +104,22 @@ fn run_tool_failure() {
         assert_eq!(exit_code, Some(1));
     }
 }
+
+// ---------------------------------------------------------------------------
+// run_tool — timeout returns Timeout variant
+// ---------------------------------------------------------------------------
+
+#[test]
+fn run_tool_timeout() {
+    use crate::detect::command::run_tool;
+    use std::time::Duration;
+    // `sleep 10` with a 50ms timeout should always time out.
+    let result = run_tool("sleep", &["10"], Duration::from_millis(50));
+    match result {
+        Err(DetectionError::Timeout { tool, timeout_secs }) => {
+            assert_eq!(tool, "sleep");
+            assert!(timeout_secs < 1.0);
+        }
+        other => panic!("expected Timeout, got {:?}", other),
+    }
+}

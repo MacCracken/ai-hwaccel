@@ -244,6 +244,10 @@ fn serde_detection_error_roundtrip() {
             backend: "cuda".into(),
             message: "bad csv".into(),
         },
+        DetectionError::Timeout {
+            tool: "nvidia-smi".into(),
+            timeout_secs: 5.0,
+        },
         DetectionError::SysfsReadError {
             path: "/sys/foo".into(),
             message: "ENOENT".into(),

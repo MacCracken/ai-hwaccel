@@ -26,7 +26,14 @@ use crate::system_io::SystemIo;
 /// assert!(!plan.shards.is_empty());
 /// ```
 /// Current schema version for serialized registries.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// # Schema history
+///
+/// - **v1**: Initial schema — profiles with accelerator type, availability,
+///   memory, compute capability, driver version. Warnings array.
+/// - **v2**: System I/O — per-device bandwidth, VRAM usage, PCIe link speed,
+///   NUMA node. System-level interconnects and storage. `Timeout` error variant.
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

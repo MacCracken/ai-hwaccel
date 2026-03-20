@@ -224,6 +224,15 @@ fn display_detection_error_all_variants() {
     assert!(e.to_string().contains("cuda"));
     assert!(e.to_string().contains("bad csv"));
 
+    let e = DetectionError::Timeout {
+        tool: "nvidia-smi".into(),
+        timeout_secs: 5.0,
+    };
+    let s = e.to_string();
+    assert!(s.contains("nvidia-smi"));
+    assert!(s.contains("timed out"));
+    assert!(s.contains("5.0s"));
+
     let e = DetectionError::SysfsReadError {
         path: "/sys/class/drm".into(),
         message: "permission denied".into(),

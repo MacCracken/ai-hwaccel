@@ -150,6 +150,91 @@
 //! println!("Total: {:.1} GB", est.total_gb);
 //! ```
 //!
+//! ## Step 5: Inspect system I/O
+//!
+//! After detection, the registry includes system-level I/O information:
+//!
+//! ```rust,no_run
+//! use ai_hwaccel::AcceleratorRegistry;
+//!
+//! let registry = AcceleratorRegistry::detect();
+//! let sio = registry.system_io();
+//!
+//! for ic in &sio.interconnects {
+//!     println!("{} ({}) — {:.1} GB/s", ic.name, ic.kind, ic.bandwidth_gbps);
+//! }
+//! for dev in &sio.storage {
+//!     println!("{} ({}) — {:.1} GB/s", dev.name, dev.kind, dev.bandwidth_gbps);
+//! }
+//!
+//! // Estimate how long to load a 100 GB dataset from local storage
+//! if let Some(secs) = sio.estimate_ingestion_secs(100 * 1024 * 1024 * 1024) {
+//!     println!("Estimated ingestion time: {:.0}s", secs);
+//! }
+//! ```
+//!
+//! # Error handling
+//!
+//! Detection is best-effort. Errors are collected as warnings, not panics:
+//!
+//! ```rust,no_run
+//! use ai_hwaccel::{AcceleratorRegistry, DetectionError};
+//!
+//! let registry = AcceleratorRegistry::detect();
+//! for w in registry.warnings() {
+//!     match w {
+//!         DetectionError::ToolNotFound { tool } => {
+//!             // Tool not installed — expected on systems without that hardware.
+//!             eprintln!("skipped: {} not found", tool);
+//!         }
+//!         DetectionError::Timeout { tool, timeout_secs } => {
+//!             // Tool hung — may want to retry with a longer timeout.
+//!             eprintln!("{} timed out after {:.0}s", tool, timeout_secs);
+//!         }
+//!         DetectionError::ToolFailed { tool, exit_code, stderr } => {
+//!             eprintln!("{} failed (exit {}): {}", tool,
+//!                 exit_code.unwrap_or(-1), stderr);
+//!         }
+//!         _ => eprintln!("warning: {}", w),
+//!     }
+//! }
+//! ```
+//!
+//! # Custom backends
+//!
+//! Build profiles manually and add them to a registry for hardware that
+//! isn't auto-detected:
+//!
+//! ```rust
+//! use ai_hwaccel::{AcceleratorProfile, AcceleratorRegistry, AcceleratorType};
+//!
+//! let mut registry = AcceleratorRegistry::detect();
+//!
+//! // Add a device from an external detection system
+//! let mut custom = AcceleratorProfile::cuda(4, 80 * 1024 * 1024 * 1024);
+//! custom.compute_capability = Some("9.0".into());
+//! custom.memory_bandwidth_gbps = Some(3350.0);
+//! registry.add_profile(custom);
+//! ```
+//!
+//! # Serde integration
+//!
+//! The registry and all sub-types implement `Serialize`/`Deserialize`.
+//! Use [`CachedRegistry`] for disk persistence with TTL-based invalidation:
+//!
+//! ```rust,no_run
+//! use ai_hwaccel::CachedRegistry;
+//! use std::time::Duration;
+//!
+//! let cache = CachedRegistry::new(Duration::from_secs(300));
+//! let registry = cache.get(); // detects on first call, caches for 5 min
+//! let registry2 = cache.get(); // returns cached result
+//! ```
+//!
+//! The [`SCHEMA_VERSION`] constant tracks the JSON schema. Bumps indicate
+//! new fields or structural changes. Old JSON (lower version) can still be
+//! deserialized — new fields use `#[serde(default)]`.
+//!
 //! # Cargo features
 //!
 //! Each hardware backend can be individually enabled or disabled:

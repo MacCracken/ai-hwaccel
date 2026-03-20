@@ -81,14 +81,14 @@ becomes available.
 - [ ] **Async detection** improvements — current `detect_async` uses
   `spawn_blocking`. True async subprocess I/O via `tokio::process::Command`
   would avoid the blocking thread entirely.
-- [ ] **Stable JSON schema v2** — add device topology, bandwidth, and NUMA
-  fields when system I/O detection ships. Bump `SCHEMA_VERSION` to 2.
-- [ ] **`--table` enhancements** — column selection (`--columns name,mem,bw`),
-  machine-readable TSV output.
-- [ ] **`--watch` improvements** — show delta diffs (memory usage changes),
-  alert thresholds.
-- [ ] **Error recovery** — `DetectionError::Timeout` as distinct variant
-  (currently bundled into `ToolFailed`).
+- [x] **Stable JSON schema v2** — bumped `SCHEMA_VERSION` to 2. Includes
+  device topology, bandwidth, NUMA, and system I/O fields.
+- [x] **`--table` enhancements** — `--columns name,mem,bw` for column
+  selection, `--tsv` for machine-readable tab-separated output.
+- [x] **`--watch` improvements** — shows delta diffs (memory usage changes
+  between refreshes), `--alert mem>90` for threshold alerts.
+- [x] **Error recovery** — `DetectionError::Timeout` as distinct variant,
+  separate from `ToolFailed`. Enables retry logic for slow tools.
 
 ---
 
@@ -109,28 +109,26 @@ becomes available.
 
 ## Security gaps
 
-- [ ] **Windows `which()` improvements** — handle `.exe`, `.cmd`, `.bat`
-  extensions. Current `which()` checks `is_file()` which may miss
-  extensionless executables on Windows.
-- [ ] **Subprocess environment sanitization** — currently inherits full
-  parent environment. Consider clearing `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`
-  before spawning CLI tools.
-- [ ] **TOCTOU in `which()`** — tool is resolved to absolute path, then
-  invoked. In theory the file could be replaced between resolution and
-  execution. Document as accepted risk (same as shell behavior).
+- [x] **Windows `which()` improvements** — tries `.exe`, `.cmd`, `.bat`
+  extensions when name has no extension. Matches standard `PATHEXT` behavior.
+- [x] **Subprocess environment sanitization** — `run_tool()` strips
+  `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`,
+  `DYLD_LIBRARY_PATH` from child processes.
+- [x] **TOCTOU in `which()`** — documented as accepted risk in `run_tool()`
+  and `which()` doc comments. Equivalent to shell behavior.
 
 ---
 
 ## Documentation gaps
 
-- [ ] **Crate-level guide expansion** — add sections on error handling
-  patterns, custom backend implementation, and serde integration.
-- [ ] **Troubleshooting guide** — common issues: "nvidia-smi not found",
-  "detection returns CPU only", "Vulkan GPU missing".
-- [ ] **Performance tuning guide** — when to use `CachedRegistry`, when to
-  use `DetectBuilder::none()`, feature flag impact on compile time.
-- [ ] **Migration guide** — document breaking changes between versions for
-  downstream users.
+- [x] **Crate-level guide expansion** — added sections on error handling
+  patterns, custom backend implementation, serde integration, and system I/O.
+- [x] **Troubleshooting guide** — `docs/troubleshooting.md` covers common
+  issues with detection, permissions, and configuration.
+- [x] **Performance tuning guide** — `docs/performance.md` covers caching,
+  selective detection, feature flags, and async usage.
+- [x] **Migration guide** — `docs/migration.md` documents all breaking
+  changes from v0.19.3 to v0.20.3.
 
 ---
 

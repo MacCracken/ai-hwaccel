@@ -123,7 +123,7 @@ fn validate_device_id_via_public_api() {
 
 #[test]
 fn serde_rejects_unknown_fields() {
-    let json = r#"{"schema_version":1,"profiles":[],"unknown_field":"bad"}"#;
+    let json = r#"{"schema_version":1,"profiles":[],"system_io":{"interconnects":[],"storage":[]},"unknown_field":"bad"}"#;
     let result = serde_json::from_str::<AcceleratorRegistry>(json);
     assert!(result.is_err(), "should reject unknown fields");
 }
