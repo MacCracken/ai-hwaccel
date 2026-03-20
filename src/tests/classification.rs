@@ -32,6 +32,8 @@ fn type_classification_npu() {
         AcceleratorType::IntelNpu,
         AcceleratorType::AppleNpu,
         AcceleratorType::AmdXdnaNpu { device_id: 0 },
+        AcceleratorType::SamsungNpu { device_id: 0 },
+        AcceleratorType::MediaTekApu { device_id: 0 },
     ];
     for n in &npus {
         assert!(n.is_npu(), "{:?} should be NPU", n);
@@ -72,6 +74,9 @@ fn type_classification_ai_asic() {
             core_count: 2,
         },
         AcceleratorType::QualcommAi100 { device_id: 0 },
+        AcceleratorType::CerebrasWse { device_id: 0 },
+        AcceleratorType::GraphcoreIpu { device_id: 0 },
+        AcceleratorType::GroqLpu { device_id: 0 },
     ];
     for a in &asics {
         assert!(a.is_ai_asic(), "{:?} should be AI ASIC", a);
@@ -154,6 +159,26 @@ fn type_family_all_variants() {
         AcceleratorType::QualcommAi100 { device_id: 0 }.family(),
         AcceleratorFamily::AiAsic
     );
+    assert_eq!(
+        AcceleratorType::CerebrasWse { device_id: 0 }.family(),
+        AcceleratorFamily::AiAsic
+    );
+    assert_eq!(
+        AcceleratorType::GraphcoreIpu { device_id: 0 }.family(),
+        AcceleratorFamily::AiAsic
+    );
+    assert_eq!(
+        AcceleratorType::GroqLpu { device_id: 0 }.family(),
+        AcceleratorFamily::AiAsic
+    );
+    assert_eq!(
+        AcceleratorType::SamsungNpu { device_id: 0 }.family(),
+        AcceleratorFamily::Npu
+    );
+    assert_eq!(
+        AcceleratorType::MediaTekApu { device_id: 0 }.family(),
+        AcceleratorFamily::Npu
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +243,11 @@ fn throughput_all_positive() {
         },
         AcceleratorType::QualcommAi100 { device_id: 0 },
         AcceleratorType::IntelOneApi { device_id: 0 },
+        AcceleratorType::CerebrasWse { device_id: 0 },
+        AcceleratorType::GraphcoreIpu { device_id: 0 },
+        AcceleratorType::GroqLpu { device_id: 0 },
+        AcceleratorType::SamsungNpu { device_id: 0 },
+        AcceleratorType::MediaTekApu { device_id: 0 },
     ];
     for t in &types {
         assert!(
@@ -244,6 +274,9 @@ fn training_multiplier_inference_only_is_zero() {
             chip_type: NeuronChipType::Inferentia,
             core_count: 2,
         },
+        AcceleratorType::GroqLpu { device_id: 0 },
+        AcceleratorType::SamsungNpu { device_id: 0 },
+        AcceleratorType::MediaTekApu { device_id: 0 },
     ];
     for t in &inference_only {
         assert_eq!(

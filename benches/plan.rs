@@ -82,6 +82,26 @@ fn bench_total_memory(c: &mut Criterion) {
     });
 }
 
+fn bench_json_roundtrip(c: &mut Criterion) {
+    let registry = build_large_registry();
+    let json = serde_json::to_string(&registry).unwrap();
+    let mut group = c.benchmark_group("json_roundtrip");
+    group.bench_function("serialize (13 devices)", |b| {
+        b.iter(|| serde_json::to_string(&registry).unwrap());
+    });
+    group.bench_function("deserialize (13 devices)", |b| {
+        b.iter(|| AcceleratorRegistry::from_json(&json).unwrap());
+    });
+    group.finish();
+}
+
+fn bench_by_family(c: &mut Criterion) {
+    let registry = build_large_registry();
+    c.bench_function("by_family GPU (13 devices)", |b| {
+        b.iter(|| registry.by_family(AcceleratorFamily::Gpu));
+    });
+}
+
 criterion_group!(
     benches,
     bench_plan_sharding,
@@ -92,5 +112,7 @@ criterion_group!(
     bench_estimate_training_memory,
     bench_best_available,
     bench_total_memory,
+    bench_json_roundtrip,
+    bench_by_family,
 );
 criterion_main!(benches);
