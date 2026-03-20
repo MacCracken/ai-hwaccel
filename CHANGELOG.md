@@ -9,52 +9,106 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ### Added
 
+#### System I/O and monitoring
+
 - **VRAM bandwidth probing**: `AcceleratorProfile::memory_bandwidth_gbps`
   calculates theoretical memory throughput from clock speed and bus width.
   NVIDIA via `nvidia-smi --query-gpu=clocks.max.memory` + compute capability
   lookup; AMD via sysfs `pp_dpm_mclk` + PCI device ID lookup. Includes
   fallback tables for known GPU specs.
-- **Runtime VRAM usage**: `AcceleratorProfile` now exposes `memory_used_bytes`
-  and `memory_free_bytes` for CUDA (via `nvidia-smi`) and ROCm (via sysfs).
-- **PCIe link detection**: `AcceleratorProfile::pcie_bandwidth_gbps` reads
-  sysfs `current_link_width`/`current_link_speed` for CUDA and ROCm GPUs.
-- **NUMA topology**: `AcceleratorProfile::numa_node` maps GPUs to their NUMA
-  node via sysfs PCI device info.
-- **Network interconnect detection**: new `SystemIo::interconnects` detects
+- **Runtime VRAM usage**: `memory_used_bytes` and `memory_free_bytes` for
+  CUDA (via `nvidia-smi`) and ROCm (via sysfs).
+- **PCIe link detection**: `pcie_bandwidth_gbps` reads sysfs
+  `current_link_width`/`current_link_speed` for CUDA and ROCm GPUs.
+- **NUMA topology**: `numa_node` maps GPUs to their NUMA node via sysfs PCI
+  device info.
+- **Power and thermal monitoring**: `temperature_c`, `power_watts`,
+  `gpu_utilization_percent` on `AcceleratorProfile`. CUDA via `nvidia-smi`
+  (`temperature.gpu`, `power.draw`, `utilization.gpu`). ROCm via sysfs hwmon
+  (`temp1_input`, `power1_average`, `gpu_busy_percent`).
+- **Network interconnect detection**: `SystemIo::interconnects` detects
   InfiniBand and RoCE via `/sys/class/infiniband/`, NVLink via `nvidia-smi
   nvlink -s`. Exposes bandwidth and link state.
-- **Disk I/O detection**: new `SystemIo::storage` probes `/sys/block/*/queue/`
+- **Disk I/O detection**: `SystemIo::storage` probes `/sys/block/*/queue/`
   to classify NVMe, SATA SSD, and HDD with estimated bandwidth.
 - **Ingestion estimation**: `SystemIo::estimate_ingestion_secs()` estimates
   data loading time given dataset size and detected storage throughput.
 - **New types**: `SystemIo`, `Interconnect`, `InterconnectKind`,
   `StorageDevice`, `StorageKind` — all serializable.
-- **CLI table**: now shows Free VRAM, BW, PCIe bandwidth, NUMA node columns,
-  plus Interconnects and Storage sections.
+
+#### Detection improvements
+
+- **AMD ROCm enrichment**: clock speeds (`pp_dpm_sclk`/`pp_dpm_mclk`),
+  VBIOS version, GPU temperature, power draw, and utilization from sysfs.
+  CXL-attached memory detection for MI300X/MI350.
+- **Vulkan full parsing**: compute queue families, queue counts, and subgroup
+  sizes from full `vulkaninfo` output (not just `--summary`).
+- **NVIDIA Grace Hopper**: detects GH200/GH100 from GPU name, adds 480 GB
+  unified LPDDR5X to reported HBM for capacity planning.
+
+#### New backends (untested — written from documentation)
+
+- **Cerebras WSE**: `cerebras_cli system-info` + `/dev/cerebras*` fallback.
+- **Graphcore IPU**: `gc-info` JSON parsing + `/dev/ipu*` fallback.
+- **Groq LPU**: `/dev/groq*` placeholder (driver not yet public).
+- **Samsung NPU**: `/sys/class/misc/samsung_npu` + `/dev/samsung_npu*`.
+- **MediaTek APU**: `/sys/class/misc/mtk_apu` + `/dev/mtk_mdla*`.
+
+#### API and CLI
+
+- **Schema v2**: `SCHEMA_VERSION` bumped to 2, formalizing all system I/O
+  fields, power/thermal fields, and the `Timeout` error variant.
+- **`DetectionError::Timeout`**: new error variant for timed-out tools,
+  separate from `ToolFailed`. Enables programmatic retry logic.
+- **True async detection**: `detect_async()` now uses
+  `tokio::process::Command` for non-blocking subprocess I/O. CLI backends
+  run as concurrent tokio tasks, sysfs-only backends in a single
+  `spawn_blocking`.
 - **`--columns`**: select specific table columns (`--columns name,mem,bw`).
 - **`--tsv`**: tab-separated output for machine-readable table data.
 - **`--watch` deltas**: memory usage changes shown between refreshes.
 - **`--alert`**: threshold alerts during watch mode (`--alert mem>90`).
-- **`DetectionError::Timeout`**: new error variant for timed-out tools,
-  separate from `ToolFailed`. Enables programmatic retry logic.
-- **Schema v2**: `SCHEMA_VERSION` bumped to 2, formalizing all system I/O
-  fields and the new `Timeout` error variant.
-- **True async detection**: `detect_async()` now uses `tokio::process::Command`
-  for non-blocking subprocess I/O. CLI backends run as concurrent tokio tasks,
-  sysfs-only backends in a single `spawn_blocking`. Replaces the previous
-  `spawn_blocking(detect)` approach.
-- **Docs**: troubleshooting guide, performance tuning guide, migration guide.
-  Expanded crate-level docs with error handling, custom backends, and serde.
+- **CLI table**: now shows Free VRAM, BW, PCIe, NUMA, plus Interconnects
+  and Storage sections.
+
+#### Testing
+
+- **Hardware integration tests**: `tests/hardware_integration.rs` with 17
+  tests covering CPU, ROCm, Vulkan, PCIe, bandwidth, storage, interconnects,
+  JSON roundtrip, and concurrent detection. Auto-skips when hardware absent.
+- **Fuzz testing**: 9 `cargo-fuzz` targets covering all CLI output parsers.
+  Found and fixed integer overflow in CUDA memory parser.
+- **Load testing**: concurrent 4-thread detection test + benchmark.
+- **System I/O benchmarks**: per-backend, serialization, deserialization,
+  and query benchmarks in `benches/detect.rs`.
+
+#### Documentation
+
+- **Troubleshooting guide**: `docs/troubleshooting.md`.
+- **Performance tuning guide**: `docs/performance.md`.
+- **Migration guide**: `docs/migration.md` (v0.19.3 → v0.20.3).
+- **Crate-level docs**: expanded with error handling, custom backends, serde
+  integration, and system I/O examples.
 
 ### Security
 
-- **Subprocess environment sanitization**: `run_tool()` now strips
-  `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, and
-  `DYLD_LIBRARY_PATH` from child processes to prevent library injection.
-- **Windows `which()` improvements**: tries `.exe`, `.cmd`, `.bat`
-  extensions when the tool name has no extension.
+- **Subprocess environment sanitization**: `run_tool()` strips `LD_PRELOAD`,
+  `LD_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, `DYLD_LIBRARY_PATH` from child
+  processes to prevent library injection.
+- **Windows `which()` improvements**: tries `.exe`, `.cmd`, `.bat` extensions
+  when the tool name has no extension.
 - **TOCTOU documentation**: the inherent time-of-check-time-of-use gap
   between path resolution and execution is documented as an accepted risk.
+
+### Fixed
+
+- **Integer overflow in CUDA parser**: `memory.used`/`memory.free` values
+  exceeding u64 range on multiply now use `saturating_mul` with range filter.
+
+### Performance
+
+- **Pre-allocated profile collection**: `Vec::with_capacity(8)` avoids
+  reallocation for typical systems with fewer than 8 accelerators.
 
 ## [0.19.3] - 2026-03-19
 
