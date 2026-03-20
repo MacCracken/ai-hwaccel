@@ -13,16 +13,27 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   build:
-    name: Build (${{ matrix.arch }})
-    runs-on: ubuntu-latest
+    name: Build (${{ matrix.target }})
     needs: [ci]
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            arch: amd64
+            os: ubuntu-latest
+            arch: linux-amd64
           - target: aarch64-unknown-linux-gnu
-            arch: arm64
+            os: ubuntu-latest
+            arch: linux-arm64
+            cross: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            arch: windows-amd64
+            ext: .exe
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            arch: macos-arm64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -31,8 +42,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - name: Install cross-compilation deps (arm64)
-        if: matrix.arch == 'arm64'
+      - name: Install cross-compilation deps (arm64 linux)
+        if: matrix.cross
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
@@ -41,19 +52,31 @@ jobs:
           echo 'linker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
-      - name: Package
+      - name: Package (unix)
+        if: runner.os != 'Windows'
         run: |
           VERSION=$(cat VERSION | tr -d '[:space:]')
-          ARCHIVE="ai-hwaccel-${VERSION}-linux-${{ matrix.arch }}.tar.gz"
+          ARCHIVE="ai-hwaccel-${VERSION}-${{ matrix.arch }}.tar.gz"
           tar czf "${ARCHIVE}" -C target/${{ matrix.target }}/release ai-hwaccel
           sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+        shell: bash
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        run: |
+          $VERSION = (Get-Content VERSION).Trim()
+          $ARCHIVE = "ai-hwaccel-${VERSION}-${{ matrix.arch }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/ai-hwaccel.exe" -DestinationPath $ARCHIVE
+          (Get-FileHash $ARCHIVE -Algorithm SHA256).Hash + "  " + $ARCHIVE | Out-File "${ARCHIVE}.sha256" -Encoding ascii
+        shell: pwsh
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ai-hwaccel-${{ matrix.arch }}
           path: |
             ai-hwaccel-*.tar.gz
-            ai-hwaccel-*.sha256
+            ai-hwaccel-*.tar.gz.sha256
+            ai-hwaccel-*.zip
+            ai-hwaccel-*.zip.sha256
 
   publish:
     name: Publish to crates.io
@@ -96,5 +119,7 @@ jobs:
         with:
           files: |
             ai-hwaccel-*.tar.gz
-            ai-hwaccel-*.sha256
+            ai-hwaccel-*.tar.gz.sha256
+            ai-hwaccel-*.zip
+            ai-hwaccel-*.zip.sha256
           generate_release_notes: true

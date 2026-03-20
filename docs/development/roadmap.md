@@ -45,10 +45,15 @@ becomes available.
 
 ## Testing gaps
 
-- [ ] **Windows integration tests** — current mock tests gate symlinks behind
-  `#[cfg(unix)]`. Need Windows-native mock strategies.
-- [ ] **Benchmark regression CI** — track benchmark numbers across releases
-  to catch performance regressions.
+- [x] **Windows CI** — `windows-latest` runner in CI matrix runs unit tests,
+  integration tests, doc tests, and feature-gated checks.
+- [x] **Benchmark regression CI** — `github-action-benchmark` tracks numbers
+  on main, alerts at 120% threshold, comments on PRs.
+- [x] **Fuzz CI** — all 9 fuzz targets run for 30s each on every push/PR.
+- [x] **Minimal feature testing** — CI tests `--no-default-features` and
+  single-backend builds to catch feature gate issues.
+- [x] **Release builds** — Windows (.zip), macOS ARM, Linux AMD64/ARM64
+  binaries built and published on tag.
 
 ---
 
