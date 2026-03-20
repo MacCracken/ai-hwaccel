@@ -321,6 +321,7 @@ fn hardware_mod_all_variants_have_rank() {
 // CUDA parser: edge cases
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "cuda")]
 #[test]
 fn cuda_parser_empty_fields() {
     let mut profiles = Vec::new();
@@ -336,6 +337,7 @@ fn cuda_parser_empty_fields() {
     assert!(profiles[0].driver_version.is_none());
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn cuda_parser_too_few_fields() {
     let mut profiles = Vec::new();
@@ -345,6 +347,7 @@ fn cuda_parser_too_few_fields() {
     assert_eq!(warnings.len(), 1);
 }
 
+#[cfg(feature = "cuda")]
 #[test]
 fn cuda_parser_grace_hopper() {
     let mut profiles = Vec::new();
@@ -369,6 +372,7 @@ fn cuda_parser_grace_hopper() {
 // Gaudi parser
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "gaudi")]
 #[test]
 fn gaudi_parser_valid_line() {
     let mut profiles = Vec::new();
@@ -392,6 +396,7 @@ fn gaudi_parser_valid_line() {
 // Vulkan parser
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "vulkan")]
 #[test]
 fn vulkan_parser_no_devices() {
     let mut profiles = Vec::new();

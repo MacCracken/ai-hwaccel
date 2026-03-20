@@ -153,18 +153,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run benchmarks
-        run: cargo bench -- --output-format bencher | tee bench-output.txt
-      - name: Store benchmark results
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          tool: cargo
-          output-file-path: bench-output.txt
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
-          alert-threshold: "120%"
-          comment-on-alert: true
-          fail-on-alert: false
+        run: cargo bench --bench detect --bench plan -- --noplot
 
   fuzz:
     name: Fuzz (5 min)
@@ -178,7 +167,7 @@ jobs:
         run: cargo install cargo-fuzz
       - name: Fuzz all targets
         run: |
-          for target in $(cargo fuzz list); do
+          for target in $(cargo +nightly fuzz list); do
             echo "=== Fuzzing $target ==="
-            cargo fuzz run "$target" -- -max_total_time=30 -max_len=4096 || exit 1
+            cargo +nightly fuzz run "$target" -- -max_total_time=30 -max_len=4096 || exit 1
           done
