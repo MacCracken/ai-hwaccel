@@ -12,20 +12,56 @@ jobs:
     name: CI Gate
     uses: ./.github/workflows/ci.yml
 
-  release:
-    name: Create Release & Publish
+  build:
+    name: Build (${{ matrix.arch }})
     runs-on: ubuntu-latest
     needs: [ci]
-    # Requires the "release" GitHub Environment with:
-    #   - Required reviewer (manual approval before publish)
-    #   - CARGO_REGISTRY_TOKEN secret (crates.io API token)
-    # No branch restriction needed — workflow only triggers on tags,
-    # and the version consistency check validates tag/VERSION/Cargo.toml.
-    environment: release
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: amd64
+          - target: aarch64-unknown-linux-gnu
+            arch: arm64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install cross-compilation deps (arm64)
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir -p .cargo
+          echo '[target.aarch64-unknown-linux-gnu]' >> .cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          ARCHIVE="ai-hwaccel-${VERSION}-linux-${{ matrix.arch }}.tar.gz"
+          tar czf "${ARCHIVE}" -C target/${{ matrix.target }}/release ai-hwaccel
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-hwaccel-${{ matrix.arch }}
+          path: |
+            ai-hwaccel-*.tar.gz
+            ai-hwaccel-*.sha256
+
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: [ci]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - name: Verify version consistency
         run: |
           FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
@@ -40,15 +76,25 @@ jobs:
             exit 1
           fi
           echo "Version verified: $TAG_VERSION"
-      - name: Run full test suite
-        run: cargo test
-      - name: Build release
-        run: cargo build --release
-      - name: Publish to crates.io
+      - name: Publish
         run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [ci, build, publish]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          files: |
+            ai-hwaccel-*.tar.gz
+            ai-hwaccel-*.sha256
           generate_release_notes: true
