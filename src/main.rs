@@ -133,15 +133,20 @@ fn print_table(registry: &AcceleratorRegistry, sort_by: Option<&str>, family_fil
     }
 
     println!(
-        "{:<6} {:<30} {:>10} {:>10} {:>8} {:>6} {:>8}",
-        "ID", "Device", "Memory", "Free", "PCIe", "NUMA", "Status"
+        "{:<6} {:<28} {:>10} {:>10} {:>10} {:>8} {:>6} {:>8}",
+        "ID", "Device", "Memory", "Free", "BW", "PCIe", "NUMA", "Status"
     );
-    println!("{}", "-".repeat(82));
+    println!("{}", "-".repeat(90));
 
     for (i, p) in profiles.iter().enumerate() {
         let mem_gb = p.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
         let free_str = match p.memory_free_bytes {
             Some(b) => format!("{:.1} GB", b as f64 / (1024.0 * 1024.0 * 1024.0)),
+            None => "-".into(),
+        };
+        let bw_str = match p.memory_bandwidth_gbps {
+            Some(bw) if bw >= 1000.0 => format!("{:.1} TB/s", bw / 1000.0),
+            Some(bw) => format!("{:.0} GB/s", bw),
             None => "-".into(),
         };
         let pcie_str = match p.pcie_bandwidth_gbps {
@@ -154,11 +159,12 @@ fn print_table(registry: &AcceleratorRegistry, sort_by: Option<&str>, family_fil
         };
         let status = if p.available { "ok" } else { "unavail" };
         println!(
-            "{:<6} {:<30} {:>7.1} GB {:>10} {:>8} {:>6} {:>8}",
+            "{:<6} {:<28} {:>7.1} GB {:>10} {:>10} {:>8} {:>6} {:>8}",
             i,
-            truncate(&p.accelerator.to_string(), 30),
+            truncate(&p.accelerator.to_string(), 28),
             mem_gb,
             free_str,
+            bw_str,
             pcie_str,
             numa_str,
             status,

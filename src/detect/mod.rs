@@ -4,6 +4,7 @@
 mod amd_xdna;
 #[cfg(feature = "apple")]
 mod apple;
+mod bandwidth;
 pub(crate) mod command;
 #[cfg(feature = "cuda")]
 mod cuda;
@@ -183,7 +184,8 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
         all_profiles.retain(|p| !matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
     }
 
-    // Post-pass: enrich profiles with PCIe bandwidth and NUMA topology.
+    // Post-pass: enrich profiles with memory bandwidth, PCIe, and NUMA.
+    bandwidth::enrich_bandwidth(&mut all_profiles, &mut all_warnings);
     pcie::enrich_pcie(&mut all_profiles);
     numa::enrich_numa(&mut all_profiles);
 

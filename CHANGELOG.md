@@ -9,6 +9,11 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ### Added
 
+- **VRAM bandwidth probing**: `AcceleratorProfile::memory_bandwidth_gbps`
+  calculates theoretical memory throughput from clock speed and bus width.
+  NVIDIA via `nvidia-smi --query-gpu=clocks.max.memory` + compute capability
+  lookup; AMD via sysfs `pp_dpm_mclk` + PCI device ID lookup. Includes
+  fallback tables for known GPU specs.
 - **Runtime VRAM usage**: `AcceleratorProfile` now exposes `memory_used_bytes`
   and `memory_free_bytes` for CUDA (via `nvidia-smi`) and ROCm (via sysfs).
 - **PCIe link detection**: `AcceleratorProfile::pcie_bandwidth_gbps` reads

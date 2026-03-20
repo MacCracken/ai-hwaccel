@@ -14,9 +14,9 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 Hardware bandwidth and topology detection beyond device enumeration.
 
-- [ ] **VRAM bandwidth probing** — benchmark actual memory throughput per
-  device via `nvidia-smi -q -d MEMORY`, `rocm-smi --showmeminfo`. Expose
-  as `AcceleratorProfile::memory_bandwidth_gbps`.
+- [x] **VRAM bandwidth probing** — calculate memory bandwidth from clock speed
+  and bus width. NVIDIA via `nvidia-smi --query-gpu=clocks.max.memory`, AMD
+  via sysfs `pp_dpm_mclk`. Exposed as `AcceleratorProfile::memory_bandwidth_gbps`.
 - [x] **Runtime VRAM usage** — current used/free VRAM (not just total) for
   live capacity planning. Parse `nvidia-smi` and ROCm sysfs for used/free.
 - [x] **PCIe link detection** — read sysfs `current_link_width`/`current_link_speed`
