@@ -188,6 +188,7 @@ pub mod quantization;
 pub mod registry;
 pub mod requirement;
 pub mod sharding;
+pub mod system_io;
 pub mod training;
 
 pub use cache::CachedRegistry;
@@ -200,6 +201,7 @@ pub use quantization::QuantizationLevel;
 pub use registry::{AcceleratorRegistry, Backend, DetectBuilder, SCHEMA_VERSION};
 pub use requirement::AcceleratorRequirement;
 pub use sharding::{ModelShard, ShardingPlan, ShardingStrategy};
+pub use system_io::{Interconnect, InterconnectKind, StorageDevice, StorageKind, SystemIo};
 pub use training::{MemoryEstimate, TrainingMethod, TrainingTarget, estimate_training_memory};
 
 #[cfg(test)]

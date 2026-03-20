@@ -6,7 +6,7 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 ## Pre-v1
 
-- [ ] Publish `0.19.3` to crates.io.
+- [x] Publish `0.19.3` to crates.io.
 
 ---
 
@@ -17,20 +17,20 @@ Hardware bandwidth and topology detection beyond device enumeration.
 - [ ] **VRAM bandwidth probing** — benchmark actual memory throughput per
   device via `nvidia-smi -q -d MEMORY`, `rocm-smi --showmeminfo`. Expose
   as `AcceleratorProfile::memory_bandwidth_gbps`.
-- [ ] **Runtime VRAM usage** — current used/free VRAM (not just total) for
-  live capacity planning. Parse `nvidia-smi -q -d MEMORY` free field.
-- [ ] **PCIe link detection** — read `lspci -vv` for link width/speed to
-  estimate host-to-device transfer rates. Expose as
+- [x] **Runtime VRAM usage** — current used/free VRAM (not just total) for
+  live capacity planning. Parse `nvidia-smi` and ROCm sysfs for used/free.
+- [x] **PCIe link detection** — read sysfs `current_link_width`/`current_link_speed`
+  to estimate host-to-device transfer rates. Expose as
   `AcceleratorProfile::pcie_bandwidth_gbps`.
-- [ ] **NUMA topology** — parse `/sys/devices/system/node/` to map which GPUs
-  are on which NUMA node. Expose as `AcceleratorProfile::numa_node`.
-- [ ] **Network interconnect detection** — detect InfiniBand, RoCE, NVLink
-  via `ibstat`, `ibv_devinfo`, `nvidia-smi nvlink -s`. Critical for
+- [x] **NUMA topology** — read `/sys/bus/pci/devices/<addr>/numa_node` to map
+  which GPUs are on which NUMA node. Expose as `AcceleratorProfile::numa_node`.
+- [x] **Network interconnect detection** — detect InfiniBand, RoCE via
+  `/sys/class/infiniband/`, NVLink via `nvidia-smi nvlink -s`. Critical for
   multi-node training planning.
-- [ ] **Disk I/O throughput** — probe `/sys/block/*/queue/` for NVMe vs HDD,
-  detect RAID. Estimate data loading bottlenecks.
-- [ ] **Network ingestion estimation** — given dataset size + detected network
-  bandwidth, estimate data loading time for training jobs.
+- [x] **Disk I/O throughput** — probe `/sys/block/*/queue/` for NVMe vs HDD.
+  Estimate data loading bottlenecks.
+- [x] **Network ingestion estimation** — `SystemIo::estimate_ingestion_secs()`
+  estimates data loading time given dataset size + detected storage bandwidth.
 
 ---
 

@@ -69,6 +69,11 @@ pub(crate) fn detect_gaudi(
             memory_bytes: mem_total_mb * 1024 * 1024,
             compute_capability: Some(generation.to_string()),
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         });
     }
 }

@@ -7,14 +7,18 @@ mod apple;
 pub(crate) mod command;
 #[cfg(feature = "cuda")]
 mod cuda;
+pub(crate) mod disk;
 #[cfg(feature = "gaudi")]
 mod gaudi;
+pub(crate) mod interconnect;
 #[cfg(feature = "intel-npu")]
 mod intel_npu;
 #[cfg(feature = "intel-oneapi")]
 mod intel_oneapi;
 #[cfg(feature = "aws-neuron")]
 mod neuron;
+mod numa;
+mod pcie;
 #[cfg(feature = "qualcomm")]
 mod qualcomm;
 #[cfg(feature = "rocm")]
@@ -32,6 +36,7 @@ use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 use crate::registry::{AcceleratorRegistry, Backend, DetectBuilder};
+use crate::system_io::SystemIo;
 
 /// Per-backend detection result.
 type DetectResult = (Vec<AcceleratorProfile>, Vec<DetectionError>);
@@ -178,15 +183,30 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
         all_profiles.retain(|p| !matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
     }
 
+    // Post-pass: enrich profiles with PCIe bandwidth and NUMA topology.
+    pcie::enrich_pcie(&mut all_profiles);
+    numa::enrich_numa(&mut all_profiles);
+
+    // Detect system-level I/O: interconnects and storage.
+    let system_interconnects = interconnect::detect_interconnects(&mut all_warnings);
+    let system_storage = disk::detect_storage();
+    let system_io = SystemIo {
+        interconnects: system_interconnects,
+        storage: system_storage,
+    };
+
     debug!(
         count = all_profiles.len(),
         warnings = all_warnings.len(),
+        interconnects = system_io.interconnects.len(),
+        storage_devices = system_io.storage.len(),
         "accelerator detection complete"
     );
     AcceleratorRegistry {
         schema_version: crate::registry::SCHEMA_VERSION,
         profiles: all_profiles,
         warnings: all_warnings,
+        system_io,
     }
 }
 
@@ -202,6 +222,11 @@ pub(crate) fn cpu_profile() -> AcceleratorProfile {
         memory_bytes: detect_cpu_memory(),
         compute_capability: None,
         driver_version: None,
+        memory_bandwidth_gbps: None,
+        memory_used_bytes: None,
+        memory_free_bytes: None,
+        pcie_bandwidth_gbps: None,
+        numa_node: None,
     }
 }
 

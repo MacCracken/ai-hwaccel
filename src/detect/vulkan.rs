@@ -38,6 +38,11 @@ pub(crate) fn detect_vulkan(
             memory_bytes: 4 * 1024 * 1024 * 1024,
             compute_capability: None,
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         });
     } else {
         for (i, dev) in devices.into_iter().enumerate() {
@@ -51,6 +56,11 @@ pub(crate) fn detect_vulkan(
                 memory_bytes: dev.memory_mb * 1024 * 1024,
                 compute_capability: dev.api_version,
                 driver_version: dev.driver_version,
+                memory_bandwidth_gbps: None,
+                memory_used_bytes: None,
+                memory_free_bytes: None,
+                pcie_bandwidth_gbps: None,
+                numa_node: None,
             });
         }
     }

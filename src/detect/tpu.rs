@@ -50,6 +50,11 @@ pub(crate) fn detect_tpu(
             memory_bytes: hbm,
             compute_capability: Some(format!("TPU {}", version)),
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         });
     }
 }

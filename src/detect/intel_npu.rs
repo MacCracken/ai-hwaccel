@@ -20,6 +20,11 @@ pub(crate) fn detect_intel_npu(
             memory_bytes: 2 * 1024 * 1024 * 1024,
             compute_capability: None,
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         });
     }
 }

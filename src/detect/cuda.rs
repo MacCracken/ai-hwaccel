@@ -15,7 +15,7 @@ pub(crate) fn detect_cuda(
     let output = match run_tool(
         "nvidia-smi",
         &[
-            "--query-gpu=index,memory.total,compute_cap,driver_version",
+            "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version",
             "--format=csv,noheader,nounits",
         ],
         DEFAULT_TIMEOUT,
@@ -30,10 +30,10 @@ pub(crate) fn detect_cuda(
 
     for line in output.stdout.lines() {
         let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-        if parts.len() < 4 {
+        if parts.len() < 6 {
             warnings.push(DetectionError::ParseError {
                 backend: "cuda".into(),
-                message: format!("expected 4 CSV fields, got {}: {}", parts.len(), line),
+                message: format!("expected 6 CSV fields, got {}: {}", parts.len(), line),
             });
             continue;
         }
@@ -52,10 +52,12 @@ pub(crate) fn detect_cuda(
                 continue;
             }
         };
-        let compute_cap = parts[2].to_string();
-        let driver_version = parts[3].to_string();
+        let mem_used_mb: Option<u64> = parts[2].parse().ok();
+        let mem_free_mb: Option<u64> = parts[3].parse().ok();
+        let compute_cap = parts[4].to_string();
+        let driver_version = parts[5].to_string();
 
-        debug!(device_id, mem_total_mb, %driver_version, "NVIDIA CUDA GPU detected");
+        debug!(device_id, mem_total_mb, ?mem_used_mb, ?mem_free_mb, %driver_version, "NVIDIA CUDA GPU detected");
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::CudaGpu { device_id },
             available: true,
@@ -70,6 +72,11 @@ pub(crate) fn detect_cuda(
             } else {
                 Some(driver_version)
             },
+            memory_bandwidth_gbps: None, // Enriched in post-pass if available
+            memory_used_bytes: mem_used_mb.map(|mb| mb * 1024 * 1024),
+            memory_free_bytes: mem_free_mb.map(|mb| mb * 1024 * 1024),
+            pcie_bandwidth_gbps: None, // Enriched by pcie module
+            numa_node: None,           // Enriched by numa module
         });
     }
 }

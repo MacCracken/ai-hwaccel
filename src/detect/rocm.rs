@@ -39,6 +39,8 @@ pub(crate) fn detect_rocm(
 
         let mem_total = read_sysfs_u64(&device_dir.join("mem_info_vram_total"))
             .unwrap_or(8 * 1024 * 1024 * 1024);
+        let mem_used = read_sysfs_u64(&device_dir.join("mem_info_vram_used"));
+        let mem_free = mem_used.map(|used| mem_total.saturating_sub(used));
 
         debug!(device_id, "AMD ROCm GPU detected via sysfs");
         profiles.push(AcceleratorProfile {
@@ -47,6 +49,11 @@ pub(crate) fn detect_rocm(
             memory_bytes: mem_total,
             compute_capability: None,
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: mem_used,
+            memory_free_bytes: mem_free,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         });
         device_id += 1;
     }

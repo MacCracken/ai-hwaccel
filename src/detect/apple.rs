@@ -64,6 +64,11 @@ fn detect_macos(
         memory_bytes,
         compute_capability: compute_cap.clone(),
         driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
     });
 
     profiles.push(AcceleratorProfile {
@@ -72,6 +77,11 @@ fn detect_macos(
         memory_bytes: estimate_ane_memory(&compute_cap),
         compute_capability: compute_cap,
         driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
     });
 
     true
@@ -89,6 +99,11 @@ fn detect_linux_device_tree(profiles: &mut Vec<AcceleratorProfile>) {
             memory_bytes: 16 * 1024 * 1024 * 1024,
             compute_capability: None,
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         });
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::AppleNpu,
@@ -96,6 +111,11 @@ fn detect_linux_device_tree(profiles: &mut Vec<AcceleratorProfile>) {
             memory_bytes: 4 * 1024 * 1024 * 1024,
             compute_capability: None,
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         });
     }
 }

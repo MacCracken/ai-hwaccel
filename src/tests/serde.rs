@@ -103,6 +103,11 @@ fn serde_accelerator_profile_roundtrip() {
             memory_bytes: 24 * 1024 * 1024 * 1024,
             compute_capability: Some("8.9".into()),
             driver_version: Some("545.29.06".into()),
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         },
     ];
     for p in &profiles {
@@ -312,6 +317,11 @@ fn serde_registry_roundtrip() {
         memory_bytes: 24 * 1024 * 1024 * 1024,
         compute_capability: Some("8.6".into()),
         driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
     });
     let json = serde_json::to_string(&reg).unwrap();
     let back: AcceleratorRegistry = serde_json::from_str(&json).unwrap();

@@ -133,21 +133,34 @@ fn print_table(registry: &AcceleratorRegistry, sort_by: Option<&str>, family_fil
     }
 
     println!(
-        "{:<6} {:<35} {:>10} {:>8} {:>12}",
-        "ID", "Device", "Memory", "Family", "Status"
+        "{:<6} {:<30} {:>10} {:>10} {:>8} {:>6} {:>8}",
+        "ID", "Device", "Memory", "Free", "PCIe", "NUMA", "Status"
     );
-    println!("{}", "-".repeat(75));
+    println!("{}", "-".repeat(82));
 
     for (i, p) in profiles.iter().enumerate() {
         let mem_gb = p.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
-        let family = p.accelerator.family();
+        let free_str = match p.memory_free_bytes {
+            Some(b) => format!("{:.1} GB", b as f64 / (1024.0 * 1024.0 * 1024.0)),
+            None => "-".into(),
+        };
+        let pcie_str = match p.pcie_bandwidth_gbps {
+            Some(bw) => format!("{:.1}", bw),
+            None => "-".into(),
+        };
+        let numa_str = match p.numa_node {
+            Some(n) => n.to_string(),
+            None => "-".into(),
+        };
         let status = if p.available { "ok" } else { "unavail" };
         println!(
-            "{:<6} {:<35} {:>7.1} GB {:>8} {:>12}",
+            "{:<6} {:<30} {:>7.1} GB {:>10} {:>8} {:>6} {:>8}",
             i,
-            truncate(&p.accelerator.to_string(), 35),
+            truncate(&p.accelerator.to_string(), 30),
             mem_gb,
-            family,
+            free_str,
+            pcie_str,
+            numa_str,
             status,
         );
     }
@@ -183,6 +196,30 @@ fn print_table(registry: &AcceleratorRegistry, sort_by: Option<&str>, family_fil
         .collect();
     if !counts.is_empty() {
         println!("       {}", counts.join(", "));
+    }
+
+    // System I/O summary
+    let sio = registry.system_io();
+    if !sio.interconnects.is_empty() {
+        println!();
+        println!("Interconnects:");
+        for ic in &sio.interconnects {
+            let state = ic.state.as_deref().unwrap_or("unknown");
+            println!(
+                "  {} ({}) — {:.1} GB/s [{}]",
+                ic.name, ic.kind, ic.bandwidth_gbps, state
+            );
+        }
+    }
+    if !sio.storage.is_empty() {
+        println!();
+        println!("Storage:");
+        for dev in &sio.storage {
+            println!(
+                "  {} ({}) — {:.1} GB/s est.",
+                dev.name, dev.kind, dev.bandwidth_gbps
+            );
+        }
     }
 
     if !registry.warnings().is_empty() {

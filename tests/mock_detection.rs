@@ -200,6 +200,11 @@ fn suggest_quantization_qualcomm_does_not_return_bf16() {
             memory_bytes: 32 * 1024 * 1024 * 1024,
             compute_capability: None,
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         },
     ]);
     let q = reg.suggest_quantization(7_000_000_000);

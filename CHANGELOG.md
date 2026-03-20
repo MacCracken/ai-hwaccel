@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [0.20.3] - Unreleased
+
+### Added
+
+- **Runtime VRAM usage**: `AcceleratorProfile` now exposes `memory_used_bytes`
+  and `memory_free_bytes` for CUDA (via `nvidia-smi`) and ROCm (via sysfs).
+- **PCIe link detection**: `AcceleratorProfile::pcie_bandwidth_gbps` reads
+  sysfs `current_link_width`/`current_link_speed` for CUDA and ROCm GPUs.
+- **NUMA topology**: `AcceleratorProfile::numa_node` maps GPUs to their NUMA
+  node via sysfs PCI device info.
+- **Network interconnect detection**: new `SystemIo::interconnects` detects
+  InfiniBand and RoCE via `/sys/class/infiniband/`, NVLink via `nvidia-smi
+  nvlink -s`. Exposes bandwidth and link state.
+- **Disk I/O detection**: new `SystemIo::storage` probes `/sys/block/*/queue/`
+  to classify NVMe, SATA SSD, and HDD with estimated bandwidth.
+- **Ingestion estimation**: `SystemIo::estimate_ingestion_secs()` estimates
+  data loading time given dataset size and detected storage throughput.
+- **New types**: `SystemIo`, `Interconnect`, `InterconnectKind`,
+  `StorageDevice`, `StorageKind` — all serializable.
+- **CLI table**: now shows Free VRAM, PCIe bandwidth, NUMA node columns,
+  plus Interconnects and Storage sections.
+
 ## [0.19.3] - 2026-03-19
 
 ### Performance

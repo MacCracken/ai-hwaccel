@@ -31,6 +31,24 @@ pub struct AcceleratorProfile {
     pub compute_capability: Option<String>,
     /// Driver version string.
     pub driver_version: Option<String>,
+
+    // --- System I/O fields (0.20) -------------------------------------------
+
+    /// Measured memory bandwidth in GB/s (e.g. HBM throughput).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_bandwidth_gbps: Option<f64>,
+    /// Currently used device memory in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_used_bytes: Option<u64>,
+    /// Currently free device memory in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_free_bytes: Option<u64>,
+    /// PCIe host-to-device bandwidth in GB/s (theoretical max from link width × speed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pcie_bandwidth_gbps: Option<f64>,
+    /// NUMA node this device is attached to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numa_node: Option<u32>,
 }
 
 impl AcceleratorProfile {
@@ -117,6 +135,11 @@ impl AcceleratorProfile {
             memory_bytes: vram_bytes,
             compute_capability: None,
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         }
     }
 
@@ -128,6 +151,11 @@ impl AcceleratorProfile {
             memory_bytes: vram_bytes,
             compute_capability: None,
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         }
     }
 
@@ -146,6 +174,11 @@ impl AcceleratorProfile {
             memory_bytes: hbm,
             compute_capability: Some(format!("TPU {}", version)),
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         }
     }
 
@@ -160,6 +193,11 @@ impl AcceleratorProfile {
             memory_bytes: generation.hbm_bytes(),
             compute_capability: Some(generation.to_string()),
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         }
     }
 
@@ -171,6 +209,11 @@ impl AcceleratorProfile {
             memory_bytes,
             compute_capability: None,
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         }
     }
 }

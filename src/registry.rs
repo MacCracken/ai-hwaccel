@@ -5,6 +5,7 @@ use crate::hardware::{AcceleratorFamily, AcceleratorType};
 use crate::profile::AcceleratorProfile;
 use crate::quantization::QuantizationLevel;
 use crate::requirement::AcceleratorRequirement;
+use crate::system_io::SystemIo;
 
 /// Registry of detected hardware accelerators with planning helpers.
 ///
@@ -37,6 +38,9 @@ pub struct AcceleratorRegistry {
     /// Non-fatal warnings encountered during detection.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) warnings: Vec<DetectionError>,
+    /// System-level I/O topology (interconnects, storage).
+    #[serde(default = "SystemIo::empty")]
+    pub(crate) system_io: SystemIo,
 }
 
 fn default_schema_version() -> u32 {
@@ -50,6 +54,7 @@ impl AcceleratorRegistry {
             schema_version: SCHEMA_VERSION,
             profiles: vec![crate::detect::cpu_profile()],
             warnings: vec![],
+            system_io: SystemIo::empty(),
         }
     }
 
@@ -59,6 +64,7 @@ impl AcceleratorRegistry {
             schema_version: SCHEMA_VERSION,
             profiles,
             warnings: vec![],
+            system_io: SystemIo::empty(),
         }
     }
 
@@ -154,6 +160,12 @@ impl AcceleratorRegistry {
     /// Add a profile manually (for testing or manual config).
     pub fn add_profile(&mut self, profile: AcceleratorProfile) {
         self.profiles.push(profile);
+    }
+
+    /// System-level I/O topology (interconnects, storage).
+    #[inline]
+    pub fn system_io(&self) -> &SystemIo {
+        &self.system_io
     }
 
     /// Estimate memory required for `model_params` parameters at the given quantisation.

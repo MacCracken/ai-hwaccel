@@ -20,6 +20,11 @@ pub(crate) fn detect_qualcomm_ai100(
             memory_bytes: 32 * 1024 * 1024 * 1024,
             compute_capability: Some("AI 100".into()),
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         });
         return;
     }
@@ -34,6 +39,11 @@ pub(crate) fn detect_qualcomm_ai100(
                 memory_bytes: 32 * 1024 * 1024 * 1024,
                 compute_capability: Some("AI 100".into()),
                 driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
             });
             return;
         }

@@ -42,6 +42,11 @@ pub(crate) fn detect_aws_neuron(
                     memory_bytes: mem_total,
                     compute_capability: Some(format!("Neuron {}", chip_type)),
                     driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
                 });
             }
             return;
@@ -89,6 +94,11 @@ pub(crate) fn detect_aws_neuron(
             memory_bytes: mem,
             compute_capability: Some(format!("Neuron {}", chip_type)),
             driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         });
     }
 }

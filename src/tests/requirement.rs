@@ -18,6 +18,11 @@ fn requirement_satisfied_by_all_types() {
         memory_bytes: 32 * 1024 * 1024 * 1024,
         compute_capability: None,
         driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
     };
     let npu = AcceleratorProfile {
         accelerator: AcceleratorType::IntelNpu,
@@ -25,6 +30,11 @@ fn requirement_satisfied_by_all_types() {
         memory_bytes: 2 * 1024 * 1024 * 1024,
         compute_capability: None,
         driver_version: None,
+            memory_bandwidth_gbps: None,
+            memory_used_bytes: None,
+            memory_free_bytes: None,
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
     };
 
     // None satisfied by anything
