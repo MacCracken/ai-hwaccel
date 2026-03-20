@@ -35,10 +35,9 @@ pub(crate) async fn detect_metal_and_ane_async() -> super::DetectResult {
     if let Ok(output) =
         super::command::run_tool_async("system_profiler", SYSTEM_PROFILER_ARGS, DEFAULT_TIMEOUT)
             .await
+        && parse_system_profiler_output(&output.stdout, &mut profiles, &mut warnings)
     {
-        if parse_system_profiler_output(&output.stdout, &mut profiles, &mut warnings) {
-            return (profiles, warnings);
-        }
+        return (profiles, warnings);
     }
 
     // Fallback: Linux (Asahi) device-tree detection (sync sysfs, runs inline).
