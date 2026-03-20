@@ -197,7 +197,7 @@ fn parse_vulkan_summary(output: &str) -> Vec<VulkanDevice> {
             let value = value.trim();
 
             match key {
-                "deviceName" => current_name = value.to_string(),
+                "deviceName" => current_name = value.chars().take(256).collect(),
                 "apiVersion" => current_api = Some(value.to_string()),
                 "driverVersion" => current_driver = Some(value.to_string()),
                 _ => {}

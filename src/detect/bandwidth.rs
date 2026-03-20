@@ -211,7 +211,7 @@ fn probe_rocm_bandwidth(device_id: u32) -> Option<f64> {
 fn read_rocm_bandwidth(device_dir: &Path) -> Option<f64> {
     // Read max memory clock from pp_dpm_mclk
     // Format: "0: 96Mhz\n1: 1000Mhz *\n" — last entry is typically max
-    let dpm_mclk = std::fs::read_to_string(device_dir.join("pp_dpm_mclk")).ok()?;
+    let dpm_mclk = super::read_sysfs_string(&device_dir.join("pp_dpm_mclk"), 4096)?;
     let max_mclk_mhz = parse_max_dpm_clock(&dpm_mclk)?;
 
     // Read memory bus width from mem_info_vram_total + device heuristic

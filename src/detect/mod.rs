@@ -332,6 +332,15 @@ pub(super) fn read_sysfs_u64(path: &Path) -> Option<u64> {
         .and_then(|s| s.trim().parse().ok())
 }
 
+/// Read a string from a sysfs file, capped at `max_bytes` to prevent DoS.
+pub(super) fn read_sysfs_string(path: &Path, max_bytes: usize) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    if meta.len() > max_bytes as u64 {
+        return None;
+    }
+    std::fs::read_to_string(path).ok()
+}
+
 // ---------------------------------------------------------------------------
 // True async detection (requires `async-detect` feature)
 // ---------------------------------------------------------------------------

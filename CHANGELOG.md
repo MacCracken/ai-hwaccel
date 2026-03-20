@@ -104,6 +104,29 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 - **Integer overflow in CUDA parser**: `memory.used`/`memory.free` values
   exceeding u64 range on multiply now use `saturating_mul` with range filter.
+  Found via fuzz testing.
+- **Unbounded CSV field parsing**: CUDA parser now caps CSV splits to 20
+  fields to prevent memory exhaustion from malicious `nvidia-smi` output.
+- **Path traversal in PCI address handling**: PCI addresses in `pcie.rs`
+  and `numa.rs` are now validated (hex+colon+dot only) and paths are
+  canonicalized to prevent symlink-based information disclosure.
+- **Grace Hopper memory validation**: unified memory is only added when
+  reported HBM is in the realistic 80–100 GB range (prevents miscalculation
+  from malformed nvidia-smi output).
+- **Silent device ID fallback**: TPU and Neuron `/dev` parsers now skip
+  malformed device names instead of silently mapping them to device 0.
+- **Unbounded Vulkan device name**: `vulkaninfo` device names capped at
+  256 characters to prevent memory exhaustion.
+- **Defensive CSV bounds**: CUDA parser uses `.get()` for all field access
+  instead of direct indexing.
+- **Neuron JSON defaults removed**: malformed `neuron-ls` JSON devices are
+  now skipped instead of using fabricated defaults (2 cores, 8192 MB).
+- **Sysfs file size cap**: new `read_sysfs_string()` helper checks file
+  size before reading (default 4 KiB cap) to prevent DoS via oversized
+  sysfs files. Applied to ROCm VBIOS, revision, and DPM clock reads.
+- **Subprocess zombie prevention**: `child.kill()` in timeout handler now
+  polls `try_wait()` for up to 100ms instead of blocking `wait()` to avoid
+  hanging on zombie processes.
 
 ### Performance
 

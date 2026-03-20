@@ -40,9 +40,12 @@ pub(crate) fn enrich_pcie(profiles: &mut [AcceleratorProfile]) {
 
         if let Some(addr) = addr {
             let device_path = format!("/sys/bus/pci/devices/{}", addr);
-            if let Some(bw) = read_pcie_bandwidth(Path::new(&device_path)) {
-                debug!(addr = %addr, bandwidth_gbps = bw, "PCIe link detected");
-                profile.pcie_bandwidth_gbps = Some(bw);
+            if let Ok(canonical) = std::fs::canonicalize(&device_path) {
+                if !canonical.starts_with("/sys/") { continue; }
+                if let Some(bw) = read_pcie_bandwidth(&canonical) {
+                    debug!(addr = %addr, bandwidth_gbps = bw, "PCIe link detected");
+                    profile.pcie_bandwidth_gbps = Some(bw);
+                }
             }
         }
     }
@@ -62,7 +65,7 @@ fn list_driver_pci_addrs(driver: &str) -> Vec<String> {
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
             // PCI addresses look like "0000:01:00.0"
-            if name.contains(':') && name.contains('.') {
+            if name.contains(':') && name.contains('.') && name.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') {
                 Some(name)
             } else {
                 None

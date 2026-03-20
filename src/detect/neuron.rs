@@ -53,8 +53,8 @@ pub(crate) fn parse_neuron_output(
     {
         for (i, device) in devices.iter().enumerate() {
             let model = device["model"].as_str().unwrap_or("Neuron Device");
-            let nc_count = device["nc_count"].as_u64().unwrap_or(2) as u32;
-            let mem_per_nc = device["memory_per_nc_mb"].as_u64().unwrap_or(8192);
+            let Some(nc_count) = device["nc_count"].as_u64().map(|n| n as u32) else { continue };
+            let Some(mem_per_nc) = device["memory_per_nc_mb"].as_u64() else { continue };
             let mem_total = (nc_count as u64)
                 .saturating_mul(mem_per_nc)
                 .saturating_mul(1024 * 1024);
@@ -108,7 +108,10 @@ fn detect_neuron_dev_fallback(profiles: &mut Vec<AcceleratorProfile>) {
         if suffix.is_empty() || !suffix.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        let device_id: u32 = suffix.parse().unwrap_or(0);
+        let device_id: u32 = match suffix.parse() {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
 
         let chip_type = if std::fs::read_to_string("/sys/devices/virtual/dmi/id/product_name")
             .unwrap_or_default()

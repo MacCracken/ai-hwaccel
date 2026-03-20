@@ -66,14 +66,12 @@ pub(crate) fn detect_rocm(
         let gpu_busy = read_sysfs_u64(&device_dir.join("gpu_busy_percent"));
 
         // Firmware / VBIOS version.
-        let vbios = std::fs::read_to_string(device_dir.join("vbios_version"))
-            .ok()
+        let vbios = super::read_sysfs_string(&device_dir.join("vbios_version"), 4096)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
 
         // Compute capability from revision.
-        let compute_cap = std::fs::read_to_string(device_dir.join("revision"))
-            .ok()
+        let compute_cap = super::read_sysfs_string(&device_dir.join("revision"), 4096)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
 
@@ -120,7 +118,7 @@ pub(crate) fn detect_rocm(
 ///
 /// Format: lines like `0: 200Mhz`, `1: 400Mhz *` — the `*` marks active.
 fn read_current_dpm_clock(path: &Path) -> Option<u64> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = super::read_sysfs_string(path, 4096)?;
     for line in content.lines() {
         if !line.contains('*') {
             continue;

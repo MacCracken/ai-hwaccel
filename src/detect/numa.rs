@@ -37,13 +37,17 @@ pub(crate) fn enrich_numa(profiles: &mut [AcceleratorProfile]) {
         };
 
         if let Some(addr) = addr {
-            let numa_path = format!("/sys/bus/pci/devices/{}/numa_node", addr);
-            if let Ok(contents) = std::fs::read_to_string(&numa_path)
-                && let Ok(node) = contents.trim().parse::<i32>()
-                && node >= 0
-            {
-                debug!(addr = %addr, numa_node = node, "NUMA node detected");
-                profile.numa_node = Some(node as u32);
+            let device_path = format!("/sys/bus/pci/devices/{}", addr);
+            if let Ok(canonical) = std::fs::canonicalize(&device_path) {
+                if !canonical.starts_with("/sys/") { continue; }
+                let numa_path = canonical.join("numa_node");
+                if let Ok(contents) = std::fs::read_to_string(&numa_path)
+                    && let Ok(node) = contents.trim().parse::<i32>()
+                    && node >= 0
+                {
+                    debug!(addr = %addr, numa_node = node, "NUMA node detected");
+                    profile.numa_node = Some(node as u32);
+                }
             }
         }
     }
@@ -62,7 +66,7 @@ fn list_driver_pci_addrs(driver: &str) -> Vec<String> {
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            if name.contains(':') && name.contains('.') {
+            if name.contains(':') && name.contains('.') && name.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') {
                 Some(name)
             } else {
                 None

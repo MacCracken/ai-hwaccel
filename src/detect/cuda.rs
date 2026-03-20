@@ -50,7 +50,7 @@ pub(crate) fn parse_cuda_output(
     warnings: &mut Vec<DetectionError>,
 ) {
     for line in stdout.lines() {
-        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        let parts: Vec<&str> = line.split(',').take(20).map(|s| s.trim()).collect();
         // Accept 6 fields (legacy) or 7 (with gpu name).
         if parts.len() < 6 {
             warnings.push(DetectionError::ParseError {
@@ -76,8 +76,8 @@ pub(crate) fn parse_cuda_output(
         };
         let mem_used_mb: Option<u64> = parts[2].parse().ok().filter(|&v| v <= 16 * 1024 * 1024);
         let mem_free_mb: Option<u64> = parts[3].parse().ok().filter(|&v| v <= 16 * 1024 * 1024);
-        let compute_cap = parts[4].to_string();
-        let driver_version = parts[5].to_string();
+        let compute_cap = parts.get(4).unwrap_or(&"").to_string();
+        let driver_version = parts.get(5).unwrap_or(&"").to_string();
         let gpu_name = if parts.len() > 6 { parts[6] } else { "" };
         let temp_c: Option<u32> = parts.get(7).and_then(|s| s.parse().ok());
         let power_w: Option<f64> = parts.get(8).and_then(|s| s.parse().ok());
@@ -100,7 +100,7 @@ pub(crate) fn parse_cuda_output(
         let mut effective_mem = mem_total_mb.saturating_mul(1024 * 1024);
         // Grace Hopper GH200 has 96 GB HBM3 + up to 480 GB LPDDR5X unified.
         // nvidia-smi reports only HBM. Add system memory estimate for planning.
-        if is_grace_hopper && effective_mem < 100 * 1024 * 1024 * 1024 {
+        if is_grace_hopper && effective_mem >= 80 * 1024 * 1024 * 1024 && effective_mem < 100 * 1024 * 1024 * 1024 {
             // HBM reported, add unified CPU memory (typical GH200: 480 GB).
             effective_mem = effective_mem.saturating_add(480 * 1024 * 1024 * 1024);
         }

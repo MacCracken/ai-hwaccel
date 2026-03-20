@@ -88,7 +88,11 @@ pub(crate) fn run_tool(
             Ok(Some(_)) => break,
             Ok(None) if start.elapsed() > timeout => {
                 let _ = child.kill();
-                let _ = child.wait();
+                // Brief wait for process to exit after kill (max 100ms).
+                for _ in 0..10 {
+                    if let Ok(Some(_)) = child.try_wait() { break; }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
                 return Err(DetectionError::Timeout {
                     tool: tool.into(),
                     timeout_secs: timeout.as_secs_f64(),

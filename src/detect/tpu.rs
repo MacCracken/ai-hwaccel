@@ -23,7 +23,10 @@ pub(crate) fn detect_tpu(
         if suffix.is_empty() || !suffix.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        let device_id: u32 = suffix.parse().unwrap_or(0);
+        let device_id: u32 = match suffix.parse() {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
 
         // Skip if this is an AMD XDNA device
         let driver_link = format!("/sys/class/accel/accel{}/device/driver", device_id);
