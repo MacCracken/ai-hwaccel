@@ -8,6 +8,8 @@ use crate::profile::AcceleratorProfile;
 
 use super::command::{DEFAULT_TIMEOUT, run_tool};
 
+const VULKANINFO_ARGS: &[&str] = &["--summary"];
+
 /// Detect Vulkan devices.
 ///
 /// Note: deduplication against CUDA/ROCm GPUs is handled by the orchestrator
@@ -16,7 +18,7 @@ pub(crate) fn detect_vulkan(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
 ) {
-    let output = match run_tool("vulkaninfo", &["--summary"], DEFAULT_TIMEOUT) {
+    let output = match run_tool("vulkaninfo", VULKANINFO_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
         Err(DetectionError::ToolNotFound { .. }) => return,
         Err(e) => {
@@ -24,8 +26,32 @@ pub(crate) fn detect_vulkan(
             return;
         }
     };
+    parse_vulkan_output(&output.stdout, profiles, warnings);
+}
 
-    let devices = parse_vulkan_summary(&output.stdout);
+#[cfg(feature = "async-detect")]
+pub(crate) async fn detect_vulkan_async() -> super::DetectResult {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+    let output = match super::command::run_tool_async("vulkaninfo", VULKANINFO_ARGS, DEFAULT_TIMEOUT).await {
+        Ok(o) => o,
+        Err(DetectionError::ToolNotFound { .. }) => return (profiles, warnings),
+        Err(e) => {
+            warnings.push(e);
+            return (profiles, warnings);
+        }
+    };
+    parse_vulkan_output(&output.stdout, &mut profiles, &mut warnings);
+    (profiles, warnings)
+}
+
+fn parse_vulkan_output(
+    stdout: &str,
+    profiles: &mut Vec<AcceleratorProfile>,
+    warnings: &mut Vec<DetectionError>,
+) {
+    let _ = warnings; // no parse warnings currently emitted
+    let devices = parse_vulkan_summary(stdout);
 
     if devices.is_empty() {
         debug!("vulkaninfo found but no devices parsed, registering generic Vulkan GPU");

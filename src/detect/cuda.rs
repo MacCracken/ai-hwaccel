@@ -8,18 +8,16 @@ use crate::profile::AcceleratorProfile;
 
 use super::command::{DEFAULT_TIMEOUT, run_tool, validate_device_id, validate_memory_mb};
 
+const NVIDIA_SMI_ARGS: &[&str] = &[
+    "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version",
+    "--format=csv,noheader,nounits",
+];
+
 pub(crate) fn detect_cuda(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
 ) {
-    let output = match run_tool(
-        "nvidia-smi",
-        &[
-            "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version",
-            "--format=csv,noheader,nounits",
-        ],
-        DEFAULT_TIMEOUT,
-    ) {
+    let output = match run_tool("nvidia-smi", NVIDIA_SMI_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
         Err(DetectionError::ToolNotFound { .. }) => return,
         Err(e) => {
@@ -27,8 +25,31 @@ pub(crate) fn detect_cuda(
             return;
         }
     };
+    parse_cuda_output(&output.stdout, profiles, warnings);
+}
 
-    for line in output.stdout.lines() {
+#[cfg(feature = "async-detect")]
+pub(crate) async fn detect_cuda_async() -> super::DetectResult {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+    let output = match super::command::run_tool_async("nvidia-smi", NVIDIA_SMI_ARGS, DEFAULT_TIMEOUT).await {
+        Ok(o) => o,
+        Err(DetectionError::ToolNotFound { .. }) => return (profiles, warnings),
+        Err(e) => {
+            warnings.push(e);
+            return (profiles, warnings);
+        }
+    };
+    parse_cuda_output(&output.stdout, &mut profiles, &mut warnings);
+    (profiles, warnings)
+}
+
+fn parse_cuda_output(
+    stdout: &str,
+    profiles: &mut Vec<AcceleratorProfile>,
+    warnings: &mut Vec<DetectionError>,
+) {
+    for line in stdout.lines() {
         let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
         if parts.len() < 6 {
             warnings.push(DetectionError::ParseError {
@@ -72,11 +93,11 @@ pub(crate) fn detect_cuda(
             } else {
                 Some(driver_version)
             },
-            memory_bandwidth_gbps: None, // Enriched in post-pass if available
+            memory_bandwidth_gbps: None,
             memory_used_bytes: mem_used_mb.map(|mb| mb * 1024 * 1024),
             memory_free_bytes: mem_free_mb.map(|mb| mb * 1024 * 1024),
-            pcie_bandwidth_gbps: None, // Enriched by pcie module
-            numa_node: None,           // Enriched by numa module
+            pcie_bandwidth_gbps: None,
+            numa_node: None,
         });
     }
 }

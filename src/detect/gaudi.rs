@@ -8,18 +8,16 @@ use crate::profile::AcceleratorProfile;
 
 use super::command::{DEFAULT_TIMEOUT, run_tool, validate_device_id, validate_memory_mb};
 
+const HL_SMI_ARGS: &[&str] = &[
+    "--query-aip=index,name,memory.total,memory.free",
+    "--format=csv,noheader,nounits",
+];
+
 pub(crate) fn detect_gaudi(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
 ) {
-    let output = match run_tool(
-        "hl-smi",
-        &[
-            "--query-aip=index,name,memory.total,memory.free",
-            "--format=csv,noheader,nounits",
-        ],
-        DEFAULT_TIMEOUT,
-    ) {
+    let output = match run_tool("hl-smi", HL_SMI_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
         Err(DetectionError::ToolNotFound { .. }) => return,
         Err(e) => {
@@ -27,8 +25,31 @@ pub(crate) fn detect_gaudi(
             return;
         }
     };
+    parse_gaudi_output(&output.stdout, profiles, warnings);
+}
 
-    for line in output.stdout.lines() {
+#[cfg(feature = "async-detect")]
+pub(crate) async fn detect_gaudi_async() -> super::DetectResult {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+    let output = match super::command::run_tool_async("hl-smi", HL_SMI_ARGS, DEFAULT_TIMEOUT).await {
+        Ok(o) => o,
+        Err(DetectionError::ToolNotFound { .. }) => return (profiles, warnings),
+        Err(e) => {
+            warnings.push(e);
+            return (profiles, warnings);
+        }
+    };
+    parse_gaudi_output(&output.stdout, &mut profiles, &mut warnings);
+    (profiles, warnings)
+}
+
+fn parse_gaudi_output(
+    stdout: &str,
+    profiles: &mut Vec<AcceleratorProfile>,
+    warnings: &mut Vec<DetectionError>,
+) {
+    for line in stdout.lines() {
         let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
         if parts.len() < 4 {
             warnings.push(DetectionError::ParseError {

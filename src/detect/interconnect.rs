@@ -10,6 +10,8 @@ use crate::system_io::{Interconnect, InterconnectKind};
 
 use super::command::{DEFAULT_TIMEOUT, run_tool};
 
+const NVLINK_ARGS: &[&str] = &["nvlink", "-s"];
+
 /// Detect all network interconnects on the system.
 pub(crate) fn detect_interconnects(warnings: &mut Vec<DetectionError>) -> Vec<Interconnect> {
     let mut interconnects = Vec::new();
@@ -18,6 +20,22 @@ pub(crate) fn detect_interconnects(warnings: &mut Vec<DetectionError>) -> Vec<In
     detect_nvlink(&mut interconnects, warnings);
 
     interconnects
+}
+
+#[cfg(feature = "async-detect")]
+pub(crate) async fn detect_interconnects_async() -> (Vec<Interconnect>, Vec<DetectionError>) {
+    let mut interconnects = Vec::new();
+    let mut warnings = Vec::new();
+
+    // InfiniBand: sync sysfs probing, runs inline.
+    detect_infiniband(&mut interconnects, &mut warnings);
+
+    // NVLink: async CLI call.
+    if let Ok(output) = super::command::run_tool_async("nvidia-smi", NVLINK_ARGS, DEFAULT_TIMEOUT).await {
+        parse_nvlink_output(&output.stdout, &mut interconnects);
+    }
+
+    (interconnects, warnings)
 }
 
 /// Detect InfiniBand / RoCE devices via sysfs (`/sys/class/infiniband/`).
@@ -86,7 +104,7 @@ fn detect_nvlink(
     interconnects: &mut Vec<Interconnect>,
     warnings: &mut Vec<DetectionError>,
 ) {
-    let output = match run_tool("nvidia-smi", &["nvlink", "-s"], DEFAULT_TIMEOUT) {
+    let output = match run_tool("nvidia-smi", NVLINK_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
         Err(DetectionError::ToolNotFound { .. }) => return,
         Err(e) => {
@@ -95,16 +113,20 @@ fn detect_nvlink(
             return;
         }
     };
+    parse_nvlink_output(&output.stdout, interconnects);
+}
 
-    // Parse nvidia-smi nvlink -s output.
-    // Example lines:
-    //   GPU 0: NVIDIA H100 (UUID: GPU-xxx)
-    //       Link 0: 25 GB/s
+/// Parse `nvidia-smi nvlink -s` output into interconnect entries.
+///
+/// Example lines:
+///   GPU 0: NVIDIA H100 (UUID: GPU-xxx)
+///       Link 0: 25 GB/s
+fn parse_nvlink_output(stdout: &str, interconnects: &mut Vec<Interconnect>) {
     let mut current_gpu = String::new();
     let mut link_count = 0u32;
     let mut link_bw = 0.0f64;
 
-    for line in output.stdout.lines() {
+    for line in stdout.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("GPU ") {
             // Flush previous GPU's NVLinks

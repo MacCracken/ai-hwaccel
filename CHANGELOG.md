@@ -39,6 +39,10 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
   separate from `ToolFailed`. Enables programmatic retry logic.
 - **Schema v2**: `SCHEMA_VERSION` bumped to 2, formalizing all system I/O
   fields and the new `Timeout` error variant.
+- **True async detection**: `detect_async()` now uses `tokio::process::Command`
+  for non-blocking subprocess I/O. CLI backends run as concurrent tokio tasks,
+  sysfs-only backends in a single `spawn_blocking`. Replaces the previous
+  `spawn_blocking(detect)` approach.
 - **Docs**: troubleshooting guide, performance tuning guide, migration guide.
   Expanded crate-level docs with error handling, custom backends, and serde.
 

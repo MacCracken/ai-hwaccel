@@ -11,6 +11,8 @@ use crate::profile::AcceleratorProfile;
 
 use super::command::{DEFAULT_TIMEOUT, run_tool};
 
+const SYSTEM_PROFILER_ARGS: &[&str] = &["SPHardwareDataType"];
+
 pub(crate) fn detect_metal_and_ane(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
@@ -24,12 +26,29 @@ pub(crate) fn detect_metal_and_ane(
     detect_linux_device_tree(profiles);
 }
 
+#[cfg(feature = "async-detect")]
+pub(crate) async fn detect_metal_and_ane_async() -> super::DetectResult {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+
+    // Try macOS detection via system_profiler (async CLI call).
+    if let Ok(output) = super::command::run_tool_async("system_profiler", SYSTEM_PROFILER_ARGS, DEFAULT_TIMEOUT).await {
+        if parse_system_profiler_output(&output.stdout, &mut profiles, &mut warnings) {
+            return (profiles, warnings);
+        }
+    }
+
+    // Fallback: Linux (Asahi) device-tree detection (sync sysfs, runs inline).
+    detect_linux_device_tree(&mut profiles);
+    (profiles, warnings)
+}
+
 /// macOS detection via `system_profiler`. Returns `true` if on macOS.
 fn detect_macos(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
 ) -> bool {
-    let output = match run_tool("system_profiler", &["SPHardwareDataType"], DEFAULT_TIMEOUT) {
+    let output = match run_tool("system_profiler", SYSTEM_PROFILER_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
         Err(DetectionError::ToolNotFound { .. }) => return false, // not macOS
         Err(e) => {
@@ -37,16 +56,25 @@ fn detect_macos(
             return false;
         }
     };
+    parse_system_profiler_output(&output.stdout, profiles, warnings)
+}
 
-    let chip_name = extract_field(&output.stdout, "Chip");
-    let memory_str = extract_field(&output.stdout, "Memory");
+/// Parse `system_profiler SPHardwareDataType` output. Returns `true` if this
+/// is a macOS system (even Intel Mac with no Apple Silicon).
+fn parse_system_profiler_output(
+    stdout: &str,
+    profiles: &mut Vec<AcceleratorProfile>,
+    _warnings: &mut Vec<DetectionError>,
+) -> bool {
+    let chip_name = extract_field(stdout, "Chip");
+    let memory_str = extract_field(stdout, "Memory");
 
     let memory_bytes = memory_str
         .as_deref()
         .and_then(parse_memory_string)
         .unwrap_or(16 * 1024 * 1024 * 1024);
 
-    if chip_name.is_none() && !output.stdout.contains("Apple") {
+    if chip_name.is_none() && !stdout.contains("Apple") {
         return true; // macOS but Intel Mac
     }
 
@@ -64,11 +92,11 @@ fn detect_macos(
         memory_bytes,
         compute_capability: compute_cap.clone(),
         driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
+        memory_bandwidth_gbps: None,
+        memory_used_bytes: None,
+        memory_free_bytes: None,
+        pcie_bandwidth_gbps: None,
+        numa_node: None,
     });
 
     profiles.push(AcceleratorProfile {
@@ -77,11 +105,11 @@ fn detect_macos(
         memory_bytes: estimate_ane_memory(&compute_cap),
         compute_capability: compute_cap,
         driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
+        memory_bandwidth_gbps: None,
+        memory_used_bytes: None,
+        memory_free_bytes: None,
+        pcie_bandwidth_gbps: None,
+        numa_node: None,
     });
 
     true

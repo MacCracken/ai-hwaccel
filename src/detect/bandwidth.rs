@@ -20,13 +20,35 @@ use crate::profile::AcceleratorProfile;
 
 use super::command::{DEFAULT_TIMEOUT, run_tool};
 
+const NVIDIA_BW_ARGS: &[&str] = &[
+    "--query-gpu=clocks.max.memory,compute_cap",
+    "--format=csv,noheader,nounits",
+];
+
 /// Enrich CUDA and ROCm profiles with memory bandwidth.
 pub(crate) fn enrich_bandwidth(
     profiles: &mut [AcceleratorProfile],
     warnings: &mut Vec<DetectionError>,
 ) {
     let cuda_bw = query_nvidia_bandwidth(warnings);
+    apply_bandwidth(profiles, &cuda_bw);
+}
 
+#[cfg(feature = "async-detect")]
+pub(crate) async fn enrich_bandwidth_async(
+    profiles: &mut [AcceleratorProfile],
+    warnings: &mut Vec<DetectionError>,
+) {
+    let cuda_bw = match super::command::run_tool_async("nvidia-smi", NVIDIA_BW_ARGS, DEFAULT_TIMEOUT).await {
+        Ok(o) => parse_nvidia_bandwidth_output(&o.stdout),
+        Err(_) => Vec::new(),
+    };
+    apply_bandwidth(profiles, &cuda_bw);
+    let _ = warnings; // no additional warnings from async path
+}
+
+/// Apply bandwidth values to profiles (shared by sync and async paths).
+fn apply_bandwidth(profiles: &mut [AcceleratorProfile], cuda_bw: &[Option<f64>]) {
     let mut nvidia_idx = 0usize;
     for profile in profiles.iter_mut() {
         match &profile.accelerator {
@@ -53,20 +75,16 @@ pub(crate) fn enrich_bandwidth(
 
 /// Query `nvidia-smi` for max memory clock per GPU, calculate bandwidth.
 fn query_nvidia_bandwidth(_warnings: &mut Vec<DetectionError>) -> Vec<Option<f64>> {
-    let output = match run_tool(
-        "nvidia-smi",
-        &[
-            "--query-gpu=clocks.max.memory,compute_cap",
-            "--format=csv,noheader,nounits",
-        ],
-        DEFAULT_TIMEOUT,
-    ) {
+    let output = match run_tool("nvidia-smi", NVIDIA_BW_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
         Err(_) => return Vec::new(),
     };
+    parse_nvidia_bandwidth_output(&output.stdout)
+}
 
-    output
-        .stdout
+/// Parse nvidia-smi bandwidth query output into per-GPU bandwidth values.
+fn parse_nvidia_bandwidth_output(stdout: &str) -> Vec<Option<f64>> {
+    stdout
         .lines()
         .map(|line| {
             let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();

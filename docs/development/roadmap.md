@@ -78,9 +78,10 @@ becomes available.
 
 ## API gaps
 
-- [ ] **Async detection** improvements — current `detect_async` uses
-  `spawn_blocking`. True async subprocess I/O via `tokio::process::Command`
-  would avoid the blocking thread entirely.
+- [x] **Async detection** — `detect_async` now uses `tokio::process::Command`
+  for true async subprocess I/O. CLI backends run as concurrent tokio tasks,
+  sysfs backends in a single `spawn_blocking`. No more blocking thread per
+  subprocess.
 - [x] **Stable JSON schema v2** — bumped `SCHEMA_VERSION` to 2. Includes
   device topology, bandwidth, NUMA, and system I/O fields.
 - [x] **`--table` enhancements** — `--columns name,mem,bw` for column

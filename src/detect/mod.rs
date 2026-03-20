@@ -260,3 +260,122 @@ pub(super) fn read_sysfs_u64(path: &Path) -> Option<u64> {
         .ok()
         .and_then(|s| s.trim().parse().ok())
 }
+
+// ---------------------------------------------------------------------------
+// True async detection (requires `async-detect` feature)
+// ---------------------------------------------------------------------------
+
+/// Async detection orchestrator using `tokio::process::Command`.
+///
+/// CLI backends run as concurrent tokio tasks with true async subprocess I/O.
+/// Sysfs-only backends run in a single `spawn_blocking` task since they are
+/// fast filesystem reads. Post-passes (bandwidth, PCIe, NUMA) run after all
+/// backends complete.
+#[cfg(feature = "async-detect")]
+pub(crate) async fn detect_with_builder_async(
+    builder: DetectBuilder,
+) -> AcceleratorRegistry {
+    let mut all_profiles = vec![cpu_profile()];
+    let mut all_warnings: Vec<DetectionError> = Vec::new();
+
+    // Spawn async CLI backends as concurrent tokio tasks.
+    let mut handles: Vec<tokio::task::JoinHandle<DetectResult>> = Vec::new();
+
+    macro_rules! spawn_async_backend {
+        ($feature:literal, $backend:expr, $detect_fn:path) => {
+            #[cfg(feature = $feature)]
+            if builder.backend_enabled($backend) {
+                handles.push(tokio::spawn($detect_fn()));
+            }
+        };
+    }
+
+    spawn_async_backend!("cuda", Backend::Cuda, cuda::detect_cuda_async);
+    spawn_async_backend!("vulkan", Backend::Vulkan, vulkan::detect_vulkan_async);
+    spawn_async_backend!("gaudi", Backend::Gaudi, gaudi::detect_gaudi_async);
+    spawn_async_backend!("aws-neuron", Backend::AwsNeuron, neuron::detect_aws_neuron_async);
+    spawn_async_backend!("apple", Backend::Apple, apple::detect_metal_and_ane_async);
+    spawn_async_backend!("intel-oneapi", Backend::IntelOneApi, intel_oneapi::detect_intel_oneapi_async);
+
+    // Sysfs-only backends run in a single blocking task.
+    let sysfs_builder = builder.clone();
+    let sysfs_handle = tokio::task::spawn_blocking(move || {
+        let mut profiles = Vec::new();
+        let mut warnings: Vec<DetectionError> = Vec::new();
+
+        macro_rules! run_sysfs {
+            ($feature:literal, $backend:expr, $detect_fn:expr) => {
+                #[cfg(feature = $feature)]
+                if sysfs_builder.backend_enabled($backend) {
+                    $detect_fn(&mut profiles, &mut warnings);
+                }
+            };
+        }
+
+        run_sysfs!("rocm", Backend::Rocm, rocm::detect_rocm);
+        run_sysfs!("intel-npu", Backend::IntelNpu, intel_npu::detect_intel_npu);
+        run_sysfs!("amd-xdna", Backend::AmdXdna, amd_xdna::detect_amd_xdna);
+        run_sysfs!("tpu", Backend::Tpu, tpu::detect_tpu);
+        run_sysfs!("qualcomm", Backend::Qualcomm, qualcomm::detect_qualcomm_ai100);
+
+        (profiles, warnings)
+    });
+
+    // Collect async CLI results.
+    for handle in handles {
+        if let Ok((profiles, warnings)) = handle.await {
+            all_profiles.extend(profiles);
+            all_warnings.extend(warnings);
+        }
+    }
+
+    // Collect sysfs results.
+    if let Ok((profiles, warnings)) = sysfs_handle.await {
+        all_profiles.extend(profiles);
+        all_warnings.extend(warnings);
+    }
+
+    // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found.
+    let has_dedicated = all_profiles.iter().any(|p| {
+        matches!(
+            p.accelerator,
+            AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
+        )
+    });
+    if has_dedicated {
+        all_profiles.retain(|p| !matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
+    }
+
+    // Post-pass: enrich with bandwidth (async), PCIe, NUMA.
+    bandwidth::enrich_bandwidth_async(&mut all_profiles, &mut all_warnings).await;
+    pcie::enrich_pcie(&mut all_profiles);
+    numa::enrich_numa(&mut all_profiles);
+
+    // System I/O: async interconnects + blocking storage.
+    let (system_interconnects, ic_warnings) =
+        interconnect::detect_interconnects_async().await;
+    all_warnings.extend(ic_warnings);
+
+    let system_storage = tokio::task::spawn_blocking(disk::detect_storage)
+        .await
+        .unwrap_or_default();
+
+    let system_io = SystemIo {
+        interconnects: system_interconnects,
+        storage: system_storage,
+    };
+
+    debug!(
+        count = all_profiles.len(),
+        warnings = all_warnings.len(),
+        interconnects = system_io.interconnects.len(),
+        storage_devices = system_io.storage.len(),
+        "async accelerator detection complete"
+    );
+    AcceleratorRegistry {
+        schema_version: crate::registry::SCHEMA_VERSION,
+        profiles: all_profiles,
+        warnings: all_warnings,
+        system_io,
+    }
+}

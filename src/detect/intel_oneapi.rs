@@ -8,15 +8,13 @@ use crate::profile::AcceleratorProfile;
 
 use super::command::{DEFAULT_TIMEOUT, run_tool, validate_memory_mb};
 
+const XPU_SMI_ARGS: &[&str] = &["discovery", "--dump", "1,2,18,19"];
+
 pub(crate) fn detect_intel_oneapi(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
 ) {
-    let output = match run_tool(
-        "xpu-smi",
-        &["discovery", "--dump", "1,2,18,19"],
-        DEFAULT_TIMEOUT,
-    ) {
+    let output = match run_tool("xpu-smi", XPU_SMI_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
         Err(DetectionError::ToolNotFound { .. }) => return,
         Err(e) => {
@@ -24,8 +22,31 @@ pub(crate) fn detect_intel_oneapi(
             return;
         }
     };
+    parse_xpu_smi_output(&output.stdout, profiles, warnings);
+}
 
-    for line in output.stdout.lines() {
+#[cfg(feature = "async-detect")]
+pub(crate) async fn detect_intel_oneapi_async() -> super::DetectResult {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+    let output = match super::command::run_tool_async("xpu-smi", XPU_SMI_ARGS, DEFAULT_TIMEOUT).await {
+        Ok(o) => o,
+        Err(DetectionError::ToolNotFound { .. }) => return (profiles, warnings),
+        Err(e) => {
+            warnings.push(e);
+            return (profiles, warnings);
+        }
+    };
+    parse_xpu_smi_output(&output.stdout, &mut profiles, &mut warnings);
+    (profiles, warnings)
+}
+
+fn parse_xpu_smi_output(
+    stdout: &str,
+    profiles: &mut Vec<AcceleratorProfile>,
+    warnings: &mut Vec<DetectionError>,
+) {
+    for line in stdout.lines() {
         if line.starts_with("DeviceId") || line.trim().is_empty() {
             continue;
         }

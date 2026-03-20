@@ -187,6 +187,67 @@ fn which(name: &str) -> Option<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
+// Async variant (requires `async-detect` feature)
+// ---------------------------------------------------------------------------
+
+/// Async version of [`run_tool`] using `tokio::process::Command`.
+///
+/// Uses `tokio::time::timeout` instead of a poll loop, and
+/// `tokio::process::Command` for non-blocking subprocess I/O.
+/// Same security guarantees as `run_tool` (path resolution, env sanitization,
+/// output limits, timeout).
+#[cfg(feature = "async-detect")]
+pub(crate) async fn run_tool_async(
+    tool: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<ToolOutput, DetectionError> {
+    let abs_path = which(tool).ok_or_else(|| DetectionError::ToolNotFound { tool: tool.into() })?;
+
+    let mut cmd = tokio::process::Command::new(&abs_path);
+    cmd.args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    for var in SANITIZED_ENV_VARS {
+        cmd.env_remove(var);
+    }
+    let child = cmd
+        .spawn()
+        .map_err(|_| DetectionError::ToolNotFound { tool: tool.into() })?;
+
+    // Wait with timeout.
+    let result: Result<std::process::Output, _> =
+        match tokio::time::timeout(timeout, child.wait_with_output()).await {
+            Ok(r) => r,
+            Err(_elapsed) => {
+                return Err(DetectionError::Timeout {
+                    tool: tool.into(),
+                    timeout_secs: timeout.as_secs_f64(),
+                });
+            }
+        };
+    let output = result.map_err(|e| DetectionError::ToolFailed {
+        tool: tool.into(),
+        exit_code: None,
+        stderr: e.to_string(),
+    })?;
+
+    if !output.status.success() {
+        let stderr = &output.stderr[..output.stderr.len().min(MAX_STDERR_BYTES)];
+        return Err(DetectionError::ToolFailed {
+            tool: tool.into(),
+            exit_code: output.status.code(),
+            stderr: String::from_utf8_lossy(stderr).into_owned(),
+        });
+    }
+
+    let stdout = &output.stdout[..output.stdout.len().min(MAX_STDOUT_BYTES)];
+    Ok(ToolOutput {
+        stdout: String::from_utf8_lossy(stdout).into_owned(),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Input validation helpers
 // ---------------------------------------------------------------------------
 
