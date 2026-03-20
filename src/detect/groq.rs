@@ -19,7 +19,7 @@ pub(crate) fn detect_groq_lpu(
     for entry in std::fs::read_dir("/dev").into_iter().flatten().flatten() {
         let name = entry.file_name();
         if name.to_string_lossy().starts_with("groq") {
-            debug!("Groq LPU detected via /dev");
+            debug!(device_id = 0, memory_mb = 230, "Groq LPU detected via /dev");
             profiles.push(AcceleratorProfile {
                 accelerator: AcceleratorType::GroqLpu { device_id: 0 },
                 available: true,

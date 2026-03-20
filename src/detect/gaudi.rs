@@ -1,6 +1,6 @@
 //! Intel Gaudi (Habana Labs HPU) detection via `hl-smi`.
 
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::error::DetectionError;
 use crate::hardware::{AcceleratorType, GaudiGeneration};
@@ -19,7 +19,10 @@ pub(crate) fn detect_gaudi(
 ) {
     let output = match run_tool("hl-smi", HL_SMI_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
-        Err(DetectionError::ToolNotFound { .. }) => return,
+        Err(DetectionError::ToolNotFound { .. }) => {
+            debug!("hl-smi not found on $PATH, skipping Gaudi detection");
+            return;
+        }
         Err(e) => {
             warnings.push(e);
             return;
@@ -34,7 +37,10 @@ pub(crate) async fn detect_gaudi_async() -> super::DetectResult {
     let mut warnings = Vec::new();
     let output = match super::command::run_tool_async("hl-smi", HL_SMI_ARGS, DEFAULT_TIMEOUT).await {
         Ok(o) => o,
-        Err(DetectionError::ToolNotFound { .. }) => return (profiles, warnings),
+        Err(DetectionError::ToolNotFound { .. }) => {
+            debug!("hl-smi not found on $PATH, skipping Gaudi detection");
+            return (profiles, warnings);
+        }
         Err(e) => {
             warnings.push(e);
             return (profiles, warnings);
@@ -50,6 +56,7 @@ pub(crate) fn parse_gaudi_output(
     warnings: &mut Vec<DetectionError>,
 ) {
     for line in stdout.lines() {
+        trace!(line, "parsing hl-smi CSV line");
         let parts: Vec<&str> = line.split(',').take(20).map(|s| s.trim()).collect();
         if parts.len() < 4 {
             warnings.push(DetectionError::ParseError {

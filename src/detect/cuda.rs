@@ -1,6 +1,6 @@
 //! NVIDIA CUDA GPU detection via `nvidia-smi`.
 
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
@@ -20,7 +20,10 @@ pub(crate) fn detect_cuda(
 ) {
     let output = match run_tool("nvidia-smi", NVIDIA_SMI_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
-        Err(DetectionError::ToolNotFound { .. }) => return,
+        Err(DetectionError::ToolNotFound { .. }) => {
+            debug!("nvidia-smi not found on $PATH, skipping CUDA detection");
+            return;
+        }
         Err(e) => {
             warnings.push(e);
             return;
@@ -35,7 +38,10 @@ pub(crate) async fn detect_cuda_async() -> super::DetectResult {
     let mut warnings = Vec::new();
     let output = match super::command::run_tool_async("nvidia-smi", NVIDIA_SMI_ARGS, DEFAULT_TIMEOUT).await {
         Ok(o) => o,
-        Err(DetectionError::ToolNotFound { .. }) => return (profiles, warnings),
+        Err(DetectionError::ToolNotFound { .. }) => {
+            debug!("nvidia-smi not found on $PATH, skipping CUDA detection");
+            return (profiles, warnings);
+        }
         Err(e) => {
             warnings.push(e);
             return (profiles, warnings);
@@ -51,6 +57,7 @@ pub(crate) fn parse_cuda_output(
     warnings: &mut Vec<DetectionError>,
 ) {
     for line in stdout.lines() {
+        trace!(line, "parsing nvidia-smi CSV line");
         let parts: Vec<&str> = line.split(',').take(20).map(|s| s.trim()).collect();
         // Accept 6 fields (legacy) or 7 (with gpu name).
         if parts.len() < 6 {

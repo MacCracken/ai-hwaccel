@@ -13,7 +13,7 @@ pub(crate) fn detect_intel_npu(
     _warnings: &mut Vec<DetectionError>,
 ) {
     if Path::new("/sys/class/misc/intel_npu").exists() {
-        debug!("Intel NPU detected via sysfs");
+        debug!(device_id = 0, memory_mb = 2048, "Intel NPU detected via sysfs");
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::IntelNpu,
             available: true,

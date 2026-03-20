@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::error::DetectionError;
 use crate::hardware::{AcceleratorType, TpuVersion};
@@ -88,6 +88,6 @@ fn detect_tpu_chip_count(device_id: u32) -> u32 {
     {
         return n;
     }
-    tracing::warn!(device_id, "could not read TPU chip_count, defaulting to 1");
+    warn!(device_id, "could not read TPU chip_count, defaulting to 1");
     1
 }

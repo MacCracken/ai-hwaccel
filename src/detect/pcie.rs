@@ -21,7 +21,7 @@ pub(crate) fn enrich_pcie(
     nvidia_addrs: &[String],
     amdgpu_addrs: &[String],
 ) {
-
+    let mut count = 0usize;
     let mut nvidia_idx = 0usize;
     let mut amdgpu_idx = 0usize;
 
@@ -47,10 +47,12 @@ pub(crate) fn enrich_pcie(
                 if let Some(bw) = read_pcie_bandwidth(&canonical) {
                     debug!(addr = %addr, bandwidth_gbps = bw, "PCIe link detected");
                     profile.pcie_bandwidth_gbps = Some(bw);
+                    count += 1;
                 }
             }
         }
     }
+    debug!(enriched = count, "PCIe bandwidth enrichment complete");
 }
 
 /// Read PCIe link width and speed from sysfs and compute theoretical bandwidth.

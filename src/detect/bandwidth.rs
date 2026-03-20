@@ -41,7 +41,8 @@ pub(crate) fn enrich_bandwidth(
     } else {
         query_nvidia_bandwidth(warnings)
     };
-    apply_bandwidth(profiles, &cuda_bw);
+    let count = apply_bandwidth(profiles, &cuda_bw);
+    debug!(enriched = count, "memory bandwidth enrichment complete");
 }
 
 #[cfg(feature = "async-detect")]
@@ -53,33 +54,52 @@ pub(crate) async fn enrich_bandwidth_async(
         Ok(o) => parse_nvidia_bandwidth_output(&o.stdout),
         Err(_) => Vec::new(),
     };
-    apply_bandwidth(profiles, &cuda_bw);
+    let count = apply_bandwidth(profiles, &cuda_bw);
+    debug!(enriched = count, "memory bandwidth enrichment complete");
     let _ = warnings; // no additional warnings from async path
 }
 
 /// Apply bandwidth values to profiles (shared by sync and async paths).
-fn apply_bandwidth(profiles: &mut [AcceleratorProfile], cuda_bw: &[Option<f64>]) {
+/// Returns the number of profiles that were enriched with bandwidth data.
+fn apply_bandwidth(profiles: &mut [AcceleratorProfile], cuda_bw: &[Option<f64>]) -> usize {
     let mut nvidia_idx = 0usize;
+    let mut count = 0usize;
     for profile in profiles.iter_mut() {
         match &profile.accelerator {
-            AcceleratorType::CudaGpu { .. } => {
+            AcceleratorType::CudaGpu { device_id } => {
                 // Skip CUDA GPUs that already got bandwidth from the batched parse.
                 if profile.memory_bandwidth_gbps.is_none() {
                     if let Some(bw) = cuda_bw.get(nvidia_idx).copied().flatten() {
                         profile.memory_bandwidth_gbps = Some(bw);
+                        count += 1;
                     } else if let Some(cc) = &profile.compute_capability {
                         // Fallback: estimate from compute capability alone
-                        profile.memory_bandwidth_gbps = estimate_nvidia_bandwidth_from_cc(cc);
+                        if let Some(bw) = estimate_nvidia_bandwidth_from_cc(cc) {
+                            profile.memory_bandwidth_gbps = Some(bw);
+                            count += 1;
+                        } else {
+                            let device_id = *device_id;
+                            debug!(device_id, "no memory bandwidth data available for CUDA GPU");
+                        }
+                    } else {
+                        let device_id = *device_id;
+                        debug!(device_id, "no memory bandwidth data available for CUDA GPU");
                     }
+                } else {
+                    count += 1;
                 }
                 nvidia_idx += 1;
             }
             AcceleratorType::RocmGpu { device_id } => {
-                profile.memory_bandwidth_gbps = probe_rocm_bandwidth(*device_id);
+                if let Some(bw) = probe_rocm_bandwidth(*device_id) {
+                    profile.memory_bandwidth_gbps = Some(bw);
+                    count += 1;
+                }
             }
             _ => {}
         }
     }
+    count
 }
 
 // ---------------------------------------------------------------------------

@@ -16,32 +16,38 @@ pub(crate) fn detect_graphcore_ipu(
     warnings: &mut Vec<DetectionError>,
 ) {
     // Try gc-info CLI for device 0.
-    if let Ok(output) = run_tool("gc-info", &["-d", "0", "-i"], DEFAULT_TIMEOUT) {
-        debug!("Graphcore IPU detected via gc-info");
-        let memory = parse_memory_from_gcinfo(&output.stdout).unwrap_or(DEFAULT_MEMORY_BYTES);
-        profiles.push(AcceleratorProfile {
-            accelerator: AcceleratorType::GraphcoreIpu { device_id: 0 },
-            available: true,
-            memory_bytes: memory,
-            compute_capability: Some("IPU".into()),
-            driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
-        });
-        return;
+    match run_tool("gc-info", &["-d", "0", "-i"], DEFAULT_TIMEOUT) {
+        Ok(output) => {
+            let memory = parse_memory_from_gcinfo(&output.stdout).unwrap_or(DEFAULT_MEMORY_BYTES);
+            debug!(device_id = 0, memory_mb = memory / (1024 * 1024), "Graphcore IPU detected via gc-info");
+            profiles.push(AcceleratorProfile {
+                accelerator: AcceleratorType::GraphcoreIpu { device_id: 0 },
+                available: true,
+                memory_bytes: memory,
+                compute_capability: Some("IPU".into()),
+                driver_version: None,
+                memory_bandwidth_gbps: None,
+                memory_used_bytes: None,
+                memory_free_bytes: None,
+                pcie_bandwidth_gbps: None,
+                numa_node: None,
+                temperature_c: None,
+                power_watts: None,
+                gpu_utilization_percent: None,
+            });
+            return;
+        }
+        Err(DetectionError::ToolNotFound { .. }) => {
+            debug!("gc-info not found on $PATH, skipping Graphcore CLI detection");
+        }
+        Err(_) => {}
     }
 
     // Fallback: check /dev/ipu* devices.
     for entry in std::fs::read_dir("/dev").into_iter().flatten().flatten() {
         let name = entry.file_name();
         if name.to_string_lossy().starts_with("ipu") {
-            debug!("Graphcore IPU detected via /dev");
+            debug!(device_id = 0, memory_mb = 900, "Graphcore IPU detected via /dev");
             profiles.push(AcceleratorProfile {
                 accelerator: AcceleratorType::GraphcoreIpu { device_id: 0 },
                 available: true,

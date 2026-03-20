@@ -16,7 +16,7 @@ pub(crate) fn detect_samsung_npu(
     _warnings: &mut Vec<DetectionError>,
 ) {
     if Path::new("/sys/class/misc/samsung_npu").exists() {
-        debug!("Samsung NPU detected via sysfs");
+        debug!(device_id = 0, memory_mb = 2048, "Samsung NPU detected via sysfs");
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::SamsungNpu { device_id: 0 },
             available: true,
@@ -38,7 +38,7 @@ pub(crate) fn detect_samsung_npu(
     for entry in std::fs::read_dir("/dev").into_iter().flatten().flatten() {
         let name = entry.file_name();
         if name.to_string_lossy().starts_with("samsung_npu") {
-            debug!("Samsung NPU detected via /dev");
+            debug!(device_id = 0, memory_mb = 2048, "Samsung NPU detected via /dev");
             profiles.push(AcceleratorProfile {
                 accelerator: AcceleratorType::SamsungNpu { device_id: 0 },
                 available: true,

@@ -4,7 +4,7 @@
 //! parses full `vulkaninfo` output for compute queue families and subgroup
 //! sizes.
 
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
@@ -25,7 +25,10 @@ pub(crate) fn detect_vulkan(
 ) {
     let output = match run_tool("vulkaninfo", VULKANINFO_SUMMARY_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
-        Err(DetectionError::ToolNotFound { .. }) => return,
+        Err(DetectionError::ToolNotFound { .. }) => {
+            debug!("vulkaninfo not found on $PATH, skipping Vulkan detection");
+            return;
+        }
         Err(e) => {
             warnings.push(e);
             return;
@@ -43,7 +46,10 @@ pub(crate) async fn detect_vulkan_async() -> super::DetectResult {
     let mut warnings = Vec::new();
     let output = match super::command::run_tool_async("vulkaninfo", VULKANINFO_SUMMARY_ARGS, DEFAULT_TIMEOUT).await {
         Ok(o) => o,
-        Err(DetectionError::ToolNotFound { .. }) => return (profiles, warnings),
+        Err(DetectionError::ToolNotFound { .. }) => {
+            debug!("vulkaninfo not found on $PATH, skipping Vulkan detection");
+            return (profiles, warnings);
+        }
         Err(e) => {
             warnings.push(e);
             return (profiles, warnings);
@@ -158,6 +164,7 @@ struct VulkanComputeInfo {
 
 /// Parse `vulkaninfo --summary` output for device details.
 fn parse_vulkan_summary(output: &str) -> Vec<VulkanDevice> {
+    trace!(line_count = output.lines().count(), "parsing vulkaninfo summary");
     let mut devices = Vec::new();
     let mut current_name = String::new();
     let mut current_mem: u64 = 0;

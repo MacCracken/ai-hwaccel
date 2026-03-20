@@ -349,7 +349,7 @@ fn detect_cpu_memory() -> u64 {
     {
         return bytes;
     }
-    tracing::debug!("could not read system memory, defaulting to 16 GiB");
+    debug!("could not read system memory, defaulting to 16 GiB");
     16 * 1024 * 1024 * 1024
 }
 
@@ -406,6 +406,8 @@ pub(crate) async fn detect_with_builder_async(
 ) -> AcceleratorRegistry {
     let mut all_profiles = vec![cpu_profile()];
     let mut all_warnings: Vec<DetectionError> = Vec::new();
+
+    debug!(backends = builder.enabled_count(), "starting async detection");
 
     // Spawn async CLI backends as concurrent tokio tasks.
     let mut handles: Vec<tokio::task::JoinHandle<DetectResult>> = Vec::new();

@@ -15,10 +15,16 @@ pub(crate) fn detect_aws_neuron(
     warnings: &mut Vec<DetectionError>,
 ) {
     // Use neuron-ls JSON output via safe runner.
-    if let Ok(output) = run_tool("neuron-ls", NEURON_LS_ARGS, DEFAULT_TIMEOUT) {
-        if parse_neuron_output(&output.stdout, profiles, warnings) {
-            return;
+    match run_tool("neuron-ls", NEURON_LS_ARGS, DEFAULT_TIMEOUT) {
+        Ok(output) => {
+            if parse_neuron_output(&output.stdout, profiles, warnings) {
+                return;
+            }
         }
+        Err(DetectionError::ToolNotFound { .. }) => {
+            debug!("neuron-ls not found on $PATH, skipping Neuron CLI detection");
+        }
+        Err(_) => {}
     }
 
     // Fallback: probe /dev/neuron* devices
@@ -29,10 +35,16 @@ pub(crate) fn detect_aws_neuron(
 pub(crate) async fn detect_aws_neuron_async() -> super::DetectResult {
     let mut profiles = Vec::new();
     let mut warnings = Vec::new();
-    if let Ok(output) = super::command::run_tool_async("neuron-ls", NEURON_LS_ARGS, DEFAULT_TIMEOUT).await {
-        if parse_neuron_output(&output.stdout, &mut profiles, &mut warnings) {
-            return (profiles, warnings);
+    match super::command::run_tool_async("neuron-ls", NEURON_LS_ARGS, DEFAULT_TIMEOUT).await {
+        Ok(output) => {
+            if parse_neuron_output(&output.stdout, &mut profiles, &mut warnings) {
+                return (profiles, warnings);
+            }
         }
+        Err(DetectionError::ToolNotFound { .. }) => {
+            debug!("neuron-ls not found on $PATH, skipping Neuron CLI detection");
+        }
+        Err(_) => {}
     }
 
     // Fallback: probe /dev/neuron* devices (sync sysfs, runs inline)

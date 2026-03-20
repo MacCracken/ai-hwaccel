@@ -50,7 +50,10 @@ fn detect_macos(
 ) -> bool {
     let output = match run_tool("system_profiler", SYSTEM_PROFILER_ARGS, DEFAULT_TIMEOUT) {
         Ok(o) => o,
-        Err(DetectionError::ToolNotFound { .. }) => return false, // not macOS
+        Err(DetectionError::ToolNotFound { .. }) => {
+            debug!("system_profiler not found on $PATH, skipping Apple detection");
+            return false; // not macOS
+        }
         Err(e) => {
             warnings.push(e);
             return false;
@@ -126,7 +129,7 @@ fn detect_linux_device_tree(profiles: &mut Vec<AcceleratorProfile>) {
     if let Some(compat) = super::read_sysfs_string(&std::path::Path::new("/proc/device-tree/compatible"), 4096)
         && compat.contains("apple")
     {
-        debug!("Apple device detected via device-tree, registering Metal GPU + ANE");
+        debug!(memory_gb = 16, "Apple device detected via device-tree, registering Metal GPU + ANE");
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::MetalGpu,
             available: true,

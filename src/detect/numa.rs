@@ -17,7 +17,7 @@ pub(crate) fn enrich_numa(
     nvidia_addrs: &[String],
     amdgpu_addrs: &[String],
 ) {
-
+    let mut count = 0usize;
     let mut nvidia_idx = 0usize;
     let mut amdgpu_idx = 0usize;
 
@@ -47,9 +47,11 @@ pub(crate) fn enrich_numa(
                 {
                     debug!(addr = %addr, numa_node = node, "NUMA node detected");
                     profile.numa_node = Some(node as u32);
+                    count += 1;
                 }
             }
         }
     }
+    debug!(enriched = count, "NUMA topology enrichment complete");
 }
 

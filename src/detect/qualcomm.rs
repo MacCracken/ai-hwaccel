@@ -13,7 +13,7 @@ pub(crate) fn detect_qualcomm_ai100(
     _warnings: &mut Vec<DetectionError>,
 ) {
     if Path::new("/sys/class/qaic").exists() {
-        debug!("Qualcomm Cloud AI 100 detected via sysfs");
+        debug!(device_id = 0, memory_gb = 32, "Qualcomm Cloud AI 100 detected via sysfs");
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::QualcommAi100 { device_id: 0 },
             available: true,
@@ -35,7 +35,7 @@ pub(crate) fn detect_qualcomm_ai100(
     for entry in std::fs::read_dir("/dev").into_iter().flatten().flatten() {
         let name = entry.file_name();
         if name.to_string_lossy().starts_with("qaic_") {
-            debug!("Qualcomm Cloud AI 100 detected via /dev");
+            debug!(device_id = 0, memory_gb = 32, "Qualcomm Cloud AI 100 detected via /dev");
             profiles.push(AcceleratorProfile {
                 accelerator: AcceleratorType::QualcommAi100 { device_id: 0 },
                 available: true,

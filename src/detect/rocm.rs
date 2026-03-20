@@ -172,7 +172,7 @@ fn detect_cxl_memory(device_dir: &Path) -> u64 {
     if vis_vram_total > vram_total && vram_total > 0 {
         let cxl = vis_vram_total.saturating_sub(vram_total);
         if cxl > 0 {
-            tracing::debug!(
+            debug!(
                 cxl_bytes = cxl,
                 "CXL-attached memory detected (vis_vram > vram)"
             );
@@ -199,7 +199,7 @@ fn detect_cxl_memory(device_dir: &Path) -> u64 {
         }
     }
     if total_cxl > 0 {
-        tracing::debug!(
+        debug!(
             total_cxl_bytes = total_cxl,
             "CXL memory detected via /sys/bus/cxl"
         );
