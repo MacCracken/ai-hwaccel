@@ -3,6 +3,7 @@
 mod builder;
 mod classification;
 mod command;
+mod coverage;
 mod display;
 mod new_backends;
 mod proptest;
