@@ -97,6 +97,9 @@ pub(crate) fn parse_system_profiler_output(
         memory_free_bytes: None,
         pcie_bandwidth_gbps: None,
         numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
     });
 
     profiles.push(AcceleratorProfile {
@@ -110,6 +113,9 @@ pub(crate) fn parse_system_profiler_output(
         memory_free_bytes: None,
         pcie_bandwidth_gbps: None,
         numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
     });
 
     true
@@ -132,6 +138,9 @@ fn detect_linux_device_tree(profiles: &mut Vec<AcceleratorProfile>) {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         });
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::AppleNpu,
@@ -144,6 +153,9 @@ fn detect_linux_device_tree(profiles: &mut Vec<AcceleratorProfile>) {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         });
     }
 }

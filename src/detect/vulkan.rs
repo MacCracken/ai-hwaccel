@@ -82,6 +82,9 @@ pub(crate) fn parse_vulkan_output(
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         });
     } else {
         for (i, dev) in devices.into_iter().enumerate() {
@@ -125,6 +128,9 @@ pub(crate) fn parse_vulkan_output(
                 memory_free_bytes: None,
                 pcie_bandwidth_gbps: None,
                 numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
             });
         }
     }

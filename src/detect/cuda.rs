@@ -9,7 +9,7 @@ use crate::profile::AcceleratorProfile;
 use super::command::{DEFAULT_TIMEOUT, run_tool, validate_device_id, validate_memory_mb};
 
 const NVIDIA_SMI_ARGS: &[&str] = &[
-    "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name",
+    "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name,temperature.gpu,power.draw,utilization.gpu",
     "--format=csv,noheader,nounits",
 ];
 
@@ -79,6 +79,9 @@ pub(crate) fn parse_cuda_output(
         let compute_cap = parts[4].to_string();
         let driver_version = parts[5].to_string();
         let gpu_name = if parts.len() > 6 { parts[6] } else { "" };
+        let temp_c: Option<u32> = parts.get(7).and_then(|s| s.parse().ok());
+        let power_w: Option<f64> = parts.get(8).and_then(|s| s.parse().ok());
+        let gpu_util: Option<u32> = parts.get(9).and_then(|s| s.parse().ok());
 
         // Grace Hopper detection: GH200 has unified CPU+GPU memory via NVLink-C2C.
         // The GPU can access system memory seamlessly, so the effective memory
@@ -122,6 +125,9 @@ pub(crate) fn parse_cuda_output(
             memory_free_bytes: mem_free_mb.map(|mb| mb.saturating_mul(1024 * 1024)),
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: temp_c,
+            power_watts: power_w,
+            gpu_utilization_percent: gpu_util,
         });
     }
 }

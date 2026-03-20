@@ -23,6 +23,9 @@ fn requirement_satisfied_by_all_types() {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
     };
     let npu = AcceleratorProfile {
         accelerator: AcceleratorType::IntelNpu,
@@ -35,6 +38,9 @@ fn requirement_satisfied_by_all_types() {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
     };
 
     // None satisfied by anything

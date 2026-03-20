@@ -81,6 +81,9 @@ pub(crate) fn parse_neuron_output(
                 memory_free_bytes: None,
                 pcie_bandwidth_gbps: None,
                 numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
             });
         }
         true
@@ -135,6 +138,9 @@ fn detect_neuron_dev_fallback(profiles: &mut Vec<AcceleratorProfile>) {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         });
     }
 }

@@ -108,6 +108,9 @@ fn serde_accelerator_profile_roundtrip() {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         },
     ];
     for p in &profiles {
@@ -326,6 +329,9 @@ fn serde_registry_roundtrip() {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
     });
     let json = serde_json::to_string(&reg).unwrap();
     let back: AcceleratorRegistry = serde_json::from_str(&json).unwrap();

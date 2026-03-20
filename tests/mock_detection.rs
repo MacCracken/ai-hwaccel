@@ -205,6 +205,9 @@ fn suggest_quantization_qualcomm_does_not_return_bf16() {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         },
     ]);
     let q = reg.suggest_quantization(7_000_000_000);

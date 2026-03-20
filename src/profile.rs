@@ -49,6 +49,18 @@ pub struct AcceleratorProfile {
     /// NUMA node this device is attached to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub numa_node: Option<u32>,
+
+    // --- Power and thermal (0.20) -------------------------------------------
+
+    /// GPU temperature in degrees Celsius.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature_c: Option<u32>,
+    /// Current power draw in watts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_watts: Option<f64>,
+    /// GPU utilization as a percentage (0–100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_utilization_percent: Option<u32>,
 }
 
 impl AcceleratorProfile {
@@ -171,6 +183,9 @@ impl AcceleratorProfile {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         }
     }
 
@@ -187,6 +202,9 @@ impl AcceleratorProfile {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         }
     }
 
@@ -210,6 +228,9 @@ impl AcceleratorProfile {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         }
     }
 
@@ -229,6 +250,9 @@ impl AcceleratorProfile {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         }
     }
 
@@ -245,6 +269,9 @@ impl AcceleratorProfile {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         }
     }
 }

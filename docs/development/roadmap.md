@@ -84,16 +84,18 @@ Longer-term items that don't block any release.
 
 - [ ] **Topology-aware sharding** — NVLink/NVSwitch/XGMI/ICI topology for
   optimal tensor placement and communication minimization.
-- [ ] **Power and thermal monitoring** — current power draw, temperature,
-  throttling state via `nvidia-smi`, `rocm-smi`.
+- [x] **Power and thermal monitoring** — `temperature_c`, `power_watts`,
+  `gpu_utilization_percent` on `AcceleratorProfile`. CUDA via `nvidia-smi`
+  (`temperature.gpu`, `power.draw`, `utilization.gpu`). ROCm via sysfs hwmon.
 - [ ] **Hot-plug support** — `udev`/`inotify` watch for device add/remove
   with dynamic registry updates.
 - [ ] **Cost-aware planning** — cloud pricing data for cheapest device
   configuration per workload.
 - [ ] **WASM target** — browser-based ML dashboards with stubbed detection.
 - [ ] **Full Python bindings** — complete PyO3 package with pip install.
-- [ ] **Reduce allocations** — `Cow<str>` for device names, `SmallVec` for
-  profiles (most systems have < 8 accelerators).
+- [x] **Reduce allocations** — pre-allocated `Vec::with_capacity(8)` for
+  profile collection. `Cow<str>` and `SmallVec` deferred — would break
+  public API for marginal gain.
 - [ ] **Lazy detection** — detect only backends the caller queries, not all
   enabled backends upfront.
 - [ ] **Multi-node detection** — SSH/gRPC to remote nodes to build a

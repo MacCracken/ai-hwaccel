@@ -84,6 +84,9 @@ fn npu_only_int_quantization() {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         };
         assert!(
             !p.supports_quantization(&QuantizationLevel::None),
@@ -127,6 +130,9 @@ fn neuron_supports_bf16_fp16_int8_not_int4() {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
     };
     assert!(neuron.supports_quantization(&QuantizationLevel::None));
     assert!(neuron.supports_quantization(&QuantizationLevel::BFloat16));
@@ -148,6 +154,9 @@ fn qualcomm_supports_fp16_int8_int4_not_fp32() {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
     };
     assert!(!qc.supports_quantization(&QuantizationLevel::None));
     assert!(qc.supports_quantization(&QuantizationLevel::Float16));
@@ -193,6 +202,9 @@ fn preferred_quantization_per_family() {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
     };
     assert_eq!(npu.preferred_quantization(), QuantizationLevel::Int8);
 
@@ -211,6 +223,9 @@ fn preferred_quantization_per_family() {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
     };
     assert_eq!(neuron.preferred_quantization(), QuantizationLevel::BFloat16);
 
@@ -225,6 +240,9 @@ fn preferred_quantization_per_family() {
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
     };
     assert_eq!(qc.preferred_quantization(), QuantizationLevel::Int8);
 }

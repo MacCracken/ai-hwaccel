@@ -74,7 +74,9 @@ impl AcceleratorRegistry {
 /// When 2+ backends are enabled, runs them in parallel via `std::thread::scope`.
 /// When 0-1 are enabled, runs sequentially to avoid thread spawn overhead.
 pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry {
-    let mut all_profiles = vec![cpu_profile()];
+    // Pre-allocate for typical system: 1 CPU + up to 8 accelerators.
+    let mut all_profiles = Vec::with_capacity(8);
+    all_profiles.push(cpu_profile());
     let mut all_warnings: Vec<DetectionError> = Vec::new();
 
     let use_threads = builder.enabled_count() >= 2;
@@ -295,6 +297,9 @@ pub(crate) fn cpu_profile() -> AcceleratorProfile {
         memory_free_bytes: None,
         pcie_bandwidth_gbps: None,
         numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
     }
 }
 

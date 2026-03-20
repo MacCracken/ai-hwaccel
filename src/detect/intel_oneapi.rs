@@ -76,6 +76,9 @@ pub(crate) fn parse_xpu_smi_output(
             memory_free_bytes: None,
             pcie_bandwidth_gbps: None,
             numa_node: None,
+            temperature_c: None,
+            power_watts: None,
+            gpu_utilization_percent: None,
         });
     }
 }
