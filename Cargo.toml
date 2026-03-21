@@ -8,8 +8,10 @@ description = "Universal AI hardware accelerator detection, capability querying,
 homepage = "https://github.com/MacCracken/ai-hwaccel"
 repository = "https://github.com/MacCracken/ai-hwaccel"
 readme = "README.md"
+documentation = "https://docs.rs/ai-hwaccel"
 keywords = ["gpu", "tpu", "npu", "cuda", "accelerator"]
 categories = ["hardware-support", "science"]
+exclude = ["rust_out", ".claude/"]
 
 [features]
 default = ["all-backends", "cli"]

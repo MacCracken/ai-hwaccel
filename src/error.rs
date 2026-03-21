@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// An error encountered during hardware detection.
 ///
 /// These are non-fatal — detection continues even when individual backends
-/// fail. The registry collects them as [`AcceleratorRegistry::warnings`].
+/// fail. The registry collects them as [`crate::AcceleratorRegistry::warnings`].
 ///
 /// # Examples
 ///

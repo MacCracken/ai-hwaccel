@@ -9,12 +9,41 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 Focus: lazy detection, topology-aware sharding, cloud hardware validation,
 Python bindings groundwork.
 
-### API improvements
+### Detection performance
+
+Current bottleneck: `vulkaninfo` takes ~5s on AMD Cezanne iGPU. Total
+detection is 5.05s, of which 5.0s is vulkaninfo. All other backends
+(ROCm sysfs, PCIe, bandwidth, NUMA, storage, disk) complete in <10ms.
 
 - [ ] **Lazy detection** — detect only backends the caller queries, not all
   enabled backends upfront. `AcceleratorRegistry::lazy()` returns a registry
   that probes on first access per family. Avoids spawning nvidia-smi when
   caller only needs TPU info.
+- [ ] **`vulkaninfo` timeout + caching** — `vulkaninfo` is the single
+  slowest probe (~5s). Add a per-process cache: write parsed results to
+  `$XDG_CACHE_HOME/ai-hwaccel/vulkan.json` with a 60s TTL. On subsequent
+  calls within the TTL, read from cache instead of re-running vulkaninfo.
+  Also add a 3s timeout on the subprocess — if vulkaninfo hangs, fall back
+  to sysfs-only Vulkan detection (`/sys/class/drm/card*/device/vendor`).
+- [ ] **Parallel backend probing** — run CLI-based backends (nvidia-smi,
+  vulkaninfo, rocm-smi, hl-smi) concurrently via `tokio::process::Command`
+  instead of sequentially. Sysfs-only backends already complete in <1ms
+  and don't benefit from parallelism. Expected improvement: detection time
+  drops from max(all tools) to max(slowest tool) — on systems with both
+  CUDA and Vulkan, this halves detection time.
+- [ ] **Sysfs-only Vulkan fallback** — for systems where `vulkaninfo` is
+  slow or absent, detect Vulkan-capable GPUs via
+  `/sys/class/drm/card*/device/{vendor,device}` + PCI ID lookup table.
+  Provides device name and VRAM estimate without spawning a subprocess.
+  Use as fast path; full `vulkaninfo` becomes opt-in enrichment.
+- [ ] **Detection result caching** — `AcceleratorRegistry::cached(ttl)`
+  persists detection results to disk. Subsequent calls within TTL return
+  cached data instantly. Useful for gateway servers (like hoosh) that
+  call `detect()` at startup and don't need real-time hardware changes.
+- [ ] **Per-backend timing** — `--profile` CLI flag and
+  `AcceleratorRegistry::detect_with_timing()` API that returns
+  `HashMap<&str, Duration>` showing how long each backend took. Enables
+  users to identify and disable slow backends.
 - [ ] **Topology-aware sharding** — use interconnect data (NVLink, XGMI, ICI)
   already collected in `SystemIo` to generate sharding plans that minimize
   cross-link transfers. Pipeline parallel should prefer directly-connected
@@ -208,8 +237,7 @@ Items that don't fit in a specific release yet.
 
 - [ ] **Model compatibility database** — which models run on which hardware
   at which quantisation. Queryable: "can I run Llama 70B on 2x RTX 4090?"
-- [ ] **Workload profiler** — measure actual detection latency per backend,
-  report slow tools. `--profile` flag on CLI.
+- [x] **Workload profiler** — moved to 0.21.3 as `--profile` / per-backend timing.
 - [ ] **Power budget planning** — given power cap (e.g. 1000W), recommend
   device mix. Uses power_watts from detection.
 - [ ] **Thermal throttling prediction** — warn when temperature_c approaches
