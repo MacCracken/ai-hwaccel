@@ -1,7 +1,7 @@
 //! Tests for cost-aware planning.
 
-use crate::cost::*;
 use crate::QuantizationLevel;
+use crate::cost::*;
 
 #[test]
 fn all_instances_not_empty() {
@@ -33,7 +33,10 @@ fn all_instances_cached_across_calls() {
 #[test]
 fn recommend_7b_bf16_finds_instances() {
     let recs = recommend_instance(7_000_000_000, &QuantizationLevel::BFloat16, None);
-    assert!(!recs.is_empty(), "7B at BF16 should fit on at least one instance");
+    assert!(
+        !recs.is_empty(),
+        "7B at BF16 should fit on at least one instance"
+    );
     // Should be sorted by price.
     for pair in recs.windows(2) {
         assert!(pair[0].instance.price_per_hour <= pair[1].instance.price_per_hour);
@@ -62,12 +65,20 @@ fn recommend_huge_model_may_return_empty() {
 
 #[test]
 fn recommend_filter_by_provider() {
-    let aws = recommend_instance(7_000_000_000, &QuantizationLevel::Int8, Some(CloudProvider::Aws));
+    let aws = recommend_instance(
+        7_000_000_000,
+        &QuantizationLevel::Int8,
+        Some(CloudProvider::Aws),
+    );
     for rec in &aws {
         assert_eq!(rec.instance.provider, "aws");
     }
 
-    let gcp = recommend_instance(7_000_000_000, &QuantizationLevel::Int8, Some(CloudProvider::Gcp));
+    let gcp = recommend_instance(
+        7_000_000_000,
+        &QuantizationLevel::Int8,
+        Some(CloudProvider::Gcp),
+    );
     for rec in &gcp {
         assert_eq!(rec.instance.provider, "gcp");
     }

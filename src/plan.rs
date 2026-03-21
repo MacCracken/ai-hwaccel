@@ -112,7 +112,12 @@ impl AcceleratorRegistry {
                 .any(|ic| ic.kind == InterconnectKind::NVSwitch);
             let nvlink_bw = interconnects
                 .iter()
-                .filter(|ic| matches!(ic.kind, InterconnectKind::NVLink | InterconnectKind::NVSwitch))
+                .filter(|ic| {
+                    matches!(
+                        ic.kind,
+                        InterconnectKind::NVLink | InterconnectKind::NVSwitch
+                    )
+                })
                 .map(|ic| ic.bandwidth_gbps)
                 .fold(0.0f64, f64::max);
             let xgmi_bw = interconnects
@@ -130,8 +135,8 @@ impl AcceleratorRegistry {
             // bisection bandwidth regardless of device count, so it bypasses
             // this limit. The 100 GB/s threshold corresponds to ~2 NVLink 4.0
             // connections per direction (50 GB/s each).
-            let use_tensor_parallel = has_nvswitch
-                || (high_bw_interconnect > 100.0 && gpu_devices.len() <= 8);
+            let use_tensor_parallel =
+                has_nvswitch || (high_bw_interconnect > 100.0 && gpu_devices.len() <= 8);
 
             if use_tensor_parallel {
                 let num_devices = gpu_devices.len() as u32;

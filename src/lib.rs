@@ -263,13 +263,13 @@
 
 mod async_detect;
 pub mod cache;
+pub mod cost;
 pub mod detect;
 pub mod error;
 pub mod ffi;
 #[cfg(feature = "fuzz")]
 #[doc(hidden)]
 pub mod fuzz_helpers;
-pub mod cost;
 pub mod hardware;
 pub mod lazy;
 pub mod plan;
@@ -284,11 +284,11 @@ pub mod training;
 pub use cache::{CachedRegistry, DiskCachedRegistry};
 pub use cost::{CloudInstance as CloudGpuInstance, CloudProvider, InstanceRecommendation};
 pub use detect::TimedDetection;
-pub use lazy::LazyRegistry;
 pub use error::DetectionError;
 pub use hardware::{
     AcceleratorFamily, AcceleratorType, GaudiGeneration, NeuronChipType, TpuVersion,
 };
+pub use lazy::LazyRegistry;
 pub use profile::AcceleratorProfile;
 pub use quantization::QuantizationLevel;
 pub use registry::{AcceleratorRegistry, Backend, DetectBuilder, SCHEMA_VERSION};

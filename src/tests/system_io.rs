@@ -260,10 +260,7 @@ fn disk_cached_registry_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("test_cache.json");
 
-    let cache = DiskCachedRegistry::with_path(
-        std::time::Duration::from_secs(300),
-        path.clone(),
-    );
+    let cache = DiskCachedRegistry::with_path(std::time::Duration::from_secs(300), path.clone());
 
     // First get: detects and writes to disk.
     let reg1 = cache.get();
@@ -280,10 +277,7 @@ fn disk_cached_registry_invalidate() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("test_cache.json");
 
-    let cache = DiskCachedRegistry::with_path(
-        std::time::Duration::from_secs(300),
-        path.clone(),
-    );
+    let cache = DiskCachedRegistry::with_path(std::time::Duration::from_secs(300), path.clone());
     let _ = cache.get();
     assert!(path.exists());
 
@@ -299,10 +293,7 @@ fn disk_cached_registry_corrupt_file_redetects() {
     // Write garbage to the cache file.
     std::fs::write(&path, "not valid json {{{{").unwrap();
 
-    let cache = DiskCachedRegistry::with_path(
-        std::time::Duration::from_secs(300),
-        path,
-    );
+    let cache = DiskCachedRegistry::with_path(std::time::Duration::from_secs(300), path);
 
     // Should re-detect despite corrupt file.
     let reg = cache.get();

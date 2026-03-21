@@ -126,9 +126,9 @@ pub fn recommend_instance(
             inst.total_gpu_memory_gb as f64 >= needed_gb
         })
         .map(|inst| {
-            let headroom =
-                (inst.total_gpu_memory_gb as f64 - needed_gb) / inst.total_gpu_memory_gb as f64
-                    * 100.0;
+            let headroom = (inst.total_gpu_memory_gb as f64 - needed_gb)
+                / inst.total_gpu_memory_gb as f64
+                * 100.0;
             InstanceRecommendation {
                 instance: inst.clone(),
                 memory_required_bytes: needed,

@@ -351,13 +351,16 @@ pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetectio
         ($feature:literal, $backend:expr, $name:literal, $detect_fn:expr, $handles:expr, $s:expr) => {
             #[cfg(feature = $feature)]
             if builder.backend_enabled($backend) {
-                $handles.push(($name, $s.spawn(|| {
-                    let start = Instant::now();
-                    let mut p = Vec::new();
-                    let mut w = Vec::new();
-                    $detect_fn(&mut p, &mut w);
-                    (p, w, start.elapsed())
-                })));
+                $handles.push((
+                    $name,
+                    $s.spawn(|| {
+                        let start = Instant::now();
+                        let mut p = Vec::new();
+                        let mut w = Vec::new();
+                        $detect_fn(&mut p, &mut w);
+                        (p, w, start.elapsed())
+                    }),
+                ));
             }
         };
     }
@@ -371,20 +374,111 @@ pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetectio
 
             spawn_backend_timed!("cuda", Backend::Cuda, "cuda", cuda::detect_cuda, handles, s);
             spawn_backend_timed!("rocm", Backend::Rocm, "rocm", rocm::detect_rocm, handles, s);
-            spawn_backend_timed!("apple", Backend::Apple, "apple", apple::detect_metal_and_ane, handles, s);
-            spawn_backend_timed!("vulkan", Backend::Vulkan, "vulkan", vulkan::detect_vulkan, handles, s);
-            spawn_backend_timed!("intel-npu", Backend::IntelNpu, "intel_npu", intel_npu::detect_intel_npu, handles, s);
-            spawn_backend_timed!("amd-xdna", Backend::AmdXdna, "amd_xdna", amd_xdna::detect_amd_xdna, handles, s);
+            spawn_backend_timed!(
+                "apple",
+                Backend::Apple,
+                "apple",
+                apple::detect_metal_and_ane,
+                handles,
+                s
+            );
+            spawn_backend_timed!(
+                "vulkan",
+                Backend::Vulkan,
+                "vulkan",
+                vulkan::detect_vulkan,
+                handles,
+                s
+            );
+            spawn_backend_timed!(
+                "intel-npu",
+                Backend::IntelNpu,
+                "intel_npu",
+                intel_npu::detect_intel_npu,
+                handles,
+                s
+            );
+            spawn_backend_timed!(
+                "amd-xdna",
+                Backend::AmdXdna,
+                "amd_xdna",
+                amd_xdna::detect_amd_xdna,
+                handles,
+                s
+            );
             spawn_backend_timed!("tpu", Backend::Tpu, "tpu", tpu::detect_tpu, handles, s);
-            spawn_backend_timed!("gaudi", Backend::Gaudi, "gaudi", gaudi::detect_gaudi, handles, s);
-            spawn_backend_timed!("aws-neuron", Backend::AwsNeuron, "aws_neuron", neuron::detect_aws_neuron, handles, s);
-            spawn_backend_timed!("intel-oneapi", Backend::IntelOneApi, "intel_oneapi", intel_oneapi::detect_intel_oneapi, handles, s);
-            spawn_backend_timed!("qualcomm", Backend::Qualcomm, "qualcomm", qualcomm::detect_qualcomm_ai100, handles, s);
-            spawn_backend_timed!("cerebras", Backend::Cerebras, "cerebras", cerebras::detect_cerebras_wse, handles, s);
-            spawn_backend_timed!("graphcore", Backend::Graphcore, "graphcore", graphcore::detect_graphcore_ipu, handles, s);
-            spawn_backend_timed!("groq", Backend::Groq, "groq", groq::detect_groq_lpu, handles, s);
-            spawn_backend_timed!("samsung-npu", Backend::SamsungNpu, "samsung_npu", samsung_npu::detect_samsung_npu, handles, s);
-            spawn_backend_timed!("mediatek-apu", Backend::MediaTekApu, "mediatek_apu", mediatek_apu::detect_mediatek_apu, handles, s);
+            spawn_backend_timed!(
+                "gaudi",
+                Backend::Gaudi,
+                "gaudi",
+                gaudi::detect_gaudi,
+                handles,
+                s
+            );
+            spawn_backend_timed!(
+                "aws-neuron",
+                Backend::AwsNeuron,
+                "aws_neuron",
+                neuron::detect_aws_neuron,
+                handles,
+                s
+            );
+            spawn_backend_timed!(
+                "intel-oneapi",
+                Backend::IntelOneApi,
+                "intel_oneapi",
+                intel_oneapi::detect_intel_oneapi,
+                handles,
+                s
+            );
+            spawn_backend_timed!(
+                "qualcomm",
+                Backend::Qualcomm,
+                "qualcomm",
+                qualcomm::detect_qualcomm_ai100,
+                handles,
+                s
+            );
+            spawn_backend_timed!(
+                "cerebras",
+                Backend::Cerebras,
+                "cerebras",
+                cerebras::detect_cerebras_wse,
+                handles,
+                s
+            );
+            spawn_backend_timed!(
+                "graphcore",
+                Backend::Graphcore,
+                "graphcore",
+                graphcore::detect_graphcore_ipu,
+                handles,
+                s
+            );
+            spawn_backend_timed!(
+                "groq",
+                Backend::Groq,
+                "groq",
+                groq::detect_groq_lpu,
+                handles,
+                s
+            );
+            spawn_backend_timed!(
+                "samsung-npu",
+                Backend::SamsungNpu,
+                "samsung_npu",
+                samsung_npu::detect_samsung_npu,
+                handles,
+                s
+            );
+            spawn_backend_timed!(
+                "mediatek-apu",
+                Backend::MediaTekApu,
+                "mediatek_apu",
+                mediatek_apu::detect_mediatek_apu,
+                handles,
+                s
+            );
 
             for (name, handle) in handles {
                 if let Ok((profiles, warnings, duration)) = handle.join() {
@@ -397,20 +491,70 @@ pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetectio
     } else {
         run_backend_timed!("cuda", Backend::Cuda, "cuda", cuda::detect_cuda);
         run_backend_timed!("rocm", Backend::Rocm, "rocm", rocm::detect_rocm);
-        run_backend_timed!("apple", Backend::Apple, "apple", apple::detect_metal_and_ane);
+        run_backend_timed!(
+            "apple",
+            Backend::Apple,
+            "apple",
+            apple::detect_metal_and_ane
+        );
         run_backend_timed!("vulkan", Backend::Vulkan, "vulkan", vulkan::detect_vulkan);
-        run_backend_timed!("intel-npu", Backend::IntelNpu, "intel_npu", intel_npu::detect_intel_npu);
-        run_backend_timed!("amd-xdna", Backend::AmdXdna, "amd_xdna", amd_xdna::detect_amd_xdna);
+        run_backend_timed!(
+            "intel-npu",
+            Backend::IntelNpu,
+            "intel_npu",
+            intel_npu::detect_intel_npu
+        );
+        run_backend_timed!(
+            "amd-xdna",
+            Backend::AmdXdna,
+            "amd_xdna",
+            amd_xdna::detect_amd_xdna
+        );
         run_backend_timed!("tpu", Backend::Tpu, "tpu", tpu::detect_tpu);
         run_backend_timed!("gaudi", Backend::Gaudi, "gaudi", gaudi::detect_gaudi);
-        run_backend_timed!("aws-neuron", Backend::AwsNeuron, "aws_neuron", neuron::detect_aws_neuron);
-        run_backend_timed!("intel-oneapi", Backend::IntelOneApi, "intel_oneapi", intel_oneapi::detect_intel_oneapi);
-        run_backend_timed!("qualcomm", Backend::Qualcomm, "qualcomm", qualcomm::detect_qualcomm_ai100);
-        run_backend_timed!("cerebras", Backend::Cerebras, "cerebras", cerebras::detect_cerebras_wse);
-        run_backend_timed!("graphcore", Backend::Graphcore, "graphcore", graphcore::detect_graphcore_ipu);
+        run_backend_timed!(
+            "aws-neuron",
+            Backend::AwsNeuron,
+            "aws_neuron",
+            neuron::detect_aws_neuron
+        );
+        run_backend_timed!(
+            "intel-oneapi",
+            Backend::IntelOneApi,
+            "intel_oneapi",
+            intel_oneapi::detect_intel_oneapi
+        );
+        run_backend_timed!(
+            "qualcomm",
+            Backend::Qualcomm,
+            "qualcomm",
+            qualcomm::detect_qualcomm_ai100
+        );
+        run_backend_timed!(
+            "cerebras",
+            Backend::Cerebras,
+            "cerebras",
+            cerebras::detect_cerebras_wse
+        );
+        run_backend_timed!(
+            "graphcore",
+            Backend::Graphcore,
+            "graphcore",
+            graphcore::detect_graphcore_ipu
+        );
         run_backend_timed!("groq", Backend::Groq, "groq", groq::detect_groq_lpu);
-        run_backend_timed!("samsung-npu", Backend::SamsungNpu, "samsung_npu", samsung_npu::detect_samsung_npu);
-        run_backend_timed!("mediatek-apu", Backend::MediaTekApu, "mediatek_apu", mediatek_apu::detect_mediatek_apu);
+        run_backend_timed!(
+            "samsung-npu",
+            Backend::SamsungNpu,
+            "samsung_npu",
+            samsung_npu::detect_samsung_npu
+        );
+        run_backend_timed!(
+            "mediatek-apu",
+            Backend::MediaTekApu,
+            "mediatek_apu",
+            mediatek_apu::detect_mediatek_apu
+        );
     }
 
     // Post-pass: sysfs Vulkan fallback (same as detect_with_builder).

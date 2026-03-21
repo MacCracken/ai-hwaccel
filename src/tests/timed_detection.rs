@@ -24,12 +24,7 @@ fn timed_detection_has_enrich_timing() {
 #[test]
 fn timed_detection_total_ge_max_backend() {
     let result = AcceleratorRegistry::detect_with_timing();
-    let max_backend = result
-        .timings
-        .values()
-        .max()
-        .copied()
-        .unwrap_or_default();
+    let max_backend = result.timings.values().max().copied().unwrap_or_default();
     // Total wall time should be >= the slowest individual backend
     // (though total includes sequential post-passes).
     assert!(result.total >= max_backend);

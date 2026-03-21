@@ -64,23 +64,34 @@ fn main() {
 
         let recs = ai_hwaccel::cost::recommend_instance(model_params, &quant, provider);
         if recs.is_empty() {
-            println!("No cloud instance has enough GPU memory for {} params at {}.",
-                format_params(model_params), quant);
+            println!(
+                "No cloud instance has enough GPU memory for {} params at {}.",
+                format_params(model_params),
+                quant
+            );
         } else {
             let needed_gb = recs[0].memory_required_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
-            println!("Model: {} params at {} — {:.1} GB required\n",
-                format_params(model_params), quant, needed_gb);
-            println!("{:<32} {:>8} {:>6} {:>10} {:>8} {:>10}",
-                "Instance", "Provider", "GPUs", "GPU Mem", "$/hr", "Headroom");
+            println!(
+                "Model: {} params at {} — {:.1} GB required\n",
+                format_params(model_params),
+                quant,
+                needed_gb
+            );
+            println!(
+                "{:<32} {:>8} {:>6} {:>10} {:>8} {:>10}",
+                "Instance", "Provider", "GPUs", "GPU Mem", "$/hr", "Headroom"
+            );
             println!("{}", "-".repeat(80));
             for rec in recs.iter().take(10) {
-                println!("{:<32} {:>8} {:>6} {:>7} GB {:>8.2} {:>9.0}%",
+                println!(
+                    "{:<32} {:>8} {:>6} {:>7} GB {:>8.2} {:>9.0}%",
                     rec.instance.name,
                     rec.instance.provider,
                     rec.instance.gpu_count,
                     rec.instance.total_gpu_memory_gb,
                     rec.instance.price_per_hour,
-                    rec.memory_headroom_pct);
+                    rec.memory_headroom_pct
+                );
             }
         }
         return;
@@ -126,7 +137,11 @@ fn main() {
         for (name, dur) in &entries {
             eprintln!("  {:<16} {:>8.1}ms", name, dur.as_secs_f64() * 1000.0);
         }
-        eprintln!("  {:<16} {:>8.1}ms", "TOTAL (wall)", total.as_secs_f64() * 1000.0);
+        eprintln!(
+            "  {:<16} {:>8.1}ms",
+            "TOTAL (wall)",
+            total.as_secs_f64() * 1000.0
+        );
         eprintln!();
     }
 
@@ -528,10 +543,7 @@ fn print_table(
             println!("  Container: Docker");
         }
         if env.is_kubernetes {
-            let ns = env
-                .kubernetes_namespace
-                .as_deref()
-                .unwrap_or("unknown");
+            let ns = env.kubernetes_namespace.as_deref().unwrap_or("unknown");
             println!("  Kubernetes: namespace={}", ns);
         }
         if let Some(ref cloud) = env.cloud_instance {

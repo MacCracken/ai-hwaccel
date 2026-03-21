@@ -33,10 +33,12 @@ fn lazy_into_registry_probes_all() {
     let registry = lazy.into_registry();
     // Should have at least the CPU profile.
     assert!(!registry.all_profiles().is_empty());
-    assert!(registry
-        .all_profiles()
-        .iter()
-        .any(|p| matches!(p.accelerator, AcceleratorType::Cpu)));
+    assert!(
+        registry
+            .all_profiles()
+            .iter()
+            .any(|p| matches!(p.accelerator, AcceleratorType::Cpu))
+    );
 }
 
 #[test]

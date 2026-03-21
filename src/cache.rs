@@ -259,11 +259,7 @@ impl DiskCachedRegistry {
 
     fn read_disk_cache(&self) -> Option<AcceleratorRegistry> {
         let metadata = std::fs::metadata(&self.cache_path).ok()?;
-        let age = metadata
-            .modified()
-            .ok()?
-            .elapsed()
-            .unwrap_or(Duration::MAX);
+        let age = metadata.modified().ok()?.elapsed().unwrap_or(Duration::MAX);
         if age > self.ttl {
             return None;
         }

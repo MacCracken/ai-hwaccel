@@ -48,19 +48,21 @@ fn vulkan_cache_path() -> Option<PathBuf> {
 fn read_vulkan_cache() -> Option<(String, Option<String>)> {
     let path = vulkan_cache_path()?;
     let metadata = std::fs::metadata(&path).ok()?;
-    let age = metadata
-        .modified()
-        .ok()?
-        .elapsed()
-        .unwrap_or(Duration::MAX);
+    let age = metadata.modified().ok()?.elapsed().unwrap_or(Duration::MAX);
     if age > VULKANINFO_CACHE_TTL {
         return None;
     }
     let data = std::fs::read_to_string(&path).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&data).ok()?;
     let summary = parsed.get("summary")?.as_str()?.to_string();
-    let full = parsed.get("full").and_then(|v| v.as_str()).map(String::from);
-    debug!("using cached vulkaninfo results (age: {:.1}s)", age.as_secs_f64());
+    let full = parsed
+        .get("full")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    debug!(
+        "using cached vulkaninfo results (age: {:.1}s)",
+        age.as_secs_f64()
+    );
     Some((summary, full))
 }
 
@@ -308,10 +310,10 @@ pub(crate) fn detect_vulkan_sysfs(
             continue;
         };
 
-        let vendor_id = u16::from_str_radix(vendor_str.trim().trim_start_matches("0x"), 16)
-            .unwrap_or(0);
-        let device_id_pci = u16::from_str_radix(device_str.trim().trim_start_matches("0x"), 16)
-            .unwrap_or(0);
+        let vendor_id =
+            u16::from_str_radix(vendor_str.trim().trim_start_matches("0x"), 16).unwrap_or(0);
+        let device_id_pci =
+            u16::from_str_radix(device_str.trim().trim_start_matches("0x"), 16).unwrap_or(0);
 
         // Skip non-GPU vendors.
         if !is_gpu_vendor(vendor_id) {
@@ -321,8 +323,7 @@ pub(crate) fn detect_vulkan_sysfs(
         let (device_name, estimated_vram_mb) = lookup_pci_gpu(vendor_id, device_id_pci);
 
         // Try to read VRAM from sysfs (some drivers expose this).
-        let vram_bytes = read_drm_vram(&dev_dir)
-            .unwrap_or(estimated_vram_mb * 1024 * 1024);
+        let vram_bytes = read_drm_vram(&dev_dir).unwrap_or(estimated_vram_mb * 1024 * 1024);
 
         debug!(
             vendor_id,

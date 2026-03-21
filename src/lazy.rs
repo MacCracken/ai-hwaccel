@@ -91,10 +91,7 @@ impl LazyRegistry {
         // Build a DetectBuilder that only enables backends for this family.
         let builder = match family {
             AcceleratorFamily::Cpu => return, // Always probed.
-            AcceleratorFamily::Gpu => DetectBuilder::none()
-                .with_cuda()
-                .with_rocm()
-                .with_vulkan(),
+            AcceleratorFamily::Gpu => DetectBuilder::none().with_cuda().with_rocm().with_vulkan(),
             AcceleratorFamily::Npu => DetectBuilder::none()
                 .with_intel_npu()
                 .with_amd_xdna()

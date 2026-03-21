@@ -106,11 +106,9 @@ fn detect_aws(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstance> {
         return None;
     }
 
-    let instance_type = Some(dmi.product_name.clone())
-        .filter(|s| !s.is_empty() && s.contains('.'));
+    let instance_type = Some(dmi.product_name.clone()).filter(|s| !s.is_empty() && s.contains('.'));
 
-    let instance_id = Some(dmi.board_asset_tag.clone())
-        .filter(|s| s.starts_with("i-"));
+    let instance_id = Some(dmi.board_asset_tag.clone()).filter(|s| s.starts_with("i-"));
 
     let region = std::env::var("AWS_DEFAULT_REGION")
         .ok()
