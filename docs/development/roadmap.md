@@ -136,6 +136,22 @@ platforms.
   `from_json()`, planning, and sharding for browser-based dashboards.
 - [ ] **JS/TS bindings** — `wasm-bindgen` wrapper for npm package.
 
+### Interconnect detection gaps
+
+- [ ] **NVSwitch auto-detection** — probe `/sys/devices/virtual/nvidia-nvswitch/`
+  or parse `nvidia-smi topo -m` to detect NVSwitch fabric. Currently NVSwitch
+  is only inferred from NVLink link count. Affects tensor-parallel strategy
+  selection in `plan_sharding()`.
+- [ ] **AMD XGMI / Infinity Fabric** — detect multi-GPU XGMI topology via
+  `rocm-smi --showtopo` or sysfs. Currently no XGMI detection exists, so
+  AMD multi-GPU sharding underestimates interconnect bandwidth.
+- [ ] **Google TPU ICI detection** — detect ICI (Inter-Chip Interconnect)
+  mesh topology on TPU pod slices. Currently `InterconnectKind::Ici` is
+  defined but never populated by detection code.
+- [ ] **RoCE v2 detection** — distinguish RoCEv1 vs RoCEv2 via
+  `/sys/class/infiniband/*/ports/*/gid_attrs/types/`. RoCEv2 supports
+  routable RDMA which affects multi-node sharding decisions.
+
 ### Remaining platform gaps
 
 - [ ] **Android** — HAL `hwbinder` for NNAPI accelerator list. Requires
@@ -143,8 +159,6 @@ platforms.
 - [ ] **FreeBSD** — DRM sysctl equivalents for GPU detection.
 - [ ] **Intel oneAPI** — Data Center GPU Max (Ponte Vecchio) HBM vs DDR
   memory tiers on real hardware.
-- [ ] **AMD ROCm XGMI** — multi-GPU XGMI/Infinity Fabric topology detection
-  on multi-GPU AMD systems.
 
 ### Remaining untested backends
 

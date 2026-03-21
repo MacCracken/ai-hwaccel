@@ -482,25 +482,25 @@ pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetectio
 
 /// List PCI addresses bound to a given driver (sorted).
 pub(super) fn list_driver_pci_addrs(driver: &str) -> Vec<String> {
-    let driver_path = format!("/sys/bus/pci/drivers/{}", driver);
-    let dir = Path::new(&driver_path);
+    let dir = Path::new("/sys/bus/pci/drivers").join(driver);
     if !dir.exists() {
         return Vec::new();
     }
-    let mut addrs: Vec<String> = std::fs::read_dir(dir)
+    let mut addrs: Vec<String> = std::fs::read_dir(&dir)
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            // PCI addresses look like "0000:01:00.0"
-            if name.contains(':')
-                && name.contains('.')
-                && name
-                    .chars()
-                    .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.')
+            let name = e.file_name();
+            let name_bytes = name.as_encoded_bytes();
+            // PCI addresses look like "0000:01:00.0" — only hex digits, colons, dots.
+            if name_bytes.contains(&b':')
+                && name_bytes.contains(&b'.')
+                && name_bytes
+                    .iter()
+                    .all(|&b| b.is_ascii_hexdigit() || b == b':' || b == b'.')
             {
-                Some(name)
+                Some(name.to_string_lossy().into_owned())
             } else {
                 None
             }
@@ -584,7 +584,8 @@ pub(super) fn read_sysfs_string(path: &Path, max_bytes: usize) -> Option<String>
     if n > max_bytes {
         return None;
     }
-    String::from_utf8(buf[..n].to_vec()).ok()
+    buf.truncate(n);
+    String::from_utf8(buf).ok()
 }
 
 // ---------------------------------------------------------------------------

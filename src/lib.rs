@@ -282,6 +282,7 @@ pub mod system_io;
 pub mod training;
 
 pub use cache::{CachedRegistry, DiskCachedRegistry};
+pub use cost::{CloudInstance as CloudGpuInstance, CloudProvider, InstanceRecommendation};
 pub use detect::TimedDetection;
 pub use lazy::LazyRegistry;
 pub use error::DetectionError;

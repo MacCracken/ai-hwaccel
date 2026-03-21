@@ -62,29 +62,41 @@ impl CachedRegistry {
     ///
     /// Returns an `Arc` — cloning this is a cheap pointer increment, not a
     /// deep copy of all profiles.
+    ///
+    /// The lock is released before running detection, so concurrent readers
+    /// are not blocked during the (potentially slow) detection phase.
     pub fn get(&self) -> Arc<AcceleratorRegistry> {
-        let mut state = match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                tracing::warn!("CachedRegistry lock was poisoned, invalidating cache");
-                let mut guard = poisoned.into_inner();
-                guard.registry = None;
-                guard.last_detect = None;
-                guard
-            }
-        };
-        let now = Instant::now();
-
-        if let Some(ref reg) = state.registry
-            && let Some(last) = state.last_detect
-            && now.duration_since(last) < self.ttl
+        // Fast path: check cache under lock, release immediately.
         {
-            return Arc::clone(reg);
+            let state = match self.inner.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    tracing::warn!("CachedRegistry lock was poisoned, invalidating cache");
+                    let mut guard = poisoned.into_inner();
+                    guard.registry = None;
+                    guard.last_detect = None;
+                    guard
+                }
+            };
+
+            if let Some(ref reg) = state.registry
+                && let Some(last) = state.last_detect
+                && Instant::now().duration_since(last) < self.ttl
+            {
+                return Arc::clone(reg);
+            }
         }
+        // Lock released here — detection runs without blocking readers.
 
         let reg = Arc::new(AcceleratorRegistry::detect());
+
+        // Re-acquire lock to store result.
+        let mut state = match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         state.registry = Some(Arc::clone(&reg));
-        state.last_detect = Some(now);
+        state.last_detect = Some(Instant::now());
         reg
     }
 

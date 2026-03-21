@@ -57,53 +57,61 @@ fn detect_container() -> ContainerInfo {
 }
 
 fn detect_cloud_instance() -> Option<crate::system_io::CloudInstance> {
-    // Try AWS first (fastest — /sys check, no HTTP).
-    if let Some(inst) = detect_aws() {
+    // Read DMI files once and pass to all detectors to avoid redundant I/O.
+    let dmi = DmiInfo::read();
+
+    if let Some(inst) = detect_aws(&dmi) {
         return Some(inst);
     }
-    // Try GCE.
-    if let Some(inst) = detect_gce() {
+    if let Some(inst) = detect_gce(&dmi) {
         return Some(inst);
     }
-    // Try Azure.
-    if let Some(inst) = detect_azure() {
-        return Some(inst);
-    }
-    None
+    detect_azure(&dmi)
 }
 
-/// Detect AWS instance type via instance identity document.
-///
-/// AWS exposes instance metadata via IMDSv1 at a well-known sysfs path
-/// or via the metadata service. We check DMI first (no HTTP needed).
-fn detect_aws() -> Option<crate::system_io::CloudInstance> {
-    // Check DMI for AWS hypervisor.
-    let bios_vendor = std::fs::read_to_string("/sys/class/dmi/id/bios_vendor")
-        .unwrap_or_default();
-    let sys_vendor = std::fs::read_to_string("/sys/class/dmi/id/sys_vendor")
-        .unwrap_or_default();
+/// Cached DMI information read once from sysfs.
+struct DmiInfo {
+    sys_vendor: String,
+    bios_vendor: String,
+    product_name: String,
+    board_asset_tag: String,
+    chassis_asset_tag: String,
+}
 
-    let is_aws = bios_vendor.contains("Amazon")
-        || sys_vendor.contains("Amazon")
-        || sys_vendor.contains("Xen");
+impl DmiInfo {
+    fn read() -> Self {
+        let read = |path: &str| {
+            std::fs::read_to_string(path)
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        };
+        Self {
+            sys_vendor: read("/sys/class/dmi/id/sys_vendor"),
+            bios_vendor: read("/sys/class/dmi/id/bios_vendor"),
+            product_name: read("/sys/class/dmi/id/product_name"),
+            board_asset_tag: read("/sys/class/dmi/id/board_asset_tag"),
+            chassis_asset_tag: read("/sys/class/dmi/id/chassis_asset_tag"),
+        }
+    }
+}
+
+/// Detect AWS instance type via DMI (no HTTP needed).
+fn detect_aws(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstance> {
+    let is_aws = dmi.bios_vendor.contains("Amazon")
+        || dmi.sys_vendor.contains("Amazon")
+        || dmi.sys_vendor.contains("Xen");
 
     if !is_aws {
         return None;
     }
 
-    // Try to get instance type from DMI product name (e.g., "p4d.24xlarge").
-    let instance_type = std::fs::read_to_string("/sys/class/dmi/id/product_name")
-        .ok()
-        .map(|s| s.trim().to_string())
+    let instance_type = Some(dmi.product_name.clone())
         .filter(|s| !s.is_empty() && s.contains('.'));
 
-    // Try instance-id from DMI.
-    let instance_id = std::fs::read_to_string("/sys/class/dmi/id/board_asset_tag")
-        .ok()
-        .map(|s| s.trim().to_string())
+    let instance_id = Some(dmi.board_asset_tag.clone())
         .filter(|s| s.starts_with("i-"));
 
-    // Region from availability zone env or metadata.
     let region = std::env::var("AWS_DEFAULT_REGION")
         .ok()
         .or_else(|| std::env::var("AWS_REGION").ok());
@@ -118,18 +126,11 @@ fn detect_aws() -> Option<crate::system_io::CloudInstance> {
 }
 
 /// Detect GCE via DMI.
-fn detect_gce() -> Option<crate::system_io::CloudInstance> {
-    let product_name = std::fs::read_to_string("/sys/class/dmi/id/product_name")
-        .unwrap_or_default();
-    let sys_vendor = std::fs::read_to_string("/sys/class/dmi/id/sys_vendor")
-        .unwrap_or_default();
-
-    if !product_name.contains("Google") && !sys_vendor.contains("Google") {
+fn detect_gce(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstance> {
+    if !dmi.product_name.contains("Google") && !dmi.sys_vendor.contains("Google") {
         return None;
     }
 
-    // GCE stores machine type in the product name (e.g., "Google Compute Engine").
-    // The actual instance type needs the metadata server, but we can detect the platform.
     Some(crate::system_io::CloudInstance {
         provider: "gcp".into(),
         instance_type: None,
@@ -140,13 +141,10 @@ fn detect_gce() -> Option<crate::system_io::CloudInstance> {
 }
 
 /// Detect Azure via DMI.
-fn detect_azure() -> Option<crate::system_io::CloudInstance> {
-    let sys_vendor = std::fs::read_to_string("/sys/class/dmi/id/sys_vendor")
-        .unwrap_or_default();
-    let chassis_asset_tag = std::fs::read_to_string("/sys/class/dmi/id/chassis_asset_tag")
-        .unwrap_or_default();
-
-    if !sys_vendor.contains("Microsoft") && !chassis_asset_tag.contains("7783-7084-3265-9085") {
+fn detect_azure(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstance> {
+    if !dmi.sys_vendor.contains("Microsoft")
+        && !dmi.chassis_asset_tag.contains("7783-7084-3265-9085")
+    {
         return None;
     }
 

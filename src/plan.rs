@@ -200,14 +200,17 @@ impl AcceleratorRegistry {
                 .map(|d| d.accelerator.throughput_multiplier())
                 .fold(f64::INFINITY, f64::min);
             let quant_factor = quant.memory_reduction_factor();
-            // Pipeline parallel throughput — penalize if no high-speed interconnect
-            // (PCIe-only transfers between stages are slower).
+            // Pipeline parallel throughput: once the pipeline is full, each
+            // stage processes a micro-batch concurrently. Steady-state
+            // throughput scales with the number of stages (bounded by
+            // the slowest stage). Inter-stage communication overhead
+            // depends on interconnect bandwidth.
             let ic_factor = if high_bw_interconnect > 0.0 {
-                2.5
+                0.85 // ~15% overhead for NVLink/XGMI inter-stage transfers
             } else {
-                2.0
+                0.65 // ~35% overhead for PCIe-only transfers
             };
-            let tps = slowest * quant_factor * ic_factor;
+            let tps = slowest * num_stages as f64 * quant_factor * ic_factor;
 
             return ShardingPlan {
                 shards,

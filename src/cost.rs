@@ -19,11 +19,16 @@
 //! }
 //! ```
 
+use std::sync::OnceLock;
+
 use crate::quantization::QuantizationLevel;
 use crate::registry::AcceleratorRegistry;
 
 /// Embedded pricing data (compiled in from data/cloud_pricing.json).
 const PRICING_JSON: &str = include_str!("../data/cloud_pricing.json");
+
+/// Parsed instances, initialized once on first access.
+static PARSED_INSTANCES: OnceLock<Vec<CloudInstance>> = OnceLock::new();
 
 /// A cloud GPU instance from the pricing table.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -80,12 +85,16 @@ pub struct InstanceRecommendation {
 }
 
 /// Load all cloud instances from the embedded pricing table.
-pub fn all_instances() -> Vec<CloudInstance> {
-    let parsed: serde_json::Value = serde_json::from_str(PRICING_JSON).unwrap_or_default();
-    parsed
-        .get("instances")
-        .and_then(|v| serde_json::from_value::<Vec<CloudInstance>>(v.clone()).ok())
-        .unwrap_or_default()
+///
+/// Results are parsed once and cached for the lifetime of the process.
+pub fn all_instances() -> &'static [CloudInstance] {
+    PARSED_INSTANCES.get_or_init(|| {
+        let parsed: serde_json::Value = serde_json::from_str(PRICING_JSON).unwrap_or_default();
+        parsed
+            .get("instances")
+            .and_then(|v| serde_json::from_value::<Vec<CloudInstance>>(v.clone()).ok())
+            .unwrap_or_default()
+    })
 }
 
 /// Recommend the cheapest viable cloud instance(s) for a model.
@@ -107,7 +116,7 @@ pub fn recommend_instance(
     let needed_gb = (needed as f64) / (1024.0 * 1024.0 * 1024.0);
 
     let mut candidates: Vec<InstanceRecommendation> = all_instances()
-        .into_iter()
+        .iter()
         .filter(|inst| {
             if let Some(p) = provider
                 && inst.provider != p.as_str()
@@ -121,7 +130,7 @@ pub fn recommend_instance(
                 (inst.total_gpu_memory_gb as f64 - needed_gb) / inst.total_gpu_memory_gb as f64
                     * 100.0;
             InstanceRecommendation {
-                instance: inst,
+                instance: inst.clone(),
                 memory_required_bytes: needed,
                 memory_headroom_pct: headroom,
             }
