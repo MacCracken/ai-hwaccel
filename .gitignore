@@ -1,5 +1,7 @@
 # Build artifacts
 /target/
+/py/target/
+/py/Cargo.lock
 
 # Editor / IDE
 *.swp
