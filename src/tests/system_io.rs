@@ -221,6 +221,102 @@ fn from_json_invalid_json_errors() {
 }
 
 // ---------------------------------------------------------------------------
+// deny_unknown_fields
+// ---------------------------------------------------------------------------
+
+#[test]
+fn from_json_unknown_fields_rejected() {
+    // AcceleratorRegistry uses deny_unknown_fields.
+    let json = r#"{
+        "schema_version": 3,
+        "profiles": [],
+        "system_io": {"interconnects": [], "storage": []},
+        "evil_field": "injection attempt"
+    }"#;
+    let result = AcceleratorRegistry::from_json(json);
+    assert!(result.is_err(), "unknown fields should be rejected");
+}
+
+#[test]
+fn from_json_profile_unknown_fields_rejected() {
+    let json = r#"{
+        "accelerator": "Cpu",
+        "available": true,
+        "memory_bytes": 1000,
+        "compute_capability": null,
+        "driver_version": null,
+        "evil": true
+    }"#;
+    let result = serde_json::from_str::<AcceleratorProfile>(json);
+    assert!(result.is_err(), "unknown profile fields should be rejected");
+}
+
+// ---------------------------------------------------------------------------
+// DiskCachedRegistry
+// ---------------------------------------------------------------------------
+
+#[test]
+fn disk_cached_registry_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test_cache.json");
+
+    let cache = DiskCachedRegistry::with_path(
+        std::time::Duration::from_secs(300),
+        path.clone(),
+    );
+
+    // First get: detects and writes to disk.
+    let reg1 = cache.get();
+    assert!(!reg1.all_profiles().is_empty());
+    assert!(path.exists(), "cache file should exist after get()");
+
+    // Second get: reads from disk.
+    let reg2 = cache.get();
+    assert_eq!(reg1.all_profiles().len(), reg2.all_profiles().len());
+}
+
+#[test]
+fn disk_cached_registry_invalidate() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test_cache.json");
+
+    let cache = DiskCachedRegistry::with_path(
+        std::time::Duration::from_secs(300),
+        path.clone(),
+    );
+    let _ = cache.get();
+    assert!(path.exists());
+
+    cache.invalidate();
+    assert!(!path.exists(), "invalidate should delete cache file");
+}
+
+#[test]
+fn disk_cached_registry_corrupt_file_redetects() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test_cache.json");
+
+    // Write garbage to the cache file.
+    std::fs::write(&path, "not valid json {{{{").unwrap();
+
+    let cache = DiskCachedRegistry::with_path(
+        std::time::Duration::from_secs(300),
+        path,
+    );
+
+    // Should re-detect despite corrupt file.
+    let reg = cache.get();
+    assert!(!reg.all_profiles().is_empty());
+}
+
+#[test]
+fn disk_cached_registry_debug_impl() {
+    let cache = DiskCachedRegistry::new(std::time::Duration::from_secs(60));
+    let debug = format!("{:?}", cache);
+    assert!(debug.contains("DiskCachedRegistry"));
+}
+
+// ---------------------------------------------------------------------------
 // Edge cases
 // ---------------------------------------------------------------------------
 

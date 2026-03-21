@@ -5,7 +5,79 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
-## [0.20.3] - Unreleased
+## [0.21.3] - Unreleased
+
+### Added
+
+#### Detection performance
+
+- **Lazy detection**: `LazyRegistry::new()` defers backend probing until a
+  specific accelerator family is queried. Avoids spawning `nvidia-smi` when
+  the caller only needs TPU info.
+- **vulkaninfo timeout + caching**: 3s subprocess timeout (down from 5s).
+  Results cached to `$XDG_CACHE_HOME/ai-hwaccel/vulkan.json` with 60s TTL.
+  Falls back to sysfs-only detection on timeout.
+- **Sysfs-only Vulkan fallback**: Detects GPUs via
+  `/sys/class/drm/card*/device/{vendor,device}` with PCI ID lookup table.
+  Covers NVIDIA, AMD, and Intel GPUs without spawning `vulkaninfo`.
+- **Detection result disk caching**: `DiskCachedRegistry::new(ttl)` persists
+  full registry to `$XDG_CACHE_HOME/ai-hwaccel/registry.json` with atomic
+  writes (temp+rename) to prevent multi-process corruption.
+- **Per-backend timing**: `AcceleratorRegistry::detect_with_timing()` returns
+  `TimedDetection` with per-backend `Duration` map. CLI: `--profile` flag.
+
+#### Planning
+
+- **Topology-aware sharding**: `plan_sharding()` now prefers tensor parallel
+  for NVSwitch-connected groups or high-bandwidth NVLink (>100 GB/s). Pipeline
+  parallel orders stages by NUMA locality. Throughput estimates account for
+  interconnect overhead.
+- **Cost-aware planning**: Static pricing table in `data/cloud_pricing.json`
+  (18 instances across AWS/GCP/Azure). `cost::recommend_instance()` returns
+  cheapest viable cloud instance. CLI: `--cost 70B --quant bf16`.
+
+#### Platform
+
+- **Container/VM detection**: Detects Docker, Kubernetes, and cloud provider
+  (AWS/GCE/Azure) via DMI sysfs. Exposed as `SystemIo::environment`.
+  No HTTP metadata calls — purely filesystem-based.
+
+#### Python bindings (groundwork)
+
+- **PyO3 module scaffold**: `py/` directory with maturin build wrapping
+  `detect()`, `suggest_quantization()`, `plan_sharding()`, `system_io()`,
+  `estimate_training_memory()`.
+- **Type stubs**: `ai_hwaccel.pyi` for IDE support.
+- **Examples**: `basic_detect.py`, `sharding_plan.py`, `training_memory.py`.
+
+### Changed
+
+- **Schema version**: v2 → v3 (new `environment` field in `SystemIo`).
+  Old v1/v2 JSON deserializes cleanly with `environment: None`.
+- **Pipeline parallel throughput**: Now scales by `num_stages` with
+  interconnect overhead factor (15% NVLink, 35% PCIe-only).
+
+### Performance
+
+- **cost.rs OnceLock**: Pricing JSON parsed once per process (was re-parsing
+  on every `recommend_instance()` call).
+- **CachedRegistry lock scope**: Mutex released before running `detect()` —
+  concurrent readers no longer blocked during detection.
+- **DMI caching**: Cloud detection reads DMI files once, shares across
+  AWS/GCE/Azure detectors (was 6-7 redundant sysfs reads).
+- **read_sysfs_string**: Heap path avoids `.to_vec()` double-allocation.
+- **list_driver_pci_addrs**: Uses `Path::join()` and byte-level validation.
+- **Atomic cache writes**: Disk cache uses temp+rename to prevent corruption.
+
+### Exports
+
+- `LazyRegistry`, `DiskCachedRegistry`, `TimedDetection`
+- `CloudGpuInstance`, `CloudProvider`, `InstanceRecommendation` (cost module)
+- `RuntimeEnvironment`, `CloudInstance` (system_io)
+
+---
+
+## [0.20.3] - 2026-03-19
 
 ### Added
 

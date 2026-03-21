@@ -277,23 +277,38 @@ impl DiskCachedRegistry {
         Some(reg)
     }
 
+    /// Write cache atomically: write to a temp file then rename.
+    ///
+    /// This prevents multi-process races from producing truncated JSON.
+    /// On rename failure (e.g., cross-device), falls back to direct write.
     fn write_disk_cache(&self, registry: &AcceleratorRegistry) {
         if let Some(parent) = self.cache_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        match serde_json::to_string(registry) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(&self.cache_path, json) {
-                    tracing::debug!(
-                        error = %e,
-                        path = %self.cache_path.display(),
-                        "failed to write disk cache"
-                    );
-                }
-            }
+        let json = match serde_json::to_string(registry) {
+            Ok(j) => j,
             Err(e) => {
                 tracing::debug!(error = %e, "failed to serialize registry for disk cache");
+                return;
             }
+        };
+
+        // Atomic write: temp file + rename.
+        let tmp_path = self.cache_path.with_extension("tmp");
+        if std::fs::write(&tmp_path, &json).is_ok() {
+            if std::fs::rename(&tmp_path, &self.cache_path).is_ok() {
+                return;
+            }
+            let _ = std::fs::remove_file(&tmp_path);
+        }
+
+        // Fallback: direct write (non-atomic).
+        if let Err(e) = std::fs::write(&self.cache_path, json) {
+            tracing::debug!(
+                error = %e,
+                path = %self.cache_path.display(),
+                "failed to write disk cache"
+            );
         }
     }
 }

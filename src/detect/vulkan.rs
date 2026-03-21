@@ -64,7 +64,7 @@ fn read_vulkan_cache() -> Option<(String, Option<String>)> {
     Some((summary, full))
 }
 
-/// Write vulkaninfo output to the cache file.
+/// Write vulkaninfo output to the cache file (atomic via temp+rename).
 fn write_vulkan_cache(summary: &str, full: Option<&str>) {
     let Some(path) = vulkan_cache_path() else {
         return;
@@ -81,6 +81,13 @@ fn write_vulkan_cache(summary: &str, full: Option<&str>) {
             .unwrap_or(0),
     });
     if let Ok(json) = serde_json::to_string(&cache) {
+        let tmp = path.with_extension("tmp");
+        if std::fs::write(&tmp, &json).is_ok() {
+            if std::fs::rename(&tmp, &path).is_ok() {
+                return;
+            }
+            let _ = std::fs::remove_file(&tmp);
+        }
         let _ = std::fs::write(&path, json);
     }
 }

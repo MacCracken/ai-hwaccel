@@ -124,7 +124,12 @@ impl AcceleratorRegistry {
 
             // NVSwitch or very high NVLink BW (>100 GB/s total) → tensor parallel.
             // Tensor parallel requires all-to-all communication which is only
-            // efficient with a full-bisection fabric.
+            // efficient with a full-bisection fabric. The ≤8 device cap is a
+            // heuristic: beyond 8 GPUs without NVSwitch, all-reduce collectives
+            // hit O(n) scaling on ring topologies. NVSwitch provides full
+            // bisection bandwidth regardless of device count, so it bypasses
+            // this limit. The 100 GB/s threshold corresponds to ~2 NVLink 4.0
+            // connections per direction (50 GB/s each).
             let use_tensor_parallel = has_nvswitch
                 || (high_bw_interconnect > 100.0 && gpu_devices.len() <= 8);
 
