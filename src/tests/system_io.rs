@@ -20,6 +20,7 @@ fn serde_system_io_roundtrip() {
             kind: StorageKind::NVMe,
             bandwidth_gbps: 3.5,
         }],
+        environment: None,
     };
     let json = serde_json::to_string(&sio).unwrap();
     let back: SystemIo = serde_json::from_str(&json).unwrap();
@@ -83,6 +84,7 @@ fn system_io_has_interconnect() {
             state: None,
         }],
         storage: vec![],
+        environment: None,
     };
     assert!(with_ib.has_interconnect());
 }
@@ -105,6 +107,7 @@ fn system_io_total_bandwidth() {
             },
         ],
         storage: vec![],
+        environment: None,
     };
     assert!((sio.total_interconnect_bandwidth_gbps() - 50.0).abs() < 0.01);
 }
@@ -118,6 +121,7 @@ fn system_io_ingestion_estimate() {
             kind: StorageKind::NVMe,
             bandwidth_gbps: 3.5,
         }],
+        environment: None,
     };
     let secs = sio
         .estimate_ingestion_secs(100 * 1024 * 1024 * 1024)

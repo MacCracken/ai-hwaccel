@@ -1,0 +1,17 @@
+[package]
+name = "ai-hwaccel-python"
+version = "0.21.3"
+edition = "2024"
+rust-version = "1.89"
+license = "AGPL-3.0-only"
+description = "Python bindings for ai-hwaccel — universal AI hardware accelerator detection"
+publish = false
+
+[lib]
+name = "ai_hwaccel"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["extension-module"] }
+ai_hwaccel_core = { package = "ai-hwaccel", path = ".." }
+serde_json = "1.0"

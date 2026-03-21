@@ -33,7 +33,9 @@ use crate::system_io::SystemIo;
 ///   memory, compute capability, driver version. Warnings array.
 /// - **v2**: System I/O — per-device bandwidth, VRAM usage, PCIe link speed,
 ///   NUMA node. System-level interconnects and storage. `Timeout` error variant.
-pub const SCHEMA_VERSION: u32 = 2;
+/// - **v3**: Runtime environment detection (Docker, Kubernetes, cloud instance
+///   metadata). Per-backend timing API. Cost-aware planning.
+pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -491,6 +493,11 @@ impl DetectBuilder {
     /// Run detection with only the enabled backends.
     pub fn detect(self) -> AcceleratorRegistry {
         crate::detect::detect_with_builder(self)
+    }
+
+    /// Run detection with per-backend timing information.
+    pub fn detect_with_timing(self) -> crate::detect::TimedDetection {
+        crate::detect::detect_with_builder_timed(self)
     }
 }
 

@@ -269,7 +269,9 @@ pub mod ffi;
 #[cfg(feature = "fuzz")]
 #[doc(hidden)]
 pub mod fuzz_helpers;
+pub mod cost;
 pub mod hardware;
+pub mod lazy;
 pub mod plan;
 pub mod profile;
 pub mod quantization;
@@ -279,7 +281,9 @@ pub mod sharding;
 pub mod system_io;
 pub mod training;
 
-pub use cache::CachedRegistry;
+pub use cache::{CachedRegistry, DiskCachedRegistry};
+pub use detect::TimedDetection;
+pub use lazy::LazyRegistry;
 pub use error::DetectionError;
 pub use hardware::{
     AcceleratorFamily, AcceleratorType, GaudiGeneration, NeuronChipType, TpuVersion,
@@ -289,7 +293,10 @@ pub use quantization::QuantizationLevel;
 pub use registry::{AcceleratorRegistry, Backend, DetectBuilder, SCHEMA_VERSION};
 pub use requirement::AcceleratorRequirement;
 pub use sharding::{ModelShard, ShardingPlan, ShardingStrategy};
-pub use system_io::{Interconnect, InterconnectKind, StorageDevice, StorageKind, SystemIo};
+pub use system_io::{
+    CloudInstance, Interconnect, InterconnectKind, RuntimeEnvironment, StorageDevice, StorageKind,
+    SystemIo,
+};
 pub use training::{MemoryEstimate, TrainingMethod, TrainingTarget, estimate_training_memory};
 
 #[cfg(test)]

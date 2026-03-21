@@ -14,6 +14,9 @@ pub struct SystemIo {
     /// Detected storage devices with estimated throughput.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub storage: Vec<StorageDevice>,
+    /// Runtime environment (container, cloud, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<RuntimeEnvironment>,
 }
 
 impl SystemIo {
@@ -22,6 +25,7 @@ impl SystemIo {
         Self {
             interconnects: Vec::new(),
             storage: Vec::new(),
+            environment: None,
         }
     }
 
@@ -130,4 +134,38 @@ impl std::fmt::Display for StorageKind {
             Self::Unknown => write!(f, "Unknown"),
         }
     }
+}
+
+/// Runtime environment information.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeEnvironment {
+    /// Whether running inside a Docker container.
+    pub is_docker: bool,
+    /// Whether running inside a Kubernetes pod.
+    pub is_kubernetes: bool,
+    /// Kubernetes namespace (if detected).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kubernetes_namespace: Option<String>,
+    /// Cloud instance metadata (if detected).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_instance: Option<CloudInstance>,
+}
+
+/// Cloud instance metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CloudInstance {
+    /// Cloud provider ("aws", "gcp", "azure").
+    pub provider: String,
+    /// Instance type (e.g. "p4d.24xlarge").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_type: Option<String>,
+    /// Instance ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    /// Region (e.g. "us-east-1").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// Availability zone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone: Option<String>,
 }

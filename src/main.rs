@@ -11,6 +11,8 @@
 //!   ai-hwaccel --summary                   # Compact summary JSON
 //!   ai-hwaccel --watch 5                   # Re-detect every 5s with deltas
 //!   ai-hwaccel --watch 5 --alert mem>90    # Alert when VRAM usage > 90%
+//!   ai-hwaccel --cost 70B --quant bf16     # Cheapest cloud instance for 70B@BF16
+//!   ai-hwaccel --profile                   # Show per-backend detection timing
 //!   ai-hwaccel --debug                     # Verbose detection diagnostics
 //!   ai-hwaccel --version                   # Print version
 //!
@@ -47,6 +49,43 @@ fn main() {
         return;
     }
 
+    // --cost <model_size> [--quant <level>] [--provider <aws|gcp|azure>]
+    if let Some(model_str) = get_val("--cost") {
+        let model_params = parse_model_size(&model_str);
+        let quant = get_val("--quant")
+            .and_then(|q| parse_quant_level(&q))
+            .unwrap_or(ai_hwaccel::QuantizationLevel::BFloat16);
+        let provider = get_val("--provider").and_then(|p| match p.to_lowercase().as_str() {
+            "aws" => Some(ai_hwaccel::cost::CloudProvider::Aws),
+            "gcp" | "google" => Some(ai_hwaccel::cost::CloudProvider::Gcp),
+            "azure" | "microsoft" => Some(ai_hwaccel::cost::CloudProvider::Azure),
+            _ => None,
+        });
+
+        let recs = ai_hwaccel::cost::recommend_instance(model_params, &quant, provider);
+        if recs.is_empty() {
+            println!("No cloud instance has enough GPU memory for {} params at {}.",
+                format_params(model_params), quant);
+        } else {
+            let needed_gb = recs[0].memory_required_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+            println!("Model: {} params at {} — {:.1} GB required\n",
+                format_params(model_params), quant, needed_gb);
+            println!("{:<32} {:>8} {:>6} {:>10} {:>8} {:>10}",
+                "Instance", "Provider", "GPUs", "GPU Mem", "$/hr", "Headroom");
+            println!("{}", "-".repeat(80));
+            for rec in recs.iter().take(10) {
+                println!("{:<32} {:>8} {:>6} {:>7} GB {:>8.2} {:>9.0}%",
+                    rec.instance.name,
+                    rec.instance.provider,
+                    rec.instance.gpu_count,
+                    rec.instance.total_gpu_memory_gb,
+                    rec.instance.price_per_hour,
+                    rec.memory_headroom_pct);
+            }
+        }
+        return;
+    }
+
     let tsv = has("--tsv");
     let columns = get_val("--columns").map(|s| parse_columns(&s));
     let sort = get_val("--sort");
@@ -67,9 +106,29 @@ fn main() {
         return;
     }
 
+    let profile_mode = has("--profile");
+
     info!("starting accelerator detection");
-    let registry = AcceleratorRegistry::detect();
+    let (registry, timed_result) = if profile_mode {
+        let result = AcceleratorRegistry::detect_with_timing();
+        let timings = result.timings.clone();
+        let total = result.total;
+        (result.registry, Some((timings, total)))
+    } else {
+        (AcceleratorRegistry::detect(), None)
+    };
     log_detection(&registry);
+
+    if let Some((ref timings, total)) = timed_result {
+        eprintln!("\nBackend timing:");
+        let mut entries: Vec<_> = timings.iter().collect();
+        entries.sort_by(|a, b| b.1.cmp(a.1));
+        for (name, dur) in &entries {
+            eprintln!("  {:<16} {:>8.1}ms", name, dur.as_secs_f64() * 1000.0);
+        }
+        eprintln!("  {:<16} {:>8.1}ms", "TOTAL (wall)", total.as_secs_f64() * 1000.0);
+        eprintln!();
+    }
 
     let pretty = has("--pretty") || has("-p");
 
@@ -461,6 +520,33 @@ fn print_table(
         }
     }
 
+    // Environment info
+    if let Some(ref env) = sio.environment {
+        println!();
+        println!("Environment:");
+        if env.is_docker {
+            println!("  Container: Docker");
+        }
+        if env.is_kubernetes {
+            let ns = env
+                .kubernetes_namespace
+                .as_deref()
+                .unwrap_or("unknown");
+            println!("  Kubernetes: namespace={}", ns);
+        }
+        if let Some(ref cloud) = env.cloud_instance {
+            let instance_type = cloud.instance_type.as_deref().unwrap_or("unknown");
+            let region = cloud.region.as_deref().unwrap_or("unknown");
+            println!(
+                "  Cloud: {} (type={}, region={})",
+                cloud.provider, instance_type, region
+            );
+        }
+        if !env.is_docker && !env.is_kubernetes && env.cloud_instance.is_none() {
+            println!("  Bare metal / local VM");
+        }
+    }
+
     if !registry.warnings().is_empty() {
         println!();
         println!("Warnings:");
@@ -572,4 +658,43 @@ fn build_summary(registry: &AcceleratorRegistry) -> serde_json::Value {
         },
         "warnings": registry.warnings().iter().map(|w| w.to_string()).collect::<Vec<_>>(),
     })
+}
+
+/// Parse a model size string like "7B", "70b", "405B", "7000M", or a raw number.
+fn parse_model_size(s: &str) -> u64 {
+    let s = s.trim();
+    if let Some(num_str) = s.strip_suffix(['B', 'b'])
+        && let Ok(n) = num_str.parse::<f64>()
+    {
+        return (n * 1_000_000_000.0) as u64;
+    }
+    if let Some(num_str) = s.strip_suffix(['M', 'm'])
+        && let Ok(n) = num_str.parse::<f64>()
+    {
+        return (n * 1_000_000.0) as u64;
+    }
+    s.parse::<u64>().unwrap_or(7_000_000_000)
+}
+
+/// Format a parameter count for display (e.g. 7000000000 → "7.0B").
+fn format_params(params: u64) -> String {
+    if params >= 1_000_000_000 {
+        format!("{:.1}B", params as f64 / 1_000_000_000.0)
+    } else if params >= 1_000_000 {
+        format!("{:.0}M", params as f64 / 1_000_000.0)
+    } else {
+        format!("{}", params)
+    }
+}
+
+/// Parse a quantisation level string.
+fn parse_quant_level(s: &str) -> Option<ai_hwaccel::QuantizationLevel> {
+    match s.to_lowercase().as_str() {
+        "fp32" | "f32" | "none" => Some(ai_hwaccel::QuantizationLevel::None),
+        "fp16" | "f16" | "float16" => Some(ai_hwaccel::QuantizationLevel::Float16),
+        "bf16" | "bfloat16" => Some(ai_hwaccel::QuantizationLevel::BFloat16),
+        "int8" | "i8" | "q8" => Some(ai_hwaccel::QuantizationLevel::Int8),
+        "int4" | "i4" | "q4" => Some(ai_hwaccel::QuantizationLevel::Int4),
+        _ => None,
+    }
 }

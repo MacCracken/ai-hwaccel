@@ -11,6 +11,7 @@ pub(crate) mod command;
 #[cfg(feature = "cuda")]
 pub(crate) mod cuda;
 pub(crate) mod disk;
+pub(crate) mod environment;
 #[cfg(feature = "gaudi")]
 pub(crate) mod gaudi;
 #[cfg(feature = "graphcore")]
@@ -39,7 +40,9 @@ pub(crate) mod tpu;
 #[cfg(feature = "vulkan")]
 pub(crate) mod vulkan;
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use tracing::debug;
 
@@ -51,6 +54,20 @@ use crate::system_io::SystemIo;
 
 /// Per-backend detection result.
 type DetectResult = (Vec<AcceleratorProfile>, Vec<DetectionError>);
+
+/// Per-backend detection result with timing.
+type TimedDetectResult = (Vec<AcceleratorProfile>, Vec<DetectionError>, Duration);
+
+/// Detection results with per-backend timing information.
+#[derive(Debug, Clone)]
+pub struct TimedDetection {
+    /// The registry with all detected hardware.
+    pub registry: AcceleratorRegistry,
+    /// Per-backend detection duration.
+    pub timings: HashMap<String, Duration>,
+    /// Total wall-clock detection time.
+    pub total: Duration,
+}
 
 impl AcceleratorRegistry {
     /// Probes the system for all available accelerators.
@@ -66,6 +83,25 @@ impl AcceleratorRegistry {
     /// (e.g. `default-features = false, features = ["cuda", "tpu"]`).
     pub fn detect() -> Self {
         detect_with_builder(DetectBuilder::new())
+    }
+
+    /// Like [`detect`](Self::detect), but also returns per-backend timing.
+    ///
+    /// Useful for diagnosing slow backends. The `timings` map contains
+    /// backend names (e.g. `"cuda"`, `"vulkan"`) and how long each took.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use ai_hwaccel::AcceleratorRegistry;
+    ///
+    /// let result = AcceleratorRegistry::detect_with_timing();
+    /// for (backend, duration) in &result.timings {
+    ///     println!("{}: {:.1}ms", backend, duration.as_secs_f64() * 1000.0);
+    /// }
+    /// ```
+    pub fn detect_with_timing() -> TimedDetection {
+        detect_with_builder_timed(DetectBuilder::new())
     }
 }
 
@@ -231,6 +267,23 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
         );
     }
 
+    // Post-pass: if vulkaninfo found no Vulkan devices, try sysfs fallback.
+    #[cfg(feature = "vulkan")]
+    {
+        let has_vulkan = all_profiles
+            .iter()
+            .any(|p| matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
+        let has_dedicated = all_profiles.iter().any(|p| {
+            matches!(
+                p.accelerator,
+                AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
+            )
+        });
+        if !has_vulkan && !has_dedicated && builder.backend_enabled(Backend::Vulkan) {
+            vulkan::detect_vulkan_sysfs(&mut all_profiles, &mut all_warnings);
+        }
+    }
+
     // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found.
     let has_dedicated = all_profiles.iter().any(|p| {
         matches!(
@@ -253,9 +306,11 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
     // Detect system-level I/O: interconnects and storage.
     let system_interconnects = interconnect::detect_interconnects(&mut all_warnings);
     let system_storage = disk::detect_storage();
+    let system_environment = environment::detect_environment();
     let system_io = SystemIo {
         interconnects: system_interconnects,
         storage: system_storage,
+        environment: Some(system_environment),
     };
 
     debug!(
@@ -270,6 +325,154 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
         profiles: all_profiles,
         warnings: all_warnings,
         system_io,
+    }
+}
+
+/// Run detection with timing information per backend.
+pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetection {
+    let wall_start = Instant::now();
+    let mut all_profiles = Vec::with_capacity(8);
+    all_profiles.push(cpu_profile());
+    let mut all_warnings: Vec<DetectionError> = Vec::new();
+    let mut timings: HashMap<String, Duration> = HashMap::new();
+
+    macro_rules! run_backend_timed {
+        ($feature:literal, $backend:expr, $name:literal, $detect_fn:expr) => {
+            #[cfg(feature = $feature)]
+            if builder.backend_enabled($backend) {
+                let start = Instant::now();
+                $detect_fn(&mut all_profiles, &mut all_warnings);
+                timings.insert($name.into(), start.elapsed());
+            }
+        };
+    }
+
+    macro_rules! spawn_backend_timed {
+        ($feature:literal, $backend:expr, $name:literal, $detect_fn:expr, $handles:expr, $s:expr) => {
+            #[cfg(feature = $feature)]
+            if builder.backend_enabled($backend) {
+                $handles.push(($name, $s.spawn(|| {
+                    let start = Instant::now();
+                    let mut p = Vec::new();
+                    let mut w = Vec::new();
+                    $detect_fn(&mut p, &mut w);
+                    (p, w, start.elapsed())
+                })));
+            }
+        };
+    }
+
+    let use_threads = builder.enabled_count() >= 2;
+
+    if use_threads {
+        std::thread::scope(|s| {
+            let mut handles: Vec<(&str, std::thread::ScopedJoinHandle<'_, TimedDetectResult>)> =
+                Vec::new();
+
+            spawn_backend_timed!("cuda", Backend::Cuda, "cuda", cuda::detect_cuda, handles, s);
+            spawn_backend_timed!("rocm", Backend::Rocm, "rocm", rocm::detect_rocm, handles, s);
+            spawn_backend_timed!("apple", Backend::Apple, "apple", apple::detect_metal_and_ane, handles, s);
+            spawn_backend_timed!("vulkan", Backend::Vulkan, "vulkan", vulkan::detect_vulkan, handles, s);
+            spawn_backend_timed!("intel-npu", Backend::IntelNpu, "intel_npu", intel_npu::detect_intel_npu, handles, s);
+            spawn_backend_timed!("amd-xdna", Backend::AmdXdna, "amd_xdna", amd_xdna::detect_amd_xdna, handles, s);
+            spawn_backend_timed!("tpu", Backend::Tpu, "tpu", tpu::detect_tpu, handles, s);
+            spawn_backend_timed!("gaudi", Backend::Gaudi, "gaudi", gaudi::detect_gaudi, handles, s);
+            spawn_backend_timed!("aws-neuron", Backend::AwsNeuron, "aws_neuron", neuron::detect_aws_neuron, handles, s);
+            spawn_backend_timed!("intel-oneapi", Backend::IntelOneApi, "intel_oneapi", intel_oneapi::detect_intel_oneapi, handles, s);
+            spawn_backend_timed!("qualcomm", Backend::Qualcomm, "qualcomm", qualcomm::detect_qualcomm_ai100, handles, s);
+            spawn_backend_timed!("cerebras", Backend::Cerebras, "cerebras", cerebras::detect_cerebras_wse, handles, s);
+            spawn_backend_timed!("graphcore", Backend::Graphcore, "graphcore", graphcore::detect_graphcore_ipu, handles, s);
+            spawn_backend_timed!("groq", Backend::Groq, "groq", groq::detect_groq_lpu, handles, s);
+            spawn_backend_timed!("samsung-npu", Backend::SamsungNpu, "samsung_npu", samsung_npu::detect_samsung_npu, handles, s);
+            spawn_backend_timed!("mediatek-apu", Backend::MediaTekApu, "mediatek_apu", mediatek_apu::detect_mediatek_apu, handles, s);
+
+            for (name, handle) in handles {
+                if let Ok((profiles, warnings, duration)) = handle.join() {
+                    all_profiles.extend(profiles);
+                    all_warnings.extend(warnings);
+                    timings.insert(name.into(), duration);
+                }
+            }
+        });
+    } else {
+        run_backend_timed!("cuda", Backend::Cuda, "cuda", cuda::detect_cuda);
+        run_backend_timed!("rocm", Backend::Rocm, "rocm", rocm::detect_rocm);
+        run_backend_timed!("apple", Backend::Apple, "apple", apple::detect_metal_and_ane);
+        run_backend_timed!("vulkan", Backend::Vulkan, "vulkan", vulkan::detect_vulkan);
+        run_backend_timed!("intel-npu", Backend::IntelNpu, "intel_npu", intel_npu::detect_intel_npu);
+        run_backend_timed!("amd-xdna", Backend::AmdXdna, "amd_xdna", amd_xdna::detect_amd_xdna);
+        run_backend_timed!("tpu", Backend::Tpu, "tpu", tpu::detect_tpu);
+        run_backend_timed!("gaudi", Backend::Gaudi, "gaudi", gaudi::detect_gaudi);
+        run_backend_timed!("aws-neuron", Backend::AwsNeuron, "aws_neuron", neuron::detect_aws_neuron);
+        run_backend_timed!("intel-oneapi", Backend::IntelOneApi, "intel_oneapi", intel_oneapi::detect_intel_oneapi);
+        run_backend_timed!("qualcomm", Backend::Qualcomm, "qualcomm", qualcomm::detect_qualcomm_ai100);
+        run_backend_timed!("cerebras", Backend::Cerebras, "cerebras", cerebras::detect_cerebras_wse);
+        run_backend_timed!("graphcore", Backend::Graphcore, "graphcore", graphcore::detect_graphcore_ipu);
+        run_backend_timed!("groq", Backend::Groq, "groq", groq::detect_groq_lpu);
+        run_backend_timed!("samsung-npu", Backend::SamsungNpu, "samsung_npu", samsung_npu::detect_samsung_npu);
+        run_backend_timed!("mediatek-apu", Backend::MediaTekApu, "mediatek_apu", mediatek_apu::detect_mediatek_apu);
+    }
+
+    // Post-pass: sysfs Vulkan fallback (same as detect_with_builder).
+    #[cfg(feature = "vulkan")]
+    {
+        let has_vulkan = all_profiles
+            .iter()
+            .any(|p| matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
+        let has_dedicated = all_profiles.iter().any(|p| {
+            matches!(
+                p.accelerator,
+                AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
+            )
+        });
+        if !has_vulkan && !has_dedicated && builder.backend_enabled(Backend::Vulkan) {
+            let start = Instant::now();
+            vulkan::detect_vulkan_sysfs(&mut all_profiles, &mut all_warnings);
+            timings.insert("vulkan_sysfs".into(), start.elapsed());
+        }
+    }
+
+    // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found.
+    let has_dedicated = all_profiles.iter().any(|p| {
+        matches!(
+            p.accelerator,
+            AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
+        )
+    });
+    if has_dedicated {
+        all_profiles.retain(|p| !matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
+    }
+
+    let enrich_start = Instant::now();
+    bandwidth::enrich_bandwidth(&mut all_profiles, &mut all_warnings);
+    let nvidia_pci = list_driver_pci_addrs("nvidia");
+    let amdgpu_pci = list_driver_pci_addrs("amdgpu");
+    pcie::enrich_pcie(&mut all_profiles, &nvidia_pci, &amdgpu_pci);
+    numa::enrich_numa(&mut all_profiles, &nvidia_pci, &amdgpu_pci);
+    timings.insert("_enrich".into(), enrich_start.elapsed());
+
+    let sysio_start = Instant::now();
+    let system_interconnects = interconnect::detect_interconnects(&mut all_warnings);
+    let system_storage = disk::detect_storage();
+    let system_environment = environment::detect_environment();
+    let system_io = SystemIo {
+        interconnects: system_interconnects,
+        storage: system_storage,
+        environment: Some(system_environment),
+    };
+    timings.insert("_system_io".into(), sysio_start.elapsed());
+
+    let registry = AcceleratorRegistry {
+        schema_version: crate::registry::SCHEMA_VERSION,
+        profiles: all_profiles,
+        warnings: all_warnings,
+        system_io,
+    };
+
+    TimedDetection {
+        registry,
+        timings,
+        total: wall_start.elapsed(),
     }
 }
 
@@ -490,6 +693,23 @@ pub(crate) async fn detect_with_builder_async(builder: DetectBuilder) -> Acceler
         all_warnings.extend(warnings);
     }
 
+    // Post-pass: sysfs Vulkan fallback.
+    #[cfg(feature = "vulkan")]
+    {
+        let has_vulkan = all_profiles
+            .iter()
+            .any(|p| matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
+        let has_dedicated = all_profiles.iter().any(|p| {
+            matches!(
+                p.accelerator,
+                AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
+            )
+        });
+        if !has_vulkan && !has_dedicated && builder.backend_enabled(Backend::Vulkan) {
+            vulkan::detect_vulkan_sysfs(&mut all_profiles, &mut all_warnings);
+        }
+    }
+
     // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found.
     let has_dedicated = all_profiles.iter().any(|p| {
         matches!(
@@ -516,9 +736,11 @@ pub(crate) async fn detect_with_builder_async(builder: DetectBuilder) -> Acceler
         .await
         .unwrap_or_default();
 
+    let system_environment = environment::detect_environment();
     let system_io = SystemIo {
         interconnects: system_interconnects,
         storage: system_storage,
+        environment: Some(system_environment),
     };
 
     debug!(
