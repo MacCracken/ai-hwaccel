@@ -59,6 +59,20 @@ fn bench_system_io(c: &mut Criterion) {
         });
     });
 
+    // Benchmark ingestion estimation at various scales.
+    group.bench_function("ingestion_1gb", |b| {
+        let registry = AcceleratorRegistry::detect();
+        b.iter(|| registry.system_io().estimate_ingestion_secs(1_000_000_000));
+    });
+    group.bench_function("ingestion_100gb", |b| {
+        let registry = AcceleratorRegistry::detect();
+        b.iter(|| registry.system_io().estimate_ingestion_secs(100_000_000_000));
+    });
+    group.bench_function("ingestion_1tb", |b| {
+        let registry = AcceleratorRegistry::detect();
+        b.iter(|| registry.system_io().estimate_ingestion_secs(1_000_000_000_000));
+    });
+
     // Benchmark serialization (includes system I/O fields).
     group.bench_function("serialize_registry", |b| {
         let registry = AcceleratorRegistry::detect();

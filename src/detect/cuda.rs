@@ -57,7 +57,7 @@ pub(crate) async fn detect_cuda_async() -> super::DetectResult {
     (profiles, warnings)
 }
 
-pub(crate) fn parse_cuda_output(
+pub fn parse_cuda_output(
     stdout: &str,
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
@@ -90,8 +90,8 @@ pub(crate) fn parse_cuda_output(
         };
         let mem_used_mb: Option<u64> = parts[2].parse().ok().filter(|&v| v <= 16 * 1024 * 1024);
         let mem_free_mb: Option<u64> = parts[3].parse().ok().filter(|&v| v <= 16 * 1024 * 1024);
-        let compute_cap = parts.get(4).unwrap_or(&"").to_string();
-        let driver_version = parts.get(5).unwrap_or(&"").to_string();
+        let compute_cap_str = *parts.get(4).unwrap_or(&"");
+        let driver_version_str = *parts.get(5).unwrap_or(&"");
         let gpu_name = if parts.len() > 6 { parts[6] } else { "" };
         let temp_c: Option<u32> = parts.get(7).and_then(|s| s.parse().ok());
         let power_w: Option<f64> = parts.get(8).and_then(|s| s.parse().ok());
@@ -124,27 +124,27 @@ pub(crate) fn parse_cuda_output(
         // Calculate memory bandwidth inline from max memory clock + bus width lookup.
         let memory_bandwidth_gbps = max_mem_clock_mhz
             .and_then(|clock_mhz| {
-                nvidia_bus_width_bits(&compute_cap).map(|bus_width| {
+                nvidia_bus_width_bits(compute_cap_str).map(|bus_width| {
                     let bw = clock_mhz * bus_width as f64 * 2.0 / 8.0 / 1000.0;
                     (bw * 10.0).round() / 10.0
                 })
             })
-            .or_else(|| estimate_nvidia_bandwidth_from_cc(&compute_cap));
+            .or_else(|| estimate_nvidia_bandwidth_from_cc(compute_cap_str));
 
-        debug!(device_id, mem_total_mb, ?mem_used_mb, ?mem_free_mb, %driver_version, gpu_name, "NVIDIA CUDA GPU detected");
+        debug!(device_id, mem_total_mb, ?mem_used_mb, ?mem_free_mb, driver_version = driver_version_str, gpu_name, "NVIDIA CUDA GPU detected");
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::CudaGpu { device_id },
             available: true,
             memory_bytes: effective_mem,
-            compute_capability: if compute_cap.is_empty() {
+            compute_capability: if compute_cap_str.is_empty() {
                 None
             } else {
-                Some(compute_cap)
+                Some(compute_cap_str.to_string())
             },
-            driver_version: if driver_version.is_empty() {
+            driver_version: if driver_version_str.is_empty() {
                 None
             } else {
-                Some(driver_version)
+                Some(driver_version_str.to_string())
             },
             memory_bandwidth_gbps,
             memory_used_bytes: mem_used_mb.map(|mb| mb.saturating_mul(1024 * 1024)),

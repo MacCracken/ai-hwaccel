@@ -167,13 +167,12 @@ impl AcceleratorProfile {
 // Convenience constructors
 // ---------------------------------------------------------------------------
 
-impl AcceleratorProfile {
-    /// Create a CUDA GPU profile (for testing or manual config).
-    pub fn cuda(device_id: u32, vram_bytes: u64) -> Self {
+impl Default for AcceleratorProfile {
+    fn default() -> Self {
         Self {
-            accelerator: AcceleratorType::CudaGpu { device_id },
+            accelerator: AcceleratorType::Cpu,
             available: true,
-            memory_bytes: vram_bytes,
+            memory_bytes: 0,
             compute_capability: None,
             driver_version: None,
             memory_bandwidth_gbps: None,
@@ -186,23 +185,24 @@ impl AcceleratorProfile {
             gpu_utilization_percent: None,
         }
     }
+}
+
+impl AcceleratorProfile {
+    /// Create a CUDA GPU profile (for testing or manual config).
+    pub fn cuda(device_id: u32, vram_bytes: u64) -> Self {
+        Self {
+            accelerator: AcceleratorType::CudaGpu { device_id },
+            memory_bytes: vram_bytes,
+            ..Default::default()
+        }
+    }
 
     /// Create a ROCm GPU profile.
     pub fn rocm(device_id: u32, vram_bytes: u64) -> Self {
         Self {
             accelerator: AcceleratorType::RocmGpu { device_id },
-            available: true,
             memory_bytes: vram_bytes,
-            compute_capability: None,
-            driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+            ..Default::default()
         }
     }
 
@@ -217,18 +217,9 @@ impl AcceleratorProfile {
                 chip_count,
                 version,
             },
-            available: true,
             memory_bytes: hbm,
             compute_capability: Some(format!("TPU {}", version)),
-            driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+            ..Default::default()
         }
     }
 
@@ -239,37 +230,17 @@ impl AcceleratorProfile {
                 device_id,
                 generation,
             },
-            available: true,
             memory_bytes: generation.hbm_bytes(),
             compute_capability: Some(generation.to_string()),
-            driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+            ..Default::default()
         }
     }
 
     /// Create a CPU profile with the given amount of system RAM.
     pub fn cpu(memory_bytes: u64) -> Self {
         Self {
-            accelerator: AcceleratorType::Cpu,
-            available: true,
             memory_bytes,
-            compute_capability: None,
-            driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+            ..Default::default()
         }
     }
 }

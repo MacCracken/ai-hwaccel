@@ -30,6 +30,7 @@ impl SystemIo {
     }
 
     /// Whether any high-speed interconnect was detected.
+    #[inline]
     pub fn has_interconnect(&self) -> bool {
         !self.interconnects.is_empty()
     }

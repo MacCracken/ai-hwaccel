@@ -101,6 +101,7 @@ pub enum AcceleratorType {
 
 impl AcceleratorType {
     /// Returns `true` for any GPU variant.
+    #[inline]
     pub fn is_gpu(&self) -> bool {
         matches!(
             self,
@@ -113,6 +114,7 @@ impl AcceleratorType {
     }
 
     /// Returns `true` for any NPU variant.
+    #[inline]
     pub fn is_npu(&self) -> bool {
         matches!(
             self,
@@ -125,11 +127,13 @@ impl AcceleratorType {
     }
 
     /// Returns `true` for Google TPU.
+    #[inline]
     pub fn is_tpu(&self) -> bool {
         matches!(self, Self::Tpu { .. })
     }
 
     /// Returns `true` for any cloud/data-centre AI ASIC (Gaudi, Neuron, Qualcomm, Cerebras, Graphcore, Groq).
+    #[inline]
     pub fn is_ai_asic(&self) -> bool {
         matches!(
             self,
@@ -143,6 +147,7 @@ impl AcceleratorType {
     }
 
     /// Broad category for the device family.
+    #[inline]
     pub fn family(&self) -> AcceleratorFamily {
         match self {
             Self::Cpu => AcceleratorFamily::Cpu,
@@ -167,6 +172,7 @@ impl AcceleratorType {
     }
 
     /// Relative throughput multiplier vs CPU (rough inference estimate).
+    #[inline]
     pub fn throughput_multiplier(&self) -> f64 {
         match self {
             Self::Cpu => 1.0,
@@ -210,6 +216,7 @@ impl AcceleratorType {
     /// Relative training throughput multiplier vs CPU.
     /// Differs from inference throughput for some devices (e.g. Inferentia is
     /// inference-only, Trainium excels at training).
+    #[inline]
     pub fn training_multiplier(&self) -> f64 {
         match self {
             Self::Cpu => 1.0,
@@ -248,6 +255,7 @@ impl AcceleratorType {
     }
 
     /// Whether this device supports training workloads at all.
+    #[inline]
     pub fn supports_training(&self) -> bool {
         self.training_multiplier() > 0.0
     }

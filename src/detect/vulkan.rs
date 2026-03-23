@@ -185,7 +185,7 @@ pub(crate) async fn detect_vulkan_async() -> super::DetectResult {
     (profiles, warnings)
 }
 
-pub(crate) fn parse_vulkan_output(
+pub fn parse_vulkan_output(
     summary_stdout: &str,
     full_stdout: Option<&str>,
     profiles: &mut Vec<AcceleratorProfile>,

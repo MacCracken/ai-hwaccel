@@ -88,11 +88,15 @@ pub struct InstanceRecommendation {
 ///
 /// Results are parsed once and cached for the lifetime of the process.
 pub fn all_instances() -> &'static [CloudInstance] {
+    #[derive(serde::Deserialize)]
+    struct PricingData {
+        #[serde(default)]
+        instances: Vec<CloudInstance>,
+    }
+
     PARSED_INSTANCES.get_or_init(|| {
-        let parsed: serde_json::Value = serde_json::from_str(PRICING_JSON).unwrap_or_default();
-        parsed
-            .get("instances")
-            .and_then(|v| serde_json::from_value::<Vec<CloudInstance>>(v.clone()).ok())
+        serde_json::from_str::<PricingData>(PRICING_JSON)
+            .map(|d| d.instances)
             .unwrap_or_default()
     })
 }

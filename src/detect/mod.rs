@@ -9,11 +9,11 @@ pub mod bandwidth;
 pub(crate) mod cerebras;
 pub(crate) mod command;
 #[cfg(feature = "cuda")]
-pub(crate) mod cuda;
+pub mod cuda;
 pub(crate) mod disk;
 pub(crate) mod environment;
 #[cfg(feature = "gaudi")]
-pub(crate) mod gaudi;
+pub mod gaudi;
 #[cfg(feature = "graphcore")]
 pub(crate) mod graphcore;
 #[cfg(feature = "groq")]
@@ -38,7 +38,7 @@ pub(crate) mod samsung_npu;
 #[cfg(feature = "tpu")]
 pub(crate) mod tpu;
 #[cfg(feature = "vulkan")]
-pub(crate) mod vulkan;
+pub mod vulkan;
 
 use std::collections::HashMap;
 use std::path::Path;

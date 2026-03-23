@@ -107,25 +107,25 @@ impl AcceleratorRegistry {
 
         // Case 3: GPU / AI ASIC with topology awareness.
         if !gpu_devices.is_empty() && gpu_memory >= needed {
-            let interconnects = &self.system_io.interconnects;
-            let has_nvswitch = interconnects
-                .iter()
-                .any(|ic| ic.kind == InterconnectKind::NVSwitch);
-            let nvlink_bw = interconnects
-                .iter()
-                .filter(|ic| {
-                    matches!(
-                        ic.kind,
-                        InterconnectKind::NVLink | InterconnectKind::NVSwitch
-                    )
-                })
-                .map(|ic| ic.bandwidth_gbps)
-                .fold(0.0f64, f64::max);
-            let xgmi_bw = interconnects
-                .iter()
-                .filter(|ic| ic.kind == InterconnectKind::XgmiInfinityFabric)
-                .map(|ic| ic.bandwidth_gbps)
-                .fold(0.0f64, f64::max);
+            // Single pass over interconnects to extract all needed values.
+            let mut has_nvswitch = false;
+            let mut nvlink_bw = 0.0f64;
+            let mut xgmi_bw = 0.0f64;
+            for ic in &self.system_io.interconnects {
+                match ic.kind {
+                    InterconnectKind::NVSwitch => {
+                        has_nvswitch = true;
+                        nvlink_bw = nvlink_bw.max(ic.bandwidth_gbps);
+                    }
+                    InterconnectKind::NVLink => {
+                        nvlink_bw = nvlink_bw.max(ic.bandwidth_gbps);
+                    }
+                    InterconnectKind::XgmiInfinityFabric => {
+                        xgmi_bw = xgmi_bw.max(ic.bandwidth_gbps);
+                    }
+                    _ => {}
+                }
+            }
             let high_bw_interconnect = nvlink_bw + xgmi_bw;
 
             // NVSwitch or very high NVLink BW (>100 GB/s total) → tensor parallel.

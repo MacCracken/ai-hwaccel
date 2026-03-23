@@ -86,6 +86,78 @@ GPU 1: NVIDIA H100 (UUID: GPU-def456)
     });
 }
 
+fn bench_parse_cuda_output(c: &mut Criterion) {
+    let output_8gpu = (0..8)
+        .map(|i| {
+            format!(
+                "{}, 81920, 1024, 80896, 9.0, 550.54, NVIDIA H100, 42, 280, 15, 2619",
+                i
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    c.bench_function("parse_cuda_output_8gpu", |b| {
+        b.iter(|| {
+            let mut profiles = Vec::new();
+            let mut warnings = Vec::new();
+            ai_hwaccel::detect::cuda::parse_cuda_output(
+                &output_8gpu,
+                &mut profiles,
+                &mut warnings,
+            );
+        });
+    });
+}
+
+fn bench_parse_vulkan_output(c: &mut Criterion) {
+    let summary = "\
+GPU0:
+\tdeviceName = NVIDIA GeForce RTX 4090
+\tapiVersion = 1.3.280
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+\tmemoryHeaps: count = 2
+\tmemoryHeaps[0]: size = 24564 MiB
+GPU1:
+\tdeviceName = AMD Radeon RX 7900 XTX
+\tapiVersion = 1.3.274
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+\tmemoryHeaps: count = 3
+\tmemoryHeaps[0]: size = 24560 MiB
+";
+    c.bench_function("parse_vulkan_output_2gpu", |b| {
+        b.iter(|| {
+            let mut profiles = Vec::new();
+            let mut warnings = Vec::new();
+            ai_hwaccel::detect::vulkan::parse_vulkan_output(
+                summary,
+                None,
+                &mut profiles,
+                &mut warnings,
+            );
+        });
+    });
+}
+
+fn bench_parse_gaudi_output(c: &mut Criterion) {
+    let output = (0..8)
+        .map(|i| format!("{}, hl-325-gaudi3, 131072, 100000", i))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    c.bench_function("parse_gaudi_output_8dev", |b| {
+        b.iter(|| {
+            let mut profiles = Vec::new();
+            let mut warnings = Vec::new();
+            ai_hwaccel::detect::gaudi::parse_gaudi_output(
+                &output,
+                &mut profiles,
+                &mut warnings,
+            );
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_parse_nvidia_bandwidth,
@@ -95,5 +167,8 @@ criterion_group!(
     bench_parse_link_speed,
     bench_parse_ib_rate,
     bench_parse_nvlink_output,
+    bench_parse_cuda_output,
+    bench_parse_vulkan_output,
+    bench_parse_gaudi_output,
 );
 criterion_main!(benches);

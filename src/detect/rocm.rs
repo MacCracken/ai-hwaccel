@@ -67,13 +67,17 @@ pub(crate) fn detect_rocm(
 
         // Firmware / VBIOS version.
         let vbios = super::read_sysfs_string(&device_dir.join("vbios_version"), 4096)
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+            .and_then(|s| {
+                let t = s.trim();
+                if t.is_empty() { None } else { Some(t.to_string()) }
+            });
 
         // Compute capability from revision.
         let compute_cap = super::read_sysfs_string(&device_dir.join("revision"), 4096)
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+            .and_then(|s| {
+                let t = s.trim();
+                if t.is_empty() { None } else { Some(t.to_string()) }
+            });
 
         // MI300X / MI350: detect CXL-attached memory (unified HBM pool).
         // CXL memory shows up as an additional memory region in sysfs.

@@ -243,45 +243,52 @@ impl AcceleratorRegistry {
             }
         }
 
+        // Precompute memory estimates once (avoids up to 9 redundant calls).
+        let est_bf16 = Self::estimate_memory(model_params, &QuantizationLevel::BFloat16);
+        let est_fp16 = Self::estimate_memory(model_params, &QuantizationLevel::Float16);
+        let est_int8 = Self::estimate_memory(model_params, &QuantizationLevel::Int8);
+        let est_int4 = Self::estimate_memory(model_params, &QuantizationLevel::Int4);
+
         // TPU → BF16 preferred
         if best_tpu > 0 {
-            if Self::estimate_memory(model_params, &QuantizationLevel::BFloat16) <= best_tpu {
+            if est_bf16 <= best_tpu {
                 return QuantizationLevel::BFloat16;
             }
-            if Self::estimate_memory(model_params, &QuantizationLevel::Int8) <= best_tpu {
+            if est_int8 <= best_tpu {
                 return QuantizationLevel::Int8;
             }
         }
 
         // Gaudi → BF16 preferred
         if best_gaudi > 0 {
-            if Self::estimate_memory(model_params, &QuantizationLevel::BFloat16) <= best_gaudi {
+            if est_bf16 <= best_gaudi {
                 return QuantizationLevel::BFloat16;
             }
-            if Self::estimate_memory(model_params, &QuantizationLevel::Int8) <= best_gaudi {
+            if est_int8 <= best_gaudi {
                 return QuantizationLevel::Int8;
             }
         }
 
         // GPU → FP16 preferred, step down
         if best_gpu > 0 {
-            for quant in &[
-                QuantizationLevel::Float16,
-                QuantizationLevel::Int8,
-                QuantizationLevel::Int4,
-            ] {
-                if Self::estimate_memory(model_params, quant) <= best_gpu {
-                    return *quant;
-                }
+            if est_fp16 <= best_gpu {
+                return QuantizationLevel::Float16;
+            }
+            if est_int8 <= best_gpu {
+                return QuantizationLevel::Int8;
+            }
+            if est_int4 <= best_gpu {
+                return QuantizationLevel::Int4;
             }
         }
 
         // NPU → INT8/INT4 only
         if best_npu > 0 {
-            for quant in &[QuantizationLevel::Int8, QuantizationLevel::Int4] {
-                if Self::estimate_memory(model_params, quant) <= best_npu {
-                    return *quant;
-                }
+            if est_int8 <= best_npu {
+                return QuantizationLevel::Int8;
+            }
+            if est_int4 <= best_npu {
+                return QuantizationLevel::Int4;
             }
         }
 
@@ -291,14 +298,14 @@ impl AcceleratorRegistry {
         } else {
             16 * 1024 * 1024 * 1024
         };
-        for quant in &[
-            QuantizationLevel::Float16,
-            QuantizationLevel::Int8,
-            QuantizationLevel::Int4,
-        ] {
-            if Self::estimate_memory(model_params, quant) <= cpu_mem {
-                return *quant;
-            }
+        if est_fp16 <= cpu_mem {
+            return QuantizationLevel::Float16;
+        }
+        if est_int8 <= cpu_mem {
+            return QuantizationLevel::Int8;
+        }
+        if est_int4 <= cpu_mem {
+            return QuantizationLevel::Int4;
         }
         QuantizationLevel::Int4
     }

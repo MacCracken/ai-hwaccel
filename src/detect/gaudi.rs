@@ -51,7 +51,7 @@ pub(crate) async fn detect_gaudi_async() -> super::DetectResult {
     (profiles, warnings)
 }
 
-pub(crate) fn parse_gaudi_output(
+pub fn parse_gaudi_output(
     stdout: &str,
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,

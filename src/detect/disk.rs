@@ -18,16 +18,17 @@ pub(crate) fn detect_storage() -> Vec<StorageDevice> {
     }
 
     for entry in std::fs::read_dir(block_dir).into_iter().flatten().flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
+        let os_name = entry.file_name();
+        let name_ref = os_name.to_string_lossy();
 
         // Skip virtual devices (loop, dm, ram, etc.)
-        if name.starts_with("loop")
-            || name.starts_with("dm-")
-            || name.starts_with("ram")
-            || name.starts_with("zram")
-            || name.starts_with("sr")
-            || name.starts_with("fd")
-            || name.starts_with("md")
+        if name_ref.starts_with("loop")
+            || name_ref.starts_with("dm-")
+            || name_ref.starts_with("ram")
+            || name_ref.starts_with("zram")
+            || name_ref.starts_with("sr")
+            || name_ref.starts_with("fd")
+            || name_ref.starts_with("md")
         {
             continue;
         }
@@ -37,6 +38,7 @@ pub(crate) fn detect_storage() -> Vec<StorageDevice> {
             continue;
         }
 
+        let name = name_ref.into_owned();
         let kind = detect_storage_kind(&name, &queue_dir);
         let bandwidth_gbps = estimate_bandwidth(&kind, &queue_dir);
 
