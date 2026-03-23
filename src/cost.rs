@@ -113,7 +113,7 @@ pub fn recommend_instance(
     provider: Option<CloudProvider>,
 ) -> Vec<InstanceRecommendation> {
     let needed = AcceleratorRegistry::estimate_memory(model_params, quant);
-    let needed_gb = (needed as f64) / (1024.0 * 1024.0 * 1024.0);
+    let needed_gb = (needed as f64) / crate::units::BYTES_PER_GIB;
 
     let mut candidates: Vec<InstanceRecommendation> = all_instances()
         .iter()

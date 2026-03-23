@@ -68,19 +68,19 @@ fn read_pcie_bandwidth(device_path: &Path) -> Option<f64> {
     let speed_gts = parse_link_speed(speed_str.trim())?;
 
     // PCIe uses 128b/130b encoding for Gen3+, 8b/10b for Gen1/2.
-    let encoding_overhead = if speed_gts >= 8.0 {
-        128.0 / 130.0
+    let encoding_overhead = if speed_gts >= crate::units::PCIE_GEN3_SPEED_GTS {
+        crate::units::PCIE_GEN3_PLUS_ENCODING
     } else {
-        8.0 / 10.0
+        crate::units::PCIE_GEN1_GEN2_ENCODING
     };
 
     // GT/s × width × encoding / 8 bits per byte = GB/s
-    let bandwidth_gbps = speed_gts * width * encoding_overhead / 8.0;
+    let bandwidth_gbps = speed_gts * width * encoding_overhead / crate::units::BITS_PER_BYTE;
     Some((bandwidth_gbps * 100.0).round() / 100.0)
 }
 
 /// Parse a PCIe link speed string like "16 GT/s" or "8.0 GT/s" to GT/s.
-pub(crate) fn parse_link_speed(s: &str) -> Option<f64> {
+pub fn parse_link_speed(s: &str) -> Option<f64> {
     // Formats: "16 GT/s", "8.0 GT/s PCIe", "2.5 GT/s"
     let numeric = s.split_whitespace().next()?;
     numeric.parse::<f64>().ok()

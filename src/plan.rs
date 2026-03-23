@@ -5,6 +5,7 @@ use crate::quantization::QuantizationLevel;
 use crate::registry::AcceleratorRegistry;
 use crate::sharding::{ModelShard, ShardingPlan, ShardingStrategy};
 use crate::system_io::InterconnectKind;
+use crate::units;
 
 impl AcceleratorRegistry {
     /// Generate a sharding plan for a model given its parameter count and quantisation.
@@ -92,7 +93,7 @@ impl AcceleratorRegistry {
                 .collect();
 
             let quant_factor = quant.memory_reduction_factor();
-            let tps = tpu_min_mult * tpu_chips as f64 * quant_factor * 2.0;
+            let tps = tpu_min_mult * tpu_chips as f64 * quant_factor * units::TPU_TP_ICI_BONUS;
 
             return ShardingPlan {
                 shards,
@@ -135,8 +136,9 @@ impl AcceleratorRegistry {
             // bisection bandwidth regardless of device count, so it bypasses
             // this limit. The 100 GB/s threshold corresponds to ~2 NVLink 4.0
             // connections per direction (50 GB/s each).
-            let use_tensor_parallel =
-                has_nvswitch || (high_bw_interconnect > 100.0 && gpu_devices.len() <= 8);
+            let use_tensor_parallel = has_nvswitch
+                || (high_bw_interconnect > units::TP_MIN_INTERCONNECT_BW
+                    && gpu_devices.len() <= units::TP_MAX_DEVICES_WITHOUT_NVSWITCH);
 
             if use_tensor_parallel {
                 let num_devices = gpu_devices.len() as u32;
@@ -161,9 +163,10 @@ impl AcceleratorRegistry {
                 // Tensor parallel scales better than pipeline with good interconnect.
                 // Interconnect bonus: high BW reduces communication overhead.
                 let ic_bonus = if has_nvswitch {
-                    1.8
+                    units::NVSWITCH_TP_BONUS
                 } else {
-                    1.0 + (high_bw_interconnect / 200.0).min(0.8)
+                    1.0 + (high_bw_interconnect / units::TP_INTERCONNECT_BW_DIVISOR)
+                        .min(units::MAX_NON_NVSWITCH_TP_BONUS)
                 };
                 let tps = slowest * num_devices as f64 * quant_factor * ic_bonus;
 
@@ -183,7 +186,7 @@ impl AcceleratorRegistry {
 
             let num_stages = ordered_devices.len() as u32;
             let per_shard = needed.div_ceil(num_stages as u64);
-            let estimated_layers = (model_params / 250_000_000).max(1) as u32;
+            let estimated_layers = (model_params / units::PARAMS_PER_LAYER_ESTIMATE).max(1) as u32;
             let layers_per_shard = estimated_layers.div_ceil(num_stages).max(1);
 
             let shards: Vec<ModelShard> = ordered_devices
@@ -216,9 +219,9 @@ impl AcceleratorRegistry {
             // the slowest stage). Inter-stage communication overhead
             // depends on interconnect bandwidth.
             let ic_factor = if high_bw_interconnect > 0.0 {
-                0.85 // ~15% overhead for NVLink/XGMI inter-stage transfers
+                units::PP_HIGH_BW_EFFICIENCY // ~15% overhead for NVLink/XGMI inter-stage transfers
             } else {
-                0.65 // ~35% overhead for PCIe-only transfers
+                units::PP_PCIE_ONLY_EFFICIENCY // ~35% overhead for PCIe-only transfers
             };
             let tps = slowest * num_stages as f64 * quant_factor * ic_factor;
 
@@ -262,7 +265,7 @@ fn estimate_tokens_per_sec(
     if model_params == 0 {
         return 0.0;
     }
-    let base = 1_000_000_000.0 / model_params as f64;
+    let base = units::TOKENS_PER_SEC_BASE / model_params as f64;
     let quant_speedup = quant.memory_reduction_factor();
     base * accel.throughput_multiplier() * quant_speedup
 }

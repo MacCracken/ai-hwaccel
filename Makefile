@@ -1,4 +1,4 @@
-.PHONY: check fmt clippy test audit deny vet build doc clean
+.PHONY: check fmt clippy test audit deny vet bench build doc clean
 
 # Run all CI checks locally
 check: fmt clippy test audit
@@ -26,6 +26,10 @@ deny:
 # Supply-chain audit (cargo-vet)
 vet:
 	cargo vet
+
+# Run benchmarks with history
+bench:
+	./scripts/bench-history.sh
 
 # Build release
 build:

@@ -280,6 +280,7 @@ pub mod requirement;
 pub mod sharding;
 pub mod system_io;
 pub mod training;
+pub mod units;
 
 pub use cache::{CachedRegistry, DiskCachedRegistry};
 pub use cost::{CloudInstance as CloudGpuInstance, CloudProvider, InstanceRecommendation};

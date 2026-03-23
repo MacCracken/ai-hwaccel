@@ -204,8 +204,8 @@ impl AcceleratorRegistry {
     #[inline]
     pub fn estimate_memory(model_params: u64, quant: &QuantizationLevel) -> u64 {
         let bytes_per_param = quant.bits_per_param() as u64;
-        let raw = model_params * bytes_per_param / 8;
-        raw + raw / 5
+        let raw = model_params * bytes_per_param / crate::units::BITS_PER_BYTE as u64;
+        raw + raw / crate::units::ACTIVATION_OVERHEAD_DIVISOR
     }
 
     /// Suggest a quantisation level based on available hardware and model size.

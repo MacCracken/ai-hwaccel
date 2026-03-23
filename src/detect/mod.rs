@@ -4,7 +4,7 @@
 pub(crate) mod amd_xdna;
 #[cfg(feature = "apple")]
 pub(crate) mod apple;
-pub(crate) mod bandwidth;
+pub mod bandwidth;
 #[cfg(feature = "cerebras")]
 pub(crate) mod cerebras;
 pub(crate) mod command;
@@ -22,13 +22,13 @@ pub(crate) mod groq;
 pub(crate) mod intel_npu;
 #[cfg(feature = "intel-oneapi")]
 pub(crate) mod intel_oneapi;
-pub(crate) mod interconnect;
+pub mod interconnect;
 #[cfg(feature = "mediatek-apu")]
 pub(crate) mod mediatek_apu;
 #[cfg(feature = "aws-neuron")]
 pub(crate) mod neuron;
 pub(crate) mod numa;
-pub(crate) mod pcie;
+pub mod pcie;
 #[cfg(feature = "qualcomm")]
 pub(crate) mod qualcomm;
 #[cfg(feature = "rocm")]

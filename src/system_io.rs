@@ -52,7 +52,7 @@ impl SystemIo {
             return None;
         }
 
-        let bytes_per_sec = best_storage_gbps * 1_000_000_000.0;
+        let bytes_per_sec = best_storage_gbps * crate::units::BYTES_PER_GB;
         Some(dataset_bytes as f64 / bytes_per_sec)
     }
 }

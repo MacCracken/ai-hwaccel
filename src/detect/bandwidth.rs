@@ -117,7 +117,7 @@ fn query_nvidia_bandwidth(_warnings: &mut Vec<DetectionError>) -> Vec<Option<f64
 }
 
 /// Parse nvidia-smi bandwidth query output into per-GPU bandwidth values.
-pub(crate) fn parse_nvidia_bandwidth_output(stdout: &str) -> Vec<Option<f64>> {
+pub fn parse_nvidia_bandwidth_output(stdout: &str) -> Vec<Option<f64>> {
     stdout
         .lines()
         .map(|line| {
@@ -145,7 +145,9 @@ pub(crate) fn parse_nvidia_bandwidth_output(stdout: &str) -> Vec<Option<f64>> {
 ///
 /// `clock_mhz * bus_width_bits * 2 (DDR) / 8 (bits→bytes) / 1000 (MB→GB)`
 fn calculate_bandwidth(clock_mhz: f64, bus_width_bits: u32) -> f64 {
-    let bw = clock_mhz * bus_width_bits as f64 * 2.0 / 8.0 / 1000.0;
+    let bw = clock_mhz * bus_width_bits as f64 * crate::units::DDR_MULTIPLIER
+        / crate::units::BITS_PER_BYTE
+        / crate::units::MHZ_PER_GHZ;
     (bw * 10.0).round() / 10.0 // round to 1 decimal
 }
 
@@ -157,7 +159,7 @@ fn calculate_bandwidth(clock_mhz: f64, bus_width_bits: u32) -> f64 {
 /// wrong width is bounded — consumer cards usually have narrower buses
 /// but also lower memory clocks, so the bandwidth estimate stays in the
 /// right ballpark.
-pub(crate) fn nvidia_bus_width_bits(cc: &str) -> Option<u32> {
+pub fn nvidia_bus_width_bits(cc: &str) -> Option<u32> {
     match cc {
         // Hopper (H100/H200)
         "9.0" => Some(5120), // HBM3, 5120-bit
@@ -189,7 +191,7 @@ pub(crate) fn nvidia_bus_width_bits(cc: &str) -> Option<u32> {
 
 /// Fallback: estimate bandwidth from compute capability using known
 /// published specs (GB/s). Used when nvidia-smi doesn't report clock speed.
-pub(crate) fn estimate_nvidia_bandwidth_from_cc(cc: &str) -> Option<f64> {
+pub fn estimate_nvidia_bandwidth_from_cc(cc: &str) -> Option<f64> {
     match cc {
         "10.0" => Some(8000.0), // B200: ~8 TB/s
         "9.0" => Some(3350.0),  // H100 SXM: 3.35 TB/s
@@ -264,7 +266,7 @@ fn read_rocm_bandwidth(device_dir: &Path) -> Option<f64> {
 /// Parse the highest clock entry from `pp_dpm_mclk`.
 ///
 /// Format: lines like `0: 96Mhz`, `1: 1000Mhz *`
-pub(crate) fn parse_max_dpm_clock(content: &str) -> Option<f64> {
+pub fn parse_max_dpm_clock(content: &str) -> Option<f64> {
     let mut max_clock = 0.0f64;
     for line in content.lines() {
         // e.g. "1: 1000Mhz *"

@@ -93,7 +93,9 @@ pub fn estimate_training_memory(
     method: TrainingMethod,
     target: TrainingTarget,
 ) -> MemoryEstimate {
-    let base_gb = (model_params_millions as f64 * 1_000_000.0 * 2.0) / 1_073_741_824.0;
+    let base_gb = (model_params_millions as f64 * crate::units::PARAMS_PER_MILLION
+        * crate::units::FP16_BYTES_PER_PARAM)
+        / crate::units::BYTES_PER_GIB;
 
     match target {
         TrainingTarget::Tpu => estimate_tpu_training(base_gb, method),

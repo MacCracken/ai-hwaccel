@@ -65,3 +65,23 @@ harness = false
 [[bench]]
 name = "plan"
 harness = false
+
+[[bench]]
+name = "training"
+harness = false
+
+[[bench]]
+name = "cost"
+harness = false
+
+[[bench]]
+name = "quantization"
+harness = false
+
+[[bench]]
+name = "parsing"
+harness = false
+
+[[bench]]
+name = "registry"
+harness = false

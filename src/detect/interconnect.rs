@@ -83,12 +83,12 @@ fn detect_infiniband(interconnects: &mut Vec<Interconnect>, _warnings: &mut Vec<
 }
 
 /// Parse InfiniBand rate string like "200 Gb/sec (4X HDR)" → GB/s.
-pub(crate) fn parse_ib_rate(s: &str) -> f64 {
+pub fn parse_ib_rate(s: &str) -> f64 {
     // Format: "<number> Gb/sec (...)"
     if let Some(gb_str) = s.split_whitespace().next()
         && let Ok(gbits) = gb_str.parse::<f64>()
     {
-        gbits / 8.0 // Gb/s → GB/s
+        gbits / crate::units::GBITS_PER_GBYTE // Gb/s → GB/s
     } else {
         0.0
     }
@@ -113,7 +113,7 @@ fn detect_nvlink(interconnects: &mut Vec<Interconnect>, warnings: &mut Vec<Detec
 /// Example lines:
 ///   GPU 0: NVIDIA H100 (UUID: GPU-xxx)
 ///       Link 0: 25 GB/s
-pub(crate) fn parse_nvlink_output(stdout: &str, interconnects: &mut Vec<Interconnect>) {
+pub fn parse_nvlink_output(stdout: &str, interconnects: &mut Vec<Interconnect>) {
     let mut current_gpu = String::new();
     let mut link_count = 0u32;
     let mut link_bw = 0.0f64;
