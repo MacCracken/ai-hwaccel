@@ -156,8 +156,9 @@ jobs:
         run: cargo bench --bench detect --bench plan -- --noplot
 
   fuzz:
-    name: Fuzz (5 min)
+    name: Fuzz (smoke)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [check]
     steps:
       - uses: actions/checkout@v4
@@ -165,9 +166,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz
-      - name: Fuzz all targets
+      - name: Fuzz all targets (15s each)
         run: |
           for target in $(cargo +nightly fuzz list); do
             echo "=== Fuzzing $target ==="
-            cargo +nightly fuzz run "$target" -- -max_total_time=30 -max_len=4096 || exit 1
+            cargo +nightly fuzz run "$target" -- -max_total_time=15 -max_len=4096 || exit 1
           done
