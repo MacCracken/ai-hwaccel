@@ -42,7 +42,7 @@ mod async_tests {
     async fn detect_async_builder() {
         let registry = DetectBuilder::none().detect_async().await.unwrap();
         // CPU-only (no backends enabled).
-        assert!(registry.all_profiles().len() >= 1);
+        assert!(!registry.all_profiles().is_empty());
         assert!(
             registry
                 .all_profiles()
