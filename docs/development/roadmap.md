@@ -85,14 +85,26 @@ parser bugs found, add mock test fixtures from captured tool output.
 - [ ] **Intel Gaudi 3** — validate hl-smi parser on AWS DL1/DL2. Capture
   CSV fixtures.
 
-### Platform gaps
+### Cross-platform porting
 
-- [ ] **Windows GPU detection** — WMI queries via `wmic` for GPU enumeration
-  when nvidia-smi is absent. DirectML device listing via `dxdiag` parsing.
-  `nvidia-smi.exe` path resolution (`C:\Windows\System32\`).
-- [ ] **macOS ANE via IOKit** — native ANE core count and performance tier
-  via `IORegistryEntryCreateCFProperties`. Replace estimated ANE memory
-  with actual hardware values.
+- [ ] **macOS: `system_profiler` for Metal/ANE detection** — use
+  `system_profiler SPDisplaysDataType -json` for GPU enumeration and
+  Metal feature set, `system_profiler SPHardwareDataType` for ANE core
+  count. Replace IOKit-only approach with higher-level API.
+- [ ] **macOS: `sysctl` for CPU/memory** — use `sysctl hw.memsize`,
+  `hw.ncpu`, `hw.cpufrequency` for system topology instead of sysfs.
+- [ ] **Windows: WMI queries for GPU detection** — `Win32_VideoController`
+  via WMI for GPU enumeration when nvidia-smi is absent. DirectML device
+  listing via `dxdiag` parsing. `nvidia-smi.exe` path resolution
+  (`C:\Windows\System32\`).
+- [ ] **Windows: DirectX adapter enumeration** — DXGI `EnumAdapters1` via
+  `windows-rs` for reliable GPU detection independent of vendor CLI tools.
+  Returns adapter LUID, dedicated VRAM, shared memory, driver version.
+- [ ] **Cross-platform: abstract sysfs probing behind platform trait** —
+  `PlatformProbe` trait with `detect_gpus()`, `detect_memory()`,
+  `detect_topology()` methods. Linux impl reads sysfs, macOS impl uses
+  `system_profiler`/`sysctl`, Windows impl uses WMI/DXGI. Feature-gated
+  backends (`sysfs`, `system-profiler`, `wmi`).
 
 ---
 

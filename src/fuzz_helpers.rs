@@ -76,3 +76,21 @@ pub fn fuzz_pcie_link_speed_parser(input: &str) {
 pub fn fuzz_dpm_clock_parser(input: &str) {
     let _ = crate::detect::bandwidth::parse_max_dpm_clock(input);
 }
+
+/// Fuzz the AcceleratorRegistry JSON deserializer.
+///
+/// This is security-critical: malicious JSON should never crash the parser
+/// or cause unbounded memory allocation.
+pub fn fuzz_registry_from_json(input: &str) {
+    let _ = crate::registry::AcceleratorRegistry::from_json(input);
+}
+
+/// Fuzz the Cerebras CLI memory parser.
+pub fn fuzz_cerebras_parser(input: &str) {
+    let _ = crate::detect::cerebras::parse_memory_from_cli(input);
+}
+
+/// Fuzz the Graphcore gc-info memory parser.
+pub fn fuzz_graphcore_parser(input: &str) {
+    let _ = crate::detect::graphcore::parse_memory_from_gcinfo(input);
+}

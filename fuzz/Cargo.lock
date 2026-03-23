@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "ai-hwaccel"
-version = "0.20.3"
+version = "0.21.3"
 dependencies = [
  "serde",
  "serde_json",

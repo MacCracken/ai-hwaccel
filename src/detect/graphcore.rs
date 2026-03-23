@@ -79,7 +79,7 @@ pub(crate) fn detect_graphcore_ipu(
 }
 
 /// Best-effort parse of memory from `gc-info` JSON or text output.
-fn parse_memory_from_gcinfo(stdout: &str) -> Option<u64> {
+pub(crate) fn parse_memory_from_gcinfo(stdout: &str) -> Option<u64> {
     // Try JSON parse first.
     if let Ok(val) = serde_json::from_str::<serde_json::Value>(stdout) {
         if let Some(mem) = val.get("memory").and_then(|m| m.as_u64()) {

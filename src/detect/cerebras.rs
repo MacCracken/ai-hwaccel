@@ -78,7 +78,7 @@ pub(crate) fn detect_cerebras_wse(
 }
 
 /// Best-effort parse of memory from `cerebras_cli system-info` output.
-fn parse_memory_from_cli(stdout: &str) -> Option<u64> {
+pub(crate) fn parse_memory_from_cli(stdout: &str) -> Option<u64> {
     for line in stdout.lines() {
         let lower = line.to_lowercase();
         if lower.contains("memory") || lower.contains("sram") {

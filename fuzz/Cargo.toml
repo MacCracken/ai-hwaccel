@@ -78,3 +78,17 @@ path = "fuzz_targets/fuzz_small_parsers.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_json"
+path = "fuzz_targets/fuzz_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_new_backends"
+path = "fuzz_targets/fuzz_new_backends.rs"
+test = false
+doc = false
+bench = false
