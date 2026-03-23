@@ -159,9 +159,9 @@ fn parse_memory_string(s: &str) -> Option<u64> {
     let amount: u64 = parts[0].parse().ok()?;
     let unit = parts[1].to_uppercase();
     match unit.as_str() {
-        "GB" => Some(amount * 1024 * 1024 * 1024),
-        "MB" => Some(amount * 1024 * 1024),
-        "TB" => Some(amount * 1024 * 1024 * 1024 * 1024),
+        "GB" => Some(amount.saturating_mul(1024 * 1024 * 1024)),
+        "MB" => Some(amount.saturating_mul(1024 * 1024)),
+        "TB" => Some(amount.saturating_mul(1024 * 1024 * 1024 * 1024)),
         _ => None,
     }
 }

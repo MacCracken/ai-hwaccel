@@ -78,12 +78,12 @@ pub(crate) fn parse_memory_from_gcinfo(stdout: &str) -> Option<u64> {
                 if let Some(num_str) = word.strip_suffix("MB").or_else(|| word.strip_suffix("mb"))
                     && let Ok(mb) = num_str.parse::<u64>()
                 {
-                    return Some(mb * 1024 * 1024);
+                    return Some(mb.saturating_mul(1024 * 1024));
                 }
                 if let Some(num_str) = word.strip_suffix("GB").or_else(|| word.strip_suffix("gb"))
                     && let Ok(gb) = num_str.parse::<u64>()
                 {
-                    return Some(gb * 1024 * 1024 * 1024);
+                    return Some(gb.saturating_mul(1024 * 1024 * 1024));
                 }
             }
         }

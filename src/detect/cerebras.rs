@@ -68,7 +68,7 @@ pub(crate) fn parse_memory_from_cli(stdout: &str) -> Option<u64> {
                 if let Some(num_str) = word.strip_suffix("GB").or_else(|| word.strip_suffix("gb"))
                     && let Ok(gb) = num_str.parse::<u64>()
                 {
-                    return Some(gb * 1024 * 1024 * 1024);
+                    return Some(gb.saturating_mul(1024 * 1024 * 1024));
                 }
             }
         }
