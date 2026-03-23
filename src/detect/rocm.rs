@@ -66,17 +66,25 @@ pub(crate) fn detect_rocm(
         let gpu_busy = read_sysfs_u64(&device_dir.join("gpu_busy_percent"));
 
         // Firmware / VBIOS version.
-        let vbios = super::read_sysfs_string(&device_dir.join("vbios_version"), 4096)
-            .and_then(|s| {
+        let vbios =
+            super::read_sysfs_string(&device_dir.join("vbios_version"), 4096).and_then(|s| {
                 let t = s.trim();
-                if t.is_empty() { None } else { Some(t.to_string()) }
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t.to_string())
+                }
             });
 
         // Compute capability from revision.
-        let compute_cap = super::read_sysfs_string(&device_dir.join("revision"), 4096)
-            .and_then(|s| {
+        let compute_cap =
+            super::read_sysfs_string(&device_dir.join("revision"), 4096).and_then(|s| {
                 let t = s.trim();
-                if t.is_empty() { None } else { Some(t.to_string()) }
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t.to_string())
+                }
             });
 
         // MI300X / MI350: detect CXL-attached memory (unified HBM pool).

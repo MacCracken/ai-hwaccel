@@ -682,12 +682,7 @@ pub(super) fn has_dev_device(prefix: &str) -> bool {
         .into_iter()
         .flatten()
         .flatten()
-        .any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(prefix)
-        })
+        .any(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
 }
 
 /// Build a default CPU profile with detected system memory.

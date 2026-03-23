@@ -131,7 +131,15 @@ pub fn parse_cuda_output(
             })
             .or_else(|| estimate_nvidia_bandwidth_from_cc(compute_cap_str));
 
-        debug!(device_id, mem_total_mb, ?mem_used_mb, ?mem_free_mb, driver_version = driver_version_str, gpu_name, "NVIDIA CUDA GPU detected");
+        debug!(
+            device_id,
+            mem_total_mb,
+            ?mem_used_mb,
+            ?mem_free_mb,
+            driver_version = driver_version_str,
+            gpu_name,
+            "NVIDIA CUDA GPU detected"
+        );
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::CudaGpu { device_id },
             available: true,

@@ -12,7 +12,9 @@ pub enum TrainingMethod {
     #[default]
     FullFineTune,
     LoRA,
-    QLoRA { bits: u8 },
+    QLoRA {
+        bits: u8,
+    },
     Prefix,
     DPO,
     RLHF,
@@ -105,7 +107,8 @@ pub fn estimate_training_memory(
     method: TrainingMethod,
     target: TrainingTarget,
 ) -> MemoryEstimate {
-    let base_gb = (model_params_millions as f64 * crate::units::PARAMS_PER_MILLION
+    let base_gb = (model_params_millions as f64
+        * crate::units::PARAMS_PER_MILLION
         * crate::units::FP16_BYTES_PER_PARAM)
         / crate::units::BYTES_PER_GIB;
 

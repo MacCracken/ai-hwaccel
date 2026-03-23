@@ -101,8 +101,7 @@ fn pipeline_efficiency_ordering() {
 fn memory_bandwidth_formula_matches_hardcoded() {
     // H100: 2619 MHz * 5120-bit * 2 / 8 / 1000
     let hardcoded = 2619.0 * 5120.0 * 2.0 / 8.0 / 1000.0;
-    let with_constants =
-        2619.0 * 5120.0 * DDR_MULTIPLIER / BITS_PER_BYTE / MHZ_PER_GHZ;
+    let with_constants = 2619.0 * 5120.0 * DDR_MULTIPLIER / BITS_PER_BYTE / MHZ_PER_GHZ;
     assert!(
         (hardcoded - with_constants).abs() < f64::EPSILON,
         "hardcoded={}, constants={}",
@@ -128,9 +127,8 @@ fn pcie_bandwidth_formula_matches_hardcoded() {
 fn training_base_gb_formula_matches_hardcoded() {
     let model_params_millions = 7000u64;
     let hardcoded = (model_params_millions as f64 * 1_000_000.0 * 2.0) / 1_073_741_824.0;
-    let with_constants = (model_params_millions as f64 * PARAMS_PER_MILLION
-        * FP16_BYTES_PER_PARAM)
-        / BYTES_PER_GIB;
+    let with_constants =
+        (model_params_millions as f64 * PARAMS_PER_MILLION * FP16_BYTES_PER_PARAM) / BYTES_PER_GIB;
     assert!(
         (hardcoded - with_constants).abs() < f64::EPSILON,
         "hardcoded={}, constants={}",

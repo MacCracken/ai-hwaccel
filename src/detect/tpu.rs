@@ -11,7 +11,6 @@ pub(crate) fn detect_tpu(
     _warnings: &mut Vec<DetectionError>,
 ) {
     for device_id in super::iter_dev_devices("accel") {
-
         // Skip if this is an AMD XDNA device
         let driver_link = format!("/sys/class/accel/accel{}/device/driver", device_id);
         if let Ok(target) = std::fs::read_link(&driver_link)

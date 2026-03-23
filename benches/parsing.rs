@@ -17,7 +17,9 @@ fn bench_parse_nvidia_bandwidth(c: &mut Criterion) {
 }
 
 fn bench_nvidia_bus_width(c: &mut Criterion) {
-    let ccs = ["9.0", "8.9", "8.6", "8.0", "7.5", "7.0", "6.1", "6.0", "10.0"];
+    let ccs = [
+        "9.0", "8.9", "8.6", "8.0", "7.5", "7.0", "6.1", "6.0", "10.0",
+    ];
     c.bench_function("nvidia_bus_width_all_ccs", |b| {
         b.iter(|| {
             for cc in &ccs {
@@ -28,7 +30,9 @@ fn bench_nvidia_bus_width(c: &mut Criterion) {
 }
 
 fn bench_estimate_nvidia_bw_from_cc(c: &mut Criterion) {
-    let ccs = ["10.0", "9.0", "8.9", "8.6", "8.0", "7.5", "7.0", "6.1", "6.0"];
+    let ccs = [
+        "10.0", "9.0", "8.9", "8.6", "8.0", "7.5", "7.0", "6.1", "6.0",
+    ];
     c.bench_function("estimate_bw_from_cc_all", |b| {
         b.iter(|| {
             for cc in &ccs {
@@ -101,11 +105,7 @@ fn bench_parse_cuda_output(c: &mut Criterion) {
         b.iter(|| {
             let mut profiles = Vec::new();
             let mut warnings = Vec::new();
-            ai_hwaccel::detect::cuda::parse_cuda_output(
-                &output_8gpu,
-                &mut profiles,
-                &mut warnings,
-            );
+            ai_hwaccel::detect::cuda::parse_cuda_output(&output_8gpu, &mut profiles, &mut warnings);
         });
     });
 }
@@ -149,11 +149,7 @@ fn bench_parse_gaudi_output(c: &mut Criterion) {
         b.iter(|| {
             let mut profiles = Vec::new();
             let mut warnings = Vec::new();
-            ai_hwaccel::detect::gaudi::parse_gaudi_output(
-                &output,
-                &mut profiles,
-                &mut warnings,
-            );
+            ai_hwaccel::detect::gaudi::parse_gaudi_output(&output, &mut profiles, &mut warnings);
         });
     });
 }

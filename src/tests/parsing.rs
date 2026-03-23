@@ -84,13 +84,7 @@ fn bw_estimate_all_known_ccs() {
     ];
     for (cc, expected) in &known {
         let bw = estimate_nvidia_bandwidth_from_cc(cc);
-        assert_eq!(
-            bw,
-            Some(*expected),
-            "CC {} expected {} GB/s",
-            cc,
-            expected
-        );
+        assert_eq!(bw, Some(*expected), "CC {} expected {} GB/s", cc, expected);
     }
 }
 
@@ -241,7 +235,8 @@ fn ib_rate_garbage() {
 fn cuda_parser_normal_h100() {
     let mut profiles = Vec::new();
     let mut warnings = Vec::new();
-    let line = "0, 81920, 1024, 80896, 9.0, 550.54.15, NVIDIA H100 80GB HBM3, 42, 280.50, 15, 2619\n";
+    let line =
+        "0, 81920, 1024, 80896, 9.0, 550.54.15, NVIDIA H100 80GB HBM3, 42, 280.50, 15, 2619\n";
     crate::detect::cuda::parse_cuda_output(line, &mut profiles, &mut warnings);
     assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
     assert_eq!(profiles.len(), 1);
@@ -437,11 +432,8 @@ Hardware:
       Total Number of Cores: 16 (12 performance and 4 efficiency)
       Memory: 48 GB
 ";
-    let is_mac = crate::detect::apple::parse_system_profiler_output(
-        output,
-        &mut profiles,
-        &mut warnings,
-    );
+    let is_mac =
+        crate::detect::apple::parse_system_profiler_output(output, &mut profiles, &mut warnings);
     assert!(is_mac);
     assert_eq!(profiles.len(), 2); // Metal GPU + ANE
     assert!(matches!(
@@ -473,11 +465,8 @@ Hardware:
       Processor Name: Quad-Core Intel Core i7
       Memory: 16 GB
 ";
-    let is_mac = crate::detect::apple::parse_system_profiler_output(
-        output,
-        &mut profiles,
-        &mut warnings,
-    );
+    let is_mac =
+        crate::detect::apple::parse_system_profiler_output(output, &mut profiles, &mut warnings);
     assert!(is_mac);
     assert!(profiles.is_empty()); // No Apple Silicon → no profiles
 }
@@ -496,11 +485,8 @@ Hardware:
       Chip: Apple M1
       Memory: 8 GB
 ";
-    let is_mac = crate::detect::apple::parse_system_profiler_output(
-        output,
-        &mut profiles,
-        &mut warnings,
-    );
+    let is_mac =
+        crate::detect::apple::parse_system_profiler_output(output, &mut profiles, &mut warnings);
     assert!(is_mac);
     assert_eq!(profiles.len(), 2);
     assert_eq!(profiles[0].memory_bytes, 8 * 1024 * 1024 * 1024);
@@ -607,7 +593,11 @@ fn neuron_parser_trainium_multi() {
     assert_eq!(profiles.len(), 2);
     assert!(matches!(
         &profiles[0].accelerator,
-        AcceleratorType::AwsNeuron { chip_type: crate::hardware::NeuronChipType::Trainium, core_count: 32, .. }
+        AcceleratorType::AwsNeuron {
+            chip_type: crate::hardware::NeuronChipType::Trainium,
+            core_count: 32,
+            ..
+        }
     ));
 }
 
@@ -657,7 +647,10 @@ fn xpu_smi_single_device() {
     );
     assert_eq!(profiles.len(), 1);
     assert_eq!(profiles[0].memory_bytes, 16384 * 1024 * 1024);
-    assert!(matches!(profiles[0].accelerator, AcceleratorType::IntelOneApi { device_id: 0 }));
+    assert!(matches!(
+        profiles[0].accelerator,
+        AcceleratorType::IntelOneApi { device_id: 0 }
+    ));
 }
 
 #[cfg(feature = "intel-oneapi")]
@@ -678,11 +671,7 @@ fn xpu_smi_skips_header() {
 fn xpu_smi_too_few_fields_skips() {
     let mut profiles = Vec::new();
     let mut warnings = Vec::new();
-    crate::detect::intel_oneapi::parse_xpu_smi_output(
-        "0, Arc\n",
-        &mut profiles,
-        &mut warnings,
-    );
+    crate::detect::intel_oneapi::parse_xpu_smi_output("0, Arc\n", &mut profiles, &mut warnings);
     assert!(profiles.is_empty());
 }
 
@@ -738,27 +727,21 @@ fn cerebras_memory_empty() {
 #[cfg(feature = "graphcore")]
 #[test]
 fn graphcore_json_memory() {
-    let result = crate::detect::graphcore::parse_memory_from_gcinfo(
-        r#"{"memory": 943718400}"#,
-    );
+    let result = crate::detect::graphcore::parse_memory_from_gcinfo(r#"{"memory": 943718400}"#);
     assert_eq!(result, Some(943718400));
 }
 
 #[cfg(feature = "graphcore")]
 #[test]
 fn graphcore_json_sram_size() {
-    let result = crate::detect::graphcore::parse_memory_from_gcinfo(
-        r#"{"sram_size": 943718400}"#,
-    );
+    let result = crate::detect::graphcore::parse_memory_from_gcinfo(r#"{"sram_size": 943718400}"#);
     assert_eq!(result, Some(943718400));
 }
 
 #[cfg(feature = "graphcore")]
 #[test]
 fn graphcore_text_mb() {
-    let result = crate::detect::graphcore::parse_memory_from_gcinfo(
-        "Memory: 900MB\nTiles: 1472\n",
-    );
+    let result = crate::detect::graphcore::parse_memory_from_gcinfo("Memory: 900MB\nTiles: 1472\n");
     assert_eq!(result, Some(900 * 1024 * 1024));
 }
 
@@ -778,8 +761,6 @@ fn graphcore_empty() {
 #[cfg(feature = "graphcore")]
 #[test]
 fn graphcore_no_memory_fields() {
-    let result = crate::detect::graphcore::parse_memory_from_gcinfo(
-        r#"{"tiles": 1472}"#,
-    );
+    let result = crate::detect::graphcore::parse_memory_from_gcinfo(r#"{"tiles": 1472}"#);
     assert_eq!(result, None);
 }

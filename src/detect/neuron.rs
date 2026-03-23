@@ -108,7 +108,6 @@ pub(crate) fn parse_neuron_output(
 /// Fallback: probe /dev/neuron* devices.
 fn detect_neuron_dev_fallback(profiles: &mut Vec<AcceleratorProfile>) {
     for device_id in super::iter_dev_devices("neuron") {
-
         let chip_type = if super::read_sysfs_string(
             std::path::Path::new("/sys/devices/virtual/dmi/id/product_name"),
             256,

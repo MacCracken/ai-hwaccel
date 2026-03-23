@@ -59,7 +59,9 @@ fn bench_training_memory_model_sizes(c: &mut Criterion) {
 
     for (params_m, name) in sizes {
         group.bench_function(format!("{}_lora_gpu", name), |b| {
-            b.iter(|| estimate_training_memory(*params_m, TrainingMethod::LoRA, TrainingTarget::Gpu));
+            b.iter(|| {
+                estimate_training_memory(*params_m, TrainingMethod::LoRA, TrainingTarget::Gpu)
+            });
         });
     }
 
