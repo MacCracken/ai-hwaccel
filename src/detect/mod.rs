@@ -654,22 +654,49 @@ pub(super) fn list_driver_pci_addrs(driver: &str) -> Vec<String> {
     addrs
 }
 
+/// Enumerate `/dev` device nodes matching a prefix with numeric suffixes.
+///
+/// For example, `count_dev_devices("neuron")` counts `/dev/neuron0`, `/dev/neuron1`, etc.
+/// Returns an iterator of parsed device IDs.
+pub(super) fn iter_dev_devices(prefix: &str) -> impl Iterator<Item = u32> + '_ {
+    std::fs::read_dir("/dev")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(move |entry| {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            let suffix = name_str.strip_prefix(prefix)?;
+            if suffix.is_empty() || !suffix.chars().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            suffix.parse::<u32>().ok()
+        })
+}
+
+/// Check if any `/dev` device node matches a prefix (any suffix).
+///
+/// For example, `has_dev_device("groq")` returns true if `/dev/groq*` exists.
+pub(super) fn has_dev_device(prefix: &str) -> bool {
+    std::fs::read_dir("/dev")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(prefix)
+        })
+}
+
 /// Build a default CPU profile with detected system memory.
 pub(crate) fn cpu_profile() -> AcceleratorProfile {
     AcceleratorProfile {
         accelerator: AcceleratorType::Cpu,
         available: true,
         memory_bytes: detect_cpu_memory(),
-        compute_capability: None,
-        driver_version: None,
-        memory_bandwidth_gbps: None,
-        memory_used_bytes: None,
-        memory_free_bytes: None,
-        pcie_bandwidth_gbps: None,
-        numa_node: None,
-        temperature_c: None,
-        power_watts: None,
-        gpu_utilization_percent: None,
+        ..Default::default()
     }
 }
 

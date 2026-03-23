@@ -92,15 +92,7 @@ pub(crate) fn parse_neuron_output(
                 available: true,
                 memory_bytes: mem_total,
                 compute_capability: Some(format!("Neuron {}", chip_type)),
-                driver_version: None,
-                memory_bandwidth_gbps: None,
-                memory_used_bytes: None,
-                memory_free_bytes: None,
-                pcie_bandwidth_gbps: None,
-                numa_node: None,
-                temperature_c: None,
-                power_watts: None,
-                gpu_utilization_percent: None,
+                ..Default::default()
             });
         }
         true
@@ -115,20 +107,7 @@ pub(crate) fn parse_neuron_output(
 
 /// Fallback: probe /dev/neuron* devices.
 fn detect_neuron_dev_fallback(profiles: &mut Vec<AcceleratorProfile>) {
-    for entry in std::fs::read_dir("/dev").into_iter().flatten().flatten() {
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if !name_str.starts_with("neuron") {
-            continue;
-        }
-        let suffix = &name_str[6..];
-        if suffix.is_empty() || !suffix.chars().all(|c| c.is_ascii_digit()) {
-            continue;
-        }
-        let device_id: u32 = match suffix.parse() {
-            Ok(id) => id,
-            Err(_) => continue,
-        };
+    for device_id in super::iter_dev_devices("neuron") {
 
         let chip_type = if super::read_sysfs_string(
             std::path::Path::new("/sys/devices/virtual/dmi/id/product_name"),
@@ -155,15 +134,7 @@ fn detect_neuron_dev_fallback(profiles: &mut Vec<AcceleratorProfile>) {
             available: true,
             memory_bytes: mem,
             compute_capability: Some(format!("Neuron {}", chip_type)),
-            driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+            ..Default::default()
         });
     }
 }

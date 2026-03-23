@@ -390,8 +390,15 @@ impl DetectBuilder {
         }
     }
 
-    fn set(mut self, backend: Backend, enabled: bool) -> Self {
-        self.enabled[backend as usize] = enabled;
+    /// Enable a specific backend.
+    pub fn with(mut self, backend: Backend) -> Self {
+        self.enabled[backend as usize] = true;
+        self
+    }
+
+    /// Disable a specific backend.
+    pub fn without(mut self, backend: Backend) -> Self {
+        self.enabled[backend as usize] = false;
         self
     }
 
@@ -399,103 +406,40 @@ impl DetectBuilder {
         self.enabled[backend as usize]
     }
 
-    pub fn with_cuda(self) -> Self {
-        self.set(Backend::Cuda, true)
-    }
-    pub fn with_rocm(self) -> Self {
-        self.set(Backend::Rocm, true)
-    }
-    pub fn with_apple(self) -> Self {
-        self.set(Backend::Apple, true)
-    }
-    pub fn with_vulkan(self) -> Self {
-        self.set(Backend::Vulkan, true)
-    }
-    pub fn with_intel_npu(self) -> Self {
-        self.set(Backend::IntelNpu, true)
-    }
-    pub fn with_amd_xdna(self) -> Self {
-        self.set(Backend::AmdXdna, true)
-    }
-    pub fn with_tpu(self) -> Self {
-        self.set(Backend::Tpu, true)
-    }
-    pub fn with_gaudi(self) -> Self {
-        self.set(Backend::Gaudi, true)
-    }
-    pub fn with_aws_neuron(self) -> Self {
-        self.set(Backend::AwsNeuron, true)
-    }
-    pub fn with_intel_oneapi(self) -> Self {
-        self.set(Backend::IntelOneApi, true)
-    }
-    pub fn with_qualcomm(self) -> Self {
-        self.set(Backend::Qualcomm, true)
-    }
-    pub fn with_cerebras(self) -> Self {
-        self.set(Backend::Cerebras, true)
-    }
-    pub fn with_graphcore(self) -> Self {
-        self.set(Backend::Graphcore, true)
-    }
-    pub fn with_groq(self) -> Self {
-        self.set(Backend::Groq, true)
-    }
-    pub fn with_samsung_npu(self) -> Self {
-        self.set(Backend::SamsungNpu, true)
-    }
-    pub fn with_mediatek_apu(self) -> Self {
-        self.set(Backend::MediaTekApu, true)
-    }
+    // Convenience methods (delegate to generic with/without).
+    #[inline] pub fn with_cuda(self) -> Self { self.with(Backend::Cuda) }
+    #[inline] pub fn with_rocm(self) -> Self { self.with(Backend::Rocm) }
+    #[inline] pub fn with_apple(self) -> Self { self.with(Backend::Apple) }
+    #[inline] pub fn with_vulkan(self) -> Self { self.with(Backend::Vulkan) }
+    #[inline] pub fn with_intel_npu(self) -> Self { self.with(Backend::IntelNpu) }
+    #[inline] pub fn with_amd_xdna(self) -> Self { self.with(Backend::AmdXdna) }
+    #[inline] pub fn with_tpu(self) -> Self { self.with(Backend::Tpu) }
+    #[inline] pub fn with_gaudi(self) -> Self { self.with(Backend::Gaudi) }
+    #[inline] pub fn with_aws_neuron(self) -> Self { self.with(Backend::AwsNeuron) }
+    #[inline] pub fn with_intel_oneapi(self) -> Self { self.with(Backend::IntelOneApi) }
+    #[inline] pub fn with_qualcomm(self) -> Self { self.with(Backend::Qualcomm) }
+    #[inline] pub fn with_cerebras(self) -> Self { self.with(Backend::Cerebras) }
+    #[inline] pub fn with_graphcore(self) -> Self { self.with(Backend::Graphcore) }
+    #[inline] pub fn with_groq(self) -> Self { self.with(Backend::Groq) }
+    #[inline] pub fn with_samsung_npu(self) -> Self { self.with(Backend::SamsungNpu) }
+    #[inline] pub fn with_mediatek_apu(self) -> Self { self.with(Backend::MediaTekApu) }
 
-    pub fn without_cuda(self) -> Self {
-        self.set(Backend::Cuda, false)
-    }
-    pub fn without_rocm(self) -> Self {
-        self.set(Backend::Rocm, false)
-    }
-    pub fn without_apple(self) -> Self {
-        self.set(Backend::Apple, false)
-    }
-    pub fn without_vulkan(self) -> Self {
-        self.set(Backend::Vulkan, false)
-    }
-    pub fn without_intel_npu(self) -> Self {
-        self.set(Backend::IntelNpu, false)
-    }
-    pub fn without_amd_xdna(self) -> Self {
-        self.set(Backend::AmdXdna, false)
-    }
-    pub fn without_tpu(self) -> Self {
-        self.set(Backend::Tpu, false)
-    }
-    pub fn without_gaudi(self) -> Self {
-        self.set(Backend::Gaudi, false)
-    }
-    pub fn without_aws_neuron(self) -> Self {
-        self.set(Backend::AwsNeuron, false)
-    }
-    pub fn without_intel_oneapi(self) -> Self {
-        self.set(Backend::IntelOneApi, false)
-    }
-    pub fn without_qualcomm(self) -> Self {
-        self.set(Backend::Qualcomm, false)
-    }
-    pub fn without_cerebras(self) -> Self {
-        self.set(Backend::Cerebras, false)
-    }
-    pub fn without_graphcore(self) -> Self {
-        self.set(Backend::Graphcore, false)
-    }
-    pub fn without_groq(self) -> Self {
-        self.set(Backend::Groq, false)
-    }
-    pub fn without_samsung_npu(self) -> Self {
-        self.set(Backend::SamsungNpu, false)
-    }
-    pub fn without_mediatek_apu(self) -> Self {
-        self.set(Backend::MediaTekApu, false)
-    }
+    #[inline] pub fn without_cuda(self) -> Self { self.without(Backend::Cuda) }
+    #[inline] pub fn without_rocm(self) -> Self { self.without(Backend::Rocm) }
+    #[inline] pub fn without_apple(self) -> Self { self.without(Backend::Apple) }
+    #[inline] pub fn without_vulkan(self) -> Self { self.without(Backend::Vulkan) }
+    #[inline] pub fn without_intel_npu(self) -> Self { self.without(Backend::IntelNpu) }
+    #[inline] pub fn without_amd_xdna(self) -> Self { self.without(Backend::AmdXdna) }
+    #[inline] pub fn without_tpu(self) -> Self { self.without(Backend::Tpu) }
+    #[inline] pub fn without_gaudi(self) -> Self { self.without(Backend::Gaudi) }
+    #[inline] pub fn without_aws_neuron(self) -> Self { self.without(Backend::AwsNeuron) }
+    #[inline] pub fn without_intel_oneapi(self) -> Self { self.without(Backend::IntelOneApi) }
+    #[inline] pub fn without_qualcomm(self) -> Self { self.without(Backend::Qualcomm) }
+    #[inline] pub fn without_cerebras(self) -> Self { self.without(Backend::Cerebras) }
+    #[inline] pub fn without_graphcore(self) -> Self { self.without(Backend::Graphcore) }
+    #[inline] pub fn without_groq(self) -> Self { self.without(Backend::Groq) }
+    #[inline] pub fn without_samsung_npu(self) -> Self { self.without(Backend::SamsungNpu) }
+    #[inline] pub fn without_mediatek_apu(self) -> Self { self.without(Backend::MediaTekApu) }
 
     /// Run detection with only the enabled backends.
     pub fn detect(self) -> AcceleratorRegistry {

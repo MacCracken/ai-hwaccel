@@ -39,16 +39,7 @@ pub(crate) fn detect_amd_xdna(
                     accelerator: AcceleratorType::AmdXdnaNpu { device_id },
                     available: true,
                     memory_bytes: 2 * 1024 * 1024 * 1024,
-                    compute_capability: None,
-                    driver_version: None,
-                    memory_bandwidth_gbps: None,
-                    memory_used_bytes: None,
-                    memory_free_bytes: None,
-                    pcie_bandwidth_gbps: None,
-                    numa_node: None,
-                    temperature_c: None,
-                    power_watts: None,
-                    gpu_utilization_percent: None,
+                    ..Default::default()
                 });
             }
         }

@@ -29,15 +29,7 @@ pub(crate) fn detect_graphcore_ipu(
                 available: true,
                 memory_bytes: memory,
                 compute_capability: Some("IPU".into()),
-                driver_version: None,
-                memory_bandwidth_gbps: None,
-                memory_used_bytes: None,
-                memory_free_bytes: None,
-                pcie_bandwidth_gbps: None,
-                numa_node: None,
-                temperature_c: None,
-                power_watts: None,
-                gpu_utilization_percent: None,
+                ..Default::default()
             });
             return;
         }
@@ -48,31 +40,20 @@ pub(crate) fn detect_graphcore_ipu(
     }
 
     // Fallback: check /dev/ipu* devices.
-    for entry in std::fs::read_dir("/dev").into_iter().flatten().flatten() {
-        let name = entry.file_name();
-        if name.to_string_lossy().starts_with("ipu") {
-            debug!(
-                device_id = 0,
-                memory_mb = 900,
-                "Graphcore IPU detected via /dev"
-            );
-            profiles.push(AcceleratorProfile {
-                accelerator: AcceleratorType::GraphcoreIpu { device_id: 0 },
-                available: true,
-                memory_bytes: DEFAULT_MEMORY_BYTES,
-                compute_capability: Some("IPU".into()),
-                driver_version: None,
-                memory_bandwidth_gbps: None,
-                memory_used_bytes: None,
-                memory_free_bytes: None,
-                pcie_bandwidth_gbps: None,
-                numa_node: None,
-                temperature_c: None,
-                power_watts: None,
-                gpu_utilization_percent: None,
-            });
-            return;
-        }
+    if super::has_dev_device("ipu") {
+        debug!(
+            device_id = 0,
+            memory_mb = 900,
+            "Graphcore IPU detected via /dev"
+        );
+        profiles.push(AcceleratorProfile {
+            accelerator: AcceleratorType::GraphcoreIpu { device_id: 0 },
+            available: true,
+            memory_bytes: DEFAULT_MEMORY_BYTES,
+            compute_capability: Some("IPU".into()),
+            ..Default::default()
+        });
+        return;
     }
 
     let _ = warnings;

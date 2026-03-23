@@ -207,16 +207,7 @@ pub fn parse_vulkan_output(
             },
             available: true,
             memory_bytes: 4 * 1024 * 1024 * 1024,
-            compute_capability: None,
-            driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+            ..Default::default()
         });
     } else {
         for (i, dev) in devices.into_iter().take(1024).enumerate() {
@@ -253,14 +244,7 @@ pub fn parse_vulkan_output(
                 memory_bytes: dev.memory_mb.saturating_mul(1024 * 1024),
                 compute_capability: compute_cap,
                 driver_version: dev.driver_version,
-                memory_bandwidth_gbps: None,
-                memory_used_bytes: None,
-                memory_free_bytes: None,
-                pcie_bandwidth_gbps: None,
-                numa_node: None,
-                temperature_c: None,
-                power_watts: None,
-                gpu_utilization_percent: None,
+                ..Default::default()
             });
         }
     }
@@ -340,16 +324,7 @@ pub(crate) fn detect_vulkan_sysfs(
             },
             available: true,
             memory_bytes: vram_bytes,
-            compute_capability: None,
-            driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+            ..Default::default()
         });
         device_id_counter += 1;
     }

@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::requirement::AcceleratorRequirement;
 
 /// Fine-tuning / training method.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TrainingMethod {
+    #[default]
     FullFineTune,
     LoRA,
     QLoRA { bits: u8 },
@@ -47,8 +48,9 @@ impl fmt::Display for TrainingMethod {
 }
 
 /// Target accelerator family for training memory estimation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TrainingTarget {
+    #[default]
     Gpu,
     Tpu,
     Gaudi,
@@ -66,6 +68,16 @@ pub struct MemoryEstimate {
     pub activation_gb: f64,
     /// Total device memory needed in GB.
     pub total_gb: f64,
+}
+
+impl fmt::Display for MemoryEstimate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Model: {:.1} GB, Optimizer: {:.1} GB, Activations: {:.1} GB (total: {:.1} GB)",
+            self.model_gb, self.optimizer_gb, self.activation_gb, self.total_gb
+        )
+    }
 }
 
 /// Estimate device memory for a fine-tuning job on a specific accelerator family.

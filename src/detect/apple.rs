@@ -96,15 +96,7 @@ pub(crate) fn parse_system_profiler_output(
         available: true,
         memory_bytes,
         compute_capability: compute_cap.clone(),
-        driver_version: None,
-        memory_bandwidth_gbps: None,
-        memory_used_bytes: None,
-        memory_free_bytes: None,
-        pcie_bandwidth_gbps: None,
-        numa_node: None,
-        temperature_c: None,
-        power_watts: None,
-        gpu_utilization_percent: None,
+        ..Default::default()
     });
 
     profiles.push(AcceleratorProfile {
@@ -112,15 +104,7 @@ pub(crate) fn parse_system_profiler_output(
         available: true,
         memory_bytes: estimate_ane_memory(&compute_cap),
         compute_capability: compute_cap,
-        driver_version: None,
-        memory_bandwidth_gbps: None,
-        memory_used_bytes: None,
-        memory_free_bytes: None,
-        pcie_bandwidth_gbps: None,
-        numa_node: None,
-        temperature_c: None,
-        power_watts: None,
-        gpu_utilization_percent: None,
+        ..Default::default()
     });
 
     true
@@ -140,31 +124,13 @@ fn detect_linux_device_tree(profiles: &mut Vec<AcceleratorProfile>) {
             accelerator: AcceleratorType::MetalGpu,
             available: true,
             memory_bytes: 16 * 1024 * 1024 * 1024,
-            compute_capability: None,
-            driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+            ..Default::default()
         });
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::AppleNpu,
             available: true,
             memory_bytes: 4 * 1024 * 1024 * 1024,
-            compute_capability: None,
-            driver_version: None,
-            memory_bandwidth_gbps: None,
-            memory_used_bytes: None,
-            memory_free_bytes: None,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
-            temperature_c: None,
-            power_watts: None,
-            gpu_utilization_percent: None,
+            ..Default::default()
         });
     }
 }

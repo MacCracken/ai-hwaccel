@@ -105,14 +105,12 @@ pub(crate) fn detect_rocm(
             memory_bytes: total_with_cxl,
             compute_capability: compute_cap,
             driver_version: vbios,
-            memory_bandwidth_gbps: None,
             memory_used_bytes: mem_used,
             memory_free_bytes: mem_free,
-            pcie_bandwidth_gbps: None,
-            numa_node: None,
             temperature_c: temp_c.map(|t| t as u32),
             power_watts: power_w,
             gpu_utilization_percent: gpu_busy.map(|b| b as u32),
+            ..Default::default()
         });
         device_id += 1;
     }

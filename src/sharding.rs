@@ -7,9 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::hardware::AcceleratorType;
 
 /// Strategy for distributing a model across devices.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ShardingStrategy {
     /// No sharding — run on a single device.
+    #[default]
     None,
     /// Split layers across devices in a pipeline.
     PipelineParallel { num_stages: u32 },
@@ -84,6 +85,14 @@ pub struct ShardingPlan {
     pub strategy: ShardingStrategy,
     pub total_memory_bytes: u64,
     pub estimated_tokens_per_sec: Option<f64>,
+}
+
+impl ShardingPlan {
+    /// Access the shards as a slice.
+    #[inline]
+    pub fn shards(&self) -> &[ModelShard] {
+        &self.shards
+    }
 }
 
 impl fmt::Display for ShardingPlan {

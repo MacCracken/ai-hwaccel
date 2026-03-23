@@ -277,6 +277,54 @@ Items that don't fit in a specific release yet.
 
 ---
 
+## Engineering backlog
+
+Internal code quality improvements. Not user-facing, but reduce maintenance
+burden and improve contributor experience.
+
+### API consistency
+
+- [ ] **Return `impl Iterator` from query methods** — `available()`,
+  `by_family()`, `satisfying()` currently return `Vec<&AcceleratorProfile>`.
+  Change to `impl Iterator` for zero-alloc queries. Breaking change — requires
+  callers to `.collect()` explicitly.
+- [ ] **Make `ShardingPlan::shards` private** — add `pub fn shards()` accessor
+  to maintain plan invariants. Breaking change for direct field access.
+- [ ] **`TryFrom<u32>` for `QuantizationLevel`** — map `32 → None`,
+  `16 → Float16`, `8 → Int8`, `4 → Int4` for CLI parsing ergonomics.
+- [ ] **Fix `CloudGpuInstance` re-export alias** — standardize to `CloudInstance`
+  only. Deprecate or remove the alias in `lib.rs`.
+
+### CLI refactoring
+
+- [ ] **Break `print_table()` into composable helpers** — extract
+  `filter_profiles()`, `sort_profiles()`, `render_header()`, `render_row()`,
+  `render_footer()` from the 226-line function in `main.rs`.
+- [ ] **Extract CLI mode functions** — `handle_cost_mode()`, `run_watch()`
+  decomposition, `handle_profile_mode()` as standalone functions.
+- [ ] **Reduce watch mode allocations** — cache `format!("{:?}")` keys,
+  use `entry()` API for delta tracking HashMap.
+
+### Detection infrastructure
+
+- [ ] **Consolidate `run_backend!`/`spawn_backend!` macros** — merge sync and
+  timed macro variants into a single parametric macro in `detect/mod.rs`.
+  Currently duplicated across 3 detection paths (sync, timed, async).
+- [ ] **Backend registration table** — replace hardcoded macro invocations with
+  a `const BACKENDS: &[BackendDef]` table. Adding a new backend should be a
+  single line addition.
+- [ ] **CSV parsing helper** — extract shared `parse_csv_device_line()` for
+  cuda/gaudi/intel_oneapi backends to eliminate ~30 lines of duplicate
+  validation boilerplate.
+
+### Feature flags
+
+- [ ] **Add `minimal` and `common` feature sets** — `minimal` enables CPU-only,
+  `common` enables `cuda + rocm + apple + vulkan + intel-npu`. Current default
+  (`all-backends`) is heavy for embedded or minimal deployments.
+
+---
+
 ## Non-goals
 
 - **Runtime execution** — detection and planning only, not inference/training.
