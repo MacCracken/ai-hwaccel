@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "ai-hwaccel"
-version = "0.21.3"
+version = "0.23.3"
 dependencies = [
  "criterion",
  "proptest",

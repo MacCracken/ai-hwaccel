@@ -5,7 +5,93 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
-## [0.21.3] - Unreleased
+## [0.23.3] - 2026-03-23
+
+### Added
+
+#### Benchmark infrastructure
+
+- **Benchmark history tracking**: `scripts/bench-history.sh` captures criterion
+  results to `bench-history.csv` with 7-column format (timestamp, commit,
+  branch, benchmark, low_ns, estimate_ns, high_ns). Auto-generates
+  `benchmarks.md` with 3-point trend tables (baseline → previous → current).
+- **95 benchmarks across 16 groups**: detection, parsing, planning, training,
+  cost, quantization, registry queries, caching, lazy detection, large-registry
+  sharding, and JSON serialization.
+- **New bench files**: `benches/training.rs`, `benches/cost.rs`,
+  `benches/quantization.rs`, `benches/parsing.rs`, `benches/registry.rs`.
+- `make bench` target for running the full benchmark suite.
+
+#### Testing
+
+- **358 tests** (up from ~280): added FFI module tests (11), async detection
+  tests (5), parser fixture tests for all backends (Vulkan summary, Apple
+  system_profiler, Gaudi multi-device, CUDA edge cases, Neuron JSON, Intel
+  oneAPI CSV, Cerebras memory, Graphcore memory), and named-constant
+  verification tests.
+- **23 test modules** covering all public API surface.
+
+#### API
+
+- `DetectBuilder::with(Backend)` / `without(Backend)` — generic methods for
+  enabling/disabling backends. Existing `with_cuda()` etc. are now inline
+  wrappers.
+- `ShardingPlan::shards()` accessor method.
+- `Default` derive for `ShardingStrategy`, `TrainingMethod`, `TrainingTarget`.
+- `Display` impl for `MemoryEstimate`.
+- `Default` impl for `AcceleratorProfile` — simplifies construction with
+  `..Default::default()`.
+
+### Changed
+
+- **`plan_sharding()` decomposed** into `InterconnectInfo::scan()`,
+  `build_tpu_tensor_plan()`, `build_gpu_tensor_plan()`, `build_pipeline_plan()`
+  helper functions. Main method is now a dispatcher (~40 lines vs 225).
+- **`suggest_quantization()` precomputes estimates**: 4 calls instead of up to 9
+  redundant `estimate_memory()` invocations.
+- **`/dev` device iteration helpers**: `iter_dev_devices()` and
+  `has_dev_device()` replace ~70 lines of duplicated `/dev` scanning across 8
+  backends (neuron, tpu, groq, cerebras, graphcore, qualcomm, samsung, mediatek).
+- **`..Default::default()` in all detector profiles**: 22 profile constructions
+  across 15 files simplified, eliminating ~100 lines of explicit `None` fields.
+- **Detection modules made public**: `detect::bandwidth`, `detect::interconnect`,
+  `detect::pcie`, `detect::cuda`, `detect::gaudi`, `detect::vulkan` — enables
+  external benchmarking and testing of parsing functions.
+
+### Performance
+
+- `#[inline]` on 12 hot-path methods: `bits_per_param`, `memory_reduction_factor`,
+  `is_gpu/npu/tpu/ai_asic`, `family`, `throughput_multiplier`,
+  `training_multiplier`, `supports_training`, `has_interconnect`.
+- **Single-pass interconnect scan** in `plan_sharding()` — combined 3 iterator
+  passes into 1 `for` loop with `match`.
+- **Direct JSON deserialization** in `cost.rs` — eliminated intermediate
+  `serde_json::Value` clone.
+- **Deferred string allocation** in CUDA parser — `&str` until non-empty check.
+- **Filter-before-clone** in environment detection — AWS instance fields.
+- **ROCm sysfs filter-before-alloc** — trim-then-check avoids empty String alloc.
+- **Disk detection deferred `to_string()`** — skip checks use `&str` reference.
+
+### Fixed
+
+- **Integer overflow in Graphcore parser** (`parse_memory_from_gcinfo`): fuzz
+  input with huge MB/GB values caused `u64` multiply overflow. Now uses
+  `saturating_mul`. Also fixed in Cerebras and Apple memory parsers.
+- **Fuzz CI timeout**: reduced per-target fuzz time from 30s to 15s (11 targets),
+  added `timeout-minutes: 15` job limit.
+- **Clippy `len_zero`**: `registry.all_profiles().len() >= 1` replaced with
+  `!is_empty()` in async detection tests.
+- Removed dead `use std::path::Path` import in TPU detector.
+- Removed 3 unnecessary `return;` statements in Samsung/MediaTek/Qualcomm
+  detectors.
+
+### Exports
+
+- `units` module (named constants for hardware math).
+
+---
+
+## [0.21.3] - 2026-03-23
 
 ### Added
 

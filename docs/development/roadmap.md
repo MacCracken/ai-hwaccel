@@ -4,70 +4,9 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
-## 0.21.3 — Platform & Planning
+## 0.24.3 — Platform & Validation
 
-Focus: lazy detection, topology-aware sharding, cloud hardware validation,
-Python bindings groundwork.
-
-### Detection performance
-
-Current bottleneck: `vulkaninfo` takes ~5s on AMD Cezanne iGPU. Total
-detection is 5.05s, of which 5.0s is vulkaninfo. All other backends
-(ROCm sysfs, PCIe, bandwidth, NUMA, storage, disk) complete in <10ms.
-
-- [x] **Lazy detection** — detect only backends the caller queries, not all
-  enabled backends upfront. `LazyRegistry::new()` returns a registry
-  that probes on first access per family. Avoids spawning nvidia-smi when
-  caller only needs TPU info.
-- [x] **`vulkaninfo` timeout + caching** — `vulkaninfo` is the single
-  slowest probe (~5s). Per-process cache writes parsed results to
-  `$XDG_CACHE_HOME/ai-hwaccel/vulkan.json` with a 60s TTL. On subsequent
-  calls within the TTL, reads from cache instead of re-running vulkaninfo.
-  3s timeout on the subprocess — if vulkaninfo hangs, falls back
-  to sysfs-only Vulkan detection (`/sys/class/drm/card*/device/vendor`).
-- [x] **Parallel backend probing** — CLI-based backends (nvidia-smi,
-  vulkaninfo, rocm-smi, hl-smi) run concurrently via `std::thread::scope`
-  (sync) and `tokio::process::Command` (async). Sysfs-only backends already
-  complete in <1ms and don't benefit from parallelism. Detection time
-  is max(slowest tool) — on systems with both CUDA and Vulkan, this
-  halves detection time. *(Already implemented in 0.20.)*
-- [x] **Sysfs-only Vulkan fallback** — for systems where `vulkaninfo` is
-  slow or absent, detect Vulkan-capable GPUs via
-  `/sys/class/drm/card*/device/{vendor,device}` + PCI ID lookup table.
-  Provides device name and VRAM estimate without spawning a subprocess.
-  Used as automatic fallback when vulkaninfo is missing or times out.
-- [x] **Detection result caching** — `DiskCachedRegistry::new(ttl)`
-  persists detection results to `$XDG_CACHE_HOME/ai-hwaccel/registry.json`.
-  Subsequent calls within TTL return cached data instantly. Also available
-  as in-memory `CachedRegistry` for thread-safe caching without disk I/O.
-- [x] **Per-backend timing** — `--profile` CLI flag and
-  `AcceleratorRegistry::detect_with_timing()` API that returns
-  `TimedDetection` with `HashMap<String, Duration>` showing how long
-  each backend took. Enables users to identify and disable slow backends.
-- [x] **Topology-aware sharding** — uses interconnect data (NVLink, XGMI, ICI)
-  from `SystemIo` to generate sharding plans that minimize cross-link
-  transfers. Pipeline parallel prefers NUMA-local GPU pairs. Tensor
-  parallel prefers NVSwitch-connected groups (>100 GB/s interconnect).
-- [x] **Cost-aware planning** — static pricing table for common cloud GPU
-  instances (A100, H100, L4, T4, MI300X, TPU v5e). Given model size +
-  quantisation, `cost::recommend_instance()` returns cheapest viable config.
-  Data in `data/cloud_pricing.json`, updatable without recompiling.
-  CLI: `ai-hwaccel --cost 70B --quant bf16`.
-- [x] **Container/VM detection** — detects Docker (`/.dockerenv`),
-  Kubernetes (`/var/run/secrets/kubernetes.io`), cloud instance type
-  (AWS DMI, GCE DMI, Azure DMI — no HTTP metadata calls needed).
-  Exposed as `SystemIo::environment` for deployment-aware planning.
-
-### Python bindings (groundwork)
-
-- [x] **PyO3 module scaffold** — `py/` directory with `maturin` build,
-  wrapping `AcceleratorRegistry::detect()`, `suggest_quantization()`,
-  `plan_sharding()`, `system_io()`. Ship as `ai-hwaccel` on PyPI.
-- [x] **Python type stubs** — `.pyi` files for IDE support.
-- [x] **Python examples** — basic detection, sharding plan, training memory
-  estimation.
-
-### Cloud hardware validation (staged)
+### Cloud hardware validation
 
 Spin up short-lived cloud instances to validate untested backends. Fix any
 parser bugs found, add mock test fixtures from captured tool output.
@@ -108,7 +47,7 @@ parser bugs found, add mock test fixtures from captured tool output.
 
 ---
 
-## 0.22.3 — Ecosystem & Scale
+## 0.25.3 — Ecosystem & Scale
 
 Focus: full Python package, multi-node detection, hot-plug, WASM, remaining
 platforms.
@@ -182,7 +121,7 @@ platforms.
 
 ---
 
-## 0.23.3 — Fleet & Scale
+## 0.26.3 — Fleet & Scale
 
 Focus: fleet-wide inventory, health monitoring, capacity planning at
 datacenter scale.
@@ -264,7 +203,6 @@ Items that don't fit in a specific release yet.
 
 - [ ] **Model compatibility database** — which models run on which hardware
   at which quantisation. Queryable: "can I run Llama 70B on 2x RTX 4090?"
-- [x] **Workload profiler** — moved to 0.21.3 as `--profile` / per-backend timing.
 - [ ] **Power budget planning** — given power cap (e.g. 1000W), recommend
   device mix. Uses power_watts from detection.
 - [ ] **Thermal throttling prediction** — warn when temperature_c approaches
