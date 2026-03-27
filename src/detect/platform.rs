@@ -259,16 +259,22 @@ mod tests {
     #[test]
     fn live_platform_path_exists() {
         let platform = LivePlatform;
-        assert!(platform.path_exists(Path::new("/proc")));
-        assert!(!platform.path_exists(Path::new("/nonexistent_path_abc123")));
+        // Use env::current_exe() — guaranteed to exist on all platforms.
+        let exe = std::env::current_exe().unwrap();
+        assert!(platform.path_exists(&exe));
+        assert!(!platform.path_exists(Path::new("/nonexistent_path_abc123_xyz789")));
     }
 
     #[test]
     fn live_platform_read_file() {
         let platform = LivePlatform;
-        let content = platform.read_file(Path::new("/proc/meminfo"), 64 * 1024);
+        // Write a temp file so we don't depend on /proc or working directory.
+        let tmp = std::env::temp_dir().join("ai_hwaccel_platform_test.txt");
+        std::fs::write(&tmp, "hello_platform_test").unwrap();
+        let content = platform.read_file(&tmp, 1024);
+        std::fs::remove_file(&tmp).ok();
         assert!(content.is_some());
-        assert!(content.unwrap().contains("MemTotal"));
+        assert!(content.unwrap().contains("hello_platform_test"));
     }
 
     #[test]

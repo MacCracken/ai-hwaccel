@@ -32,6 +32,13 @@ pub(crate) fn detect_windows_gpu(
     profiles: &mut Vec<AcceleratorProfile>,
     warnings: &mut Vec<DetectionError>,
 ) {
+    // On Windows, try nvidia-smi.exe at known paths first (CUDA backend may
+    // not be enabled, but we can still detect NVIDIA GPUs via nvidia-smi).
+    #[cfg(target_os = "windows")]
+    if let Some(nvsmi) = find_nvidia_smi_windows() {
+        debug!(path = nvsmi, "found nvidia-smi.exe at known Windows path");
+    }
+
     // Try wmic first (available on Windows 10 and earlier).
     if let Ok(output) = run_tool(
         "wmic",
