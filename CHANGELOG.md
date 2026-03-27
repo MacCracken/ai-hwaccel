@@ -5,43 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
-## [1.1.0] - 2026-03-27
-
-### Added
-
-#### Platform & Validation (roadmap 0.24.3)
-
-- **Cloud hardware validation fixtures** — realistic parser tests for
-  A100 80GB 8-GPU, H100 80GB SXM, Grace Hopper GH200 (unified memory),
-  Gaudi 3 8-device, Neuron trn1.32xlarge/inf2.48xlarge, MI300X 192GB.
-  Planning pipeline tests for 8x A100 sharding, TPU v5p 256-chip pod,
-  TPU v5e 4-chip, 8x Gaudi3, 8x MI300X.
-- **macOS `system_profiler -json` GPU detection** — `parse_displays_json()`
-  parses `SPDisplaysDataType -json` for GPU name, vendor, Metal family,
-  core count, discrete VRAM. Enriches Metal GPU profiles with device name
-  and Metal family string. `parse_sysctl_output()` for CPU topology
-  (memory, core count, perf/efficiency cores).
-- **Windows WMI GPU detection** — new `detect/windows.rs` module behind
-  `windows-wmi` feature flag. `parse_wmic_output()` for
-  `Win32_VideoController` CSV, `parse_powershell_csv()` for
-  `Get-CimInstance` fallback. Skips Microsoft virtual display adapters.
-  `find_nvidia_smi_windows()` resolves `nvidia-smi.exe` at known paths.
-- **Platform abstraction trait** — `PlatformProbe` trait in
-  `detect/platform.rs` abstracting filesystem reads, command execution,
-  device enumeration, and system memory. `LivePlatform` delegates to real
-  OS. `MockPlatform` (test-only) enables hardware-free testing. Foundation
-  for future `MacOsPlatform` and `WindowsPlatform`.
-- **`Backend::WindowsWmi`** variant with `with_windows_wmi()` /
-  `without_windows_wmi()` builder methods.
-
-#### Testing
-
-- **471 tests** (up from 441): 7 macOS parser tests (displays JSON, sysctl),
-  7 Windows parser tests (WMIC, PowerShell), 5 platform trait tests,
-  6 cloud planning pipeline tests, 5 cloud parser fixture tests.
-
----
-
 ## [1.0.0] - 2026-03-27
 
 ### Breaking Changes
@@ -53,6 +16,10 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
   `VulkanGpu { device_name, .. }` should read `profile.device_name` instead.
 - **`ShardingPlan::shards` is now `pub(crate)`** — use `plan.shards()` accessor
   instead of direct field access.
+- **`cost::CloudInstance` renamed to `cost::CloudGpuInstance`** — the actual
+  type is now `CloudGpuInstance`, removing the `as` alias in re-exports.
+- **`system_io::CloudInstance` renamed to `system_io::CloudInstanceMeta`** —
+  disambiguates from the cost pricing type.
 
 ### Added
 
@@ -67,21 +34,46 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 - `#[must_use]` on 18 pure public methods across registry, profile,
   quantization, requirement, training, cost, sharding, and plan modules.
 - `#[inline]` on 9 additional hot-path getters.
+- `Backend::WindowsWmi` variant with `with_windows_wmi()` /
+  `without_windows_wmi()` builder methods.
+
+#### Platform & Validation
+
+- **Cloud hardware validation fixtures** — realistic parser tests for
+  A100 80GB 8-GPU, H100 80GB SXM, Grace Hopper GH200 (unified memory),
+  Gaudi 3 8-device, Neuron trn1.32xlarge/inf2.48xlarge, MI300X 192GB.
+  Planning pipeline tests for 8x A100 sharding, TPU v5p 256-chip pod,
+  TPU v5e 4-chip, 8x Gaudi3, 8x MI300X.
+- **macOS `system_profiler -json` GPU detection** — `parse_displays_json()`
+  parses `SPDisplaysDataType -json` for GPU name, vendor, Metal family,
+  core count, discrete VRAM. `parse_sysctl_output()` for CPU topology
+  (memory, core count, perf/efficiency cores).
+- **Windows WMI GPU detection** — new `detect/windows.rs` module behind
+  `windows-wmi` feature flag. `parse_wmic_output()` for
+  `Win32_VideoController` CSV, `parse_powershell_csv()` for
+  `Get-CimInstance` fallback. `find_nvidia_smi_windows()` for path resolution.
+- **Platform abstraction trait** — `PlatformProbe` trait in
+  `detect/platform.rs` abstracting filesystem reads, command execution,
+  device enumeration, and system memory. `LivePlatform` + `MockPlatform`.
+- **Feature profiles**: `minimal` (CPU-only) and `common`
+  (cuda+rocm+apple+vulkan+intel-npu) feature sets.
 
 #### Testing
 
-- **441 tests** (up from 358): 14 new coverage tests for ASIC quantization
-  support/preference, cost provider filtering, training QLoRA cross-target,
-  SystemIo edge cases, sharding fits_in_memory, `TryFrom<u32>` for
-  QuantizationLevel.
+- **471 tests** (up from 358): cloud hardware fixtures, ASIC quantization
+  coverage, macOS/Windows parser tests, platform trait tests, planning
+  pipeline tests, `TryFrom<u32>` tests.
 
 ### Changed
 
 - `AcceleratorType` derives `Copy` — zero-cost pass-by-value for all 19
   hardware variants.
-- `AcceleratorProfile::Display` includes device name when present:
-  `Vulkan GPU (device 0) [RTX 4090] (24.0 GB)`.
-- CLI table uses `device_name` field for richer device identification.
+- `AcceleratorProfile::Display` includes device name when present.
+- CLI decomposed: `print_table()` split into `filter_profiles()`,
+  `sort_profiles()`, `render_header()`, `render_row()`, `render_footer()`.
+  `handle_cost_mode()` and `handle_profile_mode()` extracted.
+- `Column` type gains `header()`, `width()`, `is_left_aligned()` methods.
+- `parse_csv_line()` shared CSV helper for cuda/gaudi/intel_oneapi parsers.
 
 ### Fixed
 
