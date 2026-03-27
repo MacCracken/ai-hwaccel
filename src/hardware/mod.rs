@@ -47,7 +47,7 @@ impl fmt::Display for AcceleratorFamily {
 // ---------------------------------------------------------------------------
 
 /// Every supported hardware accelerator family.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum AcceleratorType {
     /// Default CPU execution — always available.
@@ -59,7 +59,7 @@ pub enum AcceleratorType {
     /// Apple Metal GPU (M1–M4).
     MetalGpu,
     /// Vulkan compute device.
-    VulkanGpu { device_id: u32, device_name: String },
+    VulkanGpu { device_id: u32 },
     /// Intel Neural Processing Unit (Meteor Lake+).
     IntelNpu,
     /// AMD XDNA / Ryzen AI NPU.
@@ -317,12 +317,7 @@ impl fmt::Display for AcceleratorType {
             Self::CudaGpu { device_id } => write!(f, "CUDA GPU (device {})", device_id),
             Self::RocmGpu { device_id } => write!(f, "ROCm GPU (device {})", device_id),
             Self::MetalGpu => write!(f, "Metal GPU"),
-            Self::VulkanGpu {
-                device_id,
-                device_name,
-            } => {
-                write!(f, "Vulkan GPU (device {}, {})", device_id, device_name)
-            }
+            Self::VulkanGpu { device_id } => write!(f, "Vulkan GPU (device {})", device_id),
             Self::IntelNpu => write!(f, "Intel NPU"),
             Self::AmdXdnaNpu { device_id } => write!(f, "AMD XDNA NPU (device {})", device_id),
             Self::AppleNpu => write!(f, "Apple Neural Engine"),

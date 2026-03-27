@@ -19,12 +19,8 @@ fn display_accelerator_type_all_variants() {
     );
     assert_eq!(AcceleratorType::MetalGpu.to_string(), "Metal GPU");
     assert_eq!(
-        AcceleratorType::VulkanGpu {
-            device_id: 0,
-            device_name: "RTX 4090".into()
-        }
-        .to_string(),
-        "Vulkan GPU (device 0, RTX 4090)"
+        AcceleratorType::VulkanGpu { device_id: 0 }.to_string(),
+        "Vulkan GPU (device 0)"
     );
     assert_eq!(AcceleratorType::IntelNpu.to_string(), "Intel NPU");
     assert_eq!(

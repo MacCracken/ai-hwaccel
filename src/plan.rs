@@ -62,7 +62,7 @@ fn build_tpu_tensor_plan(
         .map(|i| ModelShard {
             shard_id: i,
             layer_range: (0, 0),
-            device: tpu_devices[0].accelerator.clone(),
+            device: tpu_devices[0].accelerator,
             memory_bytes: per_chip,
         })
         .collect();
@@ -96,7 +96,7 @@ fn build_gpu_tensor_plan(
         .map(|(i, dev)| ModelShard {
             shard_id: i as u32,
             layer_range: (0, 0),
-            device: dev.accelerator.clone(),
+            device: dev.accelerator,
             memory_bytes: per_device,
         })
         .collect();
@@ -155,7 +155,7 @@ fn build_pipeline_plan(
             ModelShard {
                 shard_id: i as u32,
                 layer_range: (start, end),
-                device: dev.accelerator.clone(),
+                device: dev.accelerator,
                 memory_bytes: per_shard,
             }
         })
@@ -222,7 +222,7 @@ impl AcceleratorRegistry {
                 shards: vec![ModelShard {
                     shard_id: 0,
                     layer_range: (0, 0),
-                    device: best.accelerator.clone(),
+                    device: best.accelerator,
                     memory_bytes: needed,
                 }],
                 strategy: ShardingStrategy::None,
@@ -303,6 +303,8 @@ impl AcceleratorRegistry {
 
 impl ShardingPlan {
     /// Whether the plan fits within the total available memory.
+    #[must_use]
+    #[inline]
     pub fn fits_in_memory(&self, registry: &AcceleratorRegistry) -> bool {
         self.total_memory_bytes <= registry.total_memory()
     }

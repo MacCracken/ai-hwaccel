@@ -27,6 +27,7 @@ pub(crate) fn detect_samsung_npu(
             memory_bytes: DEFAULT_MEMORY_BYTES,
             compute_capability: Some("Exynos AI".into()),
             driver_version: None,
+            device_name: None,
             memory_bandwidth_gbps: None,
             memory_used_bytes: None,
             memory_free_bytes: None,

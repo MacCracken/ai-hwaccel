@@ -426,7 +426,11 @@ fn print_table(
         };
 
         let status = if p.available { "ok" } else { "unavail" };
-        let device_name = p.accelerator.to_string();
+        let device_name = if let Some(name) = &p.device_name {
+            format!("{} [{}]", p.accelerator, name)
+        } else {
+            p.accelerator.to_string()
+        };
 
         // Check for memory delta annotation (keyed by Debug format for unique identity).
         let debug_key = format!("{:?}", p.accelerator);

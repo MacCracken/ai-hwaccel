@@ -8,6 +8,7 @@ use crate::hardware::AcceleratorType;
 
 /// Strategy for distributing a model across devices.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[non_exhaustive]
 pub enum ShardingStrategy {
     /// No sharding — run on a single device.
     #[default]
@@ -22,6 +23,8 @@ pub enum ShardingStrategy {
 
 impl ShardingStrategy {
     /// Minimum number of devices required.
+    #[must_use]
+    #[inline]
     pub fn min_devices(&self) -> u32 {
         match self {
             Self::None => 1,
@@ -63,6 +66,8 @@ pub struct ModelShard {
 
 impl ModelShard {
     /// Number of layers in this shard.
+    #[must_use]
+    #[inline]
     pub fn num_layers(&self) -> u32 {
         if self.layer_range.1 >= self.layer_range.0 {
             self.layer_range.1 - self.layer_range.0 + 1
@@ -72,6 +77,8 @@ impl ModelShard {
     }
 
     /// Whether the layer range is valid.
+    #[must_use]
+    #[inline]
     pub fn is_valid(&self) -> bool {
         self.layer_range.0 <= self.layer_range.1
     }
@@ -81,7 +88,7 @@ impl ModelShard {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShardingPlan {
-    pub shards: Vec<ModelShard>,
+    pub(crate) shards: Vec<ModelShard>,
     pub strategy: ShardingStrategy,
     pub total_memory_bytes: u64,
     pub estimated_tokens_per_sec: Option<f64>,

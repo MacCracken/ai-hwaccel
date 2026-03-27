@@ -23,7 +23,7 @@ use crate::system_io::SystemIo;
 /// assert!(registry.has_accelerator());
 /// let quant = registry.suggest_quantization(7_000_000_000);
 /// let plan = registry.plan_sharding(7_000_000_000, &quant);
-/// assert!(!plan.shards.is_empty());
+/// assert!(!plan.shards().is_empty());
 /// ```
 /// Current schema version for serialized registries.
 ///
@@ -78,6 +78,8 @@ impl AcceleratorRegistry {
     }
 
     /// Schema version of this registry (for forward-compatibility checks).
+    #[must_use]
+    #[inline]
     pub fn schema_version(&self) -> u32 {
         self.schema_version
     }
@@ -136,6 +138,7 @@ impl AcceleratorRegistry {
     }
 
     /// The highest-ranked available device.
+    #[must_use]
     pub fn best_available(&self) -> Option<&AcceleratorProfile> {
         self.profiles
             .iter()
@@ -154,6 +157,7 @@ impl AcceleratorRegistry {
     }
 
     /// Total memory across all available non-CPU devices (GPU + NPU + TPU + ASIC).
+    #[must_use]
     pub fn total_accelerator_memory(&self) -> u64 {
         self.profiles
             .iter()
@@ -180,6 +184,7 @@ impl AcceleratorRegistry {
     }
 
     /// All profiles satisfying an [`AcceleratorRequirement`].
+    #[must_use]
     pub fn satisfying(&self, req: &AcceleratorRequirement) -> Vec<&AcceleratorProfile> {
         self.profiles
             .iter()
@@ -201,6 +206,7 @@ impl AcceleratorRegistry {
     /// Estimate memory required for `model_params` parameters at the given quantisation.
     ///
     /// Formula: `params * (bits / 8)` plus 20% overhead for activations/KV cache.
+    #[must_use]
     #[inline]
     pub fn estimate_memory(model_params: u64, quant: &QuantizationLevel) -> u64 {
         let bytes_per_param = quant.bits_per_param() as u64;
@@ -217,6 +223,7 @@ impl AcceleratorRegistry {
     ///
     /// Note: this is a heuristic. For production deployments, verify the
     /// returned level against [`AcceleratorProfile::supports_quantization`].
+    #[must_use]
     pub fn suggest_quantization(&self, model_params: u64) -> QuantizationLevel {
         // Single pass: collect best memory per family and check for Gaudi.
         let mut best_tpu: u64 = 0;
@@ -341,6 +348,7 @@ pub enum Backend {
     Groq,
     SamsungNpu,
     MediaTekApu,
+    WindowsWmi,
 }
 
 impl Backend {
@@ -362,6 +370,7 @@ impl Backend {
         Backend::Groq,
         Backend::SamsungNpu,
         Backend::MediaTekApu,
+        Backend::WindowsWmi,
     ];
 }
 
@@ -471,6 +480,10 @@ impl DetectBuilder {
     pub fn with_mediatek_apu(self) -> Self {
         self.with(Backend::MediaTekApu)
     }
+    #[inline]
+    pub fn with_windows_wmi(self) -> Self {
+        self.with(Backend::WindowsWmi)
+    }
 
     #[inline]
     pub fn without_cuda(self) -> Self {
@@ -535,6 +548,10 @@ impl DetectBuilder {
     #[inline]
     pub fn without_mediatek_apu(self) -> Self {
         self.without(Backend::MediaTekApu)
+    }
+    #[inline]
+    pub fn without_windows_wmi(self) -> Self {
+        self.without(Backend::WindowsWmi)
     }
 
     /// Run detection with only the enabled backends.

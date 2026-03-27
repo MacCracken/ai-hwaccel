@@ -31,6 +31,9 @@ pub struct AcceleratorProfile {
     pub compute_capability: Option<String>,
     /// Driver version string.
     pub driver_version: Option<String>,
+    /// Human-readable device name (e.g. "RTX 4090", "AMD Radeon RX 7900 XTX").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
 
     // --- System I/O fields (0.20) -------------------------------------------
     /// Measured memory bandwidth in GB/s (e.g. HBM throughput).
@@ -63,6 +66,7 @@ pub struct AcceleratorProfile {
 
 impl AcceleratorProfile {
     /// Whether this profile supports the given quantisation level.
+    #[must_use]
     pub fn supports_quantization(&self, level: &QuantizationLevel) -> bool {
         match self.accelerator.family() {
             AcceleratorFamily::Cpu | AcceleratorFamily::Gpu => true,
@@ -144,6 +148,7 @@ impl AcceleratorProfile {
     }
 
     /// The preferred (most efficient) quantisation level for this device.
+    #[must_use]
     pub fn preferred_quantization(&self) -> QuantizationLevel {
         match self.accelerator.family() {
             AcceleratorFamily::Cpu => QuantizationLevel::Float16,
@@ -175,6 +180,7 @@ impl Default for AcceleratorProfile {
             memory_bytes: 0,
             compute_capability: None,
             driver_version: None,
+            device_name: None,
             memory_bandwidth_gbps: None,
             memory_used_bytes: None,
             memory_free_bytes: None,
@@ -247,12 +253,23 @@ impl AcceleratorProfile {
 
 impl fmt::Display for AcceleratorProfile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} ({:.1} GB{})",
-            self.accelerator,
-            self.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-            if self.available { "" } else { ", unavailable" }
-        )
+        if let Some(name) = &self.device_name {
+            write!(
+                f,
+                "{} [{}] ({:.1} GB{})",
+                self.accelerator,
+                name,
+                self.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+                if self.available { "" } else { ", unavailable" }
+            )
+        } else {
+            write!(
+                f,
+                "{} ({:.1} GB{})",
+                self.accelerator,
+                self.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+                if self.available { "" } else { ", unavailable" }
+            )
+        }
     }
 }

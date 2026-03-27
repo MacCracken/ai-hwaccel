@@ -374,9 +374,16 @@ GPU0:
     assert_eq!(profiles.len(), 1);
     assert!(matches!(
         &profiles[0].accelerator,
-        crate::hardware::AcceleratorType::VulkanGpu { device_name, .. }
-        if device_name.contains("AMD Radeon")
+        crate::hardware::AcceleratorType::VulkanGpu { .. }
     ));
+    assert!(
+        profiles[0]
+            .device_name
+            .as_deref()
+            .is_some_and(|n| n.contains("AMD Radeon")),
+        "device_name should contain 'AMD Radeon', got {:?}",
+        profiles[0].device_name
+    );
     assert!(profiles[0].memory_bytes > 20 * 1024 * 1024 * 1024);
 }
 
@@ -414,7 +421,133 @@ fn vulkan_parser_empty_output_creates_fallback() {
 }
 
 // ---------------------------------------------------------------------------
-// Apple parser — parse_system_profiler_output with fixture data
+// Apple: parse_displays_json (system_profiler SPDisplaysDataType -json)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "apple")]
+#[test]
+fn apple_displays_json_m4_max() {
+    let json = r#"{
+        "SPDisplaysDataType": [{
+            "_name": "Apple M4 Max",
+            "sppci_model": "Apple M4 Max",
+            "sppci_vendor": "Apple",
+            "spdisplays_metal_family": "Metal 3, Metal Family - Apple 9",
+            "sppci_cores": "40"
+        }]
+    }"#;
+    let gpus = crate::detect::apple::parse_displays_json(json);
+    assert_eq!(gpus.len(), 1);
+    assert_eq!(gpus[0].name, "Apple M4 Max");
+    assert_eq!(gpus[0].vendor, "Apple");
+    assert_eq!(
+        gpus[0].metal_family.as_deref(),
+        Some("Metal 3, Metal Family - Apple 9")
+    );
+    assert_eq!(gpus[0].cores, Some(40));
+    assert!(gpus[0].vram_bytes.is_none()); // integrated — no discrete VRAM
+}
+
+#[cfg(feature = "apple")]
+#[test]
+fn apple_displays_json_discrete_gpu() {
+    // Intel Mac with discrete AMD GPU
+    let json = r#"{
+        "SPDisplaysDataType": [{
+            "_name": "AMD Radeon Pro 5500M",
+            "sppci_model": "AMD Radeon Pro 5500M",
+            "sppci_vendor": "AMD (0x1002)",
+            "spdisplays_metal_family": "Metal 3, Metal Family - Common 3",
+            "sppci_vram": "8192 MB"
+        }]
+    }"#;
+    let gpus = crate::detect::apple::parse_displays_json(json);
+    assert_eq!(gpus.len(), 1);
+    assert_eq!(gpus[0].name, "AMD Radeon Pro 5500M");
+    assert_eq!(gpus[0].vram_bytes, Some(8192 * 1024 * 1024));
+}
+
+#[cfg(feature = "apple")]
+#[test]
+fn apple_displays_json_multi_gpu() {
+    // MacBook Pro with integrated + discrete
+    let json = r#"{
+        "SPDisplaysDataType": [
+            {
+                "sppci_model": "Intel UHD Graphics 630",
+                "sppci_vendor": "Intel",
+                "spdisplays_metal_family": "Metal 3, Metal Family - Common 2"
+            },
+            {
+                "sppci_model": "AMD Radeon Pro 5600M",
+                "sppci_vendor": "AMD (0x1002)",
+                "spdisplays_metal_family": "Metal 3, Metal Family - Common 3",
+                "sppci_vram": "8192 MB"
+            }
+        ]
+    }"#;
+    let gpus = crate::detect::apple::parse_displays_json(json);
+    assert_eq!(gpus.len(), 2);
+    assert!(gpus[0].vram_bytes.is_none()); // integrated
+    assert_eq!(gpus[1].vram_bytes, Some(8192 * 1024 * 1024)); // discrete
+}
+
+#[cfg(feature = "apple")]
+#[test]
+fn apple_displays_json_empty() {
+    assert!(crate::detect::apple::parse_displays_json("{}").is_empty());
+    assert!(crate::detect::apple::parse_displays_json("invalid").is_empty());
+    assert!(crate::detect::apple::parse_displays_json(r#"{"SPDisplaysDataType": []}"#).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Apple: parse_sysctl_output (macOS CPU topology)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "apple")]
+#[test]
+fn apple_sysctl_m4_max() {
+    let output = "\
+hw.memsize: 137438953472
+hw.ncpu: 16
+hw.cpufrequency: 4400000000
+hw.perflevel0.logicalcpu: 12
+hw.perflevel1.logicalcpu: 4
+";
+    let info = crate::detect::apple::parse_sysctl_output(output);
+    assert_eq!(info.memory_bytes, Some(128 * 1024 * 1024 * 1024)); // 128 GB
+    assert_eq!(info.cpu_count, Some(16));
+    assert_eq!(info.cpu_freq_hz, Some(4_400_000_000));
+    assert_eq!(info.perf_cores, Some(12));
+    assert_eq!(info.eff_cores, Some(4));
+}
+
+#[cfg(feature = "apple")]
+#[test]
+fn apple_sysctl_intel_mac() {
+    // Intel Mac: no perflevel keys
+    let output = "\
+hw.memsize: 17179869184
+hw.ncpu: 8
+hw.cpufrequency: 2300000000
+";
+    let info = crate::detect::apple::parse_sysctl_output(output);
+    assert_eq!(info.memory_bytes, Some(16 * 1024 * 1024 * 1024));
+    assert_eq!(info.cpu_count, Some(8));
+    assert!(info.perf_cores.is_none());
+    assert!(info.eff_cores.is_none());
+}
+
+#[cfg(feature = "apple")]
+#[test]
+fn apple_sysctl_empty() {
+    let info = crate::detect::apple::parse_sysctl_output("");
+    assert!(info.memory_bytes.is_none());
+    assert!(info.cpu_count.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Apple: parse_system_profiler_output (existing text parser)
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "apple")]
@@ -763,4 +896,331 @@ fn graphcore_empty() {
 fn graphcore_no_memory_fields() {
     let result = crate::detect::graphcore::parse_memory_from_gcinfo(r#"{"tiles": 1472}"#);
     assert_eq!(result, None);
+}
+
+// ===========================================================================
+// Cloud hardware validation fixtures
+//
+// Realistic tool output for production cloud accelerators. Validates parsers
+// against documented specs (memory, compute capability, device names).
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// NVIDIA A100 80GB SXM (AWS p4d.24xlarge / GCP a2-megagpu-16g)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "cuda")]
+#[test]
+fn cloud_fixture_a100_80gb_8gpu() {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+    // 8x A100 80GB SXM, nvidia-smi 11-field CSV
+    let output = "\
+0, 81920, 512, 81408, 8.0, 535.129.03, NVIDIA A100-SXM4-80GB, 34, 62.30, 0, 1593
+1, 81920, 0, 81920, 8.0, 535.129.03, NVIDIA A100-SXM4-80GB, 33, 58.10, 0, 1593
+2, 81920, 256, 81664, 8.0, 535.129.03, NVIDIA A100-SXM4-80GB, 35, 63.50, 0, 1593
+3, 81920, 0, 81920, 8.0, 535.129.03, NVIDIA A100-SXM4-80GB, 32, 56.20, 0, 1593
+4, 81920, 0, 81920, 8.0, 535.129.03, NVIDIA A100-SXM4-80GB, 34, 61.70, 0, 1593
+5, 81920, 128, 81792, 8.0, 535.129.03, NVIDIA A100-SXM4-80GB, 35, 64.30, 0, 1593
+6, 81920, 0, 81920, 8.0, 535.129.03, NVIDIA A100-SXM4-80GB, 33, 59.10, 0, 1593
+7, 81920, 0, 81920, 8.0, 535.129.03, NVIDIA A100-SXM4-80GB, 34, 60.80, 0, 1593
+";
+    crate::detect::cuda::parse_cuda_output(output, &mut profiles, &mut warnings);
+    assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
+    assert_eq!(profiles.len(), 8);
+    for (i, p) in profiles.iter().enumerate() {
+        assert!(
+            matches!(p.accelerator, AcceleratorType::CudaGpu { device_id } if device_id == i as u32)
+        );
+        assert_eq!(p.compute_capability.as_deref(), Some("8.0"));
+        assert_eq!(p.device_name.as_deref(), Some("NVIDIA A100-SXM4-80GB"));
+        // A100 SXM: 1593 MHz * 5120 bit * 2 / 8 / 1000 ≈ 2039 GB/s
+        assert!(p.memory_bandwidth_gbps.unwrap() > 1900.0, "A100 BW too low");
+        // ~80 GB VRAM
+        assert!(p.memory_bytes >= 80 * 1024 * 1024 * 1024);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NVIDIA H100 80GB SXM (AWS p5.48xlarge / GCP a3-highgpu-8g)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "cuda")]
+#[test]
+fn cloud_fixture_h100_80gb_sxm() {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+    let output = "\
+0, 81920, 1024, 80896, 9.0, 550.90.07, NVIDIA H100 80GB HBM3, 38, 275.00, 5, 2619
+1, 81920, 0, 81920, 9.0, 550.90.07, NVIDIA H100 80GB HBM3, 37, 268.50, 3, 2619
+";
+    crate::detect::cuda::parse_cuda_output(output, &mut profiles, &mut warnings);
+    assert!(warnings.is_empty());
+    assert_eq!(profiles.len(), 2);
+    let p = &profiles[0];
+    assert_eq!(p.compute_capability.as_deref(), Some("9.0"));
+    assert_eq!(p.device_name.as_deref(), Some("NVIDIA H100 80GB HBM3"));
+    // H100 SXM: 2619 MHz * 5120 bit * 2 / 8 / 1000 ≈ 3352 GB/s
+    assert!(p.memory_bandwidth_gbps.unwrap() > 3300.0, "H100 BW too low");
+    assert_eq!(p.temperature_c, Some(38));
+    assert!((p.power_watts.unwrap() - 275.0).abs() < 0.01);
+}
+
+// ---------------------------------------------------------------------------
+// NVIDIA Grace Hopper GH200 (unified memory: 96 GB HBM3 + 480 GB LPDDR5X)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "cuda")]
+#[test]
+fn cloud_fixture_grace_hopper_gh200() {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+    // GH200: nvidia-smi reports ~96 GB HBM, gpu_name contains "GH200"
+    // Parser should add 480 GB unified memory for Grace Hopper
+    let output =
+        "0, 98304, 1024, 97280, 9.0, 550.90.07, NVIDIA GH200 120GB, 42, 300.00, 10, 2619\n";
+    crate::detect::cuda::parse_cuda_output(output, &mut profiles, &mut warnings);
+    assert!(warnings.is_empty());
+    assert_eq!(profiles.len(), 1);
+    let p = &profiles[0];
+    assert_eq!(p.device_name.as_deref(), Some("NVIDIA GH200 120GB"));
+    // Should have 96 GB HBM + 480 GB unified ≈ 576 GB
+    let mem_gb = p.memory_bytes / (1024 * 1024 * 1024);
+    assert!(
+        mem_gb > 500,
+        "Grace Hopper should report >500 GB unified memory, got {} GB",
+        mem_gb
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Gaudi 3 8-device (AWS DL2q or Intel Developer Cloud)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "gaudi")]
+#[test]
+fn cloud_fixture_gaudi3_8x() {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+    // Gaudi 3: 128 GB HBM2e per device, hl-smi CSV format
+    let output = "\
+0, hl-325-gaudi3, 131072, 100000
+1, hl-325-gaudi3, 131072, 100000
+2, hl-325-gaudi3, 131072, 100000
+3, hl-325-gaudi3, 131072, 100000
+4, hl-325-gaudi3, 131072, 100000
+5, hl-325-gaudi3, 131072, 100000
+6, hl-325-gaudi3, 131072, 100000
+7, hl-325-gaudi3, 131072, 100000
+";
+    crate::detect::gaudi::parse_gaudi_output(output, &mut profiles, &mut warnings);
+    assert!(warnings.is_empty());
+    assert_eq!(profiles.len(), 8);
+    for (i, p) in profiles.iter().enumerate() {
+        assert!(matches!(
+            p.accelerator,
+            AcceleratorType::Gaudi {
+                device_id,
+                generation: crate::hardware::GaudiGeneration::Gaudi3,
+            } if device_id == i as u32
+        ));
+        // 131072 MB = 128 GB HBM2e
+        assert_eq!(p.memory_bytes, 131072 * 1024 * 1024);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AWS Neuron: trn1.32xlarge (16 Trainium chips, 32 NeuronCores)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "aws-neuron")]
+#[test]
+fn cloud_fixture_trn1_32xlarge() {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+    // neuron-ls JSON: trn1.32xlarge has 16 Trainium chips, 32 NeuronCores
+    let json = r#"[
+        {"model":"trn1.32xlarge","nc_count":32,"memory_per_nc_mb":16384}
+    ]"#;
+    let ok = crate::detect::neuron::parse_neuron_output(json, &mut profiles, &mut warnings);
+    assert!(ok);
+    assert_eq!(profiles.len(), 1);
+    let p = &profiles[0];
+    assert!(matches!(
+        p.accelerator,
+        AcceleratorType::AwsNeuron {
+            chip_type: crate::hardware::NeuronChipType::Trainium,
+            core_count: 32,
+            ..
+        }
+    ));
+    // 32 cores * 16384 MB = 512 GB total
+    assert_eq!(p.memory_bytes, 32 * 16384 * 1024 * 1024);
+}
+
+// ---------------------------------------------------------------------------
+// AWS Neuron: inf2.48xlarge (12 Inferentia2 chips, 24 NeuronCores)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "aws-neuron")]
+#[test]
+fn cloud_fixture_inf2_48xlarge() {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+    let json = r#"[
+        {"model":"inf2.48xlarge","nc_count":24,"memory_per_nc_mb":32768}
+    ]"#;
+    let ok = crate::detect::neuron::parse_neuron_output(json, &mut profiles, &mut warnings);
+    assert!(ok);
+    assert_eq!(profiles.len(), 1);
+    let p = &profiles[0];
+    assert!(matches!(
+        p.accelerator,
+        AcceleratorType::AwsNeuron {
+            chip_type: crate::hardware::NeuronChipType::Inferentia,
+            core_count: 24,
+            ..
+        }
+    ));
+    // 24 cores * 32768 MB = 768 GB total
+    assert_eq!(p.memory_bytes, 24 * 32768 * 1024 * 1024);
+}
+
+// ---------------------------------------------------------------------------
+// Vulkan: AMD MI300X 192GB (Azure ND MI300X v5)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "vulkan")]
+#[test]
+fn cloud_fixture_mi300x_vulkan() {
+    let mut profiles = Vec::new();
+    let mut warnings = Vec::new();
+    // MI300X appears in vulkaninfo with 192 GB HBM3
+    let summary = "\
+GPU0:
+\tdeviceName = AMD Instinct MI300X
+\tapiVersion = 1.3.280
+\tdriverVersion = 24.20.3
+\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+\tsize = 196608 MiB
+";
+    crate::detect::vulkan::parse_vulkan_output(summary, None, &mut profiles, &mut warnings);
+    assert_eq!(profiles.len(), 1);
+    let p = &profiles[0];
+    assert!(matches!(
+        p.accelerator,
+        AcceleratorType::VulkanGpu { device_id: 0 }
+    ));
+    assert_eq!(p.device_name.as_deref(), Some("AMD Instinct MI300X"));
+    // 196608 MiB ≈ 192 GB
+    assert!(p.memory_bytes >= 192 * 1024 * 1024 * 1024);
+}
+
+// ===========================================================================
+// Windows WMI/PowerShell parser tests
+// ===========================================================================
+
+#[cfg(feature = "windows-wmi")]
+#[test]
+fn wmic_parser_single_nvidia_gpu() {
+    let mut profiles = Vec::new();
+    let output = "\
+Node,AdapterRAM,DriverVersion,Name,VideoProcessor
+DESKTOP-ABC,8589934592,31.0.15.5250,NVIDIA GeForce RTX 4070,AD104
+";
+    let ok = crate::detect::windows::parse_wmic_output(output, &mut profiles);
+    assert!(ok);
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(
+        profiles[0].device_name.as_deref(),
+        Some("NVIDIA GeForce RTX 4070")
+    );
+    assert_eq!(profiles[0].memory_bytes, 8589934592); // 8 GB
+    assert_eq!(profiles[0].driver_version.as_deref(), Some("31.0.15.5250"));
+}
+
+#[cfg(feature = "windows-wmi")]
+#[test]
+fn wmic_parser_multi_gpu() {
+    let mut profiles = Vec::new();
+    let output = "\
+Node,AdapterRAM,DriverVersion,Name,VideoProcessor
+DESKTOP-ABC,8589934592,31.0.15.5250,NVIDIA GeForce RTX 4070,AD104
+DESKTOP-ABC,4293918720,27.21.14.5671,AMD Radeon RX 580,Polaris 20
+";
+    let ok = crate::detect::windows::parse_wmic_output(output, &mut profiles);
+    assert!(ok);
+    assert_eq!(profiles.len(), 2);
+    assert_eq!(
+        profiles[0].device_name.as_deref(),
+        Some("NVIDIA GeForce RTX 4070")
+    );
+    assert_eq!(
+        profiles[1].device_name.as_deref(),
+        Some("AMD Radeon RX 580")
+    );
+}
+
+#[cfg(feature = "windows-wmi")]
+#[test]
+fn wmic_parser_skips_virtual_devices() {
+    let mut profiles = Vec::new();
+    let output = "\
+Node,AdapterRAM,DriverVersion,Name,VideoProcessor
+DESKTOP,1048576,,Microsoft Basic Display Adapter,
+DESKTOP,8589934592,31.0.15.5250,NVIDIA GeForce RTX 4090,AD102
+DESKTOP,0,,Microsoft Remote Desktop Virtual Adapter,
+";
+    let ok = crate::detect::windows::parse_wmic_output(output, &mut profiles);
+    assert!(ok);
+    assert_eq!(profiles.len(), 1); // Only the real GPU
+    assert_eq!(
+        profiles[0].device_name.as_deref(),
+        Some("NVIDIA GeForce RTX 4090")
+    );
+}
+
+#[cfg(feature = "windows-wmi")]
+#[test]
+fn wmic_parser_empty() {
+    let mut profiles = Vec::new();
+    assert!(!crate::detect::windows::parse_wmic_output(
+        "",
+        &mut profiles
+    ));
+    assert!(profiles.is_empty());
+}
+
+#[cfg(feature = "windows-wmi")]
+#[test]
+fn powershell_csv_parser_nvidia() {
+    let mut profiles = Vec::new();
+    let output = r#""Name","AdapterRAM","DriverVersion"
+"NVIDIA GeForce RTX 3080","10737418240","31.0.15.3623"
+"#;
+    let ok = crate::detect::windows::parse_powershell_csv(output, &mut profiles);
+    assert!(ok);
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(
+        profiles[0].device_name.as_deref(),
+        Some("NVIDIA GeForce RTX 3080")
+    );
+    assert_eq!(profiles[0].memory_bytes, 10737418240); // 10 GB
+}
+
+#[cfg(feature = "windows-wmi")]
+#[test]
+fn powershell_csv_parser_skips_virtual() {
+    let mut profiles = Vec::new();
+    let output = r#""Name","AdapterRAM","DriverVersion"
+"Microsoft Basic Display Adapter","1048576",""
+"NVIDIA GeForce RTX 4090","25769803776","32.0.15.6081"
+"#;
+    let ok = crate::detect::windows::parse_powershell_csv(output, &mut profiles);
+    assert!(ok);
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(
+        profiles[0].device_name.as_deref(),
+        Some("NVIDIA GeForce RTX 4090")
+    );
 }

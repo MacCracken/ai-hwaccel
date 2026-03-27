@@ -146,10 +146,10 @@ fn sharding_plan_to_dict<'py>(
         plan.total_memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
     )?;
     d.set_item("estimated_tokens_per_sec", plan.estimated_tokens_per_sec)?;
-    d.set_item("num_shards", plan.shards.len())?;
+    d.set_item("num_shards", plan.shards().len())?;
 
     let shards_list = PyList::empty(py);
-    for shard in &plan.shards {
+    for shard in plan.shards() {
         let sd = PyDict::new(py);
         sd.set_item("shard_id", shard.shard_id)?;
         sd.set_item("layer_range", (shard.layer_range.0, shard.layer_range.1))?;

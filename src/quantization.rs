@@ -32,6 +32,7 @@ pub enum QuantizationLevel {
 
 impl QuantizationLevel {
     /// Number of bits used per model parameter.
+    #[must_use]
     #[inline]
     pub fn bits_per_param(&self) -> u32 {
         match self {
@@ -43,9 +44,30 @@ impl QuantizationLevel {
     }
 
     /// Memory reduction factor relative to FP32.
+    #[must_use]
     #[inline]
     pub fn memory_reduction_factor(&self) -> f64 {
         32.0 / self.bits_per_param() as f64
+    }
+}
+
+impl TryFrom<u32> for QuantizationLevel {
+    type Error = u32;
+
+    /// Convert from bit width to quantisation level.
+    ///
+    /// - `32` → `None` (FP32)
+    /// - `16` → `Float16`
+    /// - `8`  → `Int8`
+    /// - `4`  → `Int4`
+    fn try_from(bits: u32) -> Result<Self, u32> {
+        match bits {
+            32 => Ok(Self::None),
+            16 => Ok(Self::Float16),
+            8 => Ok(Self::Int8),
+            4 => Ok(Self::Int4),
+            other => Err(other),
+        }
     }
 }
 

@@ -201,12 +201,10 @@ pub fn parse_vulkan_output(
     if devices.is_empty() {
         debug!("vulkaninfo found but no devices parsed, registering generic Vulkan GPU");
         profiles.push(AcceleratorProfile {
-            accelerator: AcceleratorType::VulkanGpu {
-                device_id: 0,
-                device_name: "Unknown Vulkan Device".into(),
-            },
+            accelerator: AcceleratorType::VulkanGpu { device_id: 0 },
             available: true,
             memory_bytes: 4 * 1024 * 1024 * 1024,
+            device_name: Some("Unknown Vulkan Device".into()),
             ..Default::default()
         });
     } else {
@@ -238,12 +236,12 @@ pub fn parse_vulkan_output(
             profiles.push(AcceleratorProfile {
                 accelerator: AcceleratorType::VulkanGpu {
                     device_id: i as u32,
-                    device_name: dev.name,
                 },
                 available: true,
                 memory_bytes: dev.memory_mb.saturating_mul(1024 * 1024),
                 compute_capability: compute_cap,
                 driver_version: dev.driver_version,
+                device_name: Some(dev.name),
                 ..Default::default()
             });
         }
@@ -320,10 +318,10 @@ pub(crate) fn detect_vulkan_sysfs(
         profiles.push(AcceleratorProfile {
             accelerator: AcceleratorType::VulkanGpu {
                 device_id: device_id_counter,
-                device_name,
             },
             available: true,
             memory_bytes: vram_bytes,
+            device_name: Some(device_name),
             ..Default::default()
         });
         device_id_counter += 1;

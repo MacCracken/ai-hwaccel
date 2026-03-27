@@ -57,6 +57,7 @@ pub struct CloudInstance {
 
 /// Cloud provider filter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CloudProvider {
     Aws,
     Gcp,
@@ -64,6 +65,7 @@ pub enum CloudProvider {
 }
 
 impl CloudProvider {
+    #[inline]
     fn as_str(self) -> &'static str {
         match self {
             Self::Aws => "aws",
@@ -87,6 +89,7 @@ pub struct InstanceRecommendation {
 /// Load all cloud instances from the embedded pricing table.
 ///
 /// Results are parsed once and cached for the lifetime of the process.
+#[must_use]
 pub fn all_instances() -> &'static [CloudInstance] {
     #[derive(serde::Deserialize)]
     struct PricingData {
@@ -111,6 +114,7 @@ pub fn all_instances() -> &'static [CloudInstance] {
 /// * `model_params` — number of model parameters
 /// * `quant` — quantisation level
 /// * `provider` — optional filter to a specific cloud provider
+#[must_use]
 pub fn recommend_instance(
     model_params: u64,
     quant: &QuantizationLevel,
@@ -152,6 +156,7 @@ pub fn recommend_instance(
 }
 
 /// Recommend the single cheapest instance, if any.
+#[must_use]
 pub fn cheapest_instance(
     model_params: u64,
     quant: &QuantizationLevel,

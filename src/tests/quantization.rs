@@ -29,6 +29,24 @@ fn quantization_memory_reduction_all_levels() {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn try_from_u32_valid() {
+    assert_eq!(QuantizationLevel::try_from(32), Ok(QuantizationLevel::None));
+    assert_eq!(
+        QuantizationLevel::try_from(16),
+        Ok(QuantizationLevel::Float16)
+    );
+    assert_eq!(QuantizationLevel::try_from(8), Ok(QuantizationLevel::Int8));
+    assert_eq!(QuantizationLevel::try_from(4), Ok(QuantizationLevel::Int4));
+}
+
+#[test]
+fn try_from_u32_invalid() {
+    assert_eq!(QuantizationLevel::try_from(0), Err(0));
+    assert_eq!(QuantizationLevel::try_from(3), Err(3));
+    assert_eq!(QuantizationLevel::try_from(64), Err(64));
+}
+
+#[test]
 fn gpu_supports_all_quantization() {
     let gpu = AcceleratorProfile::cuda(0, 24 * 1024 * 1024 * 1024);
     for q in [
@@ -74,11 +92,12 @@ fn npu_only_int_quantization() {
         AcceleratorType::AmdXdnaNpu { device_id: 0 },
     ] {
         let p = AcceleratorProfile {
-            accelerator: accel.clone(),
+            accelerator: accel,
             available: true,
             memory_bytes: 2 * 1024 * 1024 * 1024,
             compute_capability: None,
             driver_version: None,
+            device_name: None,
             memory_bandwidth_gbps: None,
             memory_used_bytes: None,
             memory_free_bytes: None,
@@ -125,6 +144,7 @@ fn neuron_supports_bf16_fp16_int8_not_int4() {
         memory_bytes: 32 * 1024 * 1024 * 1024,
         compute_capability: None,
         driver_version: None,
+        device_name: None,
         memory_bandwidth_gbps: None,
         memory_used_bytes: None,
         memory_free_bytes: None,
@@ -149,6 +169,7 @@ fn qualcomm_supports_fp16_int8_int4_not_fp32() {
         memory_bytes: 32 * 1024 * 1024 * 1024,
         compute_capability: None,
         driver_version: None,
+        device_name: None,
         memory_bandwidth_gbps: None,
         memory_used_bytes: None,
         memory_free_bytes: None,
@@ -197,6 +218,7 @@ fn preferred_quantization_per_family() {
         memory_bytes: 0,
         compute_capability: None,
         driver_version: None,
+        device_name: None,
         memory_bandwidth_gbps: None,
         memory_used_bytes: None,
         memory_free_bytes: None,
@@ -218,6 +240,7 @@ fn preferred_quantization_per_family() {
         memory_bytes: 0,
         compute_capability: None,
         driver_version: None,
+        device_name: None,
         memory_bandwidth_gbps: None,
         memory_used_bytes: None,
         memory_free_bytes: None,
@@ -235,6 +258,7 @@ fn preferred_quantization_per_family() {
         memory_bytes: 0,
         compute_capability: None,
         driver_version: None,
+        device_name: None,
         memory_bandwidth_gbps: None,
         memory_used_bytes: None,
         memory_free_bytes: None,

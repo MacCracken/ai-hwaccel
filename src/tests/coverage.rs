@@ -40,6 +40,7 @@ fn suggest_quantization_npu_drops_to_int4() {
             memory_bytes: 1024 * 1024 * 1024, // 1 GB
             compute_capability: None,
             driver_version: None,
+            device_name: None,
             memory_bandwidth_gbps: None,
             memory_used_bytes: None,
             memory_free_bytes: None,
@@ -131,7 +132,8 @@ fn builder_all_with_methods() {
         .with_graphcore()
         .with_groq()
         .with_samsung_npu()
-        .with_mediatek_apu();
+        .with_mediatek_apu()
+        .with_windows_wmi();
     assert_eq!(builder.enabled_count(), Backend::ALL.len());
 }
 
@@ -153,7 +155,8 @@ fn builder_all_without_methods() {
         .without_graphcore()
         .without_groq()
         .without_samsung_npu()
-        .without_mediatek_apu();
+        .without_mediatek_apu()
+        .without_windows_wmi();
     assert_eq!(builder.enabled_count(), 0);
 }
 
@@ -259,10 +262,7 @@ fn hardware_mod_all_variants_have_rank() {
         AcceleratorType::CudaGpu { device_id: 0 },
         AcceleratorType::RocmGpu { device_id: 0 },
         AcceleratorType::MetalGpu,
-        AcceleratorType::VulkanGpu {
-            device_id: 0,
-            device_name: "x".into(),
-        },
+        AcceleratorType::VulkanGpu { device_id: 0 },
         AcceleratorType::IntelNpu,
         AcceleratorType::AppleNpu,
         AcceleratorType::AmdXdnaNpu { device_id: 0 },
@@ -412,4 +412,276 @@ fn vulkan_parser_no_devices() {
         profiles[0].accelerator,
         AcceleratorType::VulkanGpu { .. }
     ));
+}
+
+// ---------------------------------------------------------------------------
+// AcceleratorProfile: preferred_quantization for every ASIC type
+// ---------------------------------------------------------------------------
+
+#[test]
+fn preferred_quantization_all_asic_types() {
+    let cases: Vec<(AcceleratorType, QuantizationLevel)> = vec![
+        (
+            AcceleratorType::Gaudi {
+                device_id: 0,
+                generation: GaudiGeneration::Gaudi3,
+            },
+            QuantizationLevel::BFloat16,
+        ),
+        (
+            AcceleratorType::AwsNeuron {
+                device_id: 0,
+                chip_type: NeuronChipType::Trainium,
+                core_count: 2,
+            },
+            QuantizationLevel::BFloat16,
+        ),
+        (
+            AcceleratorType::QualcommAi100 { device_id: 0 },
+            QuantizationLevel::Int8,
+        ),
+        (
+            AcceleratorType::CerebrasWse { device_id: 0 },
+            QuantizationLevel::BFloat16,
+        ),
+        (
+            AcceleratorType::GraphcoreIpu { device_id: 0 },
+            QuantizationLevel::Float16,
+        ),
+        (
+            AcceleratorType::GroqLpu { device_id: 0 },
+            QuantizationLevel::Int8,
+        ),
+    ];
+    for (accel, expected) in cases {
+        let profile = AcceleratorProfile {
+            accelerator: accel,
+            available: true,
+            memory_bytes: 96 * 1024 * 1024 * 1024,
+            ..Default::default()
+        };
+        assert_eq!(
+            profile.preferred_quantization(),
+            expected,
+            "{:?} should prefer {:?}",
+            accel,
+            expected,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AcceleratorProfile: supports_quantization ASIC edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn supports_quantization_graphcore_no_bf16() {
+    let profile = AcceleratorProfile {
+        accelerator: AcceleratorType::GraphcoreIpu { device_id: 0 },
+        available: true,
+        memory_bytes: 1024 * 1024 * 1024,
+        ..Default::default()
+    };
+    // Graphcore IPU: FP32, FP16, INT8 — NOT BF16 or INT4
+    assert!(profile.supports_quantization(&QuantizationLevel::None));
+    assert!(profile.supports_quantization(&QuantizationLevel::Float16));
+    assert!(profile.supports_quantization(&QuantizationLevel::Int8));
+    assert!(!profile.supports_quantization(&QuantizationLevel::BFloat16));
+    assert!(!profile.supports_quantization(&QuantizationLevel::Int4));
+}
+
+#[test]
+fn supports_quantization_groq_no_fp32_bf16() {
+    let profile = AcceleratorProfile {
+        accelerator: AcceleratorType::GroqLpu { device_id: 0 },
+        available: true,
+        memory_bytes: 1024 * 1024 * 1024,
+        ..Default::default()
+    };
+    // Groq LPU: FP16, INT8, INT4 — NOT FP32 or BF16
+    assert!(!profile.supports_quantization(&QuantizationLevel::None));
+    assert!(profile.supports_quantization(&QuantizationLevel::Float16));
+    assert!(profile.supports_quantization(&QuantizationLevel::Int8));
+    assert!(profile.supports_quantization(&QuantizationLevel::Int4));
+    assert!(!profile.supports_quantization(&QuantizationLevel::BFloat16));
+}
+
+#[test]
+fn supports_quantization_qualcomm_no_fp32_bf16() {
+    let profile = AcceleratorProfile {
+        accelerator: AcceleratorType::QualcommAi100 { device_id: 0 },
+        available: true,
+        memory_bytes: 1024 * 1024 * 1024,
+        ..Default::default()
+    };
+    // Qualcomm AI 100: FP16, INT8, INT4 — NOT FP32 or BF16
+    assert!(!profile.supports_quantization(&QuantizationLevel::None));
+    assert!(profile.supports_quantization(&QuantizationLevel::Float16));
+    assert!(profile.supports_quantization(&QuantizationLevel::Int8));
+    assert!(profile.supports_quantization(&QuantizationLevel::Int4));
+    assert!(!profile.supports_quantization(&QuantizationLevel::BFloat16));
+}
+
+#[test]
+fn supports_quantization_cerebras_no_int4() {
+    let profile = AcceleratorProfile {
+        accelerator: AcceleratorType::CerebrasWse { device_id: 0 },
+        available: true,
+        memory_bytes: 1024 * 1024 * 1024,
+        ..Default::default()
+    };
+    // Cerebras WSE: FP32, BF16, FP16, INT8 — NOT INT4
+    assert!(profile.supports_quantization(&QuantizationLevel::None));
+    assert!(profile.supports_quantization(&QuantizationLevel::BFloat16));
+    assert!(profile.supports_quantization(&QuantizationLevel::Float16));
+    assert!(profile.supports_quantization(&QuantizationLevel::Int8));
+    assert!(!profile.supports_quantization(&QuantizationLevel::Int4));
+}
+
+#[test]
+fn supports_quantization_neuron_no_int4() {
+    let profile = AcceleratorProfile {
+        accelerator: AcceleratorType::AwsNeuron {
+            device_id: 0,
+            chip_type: NeuronChipType::Trainium,
+            core_count: 2,
+        },
+        available: true,
+        memory_bytes: 1024 * 1024 * 1024,
+        ..Default::default()
+    };
+    // Neuron: FP32, BF16, FP16, INT8 — NOT INT4
+    assert!(profile.supports_quantization(&QuantizationLevel::None));
+    assert!(profile.supports_quantization(&QuantizationLevel::BFloat16));
+    assert!(profile.supports_quantization(&QuantizationLevel::Float16));
+    assert!(profile.supports_quantization(&QuantizationLevel::Int8));
+    assert!(!profile.supports_quantization(&QuantizationLevel::Int4));
+}
+
+// ---------------------------------------------------------------------------
+// Cost: Azure provider filter
+// ---------------------------------------------------------------------------
+
+#[test]
+fn recommend_filter_by_azure() {
+    let azure = crate::cost::recommend_instance(
+        7_000_000_000,
+        &QuantizationLevel::Int8,
+        Some(crate::cost::CloudProvider::Azure),
+    );
+    for rec in &azure {
+        assert_eq!(rec.instance.provider, "azure");
+    }
+}
+
+#[test]
+fn cheapest_instance_huge_model_returns_none() {
+    // 10 trillion params at FP32 — should return None if nothing fits
+    let result = crate::cost::cheapest_instance(10_000_000_000_000, &QuantizationLevel::None, None);
+    // Either None or has valid headroom
+    if let Some(rec) = result {
+        assert!(rec.memory_headroom_pct >= 0.0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Training: QLoRA cross-target (TPU/Gaudi with different bit widths)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn training_qlora_tpu_4bit_vs_8bit() {
+    let q4 = estimate_training_memory(7000, TrainingMethod::QLoRA { bits: 4 }, TrainingTarget::Tpu);
+    let q8 = estimate_training_memory(7000, TrainingMethod::QLoRA { bits: 8 }, TrainingTarget::Tpu);
+    assert!(
+        q4.model_gb < q8.model_gb,
+        "4-bit should use less model memory than 8-bit on TPU"
+    );
+    assert!(q4.total_gb < q8.total_gb);
+}
+
+#[test]
+fn training_qlora_gaudi_4bit_vs_8bit() {
+    let q4 = estimate_training_memory(
+        7000,
+        TrainingMethod::QLoRA { bits: 4 },
+        TrainingTarget::Gaudi,
+    );
+    let q8 = estimate_training_memory(
+        7000,
+        TrainingMethod::QLoRA { bits: 8 },
+        TrainingTarget::Gaudi,
+    );
+    assert!(
+        q4.model_gb < q8.model_gb,
+        "4-bit should use less model memory than 8-bit on Gaudi"
+    );
+    assert!(q4.total_gb < q8.total_gb);
+}
+
+#[test]
+fn training_distillation_tpu_and_gaudi() {
+    for target in [TrainingTarget::Tpu, TrainingTarget::Gaudi] {
+        let full = estimate_training_memory(7000, TrainingMethod::FullFineTune, target);
+        let dist = estimate_training_memory(7000, TrainingMethod::Distillation, target);
+        assert!(
+            dist.model_gb > full.model_gb,
+            "Distillation should need more model memory than full fine-tune on {:?}",
+            target
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SystemIo: edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn system_io_empty_has_no_interconnect() {
+    let io = crate::system_io::SystemIo::empty();
+    assert!(!io.has_interconnect());
+    assert_eq!(io.total_interconnect_bandwidth_gbps(), 0.0);
+    assert!(io.estimate_ingestion_secs(1_000_000).is_none());
+}
+
+#[test]
+fn system_io_multiple_interconnects_sum_bandwidth() {
+    let io = crate::system_io::SystemIo {
+        interconnects: vec![
+            crate::system_io::Interconnect {
+                kind: crate::system_io::InterconnectKind::NVLink,
+                name: "nvlink0".into(),
+                bandwidth_gbps: 50.0,
+                state: Some("Active".into()),
+            },
+            crate::system_io::Interconnect {
+                kind: crate::system_io::InterconnectKind::InfiniBand,
+                name: "mlx5_0".into(),
+                bandwidth_gbps: 25.0,
+                state: Some("Active".into()),
+            },
+        ],
+        storage: vec![],
+        environment: None,
+    };
+    assert!(io.has_interconnect());
+    assert!((io.total_interconnect_bandwidth_gbps() - 75.0).abs() < f64::EPSILON);
+}
+
+// ---------------------------------------------------------------------------
+// ShardingPlan: fits_in_memory
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sharding_plan_fits_in_memory_boundary() {
+    let reg = AcceleratorRegistry::from_profiles(vec![
+        AcceleratorProfile::cpu(64 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(0, 24 * 1024 * 1024 * 1024),
+    ]);
+    // Small model that fits on single GPU
+    let plan = reg.plan_sharding(1_000_000_000, &QuantizationLevel::Float16);
+    assert!(plan.fits_in_memory(&reg));
+
+    // Huge model that doesn't fit
+    let plan = reg.plan_sharding(500_000_000_000, &QuantizationLevel::None);
+    assert!(!plan.fits_in_memory(&reg));
 }

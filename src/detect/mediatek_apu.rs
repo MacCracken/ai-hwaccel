@@ -27,6 +27,7 @@ pub(crate) fn detect_mediatek_apu(
             memory_bytes: DEFAULT_MEMORY_BYTES,
             compute_capability: Some("MDLA".into()),
             driver_version: None,
+            device_name: None,
             memory_bandwidth_gbps: None,
             memory_used_bytes: None,
             memory_free_bytes: None,

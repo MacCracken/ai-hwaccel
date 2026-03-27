@@ -11,39 +11,37 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 Spin up short-lived cloud instances to validate untested backends. Fix any
 parser bugs found, add mock test fixtures from captured tool output.
 
-- [ ] **NVIDIA H100 / A100** — validate CUDA parser with real nvidia-smi
-  output. Capture fixtures for bandwidth, NVLink, power/thermal. (AWS/GCP)
-- [ ] **NVIDIA Grace Hopper GH200** — validate unified memory detection.
-  Capture nvidia-smi output. (GCP/Lambda Labs)
-- [ ] **AMD MI300X** — validate CXL memory detection, ROCm sysfs enrichment.
-  Capture sysfs tree. (Azure)
-- [ ] **Google TPU v5e / v5p** — validate TPU detection on GCE. Multi-host
-  pod slice testing. Capture sysfs fixtures.
-- [ ] **AWS Neuron (trn1/inf2)** — validate neuron-ls parser on mixed
-  instances. Capture JSON fixtures for Trainium + Inferentia.
-- [ ] **Intel Gaudi 3** — validate hl-smi parser on AWS DL1/DL2. Capture
-  CSV fixtures.
+- [x] **NVIDIA H100 / A100** — mock fixtures for nvidia-smi 11-field CSV
+  (A100 SXM 8-GPU, H100 SXM 2-GPU). Done in 1.1.0.
+- [x] **NVIDIA Grace Hopper GH200** — mock fixture validates unified memory
+  detection (96 GB HBM + 480 GB LPDDR5X). Done in 1.1.0.
+- [x] **AMD MI300X** — Vulkan parser fixture for 192 GB HBM3. ROCm sysfs
+  CXL testing via planning pipeline (8x 192 GB). Done in 1.1.0.
+- [x] **Google TPU v5e / v5p** — planning pipeline fixtures for v5e 4-chip
+  and v5p 256-chip pod slices. Done in 1.1.0.
+- [x] **AWS Neuron (trn1/inf2)** — neuron-ls JSON fixtures for trn1.32xlarge
+  (32 NeuronCores) and inf2.48xlarge (24 NeuronCores). Done in 1.1.0.
+- [x] **Intel Gaudi 3** — hl-smi CSV fixture for 8-device Gaudi 3 (128 GB
+  HBM2e each). Done in 1.1.0.
+- [ ] **Live cloud validation** — run fixtures against real hardware to
+  capture actual tool output and fix any parser discrepancies.
 
 ### Cross-platform porting
 
-- [ ] **macOS: `system_profiler` for Metal/ANE detection** — use
-  `system_profiler SPDisplaysDataType -json` for GPU enumeration and
-  Metal feature set, `system_profiler SPHardwareDataType` for ANE core
-  count. Replace IOKit-only approach with higher-level API.
-- [ ] **macOS: `sysctl` for CPU/memory** — use `sysctl hw.memsize`,
-  `hw.ncpu`, `hw.cpufrequency` for system topology instead of sysfs.
-- [ ] **Windows: WMI queries for GPU detection** — `Win32_VideoController`
-  via WMI for GPU enumeration when nvidia-smi is absent. DirectML device
-  listing via `dxdiag` parsing. `nvidia-smi.exe` path resolution
-  (`C:\Windows\System32\`).
+- [x] **macOS: `system_profiler -json` for Metal/ANE** — `parse_displays_json()`
+  for SPDisplaysDataType JSON (Metal family, GPU cores, discrete VRAM).
+  Enriches Metal profiles. `parse_sysctl_output()` for CPU topology.
+  Done in 1.1.0.
+- [x] **macOS: `sysctl` for CPU/memory** — parser for hw.memsize, hw.ncpu,
+  hw.cpufrequency, perflevel cores. Done in 1.1.0.
+- [x] **Windows: WMI queries for GPU detection** — `parse_wmic_output()` and
+  `parse_powershell_csv()` with `nvidia-smi.exe` path resolution. Done in 1.1.0.
 - [ ] **Windows: DirectX adapter enumeration** — DXGI `EnumAdapters1` via
   `windows-rs` for reliable GPU detection independent of vendor CLI tools.
   Returns adapter LUID, dedicated VRAM, shared memory, driver version.
-- [ ] **Cross-platform: abstract sysfs probing behind platform trait** —
-  `PlatformProbe` trait with `detect_gpus()`, `detect_memory()`,
-  `detect_topology()` methods. Linux impl reads sysfs, macOS impl uses
-  `system_profiler`/`sysctl`, Windows impl uses WMI/DXGI. Feature-gated
-  backends (`sysfs`, `system-profiler`, `wmi`).
+- [x] **Cross-platform: `PlatformProbe` trait** — abstracts file reads,
+  commands, device enumeration, memory. `LivePlatform` + `MockPlatform`.
+  Done in 1.1.0.
 
 ---
 
@@ -226,12 +224,15 @@ burden and improve contributor experience.
   `by_family()`, `satisfying()` currently return `Vec<&AcceleratorProfile>`.
   Change to `impl Iterator` for zero-alloc queries. Breaking change — requires
   callers to `.collect()` explicitly.
-- [ ] **Make `ShardingPlan::shards` private** — add `pub fn shards()` accessor
-  to maintain plan invariants. Breaking change for direct field access.
-- [ ] **`TryFrom<u32>` for `QuantizationLevel`** — map `32 → None`,
-  `16 → Float16`, `8 → Int8`, `4 → Int4` for CLI parsing ergonomics.
-- [ ] **Fix `CloudGpuInstance` re-export alias** — standardize to `CloudInstance`
-  only. Deprecate or remove the alias in `lib.rs`.
+- [x] **Make `ShardingPlan::shards` private** — `pub(crate)` with `shards()`
+  accessor. Done in 1.0.0.
+- [x] **`TryFrom<u32>` for `QuantizationLevel`** — map `32 → None`,
+  `16 → Float16`, `8 → Int8`, `4 → Int4`. Done in 1.0.0.
+- [x] **`AcceleratorType` is `Copy`** — moved `device_name` from `VulkanGpu`
+  into `AcceleratorProfile`. Done in 1.0.0.
+- [ ] **Fix `CloudGpuInstance` re-export alias** — blocked: two types named
+  `CloudInstance` exist (`cost::CloudInstance` and `system_io::CloudInstance`).
+  Needs rename of one type before alias can be removed.
 
 ### CLI refactoring
 

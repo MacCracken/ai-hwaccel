@@ -44,6 +44,8 @@ impl fmt::Display for AcceleratorRequirement {
 
 impl AcceleratorRequirement {
     /// Check whether a given [`AcceleratorProfile`] satisfies this requirement.
+    #[must_use]
+    #[inline]
     pub fn satisfied_by(&self, profile: &AcceleratorProfile) -> bool {
         if !profile.available {
             return false;

@@ -39,6 +39,10 @@ pub(crate) mod samsung_npu;
 pub(crate) mod tpu;
 #[cfg(feature = "vulkan")]
 pub mod vulkan;
+#[cfg(feature = "windows-wmi")]
+pub(crate) mod windows;
+
+pub mod platform;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -220,6 +224,13 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
                 handles,
                 s
             );
+            spawn_backend!(
+                "windows-wmi",
+                Backend::WindowsWmi,
+                windows::detect_windows_gpu,
+                handles,
+                s
+            );
 
             for handle in handles {
                 if let Ok((profiles, warnings)) = handle.join() {
@@ -264,6 +275,11 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
             "mediatek-apu",
             Backend::MediaTekApu,
             mediatek_apu::detect_mediatek_apu
+        );
+        run_backend!(
+            "windows-wmi",
+            Backend::WindowsWmi,
+            windows::detect_windows_gpu
         );
     }
 
@@ -479,6 +495,14 @@ pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetectio
                 handles,
                 s
             );
+            spawn_backend_timed!(
+                "windows-wmi",
+                Backend::WindowsWmi,
+                "windows_wmi",
+                windows::detect_windows_gpu,
+                handles,
+                s
+            );
 
             for (name, handle) in handles {
                 if let Ok((profiles, warnings, duration)) = handle.join() {
@@ -554,6 +578,12 @@ pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetectio
             Backend::MediaTekApu,
             "mediatek_apu",
             mediatek_apu::detect_mediatek_apu
+        );
+        run_backend_timed!(
+            "windows-wmi",
+            Backend::WindowsWmi,
+            "windows_wmi",
+            windows::detect_windows_gpu
         );
     }
 
@@ -696,7 +726,7 @@ pub(crate) fn cpu_profile() -> AcceleratorProfile {
 }
 
 /// System memory from /proc/meminfo (fallback: 16 GiB).
-fn detect_cpu_memory() -> u64 {
+pub(crate) fn detect_cpu_memory() -> u64 {
     if let Some(info) = read_sysfs_string(std::path::Path::new("/proc/meminfo"), 64 * 1024) {
         for line in info.lines() {
             if line.starts_with("MemTotal:")
@@ -841,6 +871,11 @@ pub(crate) async fn detect_with_builder_async(builder: DetectBuilder) -> Acceler
             "mediatek-apu",
             Backend::MediaTekApu,
             mediatek_apu::detect_mediatek_apu
+        );
+        run_sysfs!(
+            "windows-wmi",
+            Backend::WindowsWmi,
+            windows::detect_windows_gpu
         );
 
         (profiles, warnings)

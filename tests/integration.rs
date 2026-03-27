@@ -21,7 +21,7 @@ fn detect_query_plan_pipeline() {
 
     // Plan sharding — should always produce a plan (even CPU-only).
     let plan = registry.plan_sharding(7_000_000_000, &quant);
-    assert!(!plan.shards.is_empty());
+    assert!(!plan.shards().is_empty());
     assert!(plan.total_memory_bytes > 0);
 }
 
@@ -83,7 +83,7 @@ fn manual_registry_plan() {
 
     let plan = registry.plan_sharding(70_000_000_000, &QuantizationLevel::BFloat16);
     // 70B BF16 ~168 GB, each GPU 80 GB — should pipeline across 2
-    assert!(plan.shards.len() <= 2);
+    assert!(plan.shards().len() <= 2);
     assert!(plan.estimated_tokens_per_sec.is_some());
 }
 

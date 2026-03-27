@@ -1,6 +1,6 @@
 [package]
 name = "ai-hwaccel"
-version = "0.23.3"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.89"
 license = "AGPL-3.0-only"
@@ -19,6 +19,7 @@ all-backends = [
     "cuda", "rocm", "apple", "vulkan", "intel-npu", "amd-xdna",
     "tpu", "gaudi", "aws-neuron", "intel-oneapi", "qualcomm",
     "cerebras", "graphcore", "groq", "samsung-npu", "mediatek-apu",
+    "windows-wmi",
 ]
 cuda = []
 rocm = []
@@ -36,6 +37,7 @@ graphcore = []
 groq = []
 samsung-npu = []
 mediatek-apu = []
+windows-wmi = []
 cli = ["dep:tracing-subscriber"]
 async-detect = ["dep:tokio"]
 fuzz = []

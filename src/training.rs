@@ -8,6 +8,7 @@ use crate::requirement::AcceleratorRequirement;
 
 /// Fine-tuning / training method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[non_exhaustive]
 pub enum TrainingMethod {
     #[default]
     FullFineTune,
@@ -23,6 +24,8 @@ pub enum TrainingMethod {
 
 impl TrainingMethod {
     /// Preferred accelerator requirement for this training method.
+    #[must_use]
+    #[inline]
     pub fn preferred_accelerator(&self) -> AcceleratorRequirement {
         match self {
             // LoRA/QLoRA benefit from custom CUDA kernels
@@ -51,6 +54,7 @@ impl fmt::Display for TrainingMethod {
 
 /// Target accelerator family for training memory estimation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum TrainingTarget {
     #[default]
     Gpu,
@@ -102,6 +106,7 @@ impl fmt::Display for MemoryEstimate {
 /// assert!(est.total_gb > 0.0);
 /// assert!((est.model_gb + est.optimizer_gb + est.activation_gb - est.total_gb).abs() < 0.001);
 /// ```
+#[must_use]
 pub fn estimate_training_memory(
     model_params_millions: u64,
     method: TrainingMethod,

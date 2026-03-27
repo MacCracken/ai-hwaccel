@@ -12,10 +12,7 @@ fn type_classification_gpu() {
         AcceleratorType::CudaGpu { device_id: 0 },
         AcceleratorType::RocmGpu { device_id: 0 },
         AcceleratorType::MetalGpu,
-        AcceleratorType::VulkanGpu {
-            device_id: 0,
-            device_name: "test".into(),
-        },
+        AcceleratorType::VulkanGpu { device_id: 0 },
         AcceleratorType::IntelOneApi { device_id: 0 },
     ];
     for g in &gpus {
@@ -112,11 +109,7 @@ fn type_family_all_variants() {
     );
     assert_eq!(AcceleratorType::MetalGpu.family(), AcceleratorFamily::Gpu);
     assert_eq!(
-        AcceleratorType::VulkanGpu {
-            device_id: 0,
-            device_name: "x".into()
-        }
-        .family(),
+        AcceleratorType::VulkanGpu { device_id: 0 }.family(),
         AcceleratorFamily::Gpu
     );
     assert_eq!(
@@ -189,11 +182,7 @@ fn type_family_all_variants() {
 fn throughput_ordering() {
     let cpu = AcceleratorType::Cpu.throughput_multiplier();
     let npu = AcceleratorType::IntelNpu.throughput_multiplier();
-    let vulkan = AcceleratorType::VulkanGpu {
-        device_id: 0,
-        device_name: "x".into(),
-    }
-    .throughput_multiplier();
+    let vulkan = AcceleratorType::VulkanGpu { device_id: 0 }.throughput_multiplier();
     let cuda = AcceleratorType::CudaGpu { device_id: 0 }.throughput_multiplier();
     let tpu_v5p = AcceleratorType::Tpu {
         device_id: 0,
@@ -215,10 +204,7 @@ fn throughput_all_positive() {
         AcceleratorType::CudaGpu { device_id: 0 },
         AcceleratorType::RocmGpu { device_id: 0 },
         AcceleratorType::MetalGpu,
-        AcceleratorType::VulkanGpu {
-            device_id: 0,
-            device_name: "x".into(),
-        },
+        AcceleratorType::VulkanGpu { device_id: 0 },
         AcceleratorType::IntelNpu,
         AcceleratorType::AppleNpu,
         AcceleratorType::AmdXdnaNpu { device_id: 0 },
@@ -296,10 +282,7 @@ fn training_multiplier_positive_for_trainable_devices() {
         AcceleratorType::CudaGpu { device_id: 0 },
         AcceleratorType::RocmGpu { device_id: 0 },
         AcceleratorType::MetalGpu,
-        AcceleratorType::VulkanGpu {
-            device_id: 0,
-            device_name: "x".into(),
-        },
+        AcceleratorType::VulkanGpu { device_id: 0 },
         AcceleratorType::IntelOneApi { device_id: 0 },
         AcceleratorType::Tpu {
             device_id: 0,

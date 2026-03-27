@@ -36,12 +36,16 @@ impl SystemIo {
     }
 
     /// Total interconnect bandwidth in GB/s across all ports.
+    #[must_use]
+    #[inline]
     pub fn total_interconnect_bandwidth_gbps(&self) -> f64 {
         self.interconnects.iter().map(|i| i.bandwidth_gbps).sum()
     }
 
     /// Estimate data ingestion time for a given dataset size in bytes,
     /// using the fastest detected storage or network path.
+    #[must_use]
+    #[inline]
     pub fn estimate_ingestion_secs(&self, dataset_bytes: u64) -> Option<f64> {
         let best_storage_gbps = self
             .storage
@@ -74,6 +78,7 @@ pub struct Interconnect {
 
 /// Type of network interconnect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum InterconnectKind {
     /// InfiniBand (IB).
     InfiniBand,
@@ -115,6 +120,7 @@ pub struct StorageDevice {
 
 /// Type of storage device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum StorageKind {
     /// NVMe SSD.
     NVMe,

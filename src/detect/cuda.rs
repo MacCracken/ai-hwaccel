@@ -154,6 +154,11 @@ pub fn parse_cuda_output(
             } else {
                 Some(driver_version_str.to_string())
             },
+            device_name: if gpu_name.is_empty() {
+                None
+            } else {
+                Some(gpu_name.to_string())
+            },
             memory_bandwidth_gbps,
             memory_used_bytes: mem_used_mb.map(|mb| mb.saturating_mul(1024 * 1024)),
             memory_free_bytes: mem_free_mb.map(|mb| mb.saturating_mul(1024 * 1024)),
