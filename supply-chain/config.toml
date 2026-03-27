@@ -4,7 +4,6 @@
 [cargo-vet]
 version = "0.10"
 
-
 [policy.ai-hwaccel]
 audit-as-crates-io = false
 
@@ -22,6 +21,14 @@ criteria = "safe-to-run"
 
 [[exemptions.autocfg]]
 version = "1.5.0"
+criteria = "safe-to-run"
+
+[[exemptions.bit-set]]
+version = "0.8.0"
+criteria = "safe-to-run"
+
+[[exemptions.bit-vec]]
+version = "0.8.0"
 criteria = "safe-to-run"
 
 [[exemptions.bitflags]]
@@ -106,6 +113,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fastrand]]
 version = "2.3.0"
+criteria = "safe-to-run"
+
+[[exemptions.fnv]]
+version = "1.0.7"
 criteria = "safe-to-run"
 
 [[exemptions.foldhash]]
@@ -330,6 +341,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.unarray]]
 version = "0.1.4"
+criteria = "safe-to-run"
+
+[[exemptions.unicode-xid]]
+version = "0.2.6"
 criteria = "safe-to-run"
 
 [[exemptions.valuable]]
