@@ -6,7 +6,9 @@ use crate::error::DetectionError;
 use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
-use super::command::{DEFAULT_TIMEOUT, run_tool, validate_device_id, validate_memory_mb};
+use super::command::{
+    DEFAULT_TIMEOUT, parse_csv_line, run_tool, validate_device_id, validate_memory_mb,
+};
 
 const XPU_SMI_ARGS: &[&str] = &["discovery", "--dump", "1,2,18,19"];
 
@@ -57,10 +59,10 @@ pub(crate) fn parse_xpu_smi_output(
         if line.starts_with("DeviceId") || line.trim().is_empty() {
             continue;
         }
-        let parts: Vec<&str> = line.split(',').take(20).map(|s| s.trim()).collect();
-        if parts.len() < 4 {
-            continue;
-        }
+        let parts = match parse_csv_line(line, 4, "intel-oneapi") {
+            Ok(p) => p,
+            Err(_) => continue, // silently skip malformed lines (header, etc.)
+        };
         let device_id = match validate_device_id(parts[0], "intel-oneapi") {
             Ok(id) => id,
             Err(e) => {

@@ -283,7 +283,7 @@ pub mod training;
 pub mod units;
 
 pub use cache::{CachedRegistry, DiskCachedRegistry};
-pub use cost::{CloudInstance as CloudGpuInstance, CloudProvider, InstanceRecommendation};
+pub use cost::{CloudGpuInstance, CloudProvider, InstanceRecommendation};
 pub use detect::TimedDetection;
 pub use error::DetectionError;
 pub use hardware::{
@@ -296,8 +296,8 @@ pub use registry::{AcceleratorRegistry, Backend, DetectBuilder, SCHEMA_VERSION};
 pub use requirement::AcceleratorRequirement;
 pub use sharding::{ModelShard, ShardingPlan, ShardingStrategy};
 pub use system_io::{
-    CloudInstance, Interconnect, InterconnectKind, RuntimeEnvironment, StorageDevice, StorageKind,
-    SystemIo,
+    CloudInstanceMeta, Interconnect, InterconnectKind, RuntimeEnvironment, StorageDevice,
+    StorageKind, SystemIo,
 };
 pub use training::{MemoryEstimate, TrainingMethod, TrainingTarget, estimate_training_memory};
 

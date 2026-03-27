@@ -15,6 +15,11 @@ exclude = ["rust_out", ".claude/"]
 
 [features]
 default = ["all-backends", "cli"]
+# CPU-only: no hardware backends, minimal binary size.
+minimal = []
+# Common desktop/cloud backends.
+common = ["cuda", "rocm", "apple", "vulkan", "intel-npu"]
+# All supported backends.
 all-backends = [
     "cuda", "rocm", "apple", "vulkan", "intel-npu", "amd-xdna",
     "tpu", "gaudi", "aws-neuron", "intel-oneapi", "qualcomm",

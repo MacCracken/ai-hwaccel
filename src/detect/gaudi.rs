@@ -6,7 +6,9 @@ use crate::error::DetectionError;
 use crate::hardware::{AcceleratorType, GaudiGeneration};
 use crate::profile::AcceleratorProfile;
 
-use super::command::{DEFAULT_TIMEOUT, run_tool, validate_device_id, validate_memory_mb};
+use super::command::{
+    DEFAULT_TIMEOUT, parse_csv_line, run_tool, validate_device_id, validate_memory_mb,
+};
 
 const HL_SMI_ARGS: &[&str] = &[
     "--query-aip=index,name,memory.total,memory.free",
@@ -58,14 +60,13 @@ pub fn parse_gaudi_output(
 ) {
     for line in stdout.lines() {
         trace!(line, "parsing hl-smi CSV line");
-        let parts: Vec<&str> = line.split(',').take(20).map(|s| s.trim()).collect();
-        if parts.len() < 4 {
-            warnings.push(DetectionError::ParseError {
-                backend: "gaudi".into(),
-                message: format!("expected 4 CSV fields, got {}: {}", parts.len(), line),
-            });
-            continue;
-        }
+        let parts = match parse_csv_line(line, 4, "gaudi") {
+            Ok(p) => p,
+            Err(e) => {
+                warnings.push(e);
+                continue;
+            }
+        };
         let device_id = match validate_device_id(parts[0], "gaudi") {
             Ok(id) => id,
             Err(e) => {

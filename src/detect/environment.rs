@@ -56,7 +56,7 @@ fn detect_container() -> ContainerInfo {
     }
 }
 
-fn detect_cloud_instance() -> Option<crate::system_io::CloudInstance> {
+fn detect_cloud_instance() -> Option<crate::system_io::CloudInstanceMeta> {
     // Read DMI files once and pass to all detectors to avoid redundant I/O.
     let dmi = DmiInfo::read();
 
@@ -97,7 +97,7 @@ impl DmiInfo {
 }
 
 /// Detect AWS instance type via DMI (no HTTP needed).
-fn detect_aws(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstance> {
+fn detect_aws(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstanceMeta> {
     let is_aws = dmi.bios_vendor.contains("Amazon")
         || dmi.sys_vendor.contains("Amazon")
         || dmi.sys_vendor.contains("Xen");
@@ -122,7 +122,7 @@ fn detect_aws(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstance> {
         .ok()
         .or_else(|| std::env::var("AWS_REGION").ok());
 
-    Some(crate::system_io::CloudInstance {
+    Some(crate::system_io::CloudInstanceMeta {
         provider: "aws".into(),
         instance_type,
         instance_id,
@@ -132,12 +132,12 @@ fn detect_aws(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstance> {
 }
 
 /// Detect GCE via DMI.
-fn detect_gce(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstance> {
+fn detect_gce(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstanceMeta> {
     if !dmi.product_name.contains("Google") && !dmi.sys_vendor.contains("Google") {
         return None;
     }
 
-    Some(crate::system_io::CloudInstance {
+    Some(crate::system_io::CloudInstanceMeta {
         provider: "gcp".into(),
         instance_type: None,
         instance_id: None,
@@ -147,14 +147,14 @@ fn detect_gce(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstance> {
 }
 
 /// Detect Azure via DMI.
-fn detect_azure(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstance> {
+fn detect_azure(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstanceMeta> {
     if !dmi.sys_vendor.contains("Microsoft")
         && !dmi.chassis_asset_tag.contains("7783-7084-3265-9085")
     {
         return None;
     }
 
-    Some(crate::system_io::CloudInstance {
+    Some(crate::system_io::CloudInstanceMeta {
         provider: "azure".into(),
         instance_type: None,
         instance_id: None,

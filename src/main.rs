@@ -51,49 +51,7 @@ fn main() {
 
     // --cost <model_size> [--quant <level>] [--provider <aws|gcp|azure>]
     if let Some(model_str) = get_val("--cost") {
-        let model_params = parse_model_size(&model_str);
-        let quant = get_val("--quant")
-            .and_then(|q| parse_quant_level(&q))
-            .unwrap_or(ai_hwaccel::QuantizationLevel::BFloat16);
-        let provider = get_val("--provider").and_then(|p| match p.to_lowercase().as_str() {
-            "aws" => Some(ai_hwaccel::cost::CloudProvider::Aws),
-            "gcp" | "google" => Some(ai_hwaccel::cost::CloudProvider::Gcp),
-            "azure" | "microsoft" => Some(ai_hwaccel::cost::CloudProvider::Azure),
-            _ => None,
-        });
-
-        let recs = ai_hwaccel::cost::recommend_instance(model_params, &quant, provider);
-        if recs.is_empty() {
-            println!(
-                "No cloud instance has enough GPU memory for {} params at {}.",
-                format_params(model_params),
-                quant
-            );
-        } else {
-            let needed_gb = recs[0].memory_required_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
-            println!(
-                "Model: {} params at {} — {:.1} GB required\n",
-                format_params(model_params),
-                quant,
-                needed_gb
-            );
-            println!(
-                "{:<32} {:>8} {:>6} {:>10} {:>8} {:>10}",
-                "Instance", "Provider", "GPUs", "GPU Mem", "$/hr", "Headroom"
-            );
-            println!("{}", "-".repeat(80));
-            for rec in recs.iter().take(10) {
-                println!(
-                    "{:<32} {:>8} {:>6} {:>7} GB {:>8.2} {:>9.0}%",
-                    rec.instance.name,
-                    rec.instance.provider,
-                    rec.instance.gpu_count,
-                    rec.instance.total_gpu_memory_gb,
-                    rec.instance.price_per_hour,
-                    rec.memory_headroom_pct
-                );
-            }
-        }
+        handle_cost_mode(&model_str, get_val("--quant"), get_val("--provider"));
         return;
     }
 
@@ -131,18 +89,7 @@ fn main() {
     log_detection(&registry);
 
     if let Some((ref timings, total)) = timed_result {
-        eprintln!("\nBackend timing:");
-        let mut entries: Vec<_> = timings.iter().collect();
-        entries.sort_by(|a, b| b.1.cmp(a.1));
-        for (name, dur) in &entries {
-            eprintln!("  {:<16} {:>8.1}ms", name, dur.as_secs_f64() * 1000.0);
-        }
-        eprintln!(
-            "  {:<16} {:>8.1}ms",
-            "TOTAL (wall)",
-            total.as_secs_f64() * 1000.0
-        );
-        eprintln!();
+        handle_profile_mode(timings, total);
     }
 
     let pretty = has("--pretty") || has("-p");
@@ -164,6 +111,79 @@ fn main() {
         emit_json(&registry, pretty);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Cost mode
+// ---------------------------------------------------------------------------
+
+fn handle_cost_mode(model_str: &str, quant_str: Option<String>, provider_str: Option<String>) {
+    let model_params = parse_model_size(model_str);
+    let quant = quant_str
+        .and_then(|q| parse_quant_level(&q))
+        .unwrap_or(ai_hwaccel::QuantizationLevel::BFloat16);
+    let provider = provider_str.and_then(|p| match p.to_lowercase().as_str() {
+        "aws" => Some(ai_hwaccel::cost::CloudProvider::Aws),
+        "gcp" | "google" => Some(ai_hwaccel::cost::CloudProvider::Gcp),
+        "azure" | "microsoft" => Some(ai_hwaccel::cost::CloudProvider::Azure),
+        _ => None,
+    });
+
+    let recs = ai_hwaccel::cost::recommend_instance(model_params, &quant, provider);
+    if recs.is_empty() {
+        println!(
+            "No cloud instance has enough GPU memory for {} params at {}.",
+            format_params(model_params),
+            quant
+        );
+    } else {
+        let needed_gb = recs[0].memory_required_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+        println!(
+            "Model: {} params at {} — {:.1} GB required\n",
+            format_params(model_params),
+            quant,
+            needed_gb
+        );
+        println!(
+            "{:<32} {:>8} {:>6} {:>10} {:>8} {:>10}",
+            "Instance", "Provider", "GPUs", "GPU Mem", "$/hr", "Headroom"
+        );
+        println!("{}", "-".repeat(80));
+        for rec in recs.iter().take(10) {
+            println!(
+                "{:<32} {:>8} {:>6} {:>7} GB {:>8.2} {:>9.0}%",
+                rec.instance.name,
+                rec.instance.provider,
+                rec.instance.gpu_count,
+                rec.instance.total_gpu_memory_gb,
+                rec.instance.price_per_hour,
+                rec.memory_headroom_pct
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Profile mode
+// ---------------------------------------------------------------------------
+
+fn handle_profile_mode(timings: &HashMap<String, Duration>, total: Duration) {
+    eprintln!("\nBackend timing:");
+    let mut entries: Vec<_> = timings.iter().collect();
+    entries.sort_by(|a, b| b.1.cmp(a.1));
+    for (name, dur) in &entries {
+        eprintln!("  {:<16} {:>8.1}ms", name, dur.as_secs_f64() * 1000.0);
+    }
+    eprintln!(
+        "  {:<16} {:>8.1}ms",
+        "TOTAL (wall)",
+        total.as_secs_f64() * 1000.0
+    );
+    eprintln!();
+}
+
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
 
 fn log_detection(registry: &AcceleratorRegistry) {
     info!(
@@ -205,6 +225,35 @@ impl Column {
         Column::Numa,
         Column::Status,
     ];
+
+    fn header(self) -> &'static str {
+        match self {
+            Self::Id => "ID",
+            Self::Name => "Device",
+            Self::Memory => "Memory",
+            Self::Free => "Free",
+            Self::Bandwidth => "BW",
+            Self::Pcie => "PCIe",
+            Self::Numa => "NUMA",
+            Self::Family => "Family",
+            Self::Status => "Status",
+        }
+    }
+
+    fn width(self) -> usize {
+        match self {
+            Self::Id => 6,
+            Self::Name => 28,
+            Self::Memory | Self::Free | Self::Bandwidth => 10,
+            Self::Pcie => 8,
+            Self::Numa => 6,
+            Self::Family | Self::Status => 8,
+        }
+    }
+
+    fn is_left_aligned(self) -> bool {
+        matches!(self, Self::Id | Self::Name)
+    }
 }
 
 fn parse_columns(s: &str) -> Vec<Column> {
@@ -295,7 +344,6 @@ fn run_watch(
         let registry = AcceleratorRegistry::detect();
 
         // Build delta map: device key → change in memory_used_bytes.
-        // Uses Debug format as key for unique device identity across runs.
         let mut deltas: HashMap<String, i64> = HashMap::new();
         for p in registry.all_profiles() {
             let key = format!("{:?}", p.accelerator);
@@ -337,27 +385,23 @@ fn run_watch(
 }
 
 // ---------------------------------------------------------------------------
-// Table output
+// Table output — composable helpers
 // ---------------------------------------------------------------------------
 
-fn print_table(
-    registry: &AcceleratorRegistry,
-    sort_by: Option<&str>,
+fn filter_profiles<'a>(
+    profiles: &'a [AcceleratorProfile],
     family_filter: Option<&str>,
-    columns: &[Column],
-    tsv: bool,
-    deltas: Option<&HashMap<String, i64>>,
-) {
-    let mut profiles: Vec<&AcceleratorProfile> = registry.all_profiles().iter().collect();
-
-    // Filter by family
+) -> Vec<&'a AcceleratorProfile> {
+    let mut result: Vec<&AcceleratorProfile> = profiles.iter().collect();
     if let Some(f) = family_filter
         && let Some(fam) = parse_family(f)
     {
-        profiles.retain(|p| p.accelerator.family() == fam);
+        result.retain(|p| p.accelerator.family() == fam);
     }
+    result
+}
 
-    // Sort
+fn sort_profiles(profiles: &mut [&AcceleratorProfile], sort_by: Option<&str>) {
     match sort_by {
         Some("mem" | "memory") => {
             profiles.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes));
@@ -370,118 +414,104 @@ fn print_table(
         }
         _ => {}
     }
+}
 
-    let sep = if tsv { "\t" } else { " " };
-
-    // Header
-    let header: Vec<&str> = columns
-        .iter()
-        .map(|c| match c {
-            Column::Id => "ID",
-            Column::Name => "Device",
-            Column::Memory => "Memory",
-            Column::Free => "Free",
-            Column::Bandwidth => "BW",
-            Column::Pcie => "PCIe",
-            Column::Numa => "NUMA",
-            Column::Family => "Family",
-            Column::Status => "Status",
-        })
-        .collect();
-
+fn render_header(columns: &[Column], tsv: bool) {
+    let header: Vec<&str> = columns.iter().map(|c| c.header()).collect();
     if tsv {
-        println!("{}", header.join(sep));
+        println!("{}", header.join("\t"));
     } else {
         let hdr = format_row(columns, &header);
         println!("{}", hdr);
         println!("{}", "-".repeat(hdr.len()));
     }
+}
 
-    // Rows
-    for (i, p) in profiles.iter().enumerate() {
-        let mem_gb = format!(
-            "{:.1} GB",
-            p.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
-        );
+fn render_row(
+    i: usize,
+    p: &AcceleratorProfile,
+    columns: &[Column],
+    tsv: bool,
+    deltas: Option<&HashMap<String, i64>>,
+) {
+    let mem_gb = format!(
+        "{:.1} GB",
+        p.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+    );
 
-        let free_str = match p.memory_free_bytes {
-            Some(b) => format!("{:.1} GB", b as f64 / (1024.0 * 1024.0 * 1024.0)),
-            None => "-".into(),
-        };
+    let free_str = match p.memory_free_bytes {
+        Some(b) => format!("{:.1} GB", b as f64 / (1024.0 * 1024.0 * 1024.0)),
+        None => "-".into(),
+    };
 
-        let bw_str = match p.memory_bandwidth_gbps {
-            Some(bw) if bw >= 1000.0 => format!("{:.1} TB/s", bw / 1000.0),
-            Some(bw) => format!("{:.0} GB/s", bw),
-            None => "-".into(),
-        };
+    let bw_str = match p.memory_bandwidth_gbps {
+        Some(bw) if bw >= 1000.0 => format!("{:.1} TB/s", bw / 1000.0),
+        Some(bw) => format!("{:.0} GB/s", bw),
+        None => "-".into(),
+    };
 
-        let pcie_str = match p.pcie_bandwidth_gbps {
-            Some(bw) => format!("{:.1}", bw),
-            None => "-".into(),
-        };
+    let pcie_str = match p.pcie_bandwidth_gbps {
+        Some(bw) => format!("{:.1}", bw),
+        None => "-".into(),
+    };
 
-        let numa_str = match p.numa_node {
-            Some(n) => n.to_string(),
-            None => "-".into(),
-        };
+    let numa_str = match p.numa_node {
+        Some(n) => n.to_string(),
+        None => "-".into(),
+    };
 
-        let status = if p.available { "ok" } else { "unavail" };
-        let device_name = if let Some(name) = &p.device_name {
-            format!("{} [{}]", p.accelerator, name)
-        } else {
-            p.accelerator.to_string()
-        };
+    let status = if p.available { "ok" } else { "unavail" };
+    let device_name = if let Some(name) = &p.device_name {
+        format!("{} [{}]", p.accelerator, name)
+    } else {
+        p.accelerator.to_string()
+    };
 
-        // Check for memory delta annotation (keyed by Debug format for unique identity).
-        let debug_key = format!("{:?}", p.accelerator);
-        let delta_annotation = deltas
-            .and_then(|d| d.get(&debug_key))
-            .map(|&d| {
-                let gb = d.abs() as f64 / (1024.0 * 1024.0 * 1024.0);
-                if d > 0 {
-                    format!(" (+{:.1})", gb)
+    let debug_key = format!("{:?}", p.accelerator);
+    let delta_annotation = deltas
+        .and_then(|d| d.get(&debug_key))
+        .map(|&d| {
+            let gb = d.abs() as f64 / (1024.0 * 1024.0 * 1024.0);
+            if d > 0 {
+                format!(" (+{:.1})", gb)
+            } else {
+                format!(" (-{:.1})", gb)
+            }
+        })
+        .unwrap_or_default();
+
+    let free_with_delta = format!("{}{}", free_str, delta_annotation);
+
+    let values: Vec<String> = columns
+        .iter()
+        .map(|c| match c {
+            Column::Id => i.to_string(),
+            Column::Name => {
+                if tsv {
+                    device_name.clone()
                 } else {
-                    format!(" (-{:.1})", gb)
+                    truncate(&device_name, 28)
                 }
-            })
-            .unwrap_or_default();
-
-        let free_with_delta = format!("{}{}", free_str, delta_annotation);
-
-        let values: Vec<String> = columns
-            .iter()
-            .map(|c| match c {
-                Column::Id => i.to_string(),
-                Column::Name => {
-                    if tsv {
-                        device_name.clone()
-                    } else {
-                        truncate(&device_name, 28)
-                    }
-                }
-                Column::Memory => mem_gb.clone(),
-                Column::Free => free_with_delta.clone(),
-                Column::Bandwidth => bw_str.clone(),
-                Column::Pcie => pcie_str.clone(),
-                Column::Numa => numa_str.clone(),
-                Column::Family => p.accelerator.family().to_string(),
-                Column::Status => status.into(),
-            })
-            .collect();
-
-        if tsv {
-            println!("{}", values.join(sep));
-        } else {
-            let refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
-            println!("{}", format_row(columns, &refs));
-        }
-    }
+            }
+            Column::Memory => mem_gb.clone(),
+            Column::Free => free_with_delta.clone(),
+            Column::Bandwidth => bw_str.clone(),
+            Column::Pcie => pcie_str.clone(),
+            Column::Numa => numa_str.clone(),
+            Column::Family => p.accelerator.family().to_string(),
+            Column::Status => status.into(),
+        })
+        .collect();
 
     if tsv {
-        return; // TSV mode: data only, no footer
+        println!("{}", values.join("\t"));
+    } else {
+        let refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
+        println!("{}", format_row(columns, &refs));
     }
+}
 
-    // Footer
+fn render_footer(registry: &AcceleratorRegistry) {
     println!();
     println!(
         "Total: {} device(s), {:.1} GB system, {:.1} GB accelerator",
@@ -515,7 +545,11 @@ fn print_table(
         println!("       {}", counts.join(", "));
     }
 
-    // System I/O summary
+    render_system_io(registry);
+    render_warnings(registry);
+}
+
+fn render_system_io(registry: &AcceleratorRegistry) {
     let sio = registry.system_io();
     if !sio.interconnects.is_empty() {
         println!();
@@ -539,7 +573,6 @@ fn print_table(
         }
     }
 
-    // Environment info
     if let Some(ref env) = sio.environment {
         println!();
         println!("Environment:");
@@ -562,7 +595,9 @@ fn print_table(
             println!("  Bare metal / local VM");
         }
     }
+}
 
+fn render_warnings(registry: &AcceleratorRegistry) {
     if !registry.warnings().is_empty() {
         println!();
         println!("Warnings:");
@@ -572,21 +607,43 @@ fn print_table(
     }
 }
 
-/// Format a row with fixed-width columns for human-readable output.
+/// Orchestrator: filter → sort → header → rows → footer.
+fn print_table(
+    registry: &AcceleratorRegistry,
+    sort_by: Option<&str>,
+    family_filter: Option<&str>,
+    columns: &[Column],
+    tsv: bool,
+    deltas: Option<&HashMap<String, i64>>,
+) {
+    let mut profiles = filter_profiles(registry.all_profiles(), family_filter);
+    sort_profiles(&mut profiles, sort_by);
+
+    render_header(columns, tsv);
+    for (i, p) in profiles.iter().enumerate() {
+        render_row(i, p, columns, tsv, deltas);
+    }
+
+    if !tsv {
+        render_footer(registry);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Formatting helpers
+// ---------------------------------------------------------------------------
+
 fn format_row(columns: &[Column], values: &[&str]) -> String {
     columns
         .iter()
         .zip(values.iter())
-        .map(|(col, val)| match col {
-            Column::Id => format!("{:<6}", val),
-            Column::Name => format!("{:<28}", val),
-            Column::Memory => format!("{:>10}", val),
-            Column::Free => format!("{:>10}", val),
-            Column::Bandwidth => format!("{:>10}", val),
-            Column::Pcie => format!("{:>8}", val),
-            Column::Numa => format!("{:>6}", val),
-            Column::Family => format!("{:>8}", val),
-            Column::Status => format!("{:>8}", val),
+        .map(|(col, val)| {
+            let w = col.width();
+            if col.is_left_aligned() {
+                format!("{:<w$}", val, w = w)
+            } else {
+                format!("{:>w$}", val, w = w)
+            }
         })
         .collect::<Vec<_>>()
         .join(" ")
@@ -675,6 +732,10 @@ fn build_summary(registry: &AcceleratorRegistry) -> serde_json::Value {
         "warnings": registry.warnings().iter().map(|w| w.to_string()).collect::<Vec<_>>(),
     })
 }
+
+// ---------------------------------------------------------------------------
+// Parsing helpers
+// ---------------------------------------------------------------------------
 
 /// Parse a model size string like "7B", "70b", "405B", "7000M", or a raw number.
 fn parse_model_size(s: &str) -> u64 {

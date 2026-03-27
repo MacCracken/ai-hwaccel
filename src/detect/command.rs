@@ -270,6 +270,32 @@ pub(crate) fn validate_device_id(raw: &str, backend: &str) -> Result<u32, Detect
     Ok(id)
 }
 
+/// Parse a CSV line into trimmed fields, validating minimum field count.
+///
+/// Returns `Ok(fields)` if the line has at least `min_fields` fields,
+/// or `Err` with a parse error for the given backend.
+///
+/// Fields are capped at 20 to bound memory usage on malformed input.
+pub(crate) fn parse_csv_line<'a>(
+    line: &'a str,
+    min_fields: usize,
+    backend: &str,
+) -> Result<Vec<&'a str>, DetectionError> {
+    let fields: Vec<&str> = line.split(',').take(20).map(|s| s.trim()).collect();
+    if fields.len() < min_fields {
+        return Err(DetectionError::ParseError {
+            backend: backend.into(),
+            message: format!(
+                "expected {}+ CSV fields, got {}: {}",
+                min_fields,
+                fields.len(),
+                line
+            ),
+        });
+    }
+    Ok(fields)
+}
+
 /// Validate a memory value in MB is within a sane range (0–16 TiB).
 pub(crate) fn validate_memory_mb(raw: &str, backend: &str) -> Result<u64, DetectionError> {
     let mb: u64 = raw.parse().map_err(|e| DetectionError::ParseError {

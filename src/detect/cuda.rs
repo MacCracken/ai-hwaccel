@@ -7,7 +7,9 @@ use crate::hardware::AcceleratorType;
 use crate::profile::AcceleratorProfile;
 
 use super::bandwidth::{estimate_nvidia_bandwidth_from_cc, nvidia_bus_width_bits};
-use super::command::{DEFAULT_TIMEOUT, run_tool, validate_device_id, validate_memory_mb};
+use super::command::{
+    DEFAULT_TIMEOUT, parse_csv_line, run_tool, validate_device_id, validate_memory_mb,
+};
 
 const NVIDIA_SMI_ARGS: &[&str] = &[
     "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name,temperature.gpu,power.draw,utilization.gpu,clocks.max.memory",
@@ -64,15 +66,13 @@ pub fn parse_cuda_output(
 ) {
     for line in stdout.lines() {
         trace!(line, "parsing nvidia-smi CSV line");
-        let parts: Vec<&str> = line.split(',').take(20).map(|s| s.trim()).collect();
-        // Accept 6 fields (legacy) or 7 (with gpu name).
-        if parts.len() < 6 {
-            warnings.push(DetectionError::ParseError {
-                backend: "cuda".into(),
-                message: format!("expected 6+ CSV fields, got {}: {}", parts.len(), line),
-            });
-            continue;
-        }
+        let parts = match parse_csv_line(line, 6, "cuda") {
+            Ok(p) => p,
+            Err(e) => {
+                warnings.push(e);
+                continue;
+            }
+        };
 
         let device_id = match validate_device_id(parts[0], "cuda") {
             Ok(id) => id,

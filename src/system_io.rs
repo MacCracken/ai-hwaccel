@@ -155,12 +155,12 @@ pub struct RuntimeEnvironment {
     pub kubernetes_namespace: Option<String>,
     /// Cloud instance metadata (if detected).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cloud_instance: Option<CloudInstance>,
+    pub cloud_instance: Option<CloudInstanceMeta>,
 }
 
 /// Cloud instance metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CloudInstance {
+pub struct CloudInstanceMeta {
     /// Cloud provider ("aws", "gcp", "azure").
     pub provider: String,
     /// Instance type (e.g. "p4d.24xlarge").

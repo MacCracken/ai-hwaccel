@@ -28,11 +28,11 @@ use crate::registry::AcceleratorRegistry;
 const PRICING_JSON: &str = include_str!("../data/cloud_pricing.json");
 
 /// Parsed instances, initialized once on first access.
-static PARSED_INSTANCES: OnceLock<Vec<CloudInstance>> = OnceLock::new();
+static PARSED_INSTANCES: OnceLock<Vec<CloudGpuInstance>> = OnceLock::new();
 
 /// A cloud GPU instance from the pricing table.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CloudInstance {
+pub struct CloudGpuInstance {
     /// Instance name (e.g. "p5.48xlarge").
     pub name: String,
     /// Cloud provider (e.g. "aws", "gcp", "azure").
@@ -79,7 +79,7 @@ impl CloudProvider {
 #[derive(Debug, Clone)]
 pub struct InstanceRecommendation {
     /// The recommended cloud instance.
-    pub instance: CloudInstance,
+    pub instance: CloudGpuInstance,
     /// Estimated memory required for the model (bytes).
     pub memory_required_bytes: u64,
     /// Memory headroom percentage (how much extra memory is available).
@@ -90,11 +90,11 @@ pub struct InstanceRecommendation {
 ///
 /// Results are parsed once and cached for the lifetime of the process.
 #[must_use]
-pub fn all_instances() -> &'static [CloudInstance] {
+pub fn all_instances() -> &'static [CloudGpuInstance] {
     #[derive(serde::Deserialize)]
     struct PricingData {
         #[serde(default)]
-        instances: Vec<CloudInstance>,
+        instances: Vec<CloudGpuInstance>,
     }
 
     PARSED_INSTANCES.get_or_init(|| {

@@ -17,7 +17,7 @@ fn environment_serde_roundtrip() {
         is_docker: true,
         is_kubernetes: false,
         kubernetes_namespace: None,
-        cloud_instance: Some(CloudInstance {
+        cloud_instance: Some(CloudInstanceMeta {
             provider: "aws".into(),
             instance_type: Some("p4d.24xlarge".into()),
             instance_id: Some("i-1234567890abcdef0".into()),
