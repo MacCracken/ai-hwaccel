@@ -1,7 +1,75 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.indexmap]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+delta = "2.13.0 -> 2.13.1"
+
+[[audits.js-sys]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.3.91 -> 0.3.94"
+
+[[audits.libc]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.183 -> 0.2.184"
+
+[[audits.mio]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.1.1 -> 1.2.0"
+
+[[audits.proptest]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+delta = "1.10.0 -> 1.11.0"
+
+[[audits.tokio]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.50.0 -> 1.51.0"
+
+[[audits.tokio-macros]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "2.6.1 -> 2.7.0"
+
+[[audits.wasm-bindgen]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.2.114 -> 0.2.117"
+
+[[audits.wasm-bindgen-macro]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.2.114 -> 0.2.117"
+
+[[audits.wasm-bindgen-macro-support]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.2.114 -> 0.2.117"
+
+[[audits.wasm-bindgen-shared]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.2.114 -> 0.2.117"
+
+[[audits.web-sys]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.3.91 -> 0.3.94"
+
+[[audits.zerocopy]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.8.47 -> 0.8.48"
+
+[[audits.zerocopy-derive]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.8.47 -> 0.8.48"
 
 [[trusted.aho-corasick]]
 criteria = "safe-to-deploy"
@@ -143,37 +211,37 @@ end = "2027-03-19"
 
 [[trusted.tracing]]
 criteria = "safe-to-deploy"
-user-id = 1249 # Eliza Weisman (hawkw)
+user-id = 1249
 start = "2019-06-28"
 end = "2027-03-19"
 
 [[trusted.tracing-attributes]]
 criteria = "safe-to-deploy"
-user-id = 1249 # Eliza Weisman (hawkw)
+user-id = 1249
 start = "2019-08-08"
 end = "2027-03-19"
 
 [[trusted.tracing-core]]
 criteria = "safe-to-deploy"
-user-id = 1249 # Eliza Weisman (hawkw)
+user-id = 1249
 start = "2019-06-20"
 end = "2027-03-19"
 
 [[trusted.tracing-log]]
 criteria = "safe-to-deploy"
-user-id = 1249 # Eliza Weisman (hawkw)
+user-id = 1249
 start = "2019-06-27"
 end = "2027-03-19"
 
 [[trusted.tracing-serde]]
 criteria = "safe-to-deploy"
-user-id = 1249 # Eliza Weisman (hawkw)
+user-id = 1249
 start = "2019-06-27"
 end = "2027-03-19"
 
 [[trusted.tracing-subscriber]]
 criteria = "safe-to-deploy"
-user-id = 1249 # Eliza Weisman (hawkw)
+user-id = 1249
 start = "2019-06-27"
 end = "2027-03-19"
 

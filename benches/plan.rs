@@ -98,7 +98,7 @@ fn bench_json_roundtrip(c: &mut Criterion) {
 fn bench_by_family(c: &mut Criterion) {
     let registry = build_large_registry();
     c.bench_function("by_family GPU (13 devices)", |b| {
-        b.iter(|| registry.by_family(AcceleratorFamily::Gpu));
+        b.iter(|| registry.by_family(AcceleratorFamily::Gpu).count());
     });
 }
 

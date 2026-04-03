@@ -750,3 +750,193 @@ timestamp,commit,branch,benchmark,low_ns,estimate_ns,high_ns
 2026-03-27T16:31:06Z,ebbb9e1,main,training_model_sizes/13B_lora_gpu,2.7401,2.7627,2.7957
 2026-03-27T16:31:06Z,ebbb9e1,main,training_model_sizes/70B_lora_gpu,2.8986,2.9815,3.0969
 2026-03-27T16:31:06Z,ebbb9e1,main,training_model_sizes/405B_lora_gpu,2.7338,2.7396,2.7462
+2026-04-03T13:19:20Z,649834b,main,load_pricing_table,1.2300,1.2367,1.2443
+2026-04-03T13:19:20Z,649834b,main,recommend_instance/7B_bf16_all,3279.3000,3296.1000,3313.2000
+2026-04-03T13:19:20Z,649834b,main,recommend_instance/7B_int8_aws,1177.0000,1181.9000,1186.9000
+2026-04-03T13:19:20Z,649834b,main,recommend_instance/70B_bf16_all,1495.4000,1500.0000,1504.4000
+2026-04-03T13:19:20Z,649834b,main,recommend_instance/70B_int4_gcp,652.08,655.40,659.01
+2026-04-03T13:19:20Z,649834b,main,cheapest_instance/7B_bf16,3546.4000,3564.1000,3583.1000
+2026-04-03T13:19:20Z,649834b,main,cheapest_instance/70B_bf16,1443.4000,1450.2000,1457.5000
+2026-04-03T13:19:20Z,649834b,main,detect_all,991350.0000,1009600.0000,1034800.0000
+2026-04-03T13:19:20Z,649834b,main,detect_none (CPU only),142230.0000,142680.0000,143140.0000
+2026-04-03T13:19:20Z,649834b,main,detect_single/cuda,229710.0000,238610.0000,246590.0000
+2026-04-03T13:19:20Z,649834b,main,detect_single/rocm,1084900.0000,1115500.0000,1147200.0000
+2026-04-03T13:19:20Z,649834b,main,detect_single/vulkan,160980.0000,161540.0000,162130.0000
+2026-04-03T13:19:20Z,649834b,main,detect_single/apple,168000.0000,168830.0000,169770.0000
+2026-04-03T13:19:20Z,649834b,main,detect_single/tpu,185710.0000,186440.0000,187230.0000
+2026-04-03T13:19:20Z,649834b,main,system_io/full_with_sysio,995760.0000,1007600.0000,1021700.0000
+2026-04-03T13:19:20Z,649834b,main,system_io/query_system_io,4.7971,4.8166,4.8392
+2026-04-03T13:19:20Z,649834b,main,system_io/ingestion_1gb,5.0484,5.2490,5.4700
+2026-04-03T13:19:20Z,649834b,main,system_io/ingestion_100gb,4.8867,4.9131,4.9416
+2026-04-03T13:19:20Z,649834b,main,system_io/ingestion_1tb,4.8989,4.9296,4.9695
+2026-04-03T13:19:20Z,649834b,main,system_io/serialize_registry,1615.2000,1625.2000,1638.0000
+2026-04-03T13:19:20Z,649834b,main,system_io/deserialize_registry,3220.0000,3461.6000,3715.1000
+2026-04-03T13:19:20Z,649834b,main,concurrent_detect_4_threads,4099600.0000,4410600.0000,4749900.0000
+2026-04-03T13:19:20Z,649834b,main,parse_nvidia_bandwidth_8gpu,1135.3000,1145.1000,1155.6000
+2026-04-03T13:19:20Z,649834b,main,nvidia_bus_width_all_ccs,0.2820,0.3003,0.3231
+2026-04-03T13:19:20Z,649834b,main,estimate_bw_from_cc_all,0.2815,0.2958,0.3129
+2026-04-03T13:19:20Z,649834b,main,parse_max_dpm_clock,450.07,470.91,490.30
+2026-04-03T13:19:20Z,649834b,main,parse_link_speed,92.600,100.22,108.37
+2026-04-03T13:19:20Z,649834b,main,parse_ib_rate,87.391,91.140,95.968
+2026-04-03T13:19:20Z,649834b,main,parse_nvlink_output_2gpu,944.25,948.46,952.67
+2026-04-03T13:19:20Z,649834b,main,parse_cuda_output_8gpu,5485.8000,5504.0000,5521.8000
+2026-04-03T13:19:20Z,649834b,main,parse_vulkan_output_2gpu,1831.2000,1861.4000,1897.7000
+2026-04-03T13:19:20Z,649834b,main,parse_gaudi_output_8dev,2323.2000,2334.5000,2347.1000
+2026-04-03T13:19:20Z,649834b,main,plan_sharding 70B BF16 (4 GPU),89.909,90.523,91.247
+2026-04-03T13:19:20Z,649834b,main,plan_sharding 70B BF16 (13 devices),48.424,48.738,49.065
+2026-04-03T13:19:20Z,649834b,main,suggest_quantization 70B (4 GPU),9.2095,9.4194,9.6011
+2026-04-03T13:19:20Z,649834b,main,suggest_quantization 70B (13 devices),19.765,19.894,20.061
+2026-04-03T13:19:20Z,649834b,main,estimate_memory 70B FP16,0.2467,0.2491,0.2520
+2026-04-03T13:19:20Z,649834b,main,estimate_training_memory 7B LoRA GPU,0.9671,0.9705,0.9739
+2026-04-03T13:19:20Z,649834b,main,best_available (13 devices),41.934,42.214,42.485
+2026-04-03T13:19:20Z,649834b,main,total_memory (13 devices),10.618,10.689,10.765
+2026-04-03T13:19:20Z,649834b,main,json_roundtrip/serialize (13 devices),4400.9000,4421.3000,4442.6000
+2026-04-03T13:19:20Z,649834b,main,json_roundtrip/deserialize (13 devices),5938.2000,5963.3000,5989.1000
+2026-04-03T13:19:20Z,649834b,main,by_family GPU (13 devices),134.95,140.20,144.97
+2026-04-03T13:19:20Z,649834b,main,bits_per_param_all_levels,0.3507,0.3883,0.4296
+2026-04-03T13:19:20Z,649834b,main,memory_reduction_factor_all_levels,0.3135,0.3543,0.3960
+2026-04-03T13:19:20Z,649834b,main,estimate_memory/70B_fp32,0.6439,0.7169,0.7928
+2026-04-03T13:19:20Z,649834b,main,estimate_memory/70B_fp16,0.7469,0.8241,0.9153
+2026-04-03T13:19:20Z,649834b,main,estimate_memory/70B_bf16,0.5676,0.5948,0.6300
+2026-04-03T13:19:20Z,649834b,main,estimate_memory/70B_int8,0.5456,0.5533,0.5613
+2026-04-03T13:19:20Z,649834b,main,estimate_memory/70B_int4,0.5611,0.5811,0.6032
+2026-04-03T13:19:20Z,649834b,main,suggest_quantization/1B_1gpu,4.8503,4.9602,5.0878
+2026-04-03T13:19:20Z,649834b,main,suggest_quantization/7B_1gpu,6.3367,6.8110,7.3438
+2026-04-03T13:19:20Z,649834b,main,suggest_quantization/13B_1gpu,8.7189,8.8505,8.9560
+2026-04-03T13:19:20Z,649834b,main,suggest_quantization/70B_1gpu,9.1874,9.4092,9.6375
+2026-04-03T13:19:20Z,649834b,main,suggest_quantization/405B_1gpu,9.4777,9.6093,9.7453
+2026-04-03T13:19:20Z,649834b,main,registry_queries/available_4dev,101.63,109.52,118.48
+2026-04-03T13:19:20Z,649834b,main,registry_queries/available_129dev,552.43,574.42,600.23
+2026-04-03T13:19:20Z,649834b,main,registry_queries/available_61dev_mixed,297.31,312.55,331.88
+2026-04-03T13:19:20Z,649834b,main,registry_queries/best_available_129dev,541.04,546.14,551.30
+2026-04-03T13:19:20Z,649834b,main,registry_queries/total_memory_129dev,237.77,245.28,251.65
+2026-04-03T13:19:20Z,649834b,main,registry_queries/total_accelerator_memory_129dev,79.205,79.852,80.673
+2026-04-03T13:19:20Z,649834b,main,registry_queries/has_accelerator_129dev,1.3144,1.3261,1.3418
+2026-04-03T13:19:20Z,649834b,main,registry_queries/by_family_gpu_61dev,299.99,314.91,332.51
+2026-04-03T13:19:20Z,649834b,main,registry_queries/by_family_tpu_61dev,121.78,125.10,129.36
+2026-04-03T13:19:20Z,649834b,main,registry_queries/satisfying_gpu_61dev,331.98,345.99,363.22
+2026-04-03T13:19:20Z,649834b,main,registry_queries/satisfying_any_accel_61dev,333.79,334.97,336.41
+2026-04-03T13:19:20Z,649834b,main,cached_registry/get_cached_hit,36.237,37.897,39.950
+2026-04-03T13:19:20Z,649834b,main,cached_registry/invalidate,11.030,11.243,11.497
+2026-04-03T13:19:20Z,649834b,main,lazy_registry/new,11025.0000,11098.0000,11186.0000
+2026-04-03T13:19:20Z,649834b,main,lazy_registry/by_family_gpu_cold,1003300.0000,1004600.0000,1006000.0000
+2026-04-03T13:19:20Z,649834b,main,lazy_registry/by_family_gpu_warm,63.333,63.672,64.071
+2026-04-03T13:19:20Z,649834b,main,lazy_registry/into_registry,2009300.0000,3232900.0000,5675800.0000
+2026-04-03T13:19:20Z,649834b,main,large_registry_sharding/plan_sharding_70B_128gpu,1728.3000,1748.3000,1767.7000
+2026-04-03T13:19:20Z,649834b,main,large_registry_sharding/plan_sharding_405B_128gpu,1664.2000,1679.6000,1696.4000
+2026-04-03T13:19:20Z,649834b,main,large_registry_sharding/suggest_quantization_70B_128gpu,407.55,410.07,413.03
+2026-04-03T13:19:20Z,649834b,main,large_registry_sharding/plan_sharding_70B_mixed_61dev,208.37,209.82,211.16
+2026-04-03T13:19:20Z,649834b,main,large_json/serialize_129dev,36687.0000,37478.0000,38484.0000
+2026-04-03T13:19:20Z,649834b,main,large_json/deserialize_129dev,45167.0000,45251.0000,45341.0000
+2026-04-03T13:19:20Z,649834b,main,training_memory/7B_full_finetune_gpu,3.0695,3.0856,3.1073
+2026-04-03T13:19:20Z,649834b,main,training_memory/7B_lora_gpu,3.1485,3.2805,3.4420
+2026-04-03T13:19:20Z,649834b,main,training_memory/7B_qlora_4bit_gpu,3.6940,3.7642,3.8503
+2026-04-03T13:19:20Z,649834b,main,training_memory/7B_qlora_8bit_gpu,3.7476,3.9200,4.1368
+2026-04-03T13:19:20Z,649834b,main,training_memory/7B_prefix_gpu,3.3413,3.4092,3.4940
+2026-04-03T13:19:20Z,649834b,main,training_memory/7B_dpo_gpu,6.7135,6.9366,7.1614
+2026-04-03T13:19:20Z,649834b,main,training_memory/7B_rlhf_gpu,7.4169,7.5529,7.6686
+2026-04-03T13:19:20Z,649834b,main,training_memory/7B_distillation_gpu,3.9976,4.2628,4.6035
+2026-04-03T13:19:20Z,649834b,main,training_targets/7B_full_gpu,1.2900,1.2948,1.2996
+2026-04-03T13:19:20Z,649834b,main,training_targets/7B_full_tpu,1.3018,1.3056,1.3103
+2026-04-03T13:19:20Z,649834b,main,training_targets/7B_full_gaudi,1.2808,1.2885,1.2984
+2026-04-03T13:19:20Z,649834b,main,training_targets/7B_full_cpu,1.2720,1.2796,1.2881
+2026-04-03T13:19:20Z,649834b,main,training_model_sizes/1B_lora_gpu,1.0163,1.0205,1.0264
+2026-04-03T13:19:20Z,649834b,main,training_model_sizes/7B_lora_gpu,1.0235,1.0257,1.0283
+2026-04-03T13:19:20Z,649834b,main,training_model_sizes/13B_lora_gpu,1.0561,1.0669,1.0810
+2026-04-03T13:19:20Z,649834b,main,training_model_sizes/70B_lora_gpu,1.0614,1.0750,1.0915
+2026-04-03T13:19:20Z,649834b,main,training_model_sizes/405B_lora_gpu,1.0103,1.0146,1.0197
+2026-04-03T13:44:48Z,649834b,main,load_pricing_table,1.2105,1.2136,1.2168
+2026-04-03T13:44:48Z,649834b,main,recommend_instance/7B_bf16_all,3052.6000,3069.9000,3094.0000
+2026-04-03T13:44:48Z,649834b,main,recommend_instance/7B_int8_aws,1096.4000,1100.0000,1104.2000
+2026-04-03T13:44:48Z,649834b,main,recommend_instance/70B_bf16_all,1390.0000,1395.2000,1400.5000
+2026-04-03T13:44:48Z,649834b,main,recommend_instance/70B_int4_gcp,586.39,588.81,591.32
+2026-04-03T13:44:48Z,649834b,main,cheapest_instance/7B_bf16,3049.1000,3067.3000,3084.3000
+2026-04-03T13:44:48Z,649834b,main,cheapest_instance/70B_bf16,1405.4000,1410.6000,1415.8000
+2026-04-03T13:44:48Z,649834b,main,detect_all,988590.0000,998240.0000,1007800.0000
+2026-04-03T13:44:48Z,649834b,main,detect_none (CPU only),140040.0000,140310.0000,140590.0000
+2026-04-03T13:44:48Z,649834b,main,detect_single/cuda,157520.0000,157930.0000,158380.0000
+2026-04-03T13:44:48Z,649834b,main,detect_single/rocm,1241000.0000,1261400.0000,1280700.0000
+2026-04-03T13:44:48Z,649834b,main,detect_single/vulkan,155020.0000,155450.0000,155900.0000
+2026-04-03T13:44:48Z,649834b,main,detect_single/apple,161090.0000,161720.0000,162400.0000
+2026-04-03T13:44:48Z,649834b,main,detect_single/tpu,178800.0000,179270.0000,179750.0000
+2026-04-03T13:44:48Z,649834b,main,system_io/full_with_sysio,991210.0000,1008400.0000,1034100.0000
+2026-04-03T13:44:48Z,649834b,main,system_io/query_system_io,4.6320,4.6497,4.6698
+2026-04-03T13:44:48Z,649834b,main,system_io/ingestion_1gb,4.6874,4.7133,4.7439
+2026-04-03T13:44:48Z,649834b,main,system_io/ingestion_100gb,4.6836,4.7050,4.7343
+2026-04-03T13:44:48Z,649834b,main,system_io/ingestion_1tb,4.6824,4.7102,4.7438
+2026-04-03T13:44:48Z,649834b,main,system_io/serialize_registry,1503.0000,1510.2000,1518.7000
+2026-04-03T13:44:48Z,649834b,main,system_io/deserialize_registry,2037.6000,2043.3000,2049.9000
+2026-04-03T13:44:48Z,649834b,main,concurrent_detect_4_threads,2479300.0000,2502600.0000,2529500.0000
+2026-04-03T13:44:48Z,649834b,main,parse_nvidia_bandwidth_8gpu,988.90,992.03,995.63
+2026-04-03T13:44:48Z,649834b,main,nvidia_bus_width_all_ccs,0.2335,0.2344,0.2354
+2026-04-03T13:44:48Z,649834b,main,estimate_bw_from_cc_all,0.2329,0.2336,0.2345
+2026-04-03T13:44:48Z,649834b,main,parse_max_dpm_clock,339.02,340.11,341.47
+2026-04-03T13:44:48Z,649834b,main,parse_link_speed,70.713,70.908,71.115
+2026-04-03T13:44:48Z,649834b,main,parse_ib_rate,75.644,75.855,76.067
+2026-04-03T13:44:48Z,649834b,main,parse_nvlink_output_2gpu,933.06,936.89,941.14
+2026-04-03T13:44:48Z,649834b,main,parse_cuda_output_8gpu,5205.2000,5222.7000,5242.5000
+2026-04-03T13:44:48Z,649834b,main,parse_vulkan_output_2gpu,1777.1000,1782.0000,1786.9000
+2026-04-03T13:44:48Z,649834b,main,parse_gaudi_output_8dev,2314.6000,2322.6000,2331.3000
+2026-04-03T13:44:48Z,649834b,main,plan_sharding 70B BF16 (4 GPU),89.719,90.093,90.491
+2026-04-03T13:44:48Z,649834b,main,plan_sharding 70B BF16 (13 devices),48.701,49.324,49.942
+2026-04-03T13:44:48Z,649834b,main,suggest_quantization 70B (4 GPU),5.3770,5.4113,5.4469
+2026-04-03T13:44:48Z,649834b,main,suggest_quantization 70B (13 devices),18.624,18.756,18.928
+2026-04-03T13:44:48Z,649834b,main,estimate_memory 70B FP16,0.2399,0.2411,0.2424
+2026-04-03T13:44:48Z,649834b,main,estimate_training_memory 7B LoRA GPU,0.9634,0.9670,0.9710
+2026-04-03T13:44:48Z,649834b,main,best_available (13 devices),36.939,37.362,37.750
+2026-04-03T13:44:48Z,649834b,main,total_memory (13 devices),7.6563,7.7466,7.8625
+2026-04-03T13:44:48Z,649834b,main,json_roundtrip/serialize (13 devices),4503.9000,4577.7000,4677.4000
+2026-04-03T13:44:48Z,649834b,main,json_roundtrip/deserialize (13 devices),6098.8000,6198.9000,6328.7000
+2026-04-03T13:44:48Z,649834b,main,by_family GPU (13 devices),10.945,11.112,11.338
+2026-04-03T13:44:48Z,649834b,main,bits_per_param_all_levels,0.2347,0.2357,0.2370
+2026-04-03T13:44:48Z,649834b,main,memory_reduction_factor_all_levels,0.2346,0.2354,0.2362
+2026-04-03T13:44:48Z,649834b,main,estimate_memory/70B_fp32,0.4920,0.4955,0.4984
+2026-04-03T13:44:48Z,649834b,main,estimate_memory/70B_fp16,0.4803,0.4816,0.4828
+2026-04-03T13:44:48Z,649834b,main,estimate_memory/70B_bf16,0.4806,0.4824,0.4842
+2026-04-03T13:44:48Z,649834b,main,estimate_memory/70B_int8,0.4776,0.4788,0.4801
+2026-04-03T13:44:48Z,649834b,main,estimate_memory/70B_int4,0.4889,0.4967,0.5070
+2026-04-03T13:44:48Z,649834b,main,suggest_quantization/1B_1gpu,4.3473,4.4524,4.5763
+2026-04-03T13:44:48Z,649834b,main,suggest_quantization/7B_1gpu,4.6491,4.7500,4.8762
+2026-04-03T13:44:48Z,649834b,main,suggest_quantization/13B_1gpu,4.6020,4.6776,4.7587
+2026-04-03T13:44:48Z,649834b,main,suggest_quantization/70B_1gpu,6.2189,6.3565,6.4938
+2026-04-03T13:44:48Z,649834b,main,suggest_quantization/405B_1gpu,4.7444,4.8192,4.8979
+2026-04-03T13:44:48Z,649834b,main,registry_queries/available_4dev,1.8306,1.8392,1.8477
+2026-04-03T13:44:48Z,649834b,main,registry_queries/available_129dev,39.426,39.534,39.650
+2026-04-03T13:44:48Z,649834b,main,registry_queries/available_61dev_mixed,15.795,15.843,15.898
+2026-04-03T13:44:48Z,649834b,main,registry_queries/best_available_129dev,370.25,372.51,374.92
+2026-04-03T13:44:48Z,649834b,main,registry_queries/total_memory_129dev,68.116,68.609,69.130
+2026-04-03T13:44:48Z,649834b,main,registry_queries/total_accelerator_memory_129dev,70.381,70.686,71.006
+2026-04-03T13:44:48Z,649834b,main,registry_queries/has_accelerator_129dev,1.2175,1.2245,1.2322
+2026-04-03T13:44:48Z,649834b,main,registry_queries/by_family_gpu_61dev,45.384,45.496,45.635
+2026-04-03T13:44:48Z,649834b,main,registry_queries/by_family_tpu_61dev,45.252,45.328,45.421
+2026-04-03T13:44:48Z,649834b,main,registry_queries/satisfying_gpu_61dev,73.707,73.872,74.052
+2026-04-03T13:44:48Z,649834b,main,registry_queries/satisfying_any_accel_61dev,45.630,45.679,45.732
+2026-04-03T13:44:48Z,649834b,main,cached_registry/get_cached_hit,28.726,28.787,28.853
+2026-04-03T13:44:48Z,649834b,main,cached_registry/invalidate,6.0245,6.0313,6.0386
+2026-04-03T13:44:48Z,649834b,main,lazy_registry/new,9687.2000,9697.1000,9708.0000
+2026-04-03T13:44:48Z,649834b,main,lazy_registry/by_family_gpu_cold,1001900.0000,1002300.0000,1002900.0000
+2026-04-03T13:44:48Z,649834b,main,lazy_registry/by_family_gpu_warm,62.708,62.932,63.207
+2026-04-03T13:44:48Z,649834b,main,lazy_registry/into_registry,2002800.0000,2003900.0000,2005200.0000
+2026-04-03T13:44:48Z,649834b,main,large_registry_sharding/plan_sharding_70B_128gpu,1592.8000,1601.5000,1610.3000
+2026-04-03T13:44:48Z,649834b,main,large_registry_sharding/plan_sharding_405B_128gpu,1591.2000,1595.6000,1599.0000
+2026-04-03T13:44:48Z,649834b,main,large_registry_sharding/suggest_quantization_70B_128gpu,365.87,366.38,366.93
+2026-04-03T13:44:48Z,649834b,main,large_registry_sharding/plan_sharding_70B_mixed_61dev,192.60,193.31,193.99
+2026-04-03T13:44:48Z,649834b,main,large_json/serialize_129dev,35179.0000,35228.0000,35281.0000
+2026-04-03T13:44:48Z,649834b,main,large_json/deserialize_129dev,42620.0000,42705.0000,42805.0000
+2026-04-03T13:44:48Z,649834b,main,training_memory/7B_full_finetune_gpu,2.8393,2.8451,2.8514
+2026-04-03T13:44:48Z,649834b,main,training_memory/7B_lora_gpu,2.8342,2.8473,2.8702
+2026-04-03T13:44:48Z,649834b,main,training_memory/7B_qlora_4bit_gpu,3.0634,3.0673,3.0717
+2026-04-03T13:44:48Z,649834b,main,training_memory/7B_qlora_8bit_gpu,3.0647,3.0680,3.0715
+2026-04-03T13:44:48Z,649834b,main,training_memory/7B_prefix_gpu,3.0493,3.0524,3.0560
+2026-04-03T13:44:48Z,649834b,main,training_memory/7B_dpo_gpu,3.0691,3.0732,3.0783
+2026-04-03T13:44:48Z,649834b,main,training_memory/7B_rlhf_gpu,3.0576,3.0629,3.0686
+2026-04-03T13:44:48Z,649834b,main,training_memory/7B_distillation_gpu,2.8368,2.8415,2.8472
+2026-04-03T13:44:48Z,649834b,main,training_targets/7B_full_gpu,1.1685,1.1707,1.1729
+2026-04-03T13:44:48Z,649834b,main,training_targets/7B_full_tpu,1.1718,1.1746,1.1779
+2026-04-03T13:44:48Z,649834b,main,training_targets/7B_full_gaudi,1.1655,1.1678,1.1702
+2026-04-03T13:44:48Z,649834b,main,training_targets/7B_full_cpu,1.1651,1.1676,1.1705
+2026-04-03T13:44:48Z,649834b,main,training_model_sizes/1B_lora_gpu,0.9376,0.9389,0.9403
+2026-04-03T13:44:48Z,649834b,main,training_model_sizes/7B_lora_gpu,0.9371,0.9379,0.9388
+2026-04-03T13:44:48Z,649834b,main,training_model_sizes/13B_lora_gpu,0.9380,0.9392,0.9406
+2026-04-03T13:44:48Z,649834b,main,training_model_sizes/70B_lora_gpu,0.9374,0.9396,0.9426
+2026-04-03T13:44:48Z,649834b,main,training_model_sizes/405B_lora_gpu,0.9377,0.9390,0.9405

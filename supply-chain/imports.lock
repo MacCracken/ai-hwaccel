@@ -113,13 +113,6 @@ user-id = 2915
 user-login = "Amanieu"
 user-name = "Amanieu d'Antras"
 
-[[publisher.tracing-log]]
-version = "0.2.0"
-when = "2023-10-25"
-user-id = 1249
-user-login = "hawkw"
-user-name = "Eliza Weisman"
-
 [[publisher.unicode-ident]]
 version = "1.0.24"
 when = "2026-02-16"

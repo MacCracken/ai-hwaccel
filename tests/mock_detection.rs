@@ -42,9 +42,9 @@ fn mock_multi_device_registry() {
     ]);
 
     assert_eq!(reg.all_profiles().len(), 7);
-    assert_eq!(reg.by_family(AcceleratorFamily::Gpu).len(), 4);
-    assert_eq!(reg.by_family(AcceleratorFamily::Tpu).len(), 1);
-    assert_eq!(reg.by_family(AcceleratorFamily::AiAsic).len(), 1);
+    assert_eq!(reg.by_family(AcceleratorFamily::Gpu).count(), 4);
+    assert_eq!(reg.by_family(AcceleratorFamily::Tpu).count(), 1);
+    assert_eq!(reg.by_family(AcceleratorFamily::AiAsic).count(), 1);
 
     assert!(matches!(
         reg.best_available().unwrap().accelerator,
@@ -204,7 +204,7 @@ fn cloud_fixture_8x_a100_sxm_sharding() {
     }
     let reg = AcceleratorRegistry::from_profiles(profiles);
 
-    assert_eq!(reg.by_family(AcceleratorFamily::Gpu).len(), 8);
+    assert_eq!(reg.by_family(AcceleratorFamily::Gpu).count(), 8);
     assert_eq!(reg.total_accelerator_memory(), 8 * 80 * 1024 * 1024 * 1024);
 
     // suggest_quantization uses per-device memory (80 GB).
@@ -229,7 +229,7 @@ fn cloud_fixture_tpu_v5p_256chip() {
         AcceleratorProfile::tpu(0, 256, TpuVersion::V5p),
     ]);
 
-    assert_eq!(reg.by_family(AcceleratorFamily::Tpu).len(), 1);
+    assert_eq!(reg.by_family(AcceleratorFamily::Tpu).count(), 1);
     assert!(matches!(
         reg.best_available().unwrap().accelerator,
         AcceleratorType::Tpu {
@@ -281,7 +281,7 @@ fn cloud_fixture_gaudi3_8x_405b() {
     }
     let reg = AcceleratorRegistry::from_profiles(profiles);
 
-    assert_eq!(reg.by_family(AcceleratorFamily::AiAsic).len(), 8);
+    assert_eq!(reg.by_family(AcceleratorFamily::AiAsic).count(), 8);
 
     // Per-device: Gaudi3 has 128 GB. 405B BF16 ~970 GB > 128 GB → drops to INT8.
     // INT8 ~485 GB still > 128 GB → no single device fits, falls through.

@@ -48,7 +48,7 @@ use ai_hwaccel::{AcceleratorRegistry, AcceleratorFamily};
 
 let registry = AcceleratorRegistry::detect();
 
-if !registry.by_family(AcceleratorFamily::Gpu).is_empty() {
+if registry.by_family(AcceleratorFamily::Gpu).next().is_some() {
     // Use burn's WGPU or CUDA backend
     println!("GPU available — use burn-wgpu or burn-cuda");
 } else {
@@ -88,9 +88,9 @@ use ai_hwaccel::{AcceleratorRegistry, AcceleratorFamily};
 
 let registry = AcceleratorRegistry::detect();
 
-let provider = if !registry.by_family(AcceleratorFamily::Gpu).is_empty() {
+let provider = if registry.by_family(AcceleratorFamily::Gpu).next().is_some() {
     "CUDAExecutionProvider" // or "ROCMExecutionProvider" / "CoreMLExecutionProvider"
-} else if !registry.by_family(AcceleratorFamily::Npu).is_empty() {
+} else if registry.by_family(AcceleratorFamily::Npu).next().is_some() {
     "QNNExecutionProvider"
 } else {
     "CPUExecutionProvider"

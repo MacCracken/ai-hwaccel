@@ -344,9 +344,10 @@ fn run_watch(
 
         // Build delta map: device key → change in memory_used_bytes.
         let mut deltas: HashMap<String, i64> = HashMap::new();
-        for p in registry.all_profiles() {
-            let key = format!("{:?}", p.accelerator);
+        for (i, p) in registry.all_profiles().iter().enumerate() {
             if let Some(used) = p.memory_used_bytes {
+                // Use index + Display as key — avoids Debug format allocation.
+                let key = format!("{}:{}", i, p.accelerator);
                 if let Some(&prev) = prev_used.get(&key) {
                     let delta = used as i64 - prev as i64;
                     if delta != 0 {
@@ -466,9 +467,9 @@ fn render_row(
         p.accelerator.to_string()
     };
 
-    let debug_key = format!("{:?}", p.accelerator);
+    let delta_key = format!("{}:{}", i, p.accelerator);
     let delta_annotation = deltas
-        .and_then(|d| d.get(&debug_key))
+        .and_then(|d| d.get(&delta_key))
         .map(|&d| {
             let gb = d.abs() as f64 / (1024.0 * 1024.0 * 1024.0);
             if d > 0 {
@@ -532,7 +533,7 @@ fn render_footer(registry: &AcceleratorRegistry) {
     let counts: Vec<String> = families
         .iter()
         .filter_map(|f| {
-            let n = registry.by_family(*f).len();
+            let n = registry.by_family(*f).count();
             if n > 0 {
                 Some(format!("{} {}", n, f))
             } else {
@@ -703,7 +704,7 @@ fn init_logging(debug_mode: bool) {
 }
 
 fn build_summary(registry: &AcceleratorRegistry) -> serde_json::Value {
-    let available = registry.available();
+    let device_count = registry.available().count();
     let best = registry.best_available();
     let total_memory = registry.total_memory();
     let accel_memory = registry.total_accelerator_memory();
@@ -711,7 +712,7 @@ fn build_summary(registry: &AcceleratorRegistry) -> serde_json::Value {
     serde_json::json!({
         "schema_version": ai_hwaccel::SCHEMA_VERSION,
         "version": env!("CARGO_PKG_VERSION"),
-        "device_count": available.len(),
+        "device_count": device_count,
         "has_accelerator": registry.has_accelerator(),
         "total_memory_bytes": total_memory,
         "accelerator_memory_bytes": accel_memory,
@@ -722,10 +723,10 @@ fn build_summary(registry: &AcceleratorRegistry) -> serde_json::Value {
             "driver_version": b.driver_version,
         })),
         "families": {
-            "gpu": registry.by_family(AcceleratorFamily::Gpu).len(),
-            "tpu": registry.by_family(AcceleratorFamily::Tpu).len(),
-            "npu": registry.by_family(AcceleratorFamily::Npu).len(),
-            "ai_asic": registry.by_family(AcceleratorFamily::AiAsic).len(),
+            "gpu": registry.by_family(AcceleratorFamily::Gpu).count(),
+            "tpu": registry.by_family(AcceleratorFamily::Tpu).count(),
+            "npu": registry.by_family(AcceleratorFamily::Npu).count(),
+            "ai_asic": registry.by_family(AcceleratorFamily::AiAsic).count(),
         },
         "warnings": registry.warnings().iter().map(|w| w.to_string()).collect::<Vec<_>>(),
     })

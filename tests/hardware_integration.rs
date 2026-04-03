@@ -64,7 +64,7 @@ fn rocm_detection_when_present() {
         return;
     }
     let reg = DetectBuilder::none().with_rocm().detect();
-    let gpus: Vec<_> = reg.by_family(AcceleratorFamily::Gpu);
+    let gpus: Vec<_> = reg.by_family(AcceleratorFamily::Gpu).collect();
     assert!(!gpus.is_empty(), "ROCm GPU should be detected");
 
     for gpu in &gpus {

@@ -313,7 +313,7 @@ impl PyRegistry {
 
     fn __repr__(&self) -> String {
         let profiles = self.inner.all_profiles().len();
-        let avail = self.inner.available().len();
+        let avail = self.inner.available().count();
         let mem_gb = self.inner.total_memory() as f64 / (1024.0 * 1024.0 * 1024.0);
         format!(
             "Registry(profiles={}, available={}, total_memory={:.1} GB)",

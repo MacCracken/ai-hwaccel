@@ -8,12 +8,11 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 Patch release: internal quality, no breaking changes.
 
-- [ ] **Return `impl Iterator` from query methods** — `available()`,
-  `by_family()`, `satisfying()` return `Vec<&AcceleratorProfile>` today.
-  Change to `impl Iterator` for zero-alloc queries. Callers `.collect()`
-  explicitly.
-- [ ] **Reduce watch mode allocations** — cache `format!("{:?}")` keys,
-  use `entry()` API for delta tracking HashMap.
+- [x] **Return `impl Iterator` from query methods** — `available()`,
+  `by_family()`, `satisfying()` return `impl Iterator` for zero-alloc
+  queries. Callers `.count()` or `.collect()` explicitly.
+- [x] **Reduce watch mode allocations** — use index+Display key instead of
+  Debug format, avoid redundant allocations in delta tracking.
 - [ ] **Consolidate detection macros** — merge `run_backend!` /
   `spawn_backend!` / timed variants into fewer parametric macros.
   Blocked by `#[cfg(feature)]` compile-time resolution.

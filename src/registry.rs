@@ -133,8 +133,8 @@ impl AcceleratorRegistry {
 
     /// Only the available accelerator profiles.
     #[inline]
-    pub fn available(&self) -> Vec<&AcceleratorProfile> {
-        self.profiles.iter().filter(|p| p.available).collect()
+    pub fn available(&self) -> impl Iterator<Item = &AcceleratorProfile> {
+        self.profiles.iter().filter(|p| p.available)
     }
 
     /// The highest-ranked available device.
@@ -176,20 +176,21 @@ impl AcceleratorRegistry {
 
     /// All profiles matching a given [`AcceleratorFamily`].
     #[inline]
-    pub fn by_family(&self, family: AcceleratorFamily) -> Vec<&AcceleratorProfile> {
+    pub fn by_family(
+        &self,
+        family: AcceleratorFamily,
+    ) -> impl Iterator<Item = &AcceleratorProfile> {
         self.profiles
             .iter()
-            .filter(|p| p.available && p.accelerator.family() == family)
-            .collect()
+            .filter(move |p| p.available && p.accelerator.family() == family)
     }
 
     /// All profiles satisfying an [`AcceleratorRequirement`].
-    #[must_use]
-    pub fn satisfying(&self, req: &AcceleratorRequirement) -> Vec<&AcceleratorProfile> {
-        self.profiles
-            .iter()
-            .filter(|p| req.satisfied_by(p))
-            .collect()
+    pub fn satisfying<'a>(
+        &'a self,
+        req: &'a AcceleratorRequirement,
+    ) -> impl Iterator<Item = &'a AcceleratorProfile> {
+        self.profiles.iter().filter(move |p| req.satisfied_by(p))
     }
 
     /// Add a profile manually (for testing or manual config).

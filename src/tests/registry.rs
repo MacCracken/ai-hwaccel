@@ -140,10 +140,10 @@ fn registry_by_family() {
             gpu_utilization_percent: None,
         },
     ]);
-    assert_eq!(reg.by_family(AcceleratorFamily::Gpu).len(), 1);
-    assert_eq!(reg.by_family(AcceleratorFamily::Npu).len(), 1);
-    assert_eq!(reg.by_family(AcceleratorFamily::Tpu).len(), 0);
-    assert_eq!(reg.by_family(AcceleratorFamily::Cpu).len(), 1);
+    assert_eq!(reg.by_family(AcceleratorFamily::Gpu).count(), 1);
+    assert_eq!(reg.by_family(AcceleratorFamily::Npu).count(), 1);
+    assert_eq!(reg.by_family(AcceleratorFamily::Tpu).count(), 0);
+    assert_eq!(reg.by_family(AcceleratorFamily::Cpu).count(), 1);
 }
 
 #[test]
@@ -154,23 +154,23 @@ fn registry_satisfying() {
         AcceleratorProfile::tpu(0, 4, TpuVersion::V5p),
         AcceleratorProfile::gaudi(0, GaudiGeneration::Gaudi3),
     ]);
-    assert_eq!(reg.satisfying(&AcceleratorRequirement::Gpu).len(), 1);
-    assert_eq!(reg.satisfying(&AcceleratorRequirement::GpuOrTpu).len(), 2);
+    assert_eq!(reg.satisfying(&AcceleratorRequirement::Gpu).count(), 1);
+    assert_eq!(reg.satisfying(&AcceleratorRequirement::GpuOrTpu).count(), 2);
     assert_eq!(
         reg.satisfying(&AcceleratorRequirement::AnyAccelerator)
-            .len(),
+            .count(),
         3
     );
-    assert_eq!(reg.satisfying(&AcceleratorRequirement::None).len(), 4);
-    assert_eq!(reg.satisfying(&AcceleratorRequirement::Gaudi).len(), 1);
+    assert_eq!(reg.satisfying(&AcceleratorRequirement::None).count(), 4);
+    assert_eq!(reg.satisfying(&AcceleratorRequirement::Gaudi).count(), 1);
     assert_eq!(
         reg.satisfying(&AcceleratorRequirement::Tpu { min_chips: 4 })
-            .len(),
+            .count(),
         1
     );
     assert_eq!(
         reg.satisfying(&AcceleratorRequirement::Tpu { min_chips: 8 })
-            .len(),
+            .count(),
         0
     );
 }
@@ -183,7 +183,7 @@ fn registry_available_excludes_unavailable() {
         AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024),
         down,
     ]);
-    assert_eq!(reg.available().len(), 1);
+    assert_eq!(reg.available().count(), 1);
     assert_eq!(reg.all_profiles().len(), 2);
 }
 

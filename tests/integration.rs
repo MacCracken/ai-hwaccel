@@ -79,7 +79,7 @@ fn manual_registry_plan() {
     ]);
 
     assert!(registry.has_accelerator());
-    assert_eq!(registry.by_family(AcceleratorFamily::Gpu).len(), 2);
+    assert_eq!(registry.by_family(AcceleratorFamily::Gpu).count(), 2);
 
     let plan = registry.plan_sharding(70_000_000_000, &QuantizationLevel::BFloat16);
     // 70B BF16 ~168 GB, each GPU 80 GB — should pipeline across 2

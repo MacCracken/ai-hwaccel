@@ -46,14 +46,26 @@ fn bench_registry_queries(c: &mut Criterion) {
     let large = build_large_registry(128);
     let mixed = build_mixed_large_registry();
 
-    group.bench_function("available_4dev", |b| {
-        b.iter(|| small.available());
+    // count() — lazy iteration, no allocation
+    group.bench_function("available_count_4dev", |b| {
+        b.iter(|| small.available().count());
     });
-    group.bench_function("available_129dev", |b| {
-        b.iter(|| large.available());
+    group.bench_function("available_count_129dev", |b| {
+        b.iter(|| large.available().count());
     });
-    group.bench_function("available_61dev_mixed", |b| {
-        b.iter(|| mixed.available());
+    group.bench_function("available_count_61dev_mixed", |b| {
+        b.iter(|| mixed.available().count());
+    });
+
+    // collect() — materializes into Vec, measures allocation cost
+    group.bench_function("available_collect_4dev", |b| {
+        b.iter(|| small.available().collect::<Vec<_>>());
+    });
+    group.bench_function("available_collect_129dev", |b| {
+        b.iter(|| large.available().collect::<Vec<_>>());
+    });
+    group.bench_function("available_collect_61dev_mixed", |b| {
+        b.iter(|| mixed.available().collect::<Vec<_>>());
     });
 
     group.bench_function("best_available_129dev", |b| {
@@ -72,18 +84,48 @@ fn bench_registry_queries(c: &mut Criterion) {
         b.iter(|| large.has_accelerator());
     });
 
-    group.bench_function("by_family_gpu_61dev", |b| {
-        b.iter(|| mixed.by_family(AcceleratorFamily::Gpu));
+    // count() — lazy
+    group.bench_function("by_family_gpu_count_61dev", |b| {
+        b.iter(|| mixed.by_family(AcceleratorFamily::Gpu).count());
     });
-    group.bench_function("by_family_tpu_61dev", |b| {
-        b.iter(|| mixed.by_family(AcceleratorFamily::Tpu));
+    group.bench_function("by_family_tpu_count_61dev", |b| {
+        b.iter(|| mixed.by_family(AcceleratorFamily::Tpu).count());
     });
 
-    group.bench_function("satisfying_gpu_61dev", |b| {
-        b.iter(|| mixed.satisfying(&AcceleratorRequirement::Gpu));
+    // collect() — materialized
+    group.bench_function("by_family_gpu_collect_61dev", |b| {
+        b.iter(|| mixed.by_family(AcceleratorFamily::Gpu).collect::<Vec<_>>());
     });
-    group.bench_function("satisfying_any_accel_61dev", |b| {
-        b.iter(|| mixed.satisfying(&AcceleratorRequirement::AnyAccelerator));
+    group.bench_function("by_family_tpu_collect_61dev", |b| {
+        b.iter(|| mixed.by_family(AcceleratorFamily::Tpu).collect::<Vec<_>>());
+    });
+
+    // count() — lazy
+    group.bench_function("satisfying_gpu_count_61dev", |b| {
+        b.iter(|| mixed.satisfying(&AcceleratorRequirement::Gpu).count());
+    });
+    group.bench_function("satisfying_any_accel_count_61dev", |b| {
+        b.iter(|| {
+            mixed
+                .satisfying(&AcceleratorRequirement::AnyAccelerator)
+                .count()
+        });
+    });
+
+    // collect() — materialized
+    group.bench_function("satisfying_gpu_collect_61dev", |b| {
+        b.iter(|| {
+            mixed
+                .satisfying(&AcceleratorRequirement::Gpu)
+                .collect::<Vec<_>>()
+        });
+    });
+    group.bench_function("satisfying_any_accel_collect_61dev", |b| {
+        b.iter(|| {
+            mixed
+                .satisfying(&AcceleratorRequirement::AnyAccelerator)
+                .collect::<Vec<_>>()
+        });
     });
 
     group.finish();
