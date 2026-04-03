@@ -21,13 +21,13 @@
 //!
 //! Logging:
 //!   Set `RUST_LOG` to control verbosity (e.g. `RUST_LOG=debug ai-hwaccel`).
-//!   Use `--json-log` to emit structured JSON logs to stderr.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
 use tracing::{error, info, warn};
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::fmt;
 
 use ai_hwaccel::{AcceleratorFamily, AcceleratorProfile, AcceleratorRegistry};
 
@@ -41,8 +41,7 @@ fn main() {
     };
 
     let debug_mode = has("--debug") || has("-d");
-    let json_log = has("--json-log");
-    init_logging(json_log, debug_mode);
+    init_logging(debug_mode);
 
     if has("--version") || has("-V") {
         println!("{}", env!("CARGO_PKG_VERSION"));
@@ -683,25 +682,24 @@ fn emit_json<T: serde::Serialize>(value: &T, pretty: bool) {
     }
 }
 
-fn init_logging(json: bool, debug_mode: bool) {
-    let filter = if debug_mode {
-        EnvFilter::new("debug")
+fn init_logging(debug_mode: bool) {
+    let level = if debug_mode {
+        LevelFilter::DEBUG
     } else {
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"))
+        match std::env::var("RUST_LOG").ok().as_deref() {
+            Some("trace") => LevelFilter::TRACE,
+            Some("debug") => LevelFilter::DEBUG,
+            Some("info") => LevelFilter::INFO,
+            Some("error") => LevelFilter::ERROR,
+            Some("off") => LevelFilter::OFF,
+            _ => LevelFilter::WARN,
+        }
     };
 
-    if json {
-        fmt()
-            .with_env_filter(filter)
-            .json()
-            .with_writer(std::io::stderr)
-            .init();
-    } else {
-        fmt()
-            .with_env_filter(filter)
-            .with_writer(std::io::stderr)
-            .init();
-    }
+    fmt()
+        .with_max_level(level)
+        .with_writer(std::io::stderr)
+        .init();
 }
 
 fn build_summary(registry: &AcceleratorRegistry) -> serde_json::Value {
