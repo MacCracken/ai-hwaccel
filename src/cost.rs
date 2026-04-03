@@ -100,7 +100,10 @@ pub fn all_instances() -> &'static [CloudGpuInstance] {
     PARSED_INSTANCES.get_or_init(|| {
         serde_json::from_str::<PricingData>(PRICING_JSON)
             .map(|d| d.instances)
-            .unwrap_or_default()
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "failed to parse embedded cloud pricing data");
+                Vec::new()
+            })
     })
 }
 
@@ -134,9 +137,12 @@ pub fn recommend_instance(
             inst.total_gpu_memory_gb as f64 >= needed_gb
         })
         .map(|inst| {
-            let headroom = (inst.total_gpu_memory_gb as f64 - needed_gb)
-                / inst.total_gpu_memory_gb as f64
-                * 100.0;
+            let headroom = if inst.total_gpu_memory_gb == 0 {
+                0.0
+            } else {
+                (inst.total_gpu_memory_gb as f64 - needed_gb) / inst.total_gpu_memory_gb as f64
+                    * 100.0
+            };
             InstanceRecommendation {
                 instance: inst.clone(),
                 memory_required_bytes: needed,

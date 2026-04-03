@@ -60,15 +60,11 @@ impl fmt::Display for DetectionError {
                 exit_code,
                 stderr,
             } => {
-                write!(
-                    f,
-                    "{}: exited with code {} — {}",
-                    tool,
-                    exit_code
-                        .map(|c| c.to_string())
-                        .unwrap_or_else(|| "signal".into()),
-                    stderr.lines().next().unwrap_or("(no output)")
-                )
+                match exit_code {
+                    Some(c) => write!(f, "{}: exited with code {}", tool, c)?,
+                    None => write!(f, "{}: exited with signal", tool)?,
+                }
+                write!(f, " — {}", stderr.lines().next().unwrap_or("(no output)"))
             }
             Self::Timeout { tool, timeout_secs } => {
                 write!(f, "{}: timed out after {:.1}s", tool, timeout_secs)

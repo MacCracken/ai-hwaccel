@@ -85,7 +85,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! ai-hwaccel = { version = "0.19", default-features = false, features = ["cuda", "tpu"] }
+//! ai-hwaccel = { version = "1.1", default-features = false, features = ["cuda", "tpu"] }
 //! ```
 //!
 //! ## Step 2: Query capabilities
@@ -258,7 +258,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! ai-hwaccel = { version = "0.19", default-features = false, features = ["cuda"] }
+//! ai-hwaccel = { version = "1.1", default-features = false, features = ["cuda"] }
 //! ```
 
 mod async_detect;

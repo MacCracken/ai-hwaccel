@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [1.1.1] - 2026-04-03
+
+### Fixed
+
+- **Division-by-zero in cost headroom** — `recommend_instance` no longer
+  produces NaN when an instance has `total_gpu_memory_gb == 0`.
+- **Invalid layer range in pipeline sharding** — tiny models (< 250M params)
+  with multiple pipeline stages could produce shards where `start > end`;
+  layer ranges are now clamped to valid bounds.
+- **`DetectionError::ToolFailed` Display allocation** — removed intermediate
+  `String` allocation when formatting exit codes.
+
+### Changed
+
+- **`QuantizationLevel::bits_per_param()` and `memory_reduction_factor()` are
+  now `const fn`** — enables use in const contexts.
+- **Added `#[must_use]` attributes** to `plan_sharding()`, `total_memory()`,
+  `has_accelerator()`, `available()`, `by_family()`, `satisfying()`, and
+  `ShardingPlan::shards()`.
+- **Replaced magic numbers** — `Display` impls in `ShardingPlan` and
+  `AcceleratorProfile` now use `units::BYTES_PER_GIB` instead of
+  `1024.0 * 1024.0 * 1024.0`.
+- **`cost::all_instances()`** now logs `tracing::warn` on malformed embedded
+  pricing JSON instead of silently returning empty.
+- Updated doc examples to reference `version = "1.1"` (was `"0.19"`).
+
+### Dependencies
+
+- criterion 0.5.1 → 0.8.2 (dev-dependency, major version bump)
+- criterion-plot 0.5.0 → 0.8.2
+- itertools 0.10.5 → 0.13.0 (transitive)
+- Removed transitive deps: is-terminal, hermit-abi
+
+---
+
 ## [1.1.0] - 2026-04-03
 
 ### Changed

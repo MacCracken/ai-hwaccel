@@ -259,7 +259,7 @@ impl fmt::Display for AcceleratorProfile {
                 "{} [{}] ({:.1} GB{})",
                 self.accelerator,
                 name,
-                self.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+                self.memory_bytes as f64 / crate::units::BYTES_PER_GIB,
                 if self.available { "" } else { ", unavailable" }
             )
         } else {
@@ -267,7 +267,7 @@ impl fmt::Display for AcceleratorProfile {
                 f,
                 "{} ({:.1} GB{})",
                 self.accelerator,
-                self.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+                self.memory_bytes as f64 / crate::units::BYTES_PER_GIB,
                 if self.available { "" } else { ", unavailable" }
             )
         }

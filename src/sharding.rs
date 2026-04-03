@@ -96,6 +96,7 @@ pub struct ShardingPlan {
 
 impl ShardingPlan {
     /// Access the shards as a slice.
+    #[must_use]
     #[inline]
     pub fn shards(&self) -> &[ModelShard] {
         &self.shards
@@ -108,7 +109,7 @@ impl fmt::Display for ShardingPlan {
         writeln!(
             f,
             "Total memory: {:.1} GB",
-            self.total_memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+            self.total_memory_bytes as f64 / crate::units::BYTES_PER_GIB
         )?;
         if let Some(tps) = self.estimated_tokens_per_sec {
             writeln!(f, "Est. throughput: {:.0} tok/s", tps)?;
@@ -123,7 +124,7 @@ impl fmt::Display for ShardingPlan {
                     shard.device,
                     shard.layer_range.0,
                     shard.layer_range.1,
-                    shard.memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+                    shard.memory_bytes as f64 / crate::units::BYTES_PER_GIB
                 )?;
             }
         } else if let Some(shard) = self.shards.first() {

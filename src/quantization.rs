@@ -34,7 +34,7 @@ impl QuantizationLevel {
     /// Number of bits used per model parameter.
     #[must_use]
     #[inline]
-    pub fn bits_per_param(&self) -> u32 {
+    pub const fn bits_per_param(&self) -> u32 {
         match self {
             Self::None => 32,
             Self::Float16 | Self::BFloat16 => 16,
@@ -46,7 +46,7 @@ impl QuantizationLevel {
     /// Memory reduction factor relative to FP32.
     #[must_use]
     #[inline]
-    pub fn memory_reduction_factor(&self) -> f64 {
+    pub const fn memory_reduction_factor(&self) -> f64 {
         32.0 / self.bits_per_param() as f64
     }
 }

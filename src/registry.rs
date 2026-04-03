@@ -132,6 +132,7 @@ impl AcceleratorRegistry {
     }
 
     /// Only the available accelerator profiles.
+    #[must_use = "iterator is lazy and does nothing unless consumed"]
     #[inline]
     pub fn available(&self) -> impl Iterator<Item = &AcceleratorProfile> {
         self.profiles.iter().filter(|p| p.available)
@@ -147,6 +148,7 @@ impl AcceleratorRegistry {
     }
 
     /// Total memory across all **available** devices.
+    #[must_use]
     #[inline]
     pub fn total_memory(&self) -> u64 {
         self.profiles
@@ -167,6 +169,7 @@ impl AcceleratorRegistry {
     }
 
     /// Whether any non-CPU accelerator is available.
+    #[must_use]
     #[inline]
     pub fn has_accelerator(&self) -> bool {
         self.profiles
@@ -175,6 +178,7 @@ impl AcceleratorRegistry {
     }
 
     /// All profiles matching a given [`AcceleratorFamily`].
+    #[must_use = "iterator is lazy and does nothing unless consumed"]
     #[inline]
     pub fn by_family(
         &self,
@@ -186,6 +190,7 @@ impl AcceleratorRegistry {
     }
 
     /// All profiles satisfying an [`AcceleratorRequirement`].
+    #[must_use = "iterator is lazy and does nothing unless consumed"]
     pub fn satisfying<'a>(
         &'a self,
         req: &'a AcceleratorRequirement,

@@ -146,11 +146,11 @@ fn build_pipeline_plan(
         .iter()
         .enumerate()
         .map(|(i, dev)| {
-            let start = i as u32 * layers_per_shard;
+            let start = (i as u32 * layers_per_shard).min(estimated_layers.saturating_sub(1));
             let end = if i as u32 == num_stages - 1 {
                 estimated_layers.saturating_sub(1)
             } else {
-                start + layers_per_shard - 1
+                (start + layers_per_shard - 1).min(estimated_layers.saturating_sub(1))
             };
             ModelShard {
                 shard_id: i as u32,
@@ -200,6 +200,7 @@ impl AcceleratorRegistry {
     /// - Prefers tensor parallel for NVSwitch-connected GPU groups.
     /// - Orders pipeline stages to prefer directly-connected GPU pairs (NVLink).
     /// - Adjusts throughput estimates based on interconnect bandwidth.
+    #[must_use]
     pub fn plan_sharding(&self, model_params: u64, quant: &QuantizationLevel) -> ShardingPlan {
         let needed = Self::estimate_memory(model_params, quant);
 
