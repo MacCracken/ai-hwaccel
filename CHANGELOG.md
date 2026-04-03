@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [1.1.0] - 2026-04-03
+
+### Changed
+
+- **License: AGPL-3.0-only → GPL-3.0-only** — updated Cargo.toml, deny.toml,
+  CLAUDE.md, and LICENSE file. Removes the network-use copyleft clause.
+- **`available()`, `by_family()`, `satisfying()` return `impl Iterator`** —
+  zero-alloc queries for callers using `.count()`, `.any()`, `.next()`.
+  Callers needing a `Vec` use `.collect()` explicitly. Benchmarked: 3–35x
+  faster for non-materializing callers; `.collect()` path unchanged.
+- **Detection macro consolidation** — 6 local macros (`run_backend!`,
+  `spawn_backend!`, `run_backend_timed!`, `spawn_backend_timed!`,
+  `spawn_async_backend!`, `run_sysfs!`) replaced by 3 registration table
+  macros (`backend_table!`, `async_cli_backends!`, `sysfs_backends!`) with
+  local callback dispatch. Adding a new backend is now a 1-line table entry
+  instead of editing 6 locations.
+- **Watch mode allocations reduced** — delta tracking uses index+Display
+  keys instead of Debug format, avoiding per-tick `format!("{:?}")` allocs.
+- **`tracing-subscriber` slimmed** — dropped `env-filter` (regex engine,
+  ~347 KB .text) and `json` (tracing-serde) features. `EnvFilter` replaced
+  with simple `LevelFilter` match on `RUST_LOG`. `--json-log` flag removed.
+- **Release profile optimized** — `lto = true`, `codegen-units = 1`,
+  `strip = true`, `panic = "abort"`, `opt-level = "z"`. Binary size:
+  2.6 MB → 838 KB (68% reduction).
+
+### Added
+
+- **Dual iterator/collect benchmarks** — `registry_queries` group now
+  benchmarks both `_count` (lazy) and `_collect` (materialized) variants
+  for `available()`, `by_family()`, and `satisfying()` to transparently
+  show the allocation cost difference.
+
+### Fixed
+
+- Cleaned up unused license allowances in `deny.toml` (BSD-2-Clause,
+  BSD-3-Clause, ISC, Unicode-DFS-2016 were not in the dependency tree).
+- Pruned unnecessary `cargo-vet` exemptions.
+- Certified 14 updated dependency versions for `cargo-vet`.
+
+### Dependencies
+
+- indexmap 2.13.0 → 2.13.1
+- js-sys 0.3.91 → 0.3.94
+- libc 0.2.183 → 0.2.184
+- mio 1.1.1 → 1.2.0
+- proptest 1.10.0 → 1.11.0
+- tokio 1.50.0 → 1.51.0
+- tokio-macros 2.6.1 → 2.7.0
+- wasm-bindgen 0.2.114 → 0.2.117
+- web-sys 0.3.91 → 0.3.94
+- zerocopy 0.8.47 → 0.8.48
+
+---
+
 ## [1.0.0] - 2026-03-27
 
 ### Breaking Changes
