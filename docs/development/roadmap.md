@@ -13,15 +13,17 @@ Patch release: internal quality, no breaking changes.
   queries. Callers `.count()` or `.collect()` explicitly.
 - [x] **Reduce watch mode allocations** — use index+Display key instead of
   Debug format, avoid redundant allocations in delta tracking.
-- [ ] **Consolidate detection macros** — merge `run_backend!` /
-  `spawn_backend!` / timed variants into fewer parametric macros.
-  Blocked by `#[cfg(feature)]` compile-time resolution.
-- [ ] **Backend registration table** — replace hardcoded macro invocations
-  with `const BACKENDS: &[BackendDef]`. Blocked by same cfg issue.
+- [x] **Consolidate detection macros** — single `backend_table!` macro with
+  callback dispatch replaces `run_backend!` / `spawn_backend!` / timed
+  variants. `async_cli_backends!` and `sysfs_backends!` for the async path.
+- [x] **Backend registration table** — `backend_table!` macro is the single
+  source of truth. Adding a backend is a 1-line table entry instead of
+  touching 6 locations. `const BACKENDS` not possible due to `#[cfg]`
+  compile-time resolution, but the macro table achieves the same goal.
 
 ---
 
-## 1.1.0 — Platform Validation
+## 1.2.0 — Platform Validation
 
 Live cloud hardware validation and remaining cross-platform gaps.
 
@@ -50,7 +52,7 @@ Live cloud hardware validation and remaining cross-platform gaps.
 
 ---
 
-## 1.2.0 — Ecosystem
+## 1.3.0 — Ecosystem
 
 Python bindings, WASM, interconnect detection.
 
@@ -80,7 +82,7 @@ Python bindings, WASM, interconnect detection.
 
 ---
 
-## 1.3.0 — Multi-Node & Hot-Plug
+## 1.4.0 — Multi-Node & Hot-Plug
 
 ### Multi-node detection
 

@@ -62,6 +62,151 @@ type DetectResult = (Vec<AcceleratorProfile>, Vec<DetectionError>);
 /// Per-backend detection result with timing.
 type TimedDetectResult = (Vec<AcceleratorProfile>, Vec<DetectionError>, Duration);
 
+// ---------------------------------------------------------------------------
+// Backend registration table — single source of truth
+// ---------------------------------------------------------------------------
+
+/// Invokes `$callback!(feature, Backend, name, sync_detect_fn)` for every backend.
+///
+/// Adding a new backend? Add one line here and the corresponding `mod` + feature
+/// declarations. All sync/timed/async dispatch code expands from this table.
+macro_rules! backend_table {
+    ($callback:ident) => {
+        $callback!("cuda", Backend::Cuda, "cuda", cuda::detect_cuda);
+        $callback!("rocm", Backend::Rocm, "rocm", rocm::detect_rocm);
+        $callback!(
+            "apple",
+            Backend::Apple,
+            "apple",
+            apple::detect_metal_and_ane
+        );
+        $callback!("vulkan", Backend::Vulkan, "vulkan", vulkan::detect_vulkan);
+        $callback!(
+            "intel-npu",
+            Backend::IntelNpu,
+            "intel_npu",
+            intel_npu::detect_intel_npu
+        );
+        $callback!(
+            "amd-xdna",
+            Backend::AmdXdna,
+            "amd_xdna",
+            amd_xdna::detect_amd_xdna
+        );
+        $callback!("tpu", Backend::Tpu, "tpu", tpu::detect_tpu);
+        $callback!("gaudi", Backend::Gaudi, "gaudi", gaudi::detect_gaudi);
+        $callback!(
+            "aws-neuron",
+            Backend::AwsNeuron,
+            "aws_neuron",
+            neuron::detect_aws_neuron
+        );
+        $callback!(
+            "intel-oneapi",
+            Backend::IntelOneApi,
+            "intel_oneapi",
+            intel_oneapi::detect_intel_oneapi
+        );
+        $callback!(
+            "qualcomm",
+            Backend::Qualcomm,
+            "qualcomm",
+            qualcomm::detect_qualcomm_ai100
+        );
+        $callback!(
+            "cerebras",
+            Backend::Cerebras,
+            "cerebras",
+            cerebras::detect_cerebras_wse
+        );
+        $callback!(
+            "graphcore",
+            Backend::Graphcore,
+            "graphcore",
+            graphcore::detect_graphcore_ipu
+        );
+        $callback!("groq", Backend::Groq, "groq", groq::detect_groq_lpu);
+        $callback!(
+            "samsung-npu",
+            Backend::SamsungNpu,
+            "samsung_npu",
+            samsung_npu::detect_samsung_npu
+        );
+        $callback!(
+            "mediatek-apu",
+            Backend::MediaTekApu,
+            "mediatek_apu",
+            mediatek_apu::detect_mediatek_apu
+        );
+        $callback!(
+            "windows-wmi",
+            Backend::WindowsWmi,
+            "windows_wmi",
+            windows::detect_windows_gpu
+        );
+    };
+}
+
+/// Async CLI backends — those with `detect_*_async` functions.
+/// Invokes `$callback!(feature, Backend, async_detect_fn)` per entry.
+#[cfg(feature = "async-detect")]
+macro_rules! async_cli_backends {
+    ($callback:ident) => {
+        $callback!("cuda", Backend::Cuda, cuda::detect_cuda_async);
+        $callback!("vulkan", Backend::Vulkan, vulkan::detect_vulkan_async);
+        $callback!("gaudi", Backend::Gaudi, gaudi::detect_gaudi_async);
+        $callback!(
+            "aws-neuron",
+            Backend::AwsNeuron,
+            neuron::detect_aws_neuron_async
+        );
+        $callback!("apple", Backend::Apple, apple::detect_metal_and_ane_async);
+        $callback!(
+            "intel-oneapi",
+            Backend::IntelOneApi,
+            intel_oneapi::detect_intel_oneapi_async
+        );
+    };
+}
+
+/// Sysfs-only backends for async path (everything not in `async_cli_backends`).
+#[cfg(feature = "async-detect")]
+macro_rules! sysfs_backends {
+    ($callback:ident) => {
+        $callback!("rocm", Backend::Rocm, rocm::detect_rocm);
+        $callback!("intel-npu", Backend::IntelNpu, intel_npu::detect_intel_npu);
+        $callback!("amd-xdna", Backend::AmdXdna, amd_xdna::detect_amd_xdna);
+        $callback!("tpu", Backend::Tpu, tpu::detect_tpu);
+        $callback!(
+            "qualcomm",
+            Backend::Qualcomm,
+            qualcomm::detect_qualcomm_ai100
+        );
+        $callback!("cerebras", Backend::Cerebras, cerebras::detect_cerebras_wse);
+        $callback!(
+            "graphcore",
+            Backend::Graphcore,
+            graphcore::detect_graphcore_ipu
+        );
+        $callback!("groq", Backend::Groq, groq::detect_groq_lpu);
+        $callback!(
+            "samsung-npu",
+            Backend::SamsungNpu,
+            samsung_npu::detect_samsung_npu
+        );
+        $callback!(
+            "mediatek-apu",
+            Backend::MediaTekApu,
+            mediatek_apu::detect_mediatek_apu
+        );
+        $callback!(
+            "windows-wmi",
+            Backend::WindowsWmi,
+            windows::detect_windows_gpu
+        );
+    };
+}
+
 /// Detection results with per-backend timing information.
 #[derive(Debug, Clone)]
 pub struct TimedDetection {
@@ -121,116 +266,24 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
 
     let use_threads = builder.enabled_count() >= 2;
 
-    macro_rules! run_backend {
-        ($feature:literal, $backend:expr, $detect_fn:expr) => {
-            #[cfg(feature = $feature)]
-            if builder.backend_enabled($backend) {
-                $detect_fn(&mut all_profiles, &mut all_warnings);
-            }
-        };
-    }
-
-    macro_rules! spawn_backend {
-        ($feature:literal, $backend:expr, $detect_fn:expr, $handles:expr, $s:expr) => {
-            #[cfg(feature = $feature)]
-            if builder.backend_enabled($backend) {
-                $handles.push($s.spawn(|| {
-                    let mut p = Vec::new();
-                    let mut w = Vec::new();
-                    $detect_fn(&mut p, &mut w);
-                    (p, w)
-                }));
-            }
-        };
-    }
-
     if use_threads {
         std::thread::scope(|s| {
             let mut handles: Vec<std::thread::ScopedJoinHandle<'_, DetectResult>> = Vec::new();
 
-            spawn_backend!("cuda", Backend::Cuda, cuda::detect_cuda, handles, s);
-            spawn_backend!("rocm", Backend::Rocm, rocm::detect_rocm, handles, s);
-            spawn_backend!(
-                "apple",
-                Backend::Apple,
-                apple::detect_metal_and_ane,
-                handles,
-                s
-            );
-            spawn_backend!("vulkan", Backend::Vulkan, vulkan::detect_vulkan, handles, s);
-            spawn_backend!(
-                "intel-npu",
-                Backend::IntelNpu,
-                intel_npu::detect_intel_npu,
-                handles,
-                s
-            );
-            spawn_backend!(
-                "amd-xdna",
-                Backend::AmdXdna,
-                amd_xdna::detect_amd_xdna,
-                handles,
-                s
-            );
-            spawn_backend!("tpu", Backend::Tpu, tpu::detect_tpu, handles, s);
-            spawn_backend!("gaudi", Backend::Gaudi, gaudi::detect_gaudi, handles, s);
-            spawn_backend!(
-                "aws-neuron",
-                Backend::AwsNeuron,
-                neuron::detect_aws_neuron,
-                handles,
-                s
-            );
-            spawn_backend!(
-                "intel-oneapi",
-                Backend::IntelOneApi,
-                intel_oneapi::detect_intel_oneapi,
-                handles,
-                s
-            );
-            spawn_backend!(
-                "qualcomm",
-                Backend::Qualcomm,
-                qualcomm::detect_qualcomm_ai100,
-                handles,
-                s
-            );
-            spawn_backend!(
-                "cerebras",
-                Backend::Cerebras,
-                cerebras::detect_cerebras_wse,
-                handles,
-                s
-            );
-            spawn_backend!(
-                "graphcore",
-                Backend::Graphcore,
-                graphcore::detect_graphcore_ipu,
-                handles,
-                s
-            );
-            spawn_backend!("groq", Backend::Groq, groq::detect_groq_lpu, handles, s);
-            spawn_backend!(
-                "samsung-npu",
-                Backend::SamsungNpu,
-                samsung_npu::detect_samsung_npu,
-                handles,
-                s
-            );
-            spawn_backend!(
-                "mediatek-apu",
-                Backend::MediaTekApu,
-                mediatek_apu::detect_mediatek_apu,
-                handles,
-                s
-            );
-            spawn_backend!(
-                "windows-wmi",
-                Backend::WindowsWmi,
-                windows::detect_windows_gpu,
-                handles,
-                s
-            );
+            macro_rules! do_spawn {
+                ($feature:literal, $backend:expr, $name:literal, $detect_fn:expr) => {
+                    #[cfg(feature = $feature)]
+                    if builder.backend_enabled($backend) {
+                        handles.push(s.spawn(|| {
+                            let mut p = Vec::new();
+                            let mut w = Vec::new();
+                            $detect_fn(&mut p, &mut w);
+                            (p, w)
+                        }));
+                    }
+                };
+            }
+            backend_table!(do_spawn);
 
             for handle in handles {
                 if let Ok((profiles, warnings)) = handle.join() {
@@ -240,47 +293,15 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
             }
         });
     } else {
-        run_backend!("cuda", Backend::Cuda, cuda::detect_cuda);
-        run_backend!("rocm", Backend::Rocm, rocm::detect_rocm);
-        run_backend!("apple", Backend::Apple, apple::detect_metal_and_ane);
-        run_backend!("vulkan", Backend::Vulkan, vulkan::detect_vulkan);
-        run_backend!("intel-npu", Backend::IntelNpu, intel_npu::detect_intel_npu);
-        run_backend!("amd-xdna", Backend::AmdXdna, amd_xdna::detect_amd_xdna);
-        run_backend!("tpu", Backend::Tpu, tpu::detect_tpu);
-        run_backend!("gaudi", Backend::Gaudi, gaudi::detect_gaudi);
-        run_backend!("aws-neuron", Backend::AwsNeuron, neuron::detect_aws_neuron);
-        run_backend!(
-            "intel-oneapi",
-            Backend::IntelOneApi,
-            intel_oneapi::detect_intel_oneapi
-        );
-        run_backend!(
-            "qualcomm",
-            Backend::Qualcomm,
-            qualcomm::detect_qualcomm_ai100
-        );
-        run_backend!("cerebras", Backend::Cerebras, cerebras::detect_cerebras_wse);
-        run_backend!(
-            "graphcore",
-            Backend::Graphcore,
-            graphcore::detect_graphcore_ipu
-        );
-        run_backend!("groq", Backend::Groq, groq::detect_groq_lpu);
-        run_backend!(
-            "samsung-npu",
-            Backend::SamsungNpu,
-            samsung_npu::detect_samsung_npu
-        );
-        run_backend!(
-            "mediatek-apu",
-            Backend::MediaTekApu,
-            mediatek_apu::detect_mediatek_apu
-        );
-        run_backend!(
-            "windows-wmi",
-            Backend::WindowsWmi,
-            windows::detect_windows_gpu
-        );
+        macro_rules! do_run {
+            ($feature:literal, $backend:expr, $name:literal, $detect_fn:expr) => {
+                #[cfg(feature = $feature)]
+                if builder.backend_enabled($backend) {
+                    $detect_fn(&mut all_profiles, &mut all_warnings);
+                }
+            };
+        }
+        backend_table!(do_run);
     }
 
     // Post-pass: if vulkaninfo found no Vulkan devices, try sysfs fallback.
@@ -352,35 +373,6 @@ pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetectio
     let mut all_warnings: Vec<DetectionError> = Vec::new();
     let mut timings: HashMap<String, Duration> = HashMap::new();
 
-    macro_rules! run_backend_timed {
-        ($feature:literal, $backend:expr, $name:literal, $detect_fn:expr) => {
-            #[cfg(feature = $feature)]
-            if builder.backend_enabled($backend) {
-                let start = Instant::now();
-                $detect_fn(&mut all_profiles, &mut all_warnings);
-                timings.insert($name.into(), start.elapsed());
-            }
-        };
-    }
-
-    macro_rules! spawn_backend_timed {
-        ($feature:literal, $backend:expr, $name:literal, $detect_fn:expr, $handles:expr, $s:expr) => {
-            #[cfg(feature = $feature)]
-            if builder.backend_enabled($backend) {
-                $handles.push((
-                    $name,
-                    $s.spawn(|| {
-                        let start = Instant::now();
-                        let mut p = Vec::new();
-                        let mut w = Vec::new();
-                        $detect_fn(&mut p, &mut w);
-                        (p, w, start.elapsed())
-                    }),
-                ));
-            }
-        };
-    }
-
     let use_threads = builder.enabled_count() >= 2;
 
     if use_threads {
@@ -388,121 +380,24 @@ pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetectio
             let mut handles: Vec<(&str, std::thread::ScopedJoinHandle<'_, TimedDetectResult>)> =
                 Vec::new();
 
-            spawn_backend_timed!("cuda", Backend::Cuda, "cuda", cuda::detect_cuda, handles, s);
-            spawn_backend_timed!("rocm", Backend::Rocm, "rocm", rocm::detect_rocm, handles, s);
-            spawn_backend_timed!(
-                "apple",
-                Backend::Apple,
-                "apple",
-                apple::detect_metal_and_ane,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "vulkan",
-                Backend::Vulkan,
-                "vulkan",
-                vulkan::detect_vulkan,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "intel-npu",
-                Backend::IntelNpu,
-                "intel_npu",
-                intel_npu::detect_intel_npu,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "amd-xdna",
-                Backend::AmdXdna,
-                "amd_xdna",
-                amd_xdna::detect_amd_xdna,
-                handles,
-                s
-            );
-            spawn_backend_timed!("tpu", Backend::Tpu, "tpu", tpu::detect_tpu, handles, s);
-            spawn_backend_timed!(
-                "gaudi",
-                Backend::Gaudi,
-                "gaudi",
-                gaudi::detect_gaudi,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "aws-neuron",
-                Backend::AwsNeuron,
-                "aws_neuron",
-                neuron::detect_aws_neuron,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "intel-oneapi",
-                Backend::IntelOneApi,
-                "intel_oneapi",
-                intel_oneapi::detect_intel_oneapi,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "qualcomm",
-                Backend::Qualcomm,
-                "qualcomm",
-                qualcomm::detect_qualcomm_ai100,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "cerebras",
-                Backend::Cerebras,
-                "cerebras",
-                cerebras::detect_cerebras_wse,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "graphcore",
-                Backend::Graphcore,
-                "graphcore",
-                graphcore::detect_graphcore_ipu,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "groq",
-                Backend::Groq,
-                "groq",
-                groq::detect_groq_lpu,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "samsung-npu",
-                Backend::SamsungNpu,
-                "samsung_npu",
-                samsung_npu::detect_samsung_npu,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "mediatek-apu",
-                Backend::MediaTekApu,
-                "mediatek_apu",
-                mediatek_apu::detect_mediatek_apu,
-                handles,
-                s
-            );
-            spawn_backend_timed!(
-                "windows-wmi",
-                Backend::WindowsWmi,
-                "windows_wmi",
-                windows::detect_windows_gpu,
-                handles,
-                s
-            );
+            macro_rules! do_spawn_timed {
+                ($feature:literal, $backend:expr, $name:literal, $detect_fn:expr) => {
+                    #[cfg(feature = $feature)]
+                    if builder.backend_enabled($backend) {
+                        handles.push((
+                            $name,
+                            s.spawn(|| {
+                                let start = Instant::now();
+                                let mut p = Vec::new();
+                                let mut w = Vec::new();
+                                $detect_fn(&mut p, &mut w);
+                                (p, w, start.elapsed())
+                            }),
+                        ));
+                    }
+                };
+            }
+            backend_table!(do_spawn_timed);
 
             for (name, handle) in handles {
                 if let Ok((profiles, warnings, duration)) = handle.join() {
@@ -513,78 +408,17 @@ pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetectio
             }
         });
     } else {
-        run_backend_timed!("cuda", Backend::Cuda, "cuda", cuda::detect_cuda);
-        run_backend_timed!("rocm", Backend::Rocm, "rocm", rocm::detect_rocm);
-        run_backend_timed!(
-            "apple",
-            Backend::Apple,
-            "apple",
-            apple::detect_metal_and_ane
-        );
-        run_backend_timed!("vulkan", Backend::Vulkan, "vulkan", vulkan::detect_vulkan);
-        run_backend_timed!(
-            "intel-npu",
-            Backend::IntelNpu,
-            "intel_npu",
-            intel_npu::detect_intel_npu
-        );
-        run_backend_timed!(
-            "amd-xdna",
-            Backend::AmdXdna,
-            "amd_xdna",
-            amd_xdna::detect_amd_xdna
-        );
-        run_backend_timed!("tpu", Backend::Tpu, "tpu", tpu::detect_tpu);
-        run_backend_timed!("gaudi", Backend::Gaudi, "gaudi", gaudi::detect_gaudi);
-        run_backend_timed!(
-            "aws-neuron",
-            Backend::AwsNeuron,
-            "aws_neuron",
-            neuron::detect_aws_neuron
-        );
-        run_backend_timed!(
-            "intel-oneapi",
-            Backend::IntelOneApi,
-            "intel_oneapi",
-            intel_oneapi::detect_intel_oneapi
-        );
-        run_backend_timed!(
-            "qualcomm",
-            Backend::Qualcomm,
-            "qualcomm",
-            qualcomm::detect_qualcomm_ai100
-        );
-        run_backend_timed!(
-            "cerebras",
-            Backend::Cerebras,
-            "cerebras",
-            cerebras::detect_cerebras_wse
-        );
-        run_backend_timed!(
-            "graphcore",
-            Backend::Graphcore,
-            "graphcore",
-            graphcore::detect_graphcore_ipu
-        );
-        run_backend_timed!("groq", Backend::Groq, "groq", groq::detect_groq_lpu);
-        run_backend_timed!(
-            "samsung-npu",
-            Backend::SamsungNpu,
-            "samsung_npu",
-            samsung_npu::detect_samsung_npu
-        );
-        run_backend_timed!(
-            "mediatek-apu",
-            Backend::MediaTekApu,
-            "mediatek_apu",
-            mediatek_apu::detect_mediatek_apu
-        );
-        run_backend_timed!(
-            "windows-wmi",
-            Backend::WindowsWmi,
-            "windows_wmi",
-            windows::detect_windows_gpu
-        );
+        macro_rules! do_run_timed {
+            ($feature:literal, $backend:expr, $name:literal, $detect_fn:expr) => {
+                #[cfg(feature = $feature)]
+                if builder.backend_enabled($backend) {
+                    let start = Instant::now();
+                    $detect_fn(&mut all_profiles, &mut all_warnings);
+                    timings.insert($name.into(), start.elapsed());
+                }
+            };
+        }
+        backend_table!(do_run_timed);
     }
 
     // Post-pass: sysfs Vulkan fallback (same as detect_with_builder).
@@ -807,7 +641,7 @@ pub(crate) async fn detect_with_builder_async(builder: DetectBuilder) -> Acceler
     // Spawn async CLI backends as concurrent tokio tasks.
     let mut handles: Vec<tokio::task::JoinHandle<DetectResult>> = Vec::new();
 
-    macro_rules! spawn_async_backend {
+    macro_rules! do_spawn_async {
         ($feature:literal, $backend:expr, $detect_fn:path) => {
             #[cfg(feature = $feature)]
             if builder.backend_enabled($backend) {
@@ -815,21 +649,7 @@ pub(crate) async fn detect_with_builder_async(builder: DetectBuilder) -> Acceler
             }
         };
     }
-
-    spawn_async_backend!("cuda", Backend::Cuda, cuda::detect_cuda_async);
-    spawn_async_backend!("vulkan", Backend::Vulkan, vulkan::detect_vulkan_async);
-    spawn_async_backend!("gaudi", Backend::Gaudi, gaudi::detect_gaudi_async);
-    spawn_async_backend!(
-        "aws-neuron",
-        Backend::AwsNeuron,
-        neuron::detect_aws_neuron_async
-    );
-    spawn_async_backend!("apple", Backend::Apple, apple::detect_metal_and_ane_async);
-    spawn_async_backend!(
-        "intel-oneapi",
-        Backend::IntelOneApi,
-        intel_oneapi::detect_intel_oneapi_async
-    );
+    async_cli_backends!(do_spawn_async);
 
     // Sysfs-only backends run in a single blocking task.
     let sysfs_builder = builder.clone();
@@ -837,7 +657,7 @@ pub(crate) async fn detect_with_builder_async(builder: DetectBuilder) -> Acceler
         let mut profiles = Vec::new();
         let mut warnings: Vec<DetectionError> = Vec::new();
 
-        macro_rules! run_sysfs {
+        macro_rules! do_run_sysfs {
             ($feature:literal, $backend:expr, $detect_fn:expr) => {
                 #[cfg(feature = $feature)]
                 if sysfs_builder.backend_enabled($backend) {
@@ -845,38 +665,7 @@ pub(crate) async fn detect_with_builder_async(builder: DetectBuilder) -> Acceler
                 }
             };
         }
-
-        run_sysfs!("rocm", Backend::Rocm, rocm::detect_rocm);
-        run_sysfs!("intel-npu", Backend::IntelNpu, intel_npu::detect_intel_npu);
-        run_sysfs!("amd-xdna", Backend::AmdXdna, amd_xdna::detect_amd_xdna);
-        run_sysfs!("tpu", Backend::Tpu, tpu::detect_tpu);
-        run_sysfs!(
-            "qualcomm",
-            Backend::Qualcomm,
-            qualcomm::detect_qualcomm_ai100
-        );
-        run_sysfs!("cerebras", Backend::Cerebras, cerebras::detect_cerebras_wse);
-        run_sysfs!(
-            "graphcore",
-            Backend::Graphcore,
-            graphcore::detect_graphcore_ipu
-        );
-        run_sysfs!("groq", Backend::Groq, groq::detect_groq_lpu);
-        run_sysfs!(
-            "samsung-npu",
-            Backend::SamsungNpu,
-            samsung_npu::detect_samsung_npu
-        );
-        run_sysfs!(
-            "mediatek-apu",
-            Backend::MediaTekApu,
-            mediatek_apu::detect_mediatek_apu
-        );
-        run_sysfs!(
-            "windows-wmi",
-            Backend::WindowsWmi,
-            windows::detect_windows_gpu
-        );
+        sysfs_backends!(do_run_sysfs);
 
         (profiles, warnings)
     });
