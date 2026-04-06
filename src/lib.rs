@@ -272,6 +272,8 @@ pub mod ffi;
 pub mod fuzz_helpers;
 pub mod hardware;
 pub mod lazy;
+pub mod model_compat;
+pub mod model_format;
 pub mod plan;
 pub mod profile;
 pub mod quantization;
@@ -290,6 +292,7 @@ pub use hardware::{
     AcceleratorFamily, AcceleratorType, GaudiGeneration, NeuronChipType, TpuVersion,
 };
 pub use lazy::LazyRegistry;
+pub use model_format::{ModelFormat, ModelMetadata};
 pub use profile::AcceleratorProfile;
 pub use quantization::QuantizationLevel;
 pub use registry::{AcceleratorRegistry, Backend, DetectBuilder, SCHEMA_VERSION};
