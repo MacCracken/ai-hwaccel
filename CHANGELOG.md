@@ -42,8 +42,10 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 - **What-if analysis** — `what_if_add()`, `what_if_remove()`,
   `what_if_replace()` methods on `AcceleratorRegistry` for simulating hardware
   changes and re-planning sharding strategies.
-- **17 new tests** — `DetectBuilder` bitmask correctness, throughput finite
-  guards, NVLink link-count cap, sharding plan invariants. Total: 483 tests.
+- **Fuzz target** for model format byte-level parser.
+- **130+ new tests** — interconnect parsers (NVSwitch, XGMI, ICI, RoCE v2),
+  model compatibility database, model format detection (SafeTensors, GGUF,
+  ONNX, PyTorch), what-if analysis, edge cases. Total: 534 tests.
 
 ### Changed
 
