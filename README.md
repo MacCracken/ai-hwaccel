@@ -208,6 +208,16 @@ RUST_LOG=trace               # Everything including dependency traces
 
 **Rust 1.89** (edition 2024). Tracked in `rust-toolchain.toml`.
 
+## Binary size
+
+Release builds use LTO, single codegen unit, `opt-level = "z"`, and symbol
+stripping:
+
+| Build | Size |
+|-------|------|
+| All backends (default) | **847 KB** |
+| Minimal (CPU only) | **692 KB** |
+
 ## Versioning
 
 This crate uses **semantic versioning**. The version is read from the
