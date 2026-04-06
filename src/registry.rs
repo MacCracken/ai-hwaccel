@@ -236,6 +236,23 @@ impl AcceleratorRegistry {
     ///
     /// Useful for what-if analysis: "what if I lose 2 GPUs?"
     /// Always retains at least one CPU profile to prevent empty registries.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ai_hwaccel::{AcceleratorRegistry, AcceleratorProfile, AcceleratorType};
+    ///
+    /// let registry = AcceleratorRegistry::from_profiles(vec![
+    ///     AcceleratorProfile::cpu(64 * 1024 * 1024 * 1024),
+    ///     AcceleratorProfile::cuda(0, 80 * 1024 * 1024 * 1024),
+    ///     AcceleratorProfile::cuda(1, 80 * 1024 * 1024 * 1024),
+    /// ]);
+    /// // Remove GPU 1
+    /// let without = registry.what_if_remove(|p| {
+    ///     matches!(p.accelerator, AcceleratorType::CudaGpu { device_id: 1 })
+    /// });
+    /// assert_eq!(without.all_profiles().len(), 2);
+    /// ```
     #[must_use]
     pub fn what_if_remove<F>(&self, predicate: F) -> Self
     where
@@ -265,6 +282,9 @@ impl AcceleratorRegistry {
 
     /// Create a hypothetical registry from an explicit profile list,
     /// preserving the current system I/O topology.
+    ///
+    /// Useful for complete hardware replacement scenarios or testing with
+    /// a specific device configuration.
     #[must_use]
     pub fn what_if_replace(&self, profiles: Vec<AcceleratorProfile>) -> Self {
         Self {

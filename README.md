@@ -136,7 +136,7 @@ src/
 │   ├── disk.rs             #   Storage device detection
 │   ├── command.rs          #   Safe subprocess execution
 │   └── environment.rs      #   Runtime environment (Docker, K8s, cloud)
-└── tests/                  # 483 tests across 22 modules
+└── tests/                  # 538 tests across 24 modules
 ```
 
 ## Core concepts

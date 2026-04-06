@@ -45,7 +45,7 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 - **Fuzz target** for model format byte-level parser.
 - **130+ new tests** — interconnect parsers (NVSwitch, XGMI, ICI, RoCE v2),
   model compatibility database, model format detection (SafeTensors, GGUF,
-  ONNX, PyTorch), what-if analysis, edge cases. Total: 534 tests.
+  ONNX, PyTorch), what-if analysis, edge cases. Total: 538 tests.
 
 ### Changed
 

@@ -252,13 +252,90 @@
 //! | `aws-neuron` | AWS Inferentia/Trainium | yes |
 //! | `intel-oneapi` | Intel oneAPI | yes |
 //! | `qualcomm` | Qualcomm Cloud AI | yes |
+//! | `cerebras` | Cerebras WSE | yes |
+//! | `graphcore` | Graphcore IPU | yes |
+//! | `groq` | Groq LPU | yes |
+//! | `samsung-npu` | Samsung NPU | yes |
+//! | `mediatek-apu` | MediaTek APU | yes |
+//! | `windows-wmi` | Windows WMI GPU | yes |
 //! | `all-backends` | All of the above | yes |
+//! | `minimal` | CPU only, no backends | no |
+//! | `common` | Desktop/cloud backends | no |
+//! | `cli` | CLI binary support | yes |
+//! | `async-detect` | Async detection (tokio) | no |
 //!
 //! To include only specific backends:
 //!
 //! ```toml
 //! [dependencies]
 //! ai-hwaccel = { version = "1.2", default-features = false, features = ["cuda"] }
+//! ```
+//!
+//! ## WASM support
+//!
+//! The crate compiles for `wasm32-unknown-unknown` with all features.
+//! Detection stubs return empty results; use [`AcceleratorRegistry::from_profiles`]
+//! or [`AcceleratorRegistry::from_json`] to build registries in WASM, then use
+//! planning, sharding, cost, and model compatibility APIs normally.
+//!
+//! ## Step 6: Model compatibility
+//!
+//! The [`model_compat`] module includes an embedded catalogue of popular models.
+//! Check whether a model fits on your hardware:
+//!
+//! ```rust
+//! use ai_hwaccel::model_compat::{find_model, can_run, compatible_models};
+//! use ai_hwaccel::QuantizationLevel;
+//!
+//! // Check a specific model
+//! if let Some(llama) = find_model("Llama 3.1 70B") {
+//!     let fits = can_run(llama, &QuantizationLevel::Int4, 48 * 1024 * 1024 * 1024);
+//!     println!("Llama 70B INT4 on 48 GB: {}", if fits { "yes" } else { "no" });
+//! }
+//!
+//! // Find all models that fit in 24 GB at FP16
+//! let models = compatible_models(&QuantizationLevel::Float16, 24 * 1024 * 1024 * 1024);
+//! for m in &models {
+//!     println!("{}: {:.1} GB", m.model.name, m.model.memory_gb(&QuantizationLevel::Float16));
+//! }
+//! ```
+//!
+//! ## Step 7: Detect model file formats
+//!
+//! The [`model_format`] module parses `.safetensors`, `.gguf`, `.onnx`, and
+//! `.pt` file headers to extract metadata without loading the full model:
+//!
+//! ```rust
+//! use ai_hwaccel::model_format::detect_format_from_bytes;
+//!
+//! // SafeTensors example (8-byte header size + JSON)
+//! let json = r#"{"w":{"dtype":"F16","shape":[768,768],"data_offsets":[0,1179648]}}"#;
+//! let mut bytes = (json.len() as u64).to_le_bytes().to_vec();
+//! bytes.extend_from_slice(json.as_bytes());
+//!
+//! let meta = detect_format_from_bytes(&bytes).unwrap();
+//! println!("Format: {}, params: {:?}", meta.format, meta.param_count);
+//! ```
+//!
+//! ## Step 8: What-if analysis
+//!
+//! Simulate hardware changes and re-plan sharding:
+//!
+//! ```rust
+//! use ai_hwaccel::{AcceleratorRegistry, AcceleratorProfile, QuantizationLevel};
+//!
+//! let base = AcceleratorRegistry::from_profiles(vec![
+//!     AcceleratorProfile::cpu(64 * 1024 * 1024 * 1024),
+//!     AcceleratorProfile::cuda(0, 24 * 1024 * 1024 * 1024),
+//! ]);
+//!
+//! // "What if I add two H100s?"
+//! let upgraded = base.what_if_add(&[
+//!     AcceleratorProfile::cuda(1, 80 * 1024 * 1024 * 1024),
+//!     AcceleratorProfile::cuda(2, 80 * 1024 * 1024 * 1024),
+//! ]);
+//! let plan = upgraded.plan_sharding(70_000_000_000, &QuantizationLevel::BFloat16);
+//! println!("With H100s: {}", plan.strategy);
 //! ```
 
 mod async_detect;
@@ -292,6 +369,7 @@ pub use hardware::{
     AcceleratorFamily, AcceleratorType, GaudiGeneration, NeuronChipType, TpuVersion,
 };
 pub use lazy::LazyRegistry;
+pub use model_compat::ModelProfile;
 pub use model_format::{ModelFormat, ModelMetadata};
 pub use profile::AcceleratorProfile;
 pub use quantization::QuantizationLevel;

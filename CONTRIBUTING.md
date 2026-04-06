@@ -56,11 +56,21 @@ src/
 ├── requirement.rs      # AcceleratorRequirement
 ├── sharding.rs         # ShardingStrategy, ModelShard, ShardingPlan
 ├── training.rs         # TrainingMethod, TrainingTarget, MemoryEstimate
-├── registry.rs         # AcceleratorRegistry (struct + query methods)
+├── registry.rs         # AcceleratorRegistry (struct + query + what-if)
 ├── detect/             # One file per hardware backend
 │   ├── mod.rs          #   detect() orchestrator + helpers
 │   ├── cuda.rs         #   ...through qualcomm.rs
+│   ├── interconnect.rs #   NVLink, NVSwitch, XGMI, ICI, RoCE v2
+│   └── environment.rs  #   Docker/K8s/cloud + GPU device plugin detection
 ├── plan.rs             # Sharding planner (impl on AcceleratorRegistry)
+├── cost.rs             # Cloud instance recommendation
+├── model_compat.rs     # Model compatibility database (26 models)
+├── model_format.rs     # File format detection (SafeTensors, GGUF, ONNX, PyTorch)
+├── system_io.rs        # Interconnects, storage, runtime environment
+├── cache.rs            # CachedRegistry with TTL
+├── lazy.rs             # LazyRegistry for deferred detection
+├── ffi.rs              # C FFI bindings
+├── units.rs            # Constants
 └── tests/              # One file per concern
 ```
 
@@ -98,4 +108,4 @@ version in their PRs.
 ## License
 
 By contributing you agree that your contributions will be licensed under the
-[GNU Affero General Public License v3.0](LICENSE).
+[GNU General Public License v3.0](LICENSE).
