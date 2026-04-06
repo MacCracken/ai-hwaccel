@@ -106,3 +106,8 @@ pub fn fuzz_cerebras_parser(input: &str) {
 pub fn fuzz_graphcore_parser(input: &str) {
     let _ = crate::detect::graphcore::parse_memory_from_gcinfo(input);
 }
+
+/// Fuzz the model format detector with raw bytes.
+pub fn fuzz_model_format_detector(input: &[u8]) {
+    let _ = crate::model_format::detect_format_from_bytes(input);
+}

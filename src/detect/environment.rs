@@ -19,11 +19,9 @@ pub(crate) fn detect_environment() -> RuntimeEnvironment {
         "environment detection complete"
     );
 
-    let kubernetes_gpu = if container.is_kubernetes {
-        detect_kubernetes_gpu()
-    } else {
-        None
-    };
+    // GPU device plugin env vars are set by container runtimes (Docker, K8s, etc.)
+    // — not exclusively Kubernetes. Detect regardless of is_kubernetes.
+    let kubernetes_gpu = detect_kubernetes_gpu();
 
     RuntimeEnvironment {
         is_docker: container.is_docker,

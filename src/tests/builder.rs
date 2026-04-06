@@ -314,3 +314,62 @@ fn tpu_large_chip_count_no_overflow_panic() {
     // Should saturate to u64::MAX, not panic.
     assert!(p.memory_bytes > 0);
 }
+
+// ---------------------------------------------------------------------------
+// What-if analysis
+// ---------------------------------------------------------------------------
+
+#[test]
+fn what_if_add_increases_memory() {
+    let base =
+        AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(64 * 1024 * 1024 * 1024)]);
+    let added = base.what_if_add(&[AcceleratorProfile::cuda(0, 80 * 1024 * 1024 * 1024)]);
+    assert!(added.total_memory() > base.total_memory());
+    assert_eq!(added.all_profiles().len(), 2);
+}
+
+#[test]
+fn what_if_remove_keeps_cpu() {
+    let base = AcceleratorRegistry::from_profiles(vec![
+        AcceleratorProfile::cpu(64 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(0, 80 * 1024 * 1024 * 1024),
+    ]);
+    // Remove everything — should still keep a CPU.
+    let removed = base.what_if_remove(|_| true);
+    assert!(!removed.all_profiles().is_empty());
+    assert!(
+        removed
+            .all_profiles()
+            .iter()
+            .any(|p| matches!(p.accelerator, AcceleratorType::Cpu))
+    );
+}
+
+#[test]
+fn what_if_remove_specific_device() {
+    let base = AcceleratorRegistry::from_profiles(vec![
+        AcceleratorProfile::cpu(64 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(0, 80 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(1, 80 * 1024 * 1024 * 1024),
+    ]);
+    let removed =
+        base.what_if_remove(|p| matches!(p.accelerator, AcceleratorType::CudaGpu { device_id: 1 }));
+    assert_eq!(removed.all_profiles().len(), 2);
+}
+
+#[test]
+fn what_if_replace_changes_plan() {
+    let base =
+        AcceleratorRegistry::from_profiles(vec![AcceleratorProfile::cpu(64 * 1024 * 1024 * 1024)]);
+    let upgraded = base.what_if_replace(vec![
+        AcceleratorProfile::cpu(64 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(0, 80 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(1, 80 * 1024 * 1024 * 1024),
+    ]);
+    // 70B at BF16 shouldn't fit on CPU alone but should fit on 2x 80GB GPUs.
+    let plan_base = base.plan_sharding(70_000_000_000, &QuantizationLevel::BFloat16);
+    let plan_upgraded = upgraded.plan_sharding(70_000_000_000, &QuantizationLevel::BFloat16);
+    assert!(plan_upgraded.total_memory_bytes <= upgraded.total_accelerator_memory());
+    // Upgraded should have at least as good throughput.
+    assert!(plan_upgraded.estimated_tokens_per_sec >= plan_base.estimated_tokens_per_sec);
+}

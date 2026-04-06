@@ -74,13 +74,12 @@ pub struct ModelMetadata {
 /// metadata. Returns `None` if the format is unrecognised.
 #[must_use]
 pub fn detect_format(path: &Path) -> Option<ModelMetadata> {
-    let bytes = std::fs::read(path).ok()?;
-    let header = if bytes.len() > MAX_HEADER_BYTES {
-        &bytes[..MAX_HEADER_BYTES]
-    } else {
-        &bytes
-    };
-    detect_format_from_bytes(header)
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buf = vec![0u8; MAX_HEADER_BYTES];
+    let n = file.read(&mut buf).ok()?;
+    buf.truncate(n);
+    detect_format_from_bytes(&buf)
 }
 
 /// Detect the model format from raw bytes (typically the first 16 KB).
@@ -186,7 +185,7 @@ fn extract_safetensors_metadata(header: &serde_json::Value) -> ModelMetadata {
             continue;
         }
 
-        tensor_count += 1;
+        tensor_count = tensor_count.saturating_add(1);
 
         if let Some(tensor_obj) = value.as_object() {
             // Extract dtype from first tensor.
@@ -196,8 +195,10 @@ fn extract_safetensors_metadata(header: &serde_json::Value) -> ModelMetadata {
                 dtype = Some(dt.to_string());
             }
 
-            // Count parameters from shape.
-            if let Some(shape) = tensor_obj.get("shape").and_then(|v| v.as_array()) {
+            // Count parameters from shape (skip empty shapes — scalars).
+            if let Some(shape) = tensor_obj.get("shape").and_then(|v| v.as_array())
+                && !shape.is_empty()
+            {
                 let params: u64 = shape.iter().filter_map(|d| d.as_u64()).product();
                 total_params = total_params.saturating_add(params);
             }
@@ -327,10 +328,29 @@ fn parse_onnx_header(bytes: &[u8]) -> Option<ModelMetadata> {
     }
 
     // Parse ir_version as varint.
-    let (ir_version, _) = parse_varint(&bytes[1..])?;
+    let (ir_version, consumed) = parse_varint(&bytes[1..])?;
 
     // Sanity: ir_version should be 1-10 (current range).
     if ir_version == 0 || ir_version > 20 {
+        return None;
+    }
+
+    // Strengthen detection: require a valid second protobuf field after ir_version.
+    // ONNX ModelProto field 2 (opset_import) has tag 0x3A (field 7, wire type 2)
+    // or field 8 (metadata_props) 0x42, or producer_name (field 2) 0x12.
+    // We accept any valid protobuf field tag (wire type 0-2, field 1-15).
+    let next_offset = 1 + consumed;
+    if next_offset < bytes.len() {
+        let next_tag = bytes[next_offset];
+        let wire_type = next_tag & 0x07;
+        let field_num = next_tag >> 3;
+        // Valid protobuf: wire type 0 (varint), 1 (64-bit), 2 (length-delimited)
+        // and field number 1-15 (single-byte tags).
+        if wire_type > 2 || field_num == 0 {
+            return None;
+        }
+    } else {
+        // Only ir_version and nothing else — too short to be a real ONNX model.
         return None;
     }
 
@@ -526,5 +546,50 @@ mod tests {
     fn varint_unterminated() {
         // All continuation bits set, never terminates.
         assert_eq!(parse_varint(&[0x80, 0x80, 0x80]), None);
+    }
+
+    // Audit edge cases
+    #[test]
+    fn safetensors_empty_shape_not_counted() {
+        // Scalar tensor with empty shape should not inflate param count.
+        let json = r#"{"bias":{"dtype":"F32","shape":[],"data_offsets":[0,4]}}"#;
+        let header_size = json.len() as u64;
+        let mut bytes = header_size.to_le_bytes().to_vec();
+        bytes.extend_from_slice(json.as_bytes());
+
+        let meta = detect_format_from_bytes(&bytes).unwrap();
+        assert_eq!(meta.format, ModelFormat::SafeTensors);
+        assert_eq!(meta.param_count, None); // Empty shape → no params counted.
+        assert_eq!(meta.tensor_count, Some(1));
+    }
+
+    #[test]
+    fn onnx_too_short_after_ir_version() {
+        // Only ir_version, no second field — should not match.
+        let bytes = [0x08, 0x09];
+        assert!(parse_onnx_header(&bytes).is_none());
+    }
+
+    #[test]
+    fn onnx_invalid_second_field() {
+        // ir_version=9, then wire type 7 (invalid) at field 0.
+        let bytes = [0x08, 0x09, 0x07];
+        assert!(parse_onnx_header(&bytes).is_none());
+    }
+
+    #[test]
+    fn onnx_valid_second_field() {
+        // ir_version=9, then field 2 wire type 2 (producer_name, length-delimited).
+        let bytes = [0x08, 0x09, 0x12, 0x05, b'o', b'n', b'n', b'x', b'!'];
+        let meta = detect_format_from_bytes(&bytes).unwrap();
+        assert_eq!(meta.format, ModelFormat::ONNX);
+        assert_eq!(meta.format_version, Some(9));
+    }
+
+    #[test]
+    fn random_0x08_not_onnx() {
+        // Arbitrary binary starting with 0x08 should not be detected as ONNX.
+        let bytes = [0x08, 0x05, 0xFF, 0xFF]; // wire type 7 = invalid
+        assert!(parse_onnx_header(&bytes).is_none());
     }
 }

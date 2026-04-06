@@ -235,17 +235,26 @@ impl AcceleratorRegistry {
     /// Create a hypothetical registry by removing devices matching a predicate.
     ///
     /// Useful for what-if analysis: "what if I lose 2 GPUs?"
+    /// Always retains at least one CPU profile to prevent empty registries.
     #[must_use]
     pub fn what_if_remove<F>(&self, predicate: F) -> Self
     where
         F: Fn(&AcceleratorProfile) -> bool,
     {
-        let profiles = self
+        let mut profiles: Vec<AcceleratorProfile> = self
             .profiles
             .iter()
             .filter(|p| !predicate(p))
             .cloned()
             .collect();
+        // Ensure at least one CPU profile exists.
+        if profiles.is_empty()
+            || !profiles
+                .iter()
+                .any(|p| matches!(p.accelerator, crate::hardware::AcceleratorType::Cpu))
+        {
+            profiles.push(crate::detect::cpu_profile());
+        }
         Self {
             schema_version: self.schema_version,
             profiles,
