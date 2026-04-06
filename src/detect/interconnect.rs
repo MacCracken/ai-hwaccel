@@ -37,30 +37,34 @@ pub(crate) async fn detect_interconnects_async() -> (Vec<Interconnect>, Vec<Dete
     detect_infiniband(&mut interconnects, &mut warnings);
 
     // NVLink: async CLI call.
-    if let Ok(output) =
-        super::command::run_tool_async("nvidia-smi", NVLINK_ARGS, DEFAULT_TIMEOUT).await
-    {
-        parse_nvlink_output(&output.stdout, &mut interconnects);
+    match super::command::run_tool_async("nvidia-smi", NVLINK_ARGS, DEFAULT_TIMEOUT).await {
+        Ok(output) => parse_nvlink_output(&output.stdout, &mut interconnects),
+        Err(DetectionError::ToolNotFound { .. }) => {}
+        Err(e) => warnings.push(e),
     }
 
-    // NVSwitch: async CLI call (nvidia-smi topo -m).
-    if let Ok(output) =
-        super::command::run_tool_async("nvidia-smi", TOPO_ARGS, DEFAULT_TIMEOUT).await
-    {
-        parse_nvswitch_topo(&output.stdout, &mut interconnects);
-    } else {
-        // Fallback to sysfs probing.
-        detect_nvswitch_sysfs(&mut interconnects);
+    // NVSwitch: async CLI call (nvidia-smi topo -m), sysfs fallback.
+    match super::command::run_tool_async("nvidia-smi", TOPO_ARGS, DEFAULT_TIMEOUT).await {
+        Ok(output) => parse_nvswitch_topo(&output.stdout, &mut interconnects),
+        Err(DetectionError::ToolNotFound { .. }) => {
+            detect_nvswitch_sysfs(&mut interconnects);
+        }
+        Err(e) => {
+            warnings.push(e);
+            detect_nvswitch_sysfs(&mut interconnects);
+        }
     }
 
-    // XGMI: async CLI call (rocm-smi --showtopo).
-    if let Ok(output) =
-        super::command::run_tool_async("rocm-smi", ROCM_TOPO_ARGS, DEFAULT_TIMEOUT).await
-    {
-        parse_xgmi_topo(&output.stdout, &mut interconnects);
-    } else {
-        // Fallback to sysfs probing.
-        detect_xgmi_sysfs(&mut interconnects);
+    // XGMI: async CLI call (rocm-smi --showtopo), sysfs fallback.
+    match super::command::run_tool_async("rocm-smi", ROCM_TOPO_ARGS, DEFAULT_TIMEOUT).await {
+        Ok(output) => parse_xgmi_topo(&output.stdout, &mut interconnects),
+        Err(DetectionError::ToolNotFound { .. }) => {
+            detect_xgmi_sysfs(&mut interconnects);
+        }
+        Err(e) => {
+            warnings.push(e);
+            detect_xgmi_sysfs(&mut interconnects);
+        }
     }
 
     // TPU ICI: sync sysfs probing.
@@ -118,6 +122,8 @@ fn detect_infiniband(interconnects: &mut Vec<Interconnect>, _warnings: &mut Vec<
 }
 
 /// Parse InfiniBand rate string like "200 Gb/sec (4X HDR)" → GB/s.
+#[must_use]
+#[inline]
 pub fn parse_ib_rate(s: &str) -> f64 {
     // Format: "<number> Gb/sec (...)"
     if let Some(gb_str) = s.split_whitespace().next()
@@ -160,7 +166,7 @@ pub fn parse_nvlink_output(stdout: &str, interconnects: &mut Vec<Interconnect>) 
             if link_count > 0 {
                 interconnects.push(Interconnect {
                     kind: InterconnectKind::NVLink,
-                    name: current_gpu.clone(),
+                    name: std::mem::take(&mut current_gpu),
                     bandwidth_gbps: link_bw * link_count as f64,
                     state: Some(format!("{} links", link_count)),
                 });
@@ -355,7 +361,7 @@ fn detect_xgmi_sysfs(interconnects: &mut Vec<Interconnect>) -> bool {
     };
 
     // Typically 1-2 hives at most; Vec is lighter than HashMap here.
-    let mut hive_gpus: Vec<(String, Vec<String>)> = Vec::new();
+    let mut hive_gpus: Vec<(String, Vec<String>)> = Vec::with_capacity(2);
 
     for entry in drm_entries.flatten() {
         let name = entry.file_name();
@@ -759,5 +765,100 @@ GPU0     0
         let mut interconnects = Vec::new();
         parse_xgmi_topo(output, &mut interconnects);
         assert!(interconnects.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Edge cases from audit
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_nvswitch_topo_mixed_nv_counts() {
+        // Some GPU pairs have different NV counts (heterogeneous topology).
+        let output = "\
+\tGPU0\tGPU1\tGPU2\tGPU3\t
+GPU0\t X \tNV12\tNV4\tNV4\t
+GPU1\tNV12\t X \tNV4\tNV4\t
+GPU2\tNV4\tNV4\t X \tNV12\t
+GPU3\tNV4\tNV4\tNV12\t X \t
+";
+        let mut interconnects = Vec::new();
+        parse_nvswitch_topo(output, &mut interconnects);
+        assert_eq!(interconnects.len(), 1);
+        // max_nv_links is 12 (≥ 8), so NVSwitch detected.
+        assert_eq!(interconnects[0].bandwidth_gbps, 12.0 * 25.0);
+    }
+
+    #[test]
+    fn parse_nvswitch_topo_header_not_counted_as_gpu() {
+        // Verify the header row (GPU0 GPU1 ...) is not counted as a data row.
+        let output = "\
+\tGPU0\tGPU1\t
+GPU0\t X \tNV12\t
+GPU1\tNV12\t X \t
+";
+        let mut interconnects = Vec::new();
+        parse_nvswitch_topo(output, &mut interconnects);
+        assert_eq!(interconnects.len(), 1);
+        // Should report 2 GPUs, not 3.
+        assert!(interconnects[0].name.contains("2 GPUs"));
+    }
+
+    #[test]
+    fn parse_nvlink_output_zero_bandwidth() {
+        // Malformed output with no bandwidth value.
+        let output = "\
+GPU 0: NVIDIA RTX 4090 (UUID: GPU-aaa)
+    Link 0:
+    Link 1: GB/s
+";
+        let mut interconnects = Vec::new();
+        parse_nvlink_output(output, &mut interconnects);
+        // Links counted but bandwidth stays 0.
+        assert_eq!(interconnects.len(), 1);
+        assert_eq!(interconnects[0].bandwidth_gbps, 0.0);
+    }
+
+    #[test]
+    fn parse_xgmi_topo_multi_section_output() {
+        // Full rocm-smi --showtopo output with weight section before link section.
+        let output = "\
+===================== Inter Node Access (different P2P protocols) ===========
+         GPU0         GPU1
+GPU0     0            15
+GPU1     15           0
+
+========================= Link Type between two GPUs =========================
+         GPU0         GPU1
+GPU0     0            XGMI
+GPU1     XGMI         0
+
+========================= Weight between two GPUs =========================
+         GPU0         GPU1
+GPU0     0            15
+GPU1     15           0
+";
+        let mut interconnects = Vec::new();
+        parse_xgmi_topo(output, &mut interconnects);
+        assert_eq!(interconnects.len(), 1);
+        assert_eq!(interconnects[0].state.as_deref(), Some("2 GPUs"));
+    }
+
+    #[test]
+    fn parse_nvswitch_topo_gpu_count_correct_with_full_header() {
+        // Real nvidia-smi topo -m header format with Legend section.
+        let output = "\
+        GPU0    GPU1    CPU Affinity    NUMA Affinity   GPU NUMA ID
+GPU0     X      NV12    0-15            0               N/A
+GPU1    NV12     X      0-15            0               N/A
+
+Legend:
+  X    = Self
+  SYS  = Connection traversing PCIe as well as the SMP interconnect
+  NV#  = Connection traversing a bonded set of # NVLinks
+";
+        let mut interconnects = Vec::new();
+        parse_nvswitch_topo(output, &mut interconnects);
+        assert_eq!(interconnects.len(), 1);
+        assert!(interconnects[0].name.contains("2 GPUs"));
     }
 }

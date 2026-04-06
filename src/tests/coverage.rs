@@ -685,6 +685,45 @@ fn system_io_multiple_interconnects_sum_bandwidth() {
     assert!((io.total_interconnect_bandwidth_gbps() - 75.0).abs() < f64::EPSILON);
 }
 
+#[test]
+fn system_io_rocev2_and_ici_contribute_bandwidth() {
+    let io = crate::system_io::SystemIo {
+        interconnects: vec![
+            crate::system_io::Interconnect {
+                kind: crate::system_io::InterconnectKind::RoCEv2,
+                name: "mlx5_0".into(),
+                bandwidth_gbps: 50.0,
+                state: None,
+            },
+            crate::system_io::Interconnect {
+                kind: crate::system_io::InterconnectKind::Ici,
+                name: "ici0".into(),
+                bandwidth_gbps: 204.8,
+                state: None,
+            },
+        ],
+        storage: vec![],
+        environment: None,
+    };
+    assert!(io.has_interconnect());
+    assert!((io.total_interconnect_bandwidth_gbps() - 254.8).abs() < f64::EPSILON);
+}
+
+#[test]
+fn system_io_nvswitch_bandwidth() {
+    let io = crate::system_io::SystemIo {
+        interconnects: vec![crate::system_io::Interconnect {
+            kind: crate::system_io::InterconnectKind::NVSwitch,
+            name: "NVSwitch (8 GPUs)".into(),
+            bandwidth_gbps: 450.0,
+            state: Some("NV18".into()),
+        }],
+        storage: vec![],
+        environment: None,
+    };
+    assert_eq!(io.total_interconnect_bandwidth_gbps(), 450.0);
+}
+
 // ---------------------------------------------------------------------------
 // ShardingPlan: fits_in_memory
 // ---------------------------------------------------------------------------

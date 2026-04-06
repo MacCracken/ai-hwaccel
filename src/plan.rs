@@ -9,11 +9,9 @@ use crate::system_io::{Interconnect, InterconnectKind};
 use crate::units;
 
 /// Aggregated interconnect bandwidth data extracted in a single pass.
-#[allow(dead_code)]
 struct InterconnectInfo {
     has_nvswitch: bool,
-    nvlink_bw: f64,
-    xgmi_bw: f64,
+    /// Total high-bandwidth interconnect: NVLink/NVSwitch + XGMI + RDMA + ICI.
     high_bw: f64,
 }
 
@@ -23,6 +21,8 @@ impl InterconnectInfo {
         let mut has_nvswitch = false;
         let mut nvlink_bw = 0.0f64;
         let mut xgmi_bw = 0.0f64;
+        let mut rdma_bw = 0.0f64;
+        let mut ici_bw = 0.0f64;
         for ic in interconnects {
             match ic.kind {
                 InterconnectKind::NVSwitch => {
@@ -35,14 +35,19 @@ impl InterconnectInfo {
                 InterconnectKind::XgmiInfinityFabric => {
                     xgmi_bw = xgmi_bw.max(ic.bandwidth_gbps);
                 }
-                _ => {}
+                InterconnectKind::InfiniBand
+                | InterconnectKind::RoCE
+                | InterconnectKind::RoCEv2 => {
+                    rdma_bw = rdma_bw.max(ic.bandwidth_gbps);
+                }
+                InterconnectKind::Ici => {
+                    ici_bw = ici_bw.max(ic.bandwidth_gbps);
+                }
             }
         }
         Self {
             has_nvswitch,
-            nvlink_bw,
-            xgmi_bw,
-            high_bw: nvlink_bw + xgmi_bw,
+            high_bw: nvlink_bw + xgmi_bw + rdma_bw + ici_bw,
         }
     }
 }
