@@ -385,40 +385,40 @@ impl Backend {
 /// By default all backends are enabled. Use `without_*` methods to disable
 /// specific backends, or start from `none()` and use `with_*` to enable only
 /// the ones you need.
-#[derive(Debug, Clone)]
+///
+/// Uses a `u32` bitmask internally — zero heap allocation.
+#[derive(Debug, Clone, Copy)]
 pub struct DetectBuilder {
-    enabled: Vec<bool>,
+    enabled: u32,
 }
 
 impl DetectBuilder {
     /// All backends enabled (default).
     pub fn new() -> Self {
         Self {
-            enabled: vec![true; Backend::ALL.len()],
+            enabled: (1u32 << Backend::ALL.len()) - 1,
         }
     }
 
     /// No backends enabled — start from scratch with `with_*` methods.
     pub fn none() -> Self {
-        Self {
-            enabled: vec![false; Backend::ALL.len()],
-        }
+        Self { enabled: 0 }
     }
 
     /// Enable a specific backend.
     pub fn with(mut self, backend: Backend) -> Self {
-        self.enabled[backend as usize] = true;
+        self.enabled |= 1 << backend as u32;
         self
     }
 
     /// Disable a specific backend.
     pub fn without(mut self, backend: Backend) -> Self {
-        self.enabled[backend as usize] = false;
+        self.enabled &= !(1 << backend as u32);
         self
     }
 
     fn is_enabled(&self, backend: Backend) -> bool {
-        self.enabled[backend as usize]
+        self.enabled & (1 << backend as u32) != 0
     }
 
     // Convenience methods (delegate to generic with/without).
@@ -585,6 +585,6 @@ impl DetectBuilder {
 
     /// Count of enabled backends (for deciding sequential vs parallel).
     pub(crate) fn enabled_count(&self) -> usize {
-        self.enabled.iter().filter(|&&e| e).count()
+        self.enabled.count_ones() as usize
     }
 }

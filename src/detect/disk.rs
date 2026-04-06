@@ -13,11 +13,11 @@ use crate::system_io::{StorageDevice, StorageKind};
 pub(crate) fn detect_storage() -> Vec<StorageDevice> {
     let mut devices = Vec::new();
     let block_dir = Path::new("/sys/block");
-    if !block_dir.exists() {
+    let Ok(entries) = std::fs::read_dir(block_dir) else {
         return devices;
-    }
+    };
 
-    for entry in std::fs::read_dir(block_dir).into_iter().flatten().flatten() {
+    for entry in entries.flatten() {
         let os_name = entry.file_name();
         let name_ref = os_name.to_string_lossy();
 

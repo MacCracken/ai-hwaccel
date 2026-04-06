@@ -233,6 +233,29 @@ fn plan_sharding_three_gpus_uneven_layers() {
 }
 
 #[test]
+fn plan_sharding_throughput_always_finite() {
+    // Any multi-GPU plan should produce finite (or None) throughput, never NaN/Inf.
+    let reg = AcceleratorRegistry::from_profiles(vec![
+        AcceleratorProfile::cpu(16 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(0, 24 * 1024 * 1024 * 1024),
+        AcceleratorProfile::cuda(1, 24 * 1024 * 1024 * 1024),
+    ]);
+    for quant in &[
+        QuantizationLevel::None,
+        QuantizationLevel::Float16,
+        QuantizationLevel::BFloat16,
+        QuantizationLevel::Int8,
+        QuantizationLevel::Int4,
+    ] {
+        let plan = reg.plan_sharding(7_000_000_000, quant);
+        if let Some(tps) = plan.estimated_tokens_per_sec {
+            assert!(tps.is_finite(), "NaN/Inf throughput for quant {:?}", quant);
+            assert!(tps > 0.0, "negative throughput for quant {:?}", quant);
+        }
+    }
+}
+
+#[test]
 fn plan_sharding_all_devices_unavailable() {
     let mut gpu = AcceleratorProfile::cuda(0, 80 * 1024 * 1024 * 1024);
     gpu.available = false;

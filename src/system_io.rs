@@ -82,8 +82,10 @@ pub struct Interconnect {
 pub enum InterconnectKind {
     /// InfiniBand (IB).
     InfiniBand,
-    /// RDMA over Converged Ethernet.
+    /// RDMA over Converged Ethernet (v1).
     RoCE,
+    /// RDMA over Converged Ethernet v2 (routable, UDP-encapsulated).
+    RoCEv2,
     /// NVIDIA NVLink (inter-GPU).
     NVLink,
     /// NVIDIA NVSwitch (multi-GPU fabric).
@@ -99,6 +101,7 @@ impl std::fmt::Display for InterconnectKind {
         match self {
             Self::InfiniBand => write!(f, "InfiniBand"),
             Self::RoCE => write!(f, "RoCE"),
+            Self::RoCEv2 => write!(f, "RoCE v2"),
             Self::NVLink => write!(f, "NVLink"),
             Self::NVSwitch => write!(f, "NVSwitch"),
             Self::XgmiInfinityFabric => write!(f, "XGMI"),

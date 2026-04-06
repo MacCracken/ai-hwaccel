@@ -104,7 +104,8 @@ fn build_gpu_tensor_plan(
     let slowest = gpu_devices
         .iter()
         .map(|d| d.accelerator.throughput_multiplier())
-        .fold(f64::INFINITY, f64::min);
+        .reduce(f64::min)
+        .unwrap_or(1.0);
     let quant_factor = quant.memory_reduction_factor();
     // Tensor parallel scales better than pipeline with good interconnect.
     // Interconnect bonus: high BW reduces communication overhead.
@@ -119,7 +120,7 @@ fn build_gpu_tensor_plan(
         shards,
         strategy: ShardingStrategy::TensorParallel { num_devices },
         total_memory_bytes: needed,
-        estimated_tokens_per_sec: Some(tps),
+        estimated_tokens_per_sec: if tps.is_finite() { Some(tps) } else { None },
     }
 }
 
@@ -164,7 +165,8 @@ fn build_pipeline_plan(
     let slowest = ordered_devices
         .iter()
         .map(|d| d.accelerator.throughput_multiplier())
-        .fold(f64::INFINITY, f64::min);
+        .reduce(f64::min)
+        .unwrap_or(1.0);
     let quant_factor = quant.memory_reduction_factor();
     // Pipeline parallel throughput: once the pipeline is full, each
     // stage processes a micro-batch concurrently. Steady-state
@@ -182,7 +184,7 @@ fn build_pipeline_plan(
         shards,
         strategy: ShardingStrategy::PipelineParallel { num_stages },
         total_memory_bytes: needed,
-        estimated_tokens_per_sec: Some(tps),
+        estimated_tokens_per_sec: if tps.is_finite() { Some(tps) } else { None },
     }
 }
 

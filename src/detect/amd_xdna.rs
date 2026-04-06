@@ -13,10 +13,10 @@ pub(crate) fn detect_amd_xdna(
     _warnings: &mut Vec<DetectionError>,
 ) {
     let accel_dir = Path::new("/sys/class/accel");
-    if !accel_dir.exists() {
+    let Ok(entries) = std::fs::read_dir(accel_dir) else {
         return;
-    }
-    for entry in std::fs::read_dir(accel_dir).into_iter().flatten().flatten() {
+    };
+    for entry in entries.flatten() {
         let driver_link = entry.path().join("device/driver");
         if let Ok(target) = std::fs::read_link(&driver_link) {
             let driver_name = target

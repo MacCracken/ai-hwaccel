@@ -82,6 +82,38 @@ fn backend_all_constant() {
     assert_eq!(Backend::ALL.len(), 17);
 }
 
+#[test]
+fn detect_builder_bitmask_none_has_zero_enabled() {
+    let b = DetectBuilder::none();
+    assert_eq!(b.enabled_count(), 0);
+}
+
+#[test]
+fn detect_builder_bitmask_all_has_all_enabled() {
+    let b = DetectBuilder::new();
+    assert_eq!(b.enabled_count(), Backend::ALL.len());
+}
+
+#[test]
+fn detect_builder_is_copy() {
+    let a = DetectBuilder::none().with_cuda();
+    let b = a; // Copy, not move
+    let _c = a; // Still usable — proves Copy
+    assert_eq!(b.enabled_count(), 1);
+}
+
+#[test]
+fn detect_builder_with_without_roundtrip() {
+    let b = DetectBuilder::none()
+        .with(Backend::Cuda)
+        .with(Backend::Rocm)
+        .without(Backend::Cuda);
+    assert_eq!(b.enabled_count(), 1);
+    // ROCm should still be enabled
+    assert!(b.backend_enabled(Backend::Rocm));
+    assert!(!b.backend_enabled(Backend::Cuda));
+}
+
 // ---------------------------------------------------------------------------
 // Warnings
 // ---------------------------------------------------------------------------

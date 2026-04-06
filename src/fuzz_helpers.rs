@@ -57,6 +57,18 @@ pub fn fuzz_nvlink_parser(input: &str) {
     crate::detect::interconnect::parse_nvlink_output(input, &mut interconnects);
 }
 
+/// Fuzz the NVSwitch topology parser.
+pub fn fuzz_nvswitch_topo_parser(input: &str) {
+    let mut interconnects = Vec::new();
+    crate::detect::interconnect::parse_nvswitch_topo(input, &mut interconnects);
+}
+
+/// Fuzz the XGMI topology parser.
+pub fn fuzz_xgmi_topo_parser(input: &str) {
+    let mut interconnects = Vec::new();
+    crate::detect::interconnect::parse_xgmi_topo(input, &mut interconnects);
+}
+
 /// Fuzz the nvidia-smi bandwidth parser.
 pub fn fuzz_nvidia_bandwidth_parser(input: &str) {
     let _ = crate::detect::bandwidth::parse_nvidia_bandwidth_output(input);

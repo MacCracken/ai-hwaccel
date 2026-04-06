@@ -40,6 +40,7 @@ fn serde_interconnect_kind_all_variants() {
     let kinds = [
         InterconnectKind::InfiniBand,
         InterconnectKind::RoCE,
+        InterconnectKind::RoCEv2,
         InterconnectKind::NVLink,
         InterconnectKind::NVSwitch,
         InterconnectKind::XgmiInfinityFabric,
@@ -329,6 +330,7 @@ fn display_interconnect_kind_all() {
     let kinds = [
         (InterconnectKind::InfiniBand, "InfiniBand"),
         (InterconnectKind::RoCE, "RoCE"),
+        (InterconnectKind::RoCEv2, "RoCE v2"),
         (InterconnectKind::NVLink, "NVLink"),
         (InterconnectKind::NVSwitch, "NVSwitch"),
         (InterconnectKind::XgmiInfinityFabric, "XGMI"),

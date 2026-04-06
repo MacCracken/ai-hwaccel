@@ -250,6 +250,24 @@ fn parse_nvlink_output_no_links() {
     assert!(interconnects.is_empty()); // No links → no interconnect entry
 }
 
+#[test]
+fn parse_nvlink_output_link_count_capped_at_256() {
+    // Generate malformed output with 300 "Link" lines — should be capped at 256.
+    let mut output = String::from("GPU 0: NVIDIA H100 (UUID: GPU-test)\n");
+    for i in 0..300 {
+        output.push_str(&format!("    Link {}: 25 GB/s\n", i));
+    }
+    let mut interconnects = Vec::new();
+    crate::detect::interconnect::parse_nvlink_output(&output, &mut interconnects);
+    assert_eq!(interconnects.len(), 1);
+    // Bandwidth should be capped at 256 * 25 = 6400, not 300 * 25 = 7500.
+    assert!(
+        (interconnects[0].bandwidth_gbps - 6400.0).abs() < f64::EPSILON,
+        "Expected 6400.0 GB/s (256 links * 25), got {}",
+        interconnects[0].bandwidth_gbps,
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Hardware: new backend ranks and multipliers
 // ---------------------------------------------------------------------------

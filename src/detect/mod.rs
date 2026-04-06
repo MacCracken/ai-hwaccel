@@ -304,30 +304,35 @@ pub(crate) fn detect_with_builder(builder: DetectBuilder) -> AcceleratorRegistry
         backend_table!(do_run);
     }
 
+    // Single pass: check for Vulkan and dedicated GPUs.
+    let (has_vulkan, has_dedicated) = all_profiles.iter().fold((false, false), |(hv, hd), p| {
+        (
+            hv || matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }),
+            hd || matches!(
+                p.accelerator,
+                AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
+            ),
+        )
+    });
+
     // Post-pass: if vulkaninfo found no Vulkan devices, try sysfs fallback.
     #[cfg(feature = "vulkan")]
-    {
-        let has_vulkan = all_profiles
-            .iter()
-            .any(|p| matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
-        let has_dedicated = all_profiles.iter().any(|p| {
+    if !has_vulkan && !has_dedicated && builder.backend_enabled(Backend::Vulkan) {
+        vulkan::detect_vulkan_sysfs(&mut all_profiles, &mut all_warnings);
+    }
+
+    // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found.
+    // Re-check has_dedicated in case sysfs fallback added dedicated GPUs.
+    let has_dedicated = if !has_dedicated {
+        all_profiles.iter().any(|p| {
             matches!(
                 p.accelerator,
                 AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
             )
-        });
-        if !has_vulkan && !has_dedicated && builder.backend_enabled(Backend::Vulkan) {
-            vulkan::detect_vulkan_sysfs(&mut all_profiles, &mut all_warnings);
-        }
-    }
-
-    // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found.
-    let has_dedicated = all_profiles.iter().any(|p| {
-        matches!(
-            p.accelerator,
-            AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
-        )
-    });
+        })
+    } else {
+        true
+    };
     if has_dedicated {
         all_profiles.retain(|p| !matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
     }
@@ -421,32 +426,36 @@ pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetectio
         backend_table!(do_run_timed);
     }
 
+    // Single pass: check for Vulkan and dedicated GPUs.
+    let (has_vulkan, has_dedicated) = all_profiles.iter().fold((false, false), |(hv, hd), p| {
+        (
+            hv || matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }),
+            hd || matches!(
+                p.accelerator,
+                AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
+            ),
+        )
+    });
+
     // Post-pass: sysfs Vulkan fallback (same as detect_with_builder).
     #[cfg(feature = "vulkan")]
-    {
-        let has_vulkan = all_profiles
-            .iter()
-            .any(|p| matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
-        let has_dedicated = all_profiles.iter().any(|p| {
+    if !has_vulkan && !has_dedicated && builder.backend_enabled(Backend::Vulkan) {
+        let start = Instant::now();
+        vulkan::detect_vulkan_sysfs(&mut all_profiles, &mut all_warnings);
+        timings.insert("vulkan_sysfs".into(), start.elapsed());
+    }
+
+    // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found.
+    let has_dedicated = if !has_dedicated {
+        all_profiles.iter().any(|p| {
             matches!(
                 p.accelerator,
                 AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
             )
-        });
-        if !has_vulkan && !has_dedicated && builder.backend_enabled(Backend::Vulkan) {
-            let start = Instant::now();
-            vulkan::detect_vulkan_sysfs(&mut all_profiles, &mut all_warnings);
-            timings.insert("vulkan_sysfs".into(), start.elapsed());
-        }
-    }
-
-    // Post-pass: remove Vulkan GPUs if a dedicated CUDA or ROCm GPU was found.
-    let has_dedicated = all_profiles.iter().any(|p| {
-        matches!(
-            p.accelerator,
-            AcceleratorType::CudaGpu { .. } | AcceleratorType::RocmGpu { .. }
-        )
-    });
+        })
+    } else {
+        true
+    };
     if has_dedicated {
         all_profiles.retain(|p| !matches!(p.accelerator, AcceleratorType::VulkanGpu { .. }));
     }
@@ -491,12 +500,10 @@ pub(crate) fn detect_with_builder_timed(builder: DetectBuilder) -> TimedDetectio
 /// List PCI addresses bound to a given driver (sorted).
 pub(super) fn list_driver_pci_addrs(driver: &str) -> Vec<String> {
     let dir = Path::new("/sys/bus/pci/drivers").join(driver);
-    if !dir.exists() {
+    let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
-    }
-    let mut addrs: Vec<String> = std::fs::read_dir(&dir)
-        .into_iter()
-        .flatten()
+    };
+    let mut addrs: Vec<String> = entries
         .flatten()
         .filter_map(|e| {
             let name = e.file_name();
@@ -524,9 +531,10 @@ pub(super) fn list_driver_pci_addrs(driver: &str) -> Vec<String> {
 /// Returns an iterator of parsed device IDs.
 pub(super) fn iter_dev_devices(prefix: &str) -> impl Iterator<Item = u32> + '_ {
     std::fs::read_dir("/dev")
+        .ok()
         .into_iter()
         .flatten()
-        .flatten()
+        .filter_map(|e| e.ok())
         .filter_map(move |entry| {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
@@ -542,11 +550,15 @@ pub(super) fn iter_dev_devices(prefix: &str) -> impl Iterator<Item = u32> + '_ {
 ///
 /// For example, `has_dev_device("groq")` returns true if `/dev/groq*` exists.
 pub(super) fn has_dev_device(prefix: &str) -> bool {
-    std::fs::read_dir("/dev")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .any(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
+    let Ok(entries) = std::fs::read_dir("/dev") else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        entry
+            .file_name()
+            .as_encoded_bytes()
+            .starts_with(prefix.as_bytes())
+    })
 }
 
 /// Build a default CPU profile with detected system memory.
@@ -596,6 +608,9 @@ pub(super) fn read_sysfs_u64(path: &Path) -> Option<u64> {
 /// in the common case.
 pub(super) fn read_sysfs_string(path: &Path, max_bytes: usize) -> Option<String> {
     use std::io::Read;
+    // Hard cap to prevent accidental DoS from callers passing huge limits.
+    const ABSOLUTE_MAX: usize = 1024 * 1024; // 1 MiB
+    let max_bytes = max_bytes.min(ABSOLUTE_MAX);
     let mut file = std::fs::File::open(path).ok()?;
 
     // Stack buffer for common small reads, heap for larger ones.
@@ -652,7 +667,7 @@ pub(crate) async fn detect_with_builder_async(builder: DetectBuilder) -> Acceler
     async_cli_backends!(do_spawn_async);
 
     // Sysfs-only backends run in a single blocking task.
-    let sysfs_builder = builder.clone();
+    let sysfs_builder = builder;
     let sysfs_handle = tokio::task::spawn_blocking(move || {
         let mut profiles = Vec::new();
         let mut warnings: Vec<DetectionError> = Vec::new();

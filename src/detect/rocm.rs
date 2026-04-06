@@ -18,16 +18,12 @@ pub(crate) fn detect_rocm(
     _warnings: &mut Vec<DetectionError>,
 ) {
     let drm = Path::new("/sys/class/drm");
-    if !drm.exists() {
+    let Ok(dir) = std::fs::read_dir(drm) else {
         return;
-    }
+    };
 
     let mut device_id = 0u32;
-    let mut entries: Vec<_> = std::fs::read_dir(drm)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .collect();
+    let mut entries: Vec<_> = dir.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
 
     for entry in entries {
@@ -192,11 +188,11 @@ fn detect_cxl_memory(device_dir: &Path) -> u64 {
     // Method 2: Scan CXL bus for memory devices associated with this GPU.
     // MI300X exposes CXL memory via /sys/bus/cxl/devices/
     let cxl_bus = Path::new("/sys/bus/cxl/devices");
-    if !cxl_bus.exists() {
+    let Ok(cxl_entries) = std::fs::read_dir(cxl_bus) else {
         return 0;
-    }
+    };
     let mut total_cxl = 0u64;
-    for entry in std::fs::read_dir(cxl_bus).into_iter().flatten().flatten() {
+    for entry in cxl_entries.flatten() {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
         // CXL memory devices are named "memN"
