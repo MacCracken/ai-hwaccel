@@ -21,16 +21,23 @@ with **zero compile-time SDK dependencies**.
 |---|---|---|
 | NVIDIA CUDA | GeForce, Tesla, A100, H100, ... | `nvidia-smi` on `$PATH` |
 | AMD ROCm | MI250, MI300, RX 7900 | `/sys/class/drm` sysfs |
-| Apple Metal | M1--M4 GPU cores | `/proc/device-tree/compatible` |
-| Apple ANE | Neural Engine | `/proc/device-tree/compatible` |
+| Apple Metal | M1--M4 GPU cores | `system_profiler` / `sysctl` |
+| Apple ANE | Neural Engine | `system_profiler` / `sysctl` |
 | Intel NPU | Meteor Lake+ | `/sys/class/misc/intel_npu` |
 | AMD XDNA | Ryzen AI NPU | `/sys/class/accel/*/device/driver` |
 | Google TPU | v4, v5e, v5p | `/dev/accel*` + sysfs version |
 | Intel Gaudi | Gaudi 2, Gaudi 3 (Habana HPU) | `hl-smi` on `$PATH` |
 | AWS Inferentia | inf1, inf2 | `/dev/neuron*` or `neuron-ls` |
 | AWS Trainium | trn1 | `/dev/neuron*` + sysfs |
+| Intel oneAPI | Arc, Data Center Max | `xpu-smi` on `$PATH` |
 | Qualcomm Cloud AI | AI 100 | `/dev/qaic_*` or `/sys/class/qaic` |
+| Cerebras WSE | Wafer-Scale Engine | `/dev/cerebras*` sysfs |
+| Graphcore IPU | IPU-POD | `gc-info` or sysfs |
+| Groq LPU | Language Processing Unit | `/dev/groq*` sysfs |
+| Samsung NPU | Exynos NPU | `/sys/class/npu` sysfs |
+| MediaTek APU | Dimensity APU | `/sys/class/misc/apusys` sysfs |
 | Vulkan Compute | Any Vulkan 1.1+ device | `vulkaninfo` on `$PATH` |
+| Windows GPU | Any DirectX GPU | WMI / PowerShell |
 | CPU | Always present | `/proc/meminfo` (16 GiB fallback) |
 
 ## Quick start
@@ -39,7 +46,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ai-hwaccel = "0.19"
+ai-hwaccel = "1.2"
 ```
 
 ### Library usage
@@ -73,7 +80,6 @@ ai-hwaccel --version        # Print version
 
 # Logging (logs go to stderr, data to stdout)
 RUST_LOG=debug ai-hwaccel   # Verbose detection diagnostics
-ai-hwaccel --json-log       # Structured JSON logs to stderr
 ```
 
 ## Architecture
@@ -85,34 +91,52 @@ src/
 ├── lib.rs                  # Crate root, re-exports
 ├── main.rs                 # CLI binary
 ├── hardware/               # Device type definitions
-│   ├── mod.rs              #   AcceleratorType, AcceleratorFamily
+│   ├── mod.rs              #   AcceleratorType (18 variants), AcceleratorFamily
 │   ├── tpu.rs              #   TpuVersion (v4/v5e/v5p)
 │   ├── gaudi.rs            #   GaudiGeneration (Gaudi2/Gaudi3)
 │   └── neuron.rs           #   NeuronChipType (Inferentia/Trainium)
 ├── profile.rs              # AcceleratorProfile (capabilities per device)
+├── registry.rs             # AcceleratorRegistry, DetectBuilder
+├── plan.rs                 # Sharding planner (topology-aware)
 ├── quantization.rs         # QuantizationLevel (FP32 → INT4)
-├── requirement.rs          # AcceleratorRequirement (scheduling constraints)
 ├── sharding.rs             # ShardingStrategy, ModelShard, ShardingPlan
 ├── training.rs             # TrainingMethod, MemoryEstimate
-├── registry.rs             # AcceleratorRegistry (query + suggest APIs)
+├── cost.rs                 # Cloud instance pricing + recommendations
+├── model_compat.rs         # Model compatibility database (26 models)
+├── model_format.rs         # .safetensors/.gguf/.onnx/.pt header parsing
+├── requirement.rs          # AcceleratorRequirement (scheduling constraints)
+├── system_io.rs            # Interconnects, storage, runtime environment
+├── cache.rs                # CachedRegistry, DiskCachedRegistry
+├── lazy.rs                 # LazyRegistry (on-demand detection)
+├── ffi.rs                  # C-compatible FFI bindings
+├── async_detect.rs         # Tokio-based async detection
+├── units.rs                # Named constants for unit conversions
+├── error.rs                # DetectionError variants
 ├── detect/                 # Hardware detection (one file per backend)
-│   ├── mod.rs              #   Orchestrator + shared helpers
+│   ├── mod.rs              #   Orchestrator + backend_table! macro
 │   ├── cuda.rs             #   NVIDIA via nvidia-smi
 │   ├── rocm.rs             #   AMD via sysfs /sys/class/drm
-│   ├── apple.rs            #   Metal + ANE via device-tree
+│   ├── apple.rs            #   Metal + ANE via system_profiler
 │   ├── vulkan.rs           #   Vulkan via vulkaninfo
+│   ├── tpu.rs, gaudi.rs    #   TPU / Gaudi via sysfs + CLI
+│   ├── neuron.rs           #   AWS Neuron via neuron-ls
 │   ├── intel_npu.rs        #   Intel NPU via sysfs
 │   ├── amd_xdna.rs         #   AMD XDNA via sysfs
-│   ├── tpu.rs              #   Google TPU via /dev/accel*
-│   ├── gaudi.rs            #   Intel Gaudi via hl-smi
-│   ├── neuron.rs           #   AWS Neuron via neuron-ls
 │   ├── intel_oneapi.rs     #   Intel oneAPI via xpu-smi
-│   └── qualcomm.rs         #   Qualcomm AI 100 via sysfs
-├── plan.rs                 # Sharding planner (impl on AcceleratorRegistry)
-└── tests/                  # Test suite (one file per concern)
-    ├── classification.rs, display.rs, quantization.rs,
-    ├── requirement.rs, registry.rs, sharding.rs,
-    ├── training.rs, serde.rs
+│   ├── qualcomm.rs         #   Qualcomm AI 100 via sysfs
+│   ├── cerebras.rs         #   Cerebras WSE via sysfs
+│   ├── graphcore.rs        #   Graphcore IPU via gc-info
+│   ├── groq.rs             #   Groq LPU via /dev/groq*
+│   ├── samsung_npu.rs      #   Samsung NPU via sysfs
+│   ├── mediatek_apu.rs     #   MediaTek APU via sysfs
+│   ├── windows.rs          #   Windows GPU via WMI
+│   ├── interconnect.rs     #   InfiniBand, NVLink, NVSwitch, XGMI, ICI
+│   ├── bandwidth.rs        #   Memory bandwidth probing
+│   ├── pcie.rs, numa.rs    #   PCIe link + NUMA topology
+│   ├── disk.rs             #   Storage device detection
+│   ├── command.rs          #   Safe subprocess execution
+│   └── environment.rs      #   Runtime environment (Docker, K8s, cloud)
+└── tests/                  # 483 tests across 22 modules
 ```
 
 ## Core concepts
@@ -125,10 +149,11 @@ every discovered accelerator. From there you can:
 - **Query** -- `available()`, `best_available()`, `by_family()`, `satisfying()`
 - **Plan** -- `suggest_quantization()`, `plan_sharding()`
 - **Inspect** -- `total_memory()`, `total_accelerator_memory()`, `has_accelerator()`
+- **What-if** -- `what_if_add()`, `what_if_remove()`, `what_if_replace()`
 
 ### `AcceleratorType`
 
-A 13-variant enum representing each supported device family. Provides
+An 18-variant enum representing each supported device family. Provides
 classification helpers (`is_gpu()`, `is_npu()`, `is_tpu()`, `is_ai_asic()`) and
 throughput/training multipliers used by the planner.
 
@@ -144,7 +169,7 @@ Describes how a model should be distributed across devices:
 | Strategy | When used |
 |---|---|
 | `None` | Model fits on a single device |
-| `TensorParallel` | TPU pod slices (ICI mesh) |
+| `TensorParallel` | TPU pod slices (ICI) or NVSwitch-connected GPUs |
 | `PipelineParallel` | Multiple GPUs or AI ASICs |
 | `DataParallel` | Replicas for throughput |
 
@@ -185,8 +210,7 @@ RUST_LOG=trace               # Everything including dependency traces
 
 ## Versioning
 
-This crate uses **semantic versioning**. The `0.x` series is pre-1.0 and may
-contain breaking changes between minor versions. The version is read from the
+This crate uses **semantic versioning**. The version is read from the
 `VERSION` file at the repo root and kept in sync with `Cargo.toml` via
 `scripts/version-bump.sh`.
 
@@ -217,6 +241,6 @@ make build   # release build
 
 ## License
 
-Licensed under the [GNU Affero General Public License v3.0](LICENSE).
+Licensed under the [GNU General Public License v3.0](LICENSE).
 
 See [LICENSE](LICENSE) for the full text.

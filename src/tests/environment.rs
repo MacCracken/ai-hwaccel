@@ -24,6 +24,7 @@ fn environment_serde_roundtrip() {
             region: Some("us-east-1".into()),
             zone: None,
         }),
+        kubernetes_gpu: None,
     };
     let json = serde_json::to_string(&env).unwrap();
     let back: RuntimeEnvironment = serde_json::from_str(&json).unwrap();
@@ -37,6 +38,7 @@ fn environment_serde_minimal() {
         is_kubernetes: false,
         kubernetes_namespace: None,
         cloud_instance: None,
+        kubernetes_gpu: None,
     };
     let json = serde_json::to_string(&env).unwrap();
     // Optional fields should be omitted.

@@ -203,6 +203,69 @@ impl AcceleratorRegistry {
         self.profiles.push(profile);
     }
 
+    /// Create a hypothetical registry by adding devices to the current one.
+    ///
+    /// Useful for what-if analysis: "what would my sharding plan look like
+    /// with 4 more H100s?"
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ai_hwaccel::{AcceleratorRegistry, AcceleratorProfile, QuantizationLevel};
+    ///
+    /// let registry = AcceleratorRegistry::detect();
+    /// let hypothetical = registry.what_if_add(&[
+    ///     AcceleratorProfile::cuda(0, 80 * 1024 * 1024 * 1024),
+    ///     AcceleratorProfile::cuda(1, 80 * 1024 * 1024 * 1024),
+    /// ]);
+    /// let plan = hypothetical.plan_sharding(70_000_000_000, &QuantizationLevel::BFloat16);
+    /// ```
+    #[must_use]
+    pub fn what_if_add(&self, additional: &[AcceleratorProfile]) -> Self {
+        let mut profiles = self.profiles.clone();
+        profiles.extend_from_slice(additional);
+        Self {
+            schema_version: self.schema_version,
+            profiles,
+            warnings: Vec::new(),
+            system_io: self.system_io.clone(),
+        }
+    }
+
+    /// Create a hypothetical registry by removing devices matching a predicate.
+    ///
+    /// Useful for what-if analysis: "what if I lose 2 GPUs?"
+    #[must_use]
+    pub fn what_if_remove<F>(&self, predicate: F) -> Self
+    where
+        F: Fn(&AcceleratorProfile) -> bool,
+    {
+        let profiles = self
+            .profiles
+            .iter()
+            .filter(|p| !predicate(p))
+            .cloned()
+            .collect();
+        Self {
+            schema_version: self.schema_version,
+            profiles,
+            warnings: Vec::new(),
+            system_io: self.system_io.clone(),
+        }
+    }
+
+    /// Create a hypothetical registry from an explicit profile list,
+    /// preserving the current system I/O topology.
+    #[must_use]
+    pub fn what_if_replace(&self, profiles: Vec<AcceleratorProfile>) -> Self {
+        Self {
+            schema_version: self.schema_version,
+            profiles,
+            warnings: Vec::new(),
+            system_io: self.system_io.clone(),
+        }
+    }
+
     /// System-level I/O topology (interconnects, storage).
     #[inline]
     pub fn system_io(&self) -> &SystemIo {

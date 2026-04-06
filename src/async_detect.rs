@@ -4,7 +4,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! ai-hwaccel = { version = "0.20", features = ["async-detect"] }
+//! ai-hwaccel = { version = "1.2", features = ["async-detect"] }
 //! ```
 //!
 //! Unlike the sync [`AcceleratorRegistry::detect`], this uses

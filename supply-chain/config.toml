@@ -119,10 +119,6 @@ criteria = "safe-to-run"
 version = "0.3.14"
 criteria = "safe-to-deploy"
 
-[[exemptions.fastrand]]
-version = "2.3.0"
-criteria = "safe-to-run"
-
 [[exemptions.find-msvc-tools]]
 version = "0.1.9"
 criteria = "safe-to-run"
@@ -293,10 +289,6 @@ criteria = "safe-to-run"
 
 [[exemptions.same-file]]
 version = "1.0.6"
-criteria = "safe-to-run"
-
-[[exemptions.semver]]
-version = "1.0.27"
 criteria = "safe-to-run"
 
 [[exemptions.serde_core]]

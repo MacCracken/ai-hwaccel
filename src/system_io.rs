@@ -159,6 +159,21 @@ pub struct RuntimeEnvironment {
     /// Cloud instance metadata (if detected).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloud_instance: Option<CloudInstanceMeta>,
+    /// Kubernetes GPU device plugin info (if detected).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kubernetes_gpu: Option<KubernetesGpuInfo>,
+}
+
+/// Kubernetes GPU device plugin information.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KubernetesGpuInfo {
+    /// GPU device IDs from NVIDIA_VISIBLE_DEVICES or GPU_DEVICE_ORDINAL.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub device_ids: Vec<String>,
+    /// Number of GPU devices allocated to this pod.
+    pub gpu_count: u32,
+    /// Source of GPU allocation info.
+    pub source: String,
 }
 
 /// Cloud instance metadata.

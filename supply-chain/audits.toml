@@ -1,6 +1,11 @@
 
 # cargo-vet audits file
 
+[[audits.fastrand]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+version = "2.4.0"
+
 [[audits.indexmap]]
 who = "Robert MacCracken <robert.maccracken@gmail.com>"
 criteria = "safe-to-run"
@@ -25,6 +30,11 @@ delta = "1.1.1 -> 1.2.0"
 who = "Robert MacCracken <robert.maccracken@gmail.com>"
 criteria = "safe-to-run"
 delta = "1.10.0 -> 1.11.0"
+
+[[audits.semver]]
+who = "Robert MacCracken <robert.maccracken@gmail.com>"
+criteria = "safe-to-run"
+version = "1.0.28"
 
 [[audits.tokio]]
 who = "Robert MacCracken <robert.maccracken@gmail.com>"

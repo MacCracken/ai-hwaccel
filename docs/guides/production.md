@@ -6,14 +6,14 @@ Best practices for using `ai-hwaccel` in production systems.
 
 ```toml
 [dependencies]
-ai-hwaccel = "0.19"
+ai-hwaccel = "1.2"
 ```
 
 For minimal binary size, enable only the backends you need:
 
 ```toml
 [dependencies]
-ai-hwaccel = { version = "0.19", default-features = false, features = ["cuda"] }
+ai-hwaccel = { version = "1.2", default-features = false, features = ["cuda"] }
 ```
 
 ## Detection behaviour
@@ -136,7 +136,7 @@ tracing_subscriber::fmt()
     .init();
 ```
 
-The CLI binary supports `RUST_LOG` and `--debug` / `--json-log` flags.
+The CLI binary supports `RUST_LOG` and `--debug` flags.
 
 ## Monitoring with the CLI
 

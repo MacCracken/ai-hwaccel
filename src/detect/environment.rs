@@ -19,11 +19,18 @@ pub(crate) fn detect_environment() -> RuntimeEnvironment {
         "environment detection complete"
     );
 
+    let kubernetes_gpu = if container.is_kubernetes {
+        detect_kubernetes_gpu()
+    } else {
+        None
+    };
+
     RuntimeEnvironment {
         is_docker: container.is_docker,
         is_kubernetes: container.is_kubernetes,
         kubernetes_namespace: container.k8s_namespace,
         cloud_instance: cloud,
+        kubernetes_gpu,
     }
 }
 
@@ -161,4 +168,87 @@ fn detect_azure(dmi: &DmiInfo) -> Option<crate::system_io::CloudInstanceMeta> {
         region: None,
         zone: None,
     })
+}
+
+/// Detect GPU devices allocated via Kubernetes device plugins.
+///
+/// Checks environment variables set by NVIDIA device plugin, AMD device
+/// plugin, and generic Kubernetes GPU scheduling:
+///
+/// - `NVIDIA_VISIBLE_DEVICES` — set by NVIDIA k8s device plugin
+/// - `GPU_DEVICE_ORDINAL` — set by some schedulers
+/// - `CUDA_VISIBLE_DEVICES` — set by NVIDIA container runtime
+fn detect_kubernetes_gpu() -> Option<crate::system_io::KubernetesGpuInfo> {
+    // Try NVIDIA device plugin first (most common).
+    if let Ok(val) = std::env::var("NVIDIA_VISIBLE_DEVICES")
+        && !val.is_empty()
+        && val != "void"
+        && val != "none"
+    {
+        let device_ids = parse_device_list(&val);
+        let gpu_count = if val == "all" {
+            0 // Unknown count, all GPUs visible.
+        } else {
+            device_ids.len() as u32
+        };
+        debug!(
+            device_ids = ?device_ids,
+            source = "NVIDIA_VISIBLE_DEVICES",
+            "Kubernetes GPU devices detected"
+        );
+        return Some(crate::system_io::KubernetesGpuInfo {
+            device_ids,
+            gpu_count,
+            source: "NVIDIA_VISIBLE_DEVICES".into(),
+        });
+    }
+
+    // Try CUDA_VISIBLE_DEVICES (container runtime or user-set).
+    if let Ok(val) = std::env::var("CUDA_VISIBLE_DEVICES")
+        && !val.is_empty()
+    {
+        let device_ids = parse_device_list(&val);
+        let gpu_count = device_ids.len() as u32;
+        debug!(
+            device_ids = ?device_ids,
+            source = "CUDA_VISIBLE_DEVICES",
+            "Kubernetes GPU devices detected"
+        );
+        return Some(crate::system_io::KubernetesGpuInfo {
+            device_ids,
+            gpu_count,
+            source: "CUDA_VISIBLE_DEVICES".into(),
+        });
+    }
+
+    // Try GPU_DEVICE_ORDINAL (some schedulers).
+    if let Ok(val) = std::env::var("GPU_DEVICE_ORDINAL")
+        && !val.is_empty()
+    {
+        let device_ids = parse_device_list(&val);
+        let gpu_count = device_ids.len() as u32;
+        debug!(
+            device_ids = ?device_ids,
+            source = "GPU_DEVICE_ORDINAL",
+            "Kubernetes GPU devices detected"
+        );
+        return Some(crate::system_io::KubernetesGpuInfo {
+            device_ids,
+            gpu_count,
+            source: "GPU_DEVICE_ORDINAL".into(),
+        });
+    }
+
+    None
+}
+
+/// Parse a comma-separated device list (e.g. "0,1,2" or "GPU-uuid1,GPU-uuid2").
+fn parse_device_list(val: &str) -> Vec<String> {
+    if val == "all" {
+        return vec!["all".into()];
+    }
+    val.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }

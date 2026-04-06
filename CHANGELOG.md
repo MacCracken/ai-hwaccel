@@ -7,6 +7,8 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-05
+
 ### Added
 
 - **NVSwitch auto-detection** — probes sysfs
@@ -22,12 +24,43 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 - **RoCE v2 detection** — new `InterconnectKind::RoCEv2` variant. Distinguished
   from RoCE v1 by reading sysfs `gid_attrs/types` for "RoCE v2" entries.
 - **Fuzz targets** for NVSwitch topology and XGMI topology parsers.
+- **Model compatibility database** (`model_compat` module) — embedded catalogue
+  of 26 popular models (Llama, Mistral, Gemma, Phi, Qwen, DeepSeek, Falcon,
+  etc.) with `can_run()`, `compatible_models()`, `find_model()`,
+  `compatible_with_registry()` APIs. Answers "can I run Llama 70B on 2x RTX
+  4090?" without manual memory math.
+- **Model format detection** (`model_format` module) — parses `.safetensors`,
+  `.gguf`, `.onnx`, and `.pt` file headers to extract format, parameter count,
+  data type, and tensor count. Both file-path and byte-slice APIs (WASM-safe).
+- **WASM target support** — `wasm32-unknown-unknown` builds cleanly with all
+  features. `from_profiles()`, `from_json()`, planning, sharding, cost,
+  training, model compat, and model format detection all work in WASM.
+- **Kubernetes GPU detection** — detects GPU devices allocated via Kubernetes
+  device plugins (`NVIDIA_VISIBLE_DEVICES`, `CUDA_VISIBLE_DEVICES`,
+  `GPU_DEVICE_ORDINAL`). New `KubernetesGpuInfo` struct in
+  `RuntimeEnvironment`.
+- **What-if analysis** — `what_if_add()`, `what_if_remove()`,
+  `what_if_replace()` methods on `AcceleratorRegistry` for simulating hardware
+  changes and re-planning sharding strategies.
+- **17 new tests** — `DetectBuilder` bitmask correctness, throughput finite
+  guards, NVLink link-count cap, sharding plan invariants. Total: 483 tests.
 
 ### Changed
 
+- **`DetectBuilder` uses `u32` bitmask** — replaces `Vec<bool>` with zero-alloc
+  bitmask. `DetectBuilder` is now `Copy`. `enabled_count()` uses
+  `count_ones()` instead of iterator filter.
 - **Sharding planner now accounts for all interconnect types** —
   `InterconnectInfo::scan()` incorporates InfiniBand, RoCE, RoCEv2, and ICI
   bandwidth into `high_bw` for better sharding decisions.
+- **Sharding throughput uses `reduce()` instead of `fold(INFINITY)`** —
+  prevents NaN/Inf when device lists are empty. Throughput estimates now
+  return `None` instead of `Some(NaN)` when non-finite.
+- **Single-pass Vulkan/dedicated GPU check** — combined 3 separate iterator
+  passes into one `fold` in `detect_with_builder` and timed variant.
+- **Simplified `read_dir` patterns** — replaced 12 `read_dir().into_iter()
+  .flatten().flatten()` double-flatten patterns across 5 files with idiomatic
+  `let Ok(entries) = read_dir() else { return }`.
 - **Async interconnect detection collects warnings** — CLI tool errors
   (non-tool-not-found) are now propagated as warnings in the async path.
 
@@ -40,6 +73,17 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
   fallback) even when all XGMI hives had only 1 GPU.
 - **`detect_tpu_ici` non-TPU device counting** — non-TPU accelerator devices
   under `/dev/accel` are now skipped by requiring `tpu_version` sysfs file.
+
+### Security
+
+- **`read_sysfs_string` hard cap** — added 1 MiB absolute maximum to prevent
+  DoS from callers passing huge `max_bytes` values.
+- **NVLink link-count cap** — `parse_nvlink_output` caps at 256 links per GPU
+  to bound bandwidth accumulation from malformed output.
+
+### Dependencies
+
+- Certified `semver 1.0.28` and `fastrand 2.4.0` via `cargo vet`.
 
 ## [1.1.1] - 2026-04-03
 

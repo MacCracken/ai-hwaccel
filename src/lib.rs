@@ -85,7 +85,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! ai-hwaccel = { version = "1.1", default-features = false, features = ["cuda", "tpu"] }
+//! ai-hwaccel = { version = "1.2", default-features = false, features = ["cuda", "tpu"] }
 //! ```
 //!
 //! ## Step 2: Query capabilities
@@ -258,7 +258,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! ai-hwaccel = { version = "1.1", default-features = false, features = ["cuda"] }
+//! ai-hwaccel = { version = "1.2", default-features = false, features = ["cuda"] }
 //! ```
 
 mod async_detect;
@@ -299,8 +299,8 @@ pub use registry::{AcceleratorRegistry, Backend, DetectBuilder, SCHEMA_VERSION};
 pub use requirement::AcceleratorRequirement;
 pub use sharding::{ModelShard, ShardingPlan, ShardingStrategy};
 pub use system_io::{
-    CloudInstanceMeta, Interconnect, InterconnectKind, RuntimeEnvironment, StorageDevice,
-    StorageKind, SystemIo,
+    CloudInstanceMeta, Interconnect, InterconnectKind, KubernetesGpuInfo, RuntimeEnvironment,
+    StorageDevice, StorageKind, SystemIo,
 };
 pub use training::{MemoryEstimate, TrainingMethod, TrainingTarget, estimate_training_memory};
 

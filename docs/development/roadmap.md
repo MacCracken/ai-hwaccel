@@ -4,26 +4,7 @@ Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
-## 1.0.1 — Polish & Backlog
-
-Patch release: internal quality, no breaking changes.
-
-- [x] **Return `impl Iterator` from query methods** — `available()`,
-  `by_family()`, `satisfying()` return `impl Iterator` for zero-alloc
-  queries. Callers `.count()` or `.collect()` explicitly.
-- [x] **Reduce watch mode allocations** — use index+Display key instead of
-  Debug format, avoid redundant allocations in delta tracking.
-- [x] **Consolidate detection macros** — single `backend_table!` macro with
-  callback dispatch replaces `run_backend!` / `spawn_backend!` / timed
-  variants. `async_cli_backends!` and `sysfs_backends!` for the async path.
-- [x] **Backend registration table** — `backend_table!` macro is the single
-  source of truth. Adding a backend is a 1-line table entry instead of
-  touching 6 locations. `const BACKENDS` not possible due to `#[cfg]`
-  compile-time resolution, but the macro table achieves the same goal.
-
----
-
-## 1.2.0 — Platform Validation
+## 1.3.0 — Platform Validation
 
 Live cloud hardware validation and remaining cross-platform gaps.
 
@@ -52,9 +33,9 @@ Live cloud hardware validation and remaining cross-platform gaps.
 
 ---
 
-## 1.3.0 — Ecosystem
+## 1.4.0 — Ecosystem
 
-Python bindings, WASM, interconnect detection.
+Python bindings, WASM, JS/TS.
 
 ### Python bindings
 
@@ -66,23 +47,13 @@ Python bindings, WASM, interconnect detection.
 - [ ] **Python-native features** — dict-like objects, JSON serialization,
   pandas DataFrame export
 
-### WASM target
+### WASM / JS
 
-- [ ] **`wasm32-unknown-unknown` build** — stub sysfs/subprocess detection.
-  Expose `from_profiles()`, `from_json()`, planning, sharding
 - [ ] **JS/TS bindings** — `wasm-bindgen` wrapper for npm package
-
-### Interconnect gaps
-
-- [x] **NVSwitch auto-detection** — probe
-  `/sys/devices/virtual/nvidia-nvswitch/` or `nvidia-smi topo -m`
-- [x] **AMD XGMI / Infinity Fabric** — `rocm-smi --showtopo` or sysfs
-- [x] **Google TPU ICI detection** — populate `InterconnectKind::Ici`
-- [x] **RoCE v2 detection** — distinguish v1/v2 via sysfs gid_attrs
 
 ---
 
-## 1.4.0 — Multi-Node & Hot-Plug
+## 1.5.0 — Multi-Node & Hot-Plug
 
 ### Multi-node detection
 
@@ -90,7 +61,6 @@ Python bindings, WASM, interconnect detection.
   merge into cluster-wide registry
 - [ ] **Cluster-aware sharding** — distribute across nodes, consider
   IB/RoCE bandwidth for pipeline vs data parallelism
-- [ ] **Kubernetes integration** — detect GPUs via device plugin labels
 
 ### Hot-plug support
 
@@ -133,7 +103,6 @@ scale.
 - [ ] **Fleet-wide sharding** — recommend nodes and distribution strategy
 - [ ] **Bin packing** — optimal multi-model placement across fleet
 - [ ] **Scaling recommendations** — "you need 3 more H100 nodes for 405B"
-- [ ] **What-if analysis** — simulate adding/removing nodes
 
 ### Observability & export
 
@@ -152,10 +121,8 @@ scale.
 
 ## Future
 
-- [ ] **Model compatibility database** — "can I run Llama 70B on 2x RTX 4090?"
 - [ ] **Power budget planning** — recommend device mix for power cap
 - [ ] **Thermal throttling prediction** — warn on approaching thresholds
-- [ ] **Model format detection** — parse .safetensors, .gguf, .onnx headers
 - [ ] **Plugin system** — third-party backends via dynamic loading
 
 ---
