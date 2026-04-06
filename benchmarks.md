@@ -1,197 +1,190 @@
 # Benchmarks
 
-Latest: **2026-04-03T15:34:28Z** — commit `6fb0ccd`
+Latest: **2026-04-05T22:34:16Z** — commit `234419b`
 
-Tracking: `649834b` (baseline) → `6fb0ccd` (previous) → `6fb0ccd` (current)
+Tracking: `6fb0ccd` (baseline) → `6fb0ccd` (previous) → `234419b` (current)
 
 ## ungrouped
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `load_pricing_table` | 1.21 ns | 1.44 ns +19% | 1.43 ns +18% |
-| `detect_all` | 998.24 µs | 1.01 ms | 1.01 ms |
-| `detect_none (CPU only)` | 140.31 µs | 141.55 µs | 139.51 µs |
-| `concurrent_detect_4_threads` | 2.50 ms | 2.48 ms | 2.51 ms |
-| `parse_nvidia_bandwidth_8gpu` | 992.03 ns | 969.76 ns | 977.20 ns |
-| `nvidia_bus_width_all_ccs` | 234.40 ps | 238.20 ps | 234.20 ps |
-| `estimate_bw_from_cc_all` | 233.60 ps | 237.20 ps | 235.40 ps |
-| `parse_max_dpm_clock` | 340.11 ns | 338.10 ns | 334.37 ns |
-| `parse_link_speed` | 70.91 ns | 73.38 ns +3% | 72.66 ns |
-| `parse_ib_rate` | 75.86 ns | 72.81 ns **-4%** | 72.09 ns **-5%** |
-| `parse_nvlink_output_2gpu` | 936.89 ns | 974.87 ns +4% | 944.74 ns |
-| `parse_cuda_output_8gpu` | 5.22 µs | 11.51 µs +120% | 5.45 µs +4% |
-| `parse_vulkan_output_2gpu` | 1.78 µs | 2.32 µs +30% | 1.81 µs |
-| `parse_gaudi_output_8dev` | 2.32 µs | 2.32 µs | 2.33 µs |
-| `plan_sharding 70B BF16 (4 GPU)` | 90.09 ns | 95.85 ns +6% | 90.25 ns |
-| `plan_sharding 70B BF16 (13 devices)` | 49.32 ns | 47.49 ns **-4%** | 49.36 ns |
-| `suggest_quantization 70B (4 GPU)` | 5.41 ns | 8.66 ns +60% | 8.53 ns +58% |
-| `suggest_quantization 70B (13 devices)` | 18.76 ns | 20.91 ns +12% | 21.30 ns +14% |
-| `estimate_memory 70B FP16` | 241.10 ps | 241.10 ps | 232.90 ps **-3%** |
-| `estimate_training_memory 7B LoRA GPU` | 967.00 ps | 499.30 ps **-48%** | 480.60 ps **-50%** |
-| `best_available (13 devices)` | 37.36 ns | 37.35 ns | 36.29 ns |
-| `total_memory (13 devices)` | 7.75 ns | 10.85 ns +40% | 10.38 ns +34% |
-| `by_family GPU (13 devices)` | 11.11 ns | 7.89 ns **-29%** | 7.23 ns **-35%** |
-| `bits_per_param_all_levels` | 235.70 ps | 265.10 ps +12% | 229.20 ps |
-| `memory_reduction_factor_all_levels` | 235.40 ps | 263.80 ps +12% | 232.40 ps |
+| `load_pricing_table` | 1.44 ns | 1.43 ns | 1.64 ns +14% |
+| `detect_all` | 1.01 ms | 1.01 ms | 999.30 µs |
+| `detect_none (CPU only)` | 141.55 µs | 139.51 µs | 158.51 µs +12% |
+| `concurrent_detect_4_threads` | 2.48 ms | 2.51 ms | 3.00 ms +21% |
+| `parse_nvidia_bandwidth_8gpu` | 969.76 ns | 977.20 ns | 1.09 µs +13% |
+| `nvidia_bus_width_all_ccs` | 238.20 ps | 234.20 ps | 264.50 ps +11% |
+| `estimate_bw_from_cc_all` | 237.20 ps | 235.40 ps | 264.30 ps +11% |
+| `parse_max_dpm_clock` | 338.10 ns | 334.37 ns | 373.99 ns +11% |
+| `parse_link_speed` | 73.38 ns | 72.66 ns | 80.64 ns +10% |
+| `parse_ib_rate` | 72.81 ns | 72.09 ns | 80.50 ns +11% |
+| `parse_nvlink_output_2gpu` | 974.87 ns | 944.74 ns **-3%** | 1.10 µs +13% |
+| `parse_cuda_output_8gpu` | 11.51 µs | 5.45 µs **-53%** | 6.00 µs **-48%** |
+| `parse_vulkan_output_2gpu` | 2.32 µs | 1.81 µs **-22%** | 2.09 µs **-10%** |
+| `parse_gaudi_output_8dev` | 2.32 µs | 2.33 µs | 2.50 µs +8% |
+| `plan_sharding 70B BF16 (4 GPU)` | 95.85 ns | 90.25 ns **-6%** | 106.87 ns +12% |
+| `plan_sharding 70B BF16 (13 devices)` | 47.49 ns | 49.36 ns +4% | 54.91 ns +16% |
+| `suggest_quantization 70B (4 GPU)` | 8.66 ns | 8.53 ns | 9.65 ns +11% |
+| `suggest_quantization 70B (13 devices)` | 20.91 ns | 21.30 ns | 24.17 ns +16% |
+| `estimate_memory 70B FP16` | 241.10 ps | 232.90 ps **-3%** | 277.30 ps +15% |
+| `estimate_training_memory 7B LoRA GPU` | 499.30 ps | 480.60 ps **-4%** | 550.80 ps +10% |
+| `best_available (13 devices)` | 37.35 ns | 36.29 ns | 46.01 ns +23% |
+| `total_memory (13 devices)` | 10.85 ns | 10.38 ns **-4%** | 13.33 ns +23% |
+| `by_family GPU (13 devices)` | 7.89 ns | 7.23 ns **-8%** | 9.21 ns +17% |
+| `bits_per_param_all_levels` | 265.10 ps | 229.20 ps **-14%** | 287.70 ps +9% |
+| `memory_reduction_factor_all_levels` | 263.80 ps | 232.40 ps **-12%** | 262.90 ps |
 
 ## recommend_instance
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `7B_bf16_all` | 3.07 µs | 3.16 µs +3% | 3.24 µs +5% |
-| `7B_int8_aws` | 1.10 µs | 1.11 µs | 1.14 µs +4% |
-| `70B_bf16_all` | 1.40 µs | 1.36 µs | 1.39 µs |
-| `70B_int4_gcp` | 588.81 ns | 593.71 ns | 597.77 ns |
+| `7B_bf16_all` | 3.16 µs | 3.24 µs | 3.74 µs +18% |
+| `7B_int8_aws` | 1.11 µs | 1.14 µs | 1.19 µs +7% |
+| `70B_bf16_all` | 1.36 µs | 1.39 µs | 1.57 µs +16% |
+| `70B_int4_gcp` | 593.71 ns | 597.77 ns | 677.38 ns +14% |
 
 ## cheapest_instance
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `7B_bf16` | 3.07 µs | 3.12 µs | 3.15 µs |
-| `70B_bf16` | 1.41 µs | 1.40 µs | 1.44 µs |
+| `7B_bf16` | 3.12 µs | 3.15 µs | 3.31 µs +6% |
+| `70B_bf16` | 1.40 µs | 1.44 µs | 1.59 µs +13% |
 
 ## detect_single
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `cuda` | 157.93 µs | 160.30 µs | 157.67 µs |
-| `rocm` | 1.26 ms | 1.17 ms **-7%** | 1.24 ms |
-| `vulkan` | 155.45 µs | 157.74 µs | 155.29 µs |
-| `apple` | 161.72 µs | 163.14 µs | 161.20 µs |
-| `tpu` | 179.27 µs | 179.74 µs | 179.98 µs |
+| `cuda` | 160.30 µs | 157.67 µs | 177.82 µs +11% |
+| `rocm` | 1.17 ms | 1.24 ms +6% | 996.20 µs **-15%** |
+| `vulkan` | 157.74 µs | 155.29 µs | 174.37 µs +11% |
+| `apple` | 163.14 µs | 161.20 µs | 179.42 µs +10% |
+| `tpu` | 179.74 µs | 179.98 µs | 196.09 µs +9% |
 
 ## system_io
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `full_with_sysio` | 1.01 ms | 1.01 ms | 1.01 ms |
-| `query_system_io` | 4.65 ns | 3.69 ns **-21%** | 3.65 ns **-21%** |
-| `ingestion_1gb` | 4.71 ns | 3.94 ns **-16%** | 3.91 ns **-17%** |
-| `ingestion_100gb` | 4.71 ns | 3.73 ns **-21%** | 3.69 ns **-22%** |
-| `ingestion_1tb` | 4.71 ns | 3.96 ns **-16%** | 3.92 ns **-17%** |
-| `serialize_registry` | 1.51 µs | 1.61 µs +7% | 1.60 µs +6% |
-| `deserialize_registry` | 2.04 µs | 1.98 µs **-3%** | 1.99 µs |
+| `full_with_sysio` | 1.01 ms | 1.01 ms | 1.00 ms |
+| `query_system_io` | 3.69 ns | 3.65 ns | 3.94 ns +7% |
+| `ingestion_1gb` | 3.94 ns | 3.91 ns | 4.29 ns +9% |
+| `ingestion_100gb` | 3.73 ns | 3.69 ns | 4.05 ns +8% |
+| `ingestion_1tb` | 3.96 ns | 3.92 ns | 4.31 ns +9% |
+| `serialize_registry` | 1.61 µs | 1.60 µs | 1.73 µs +7% |
+| `deserialize_registry` | 1.98 µs | 1.99 µs | 2.15 µs +9% |
 
 ## json_roundtrip
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `serialize (13 devices)` | 4.58 µs | 4.13 µs **-10%** | 4.71 µs |
-| `deserialize (13 devices)` | 6.20 µs | 5.81 µs **-6%** | 5.51 µs **-11%** |
+| `serialize (13 devices)` | 4.13 µs | 4.71 µs +14% | 5.18 µs +25% |
+| `deserialize (13 devices)` | 5.81 µs | 5.51 µs **-5%** | 7.12 µs +23% |
 
 ## estimate_memory
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `70B_fp32` | 495.50 ps | 520.20 ps +5% | 472.60 ps **-5%** |
-| `70B_fp16` | 481.60 ps | 548.50 ps +14% | 472.10 ps |
-| `70B_bf16` | 482.40 ps | 546.20 ps +13% | 470.60 ps |
-| `70B_int8` | 478.80 ps | 535.80 ps +12% | 471.40 ps |
-| `70B_int4` | 496.70 ps | 569.00 ps +15% | 473.60 ps **-5%** |
+| `70B_fp32` | 520.20 ps | 472.60 ps **-9%** | 591.10 ps +14% |
+| `70B_fp16` | 548.50 ps | 472.10 ps **-14%** | 568.20 ps +4% |
+| `70B_bf16` | 546.20 ps | 470.60 ps **-14%** | 585.20 ps +7% |
+| `70B_int8` | 535.80 ps | 471.40 ps **-12%** | 591.30 ps +10% |
+| `70B_int4` | 569.00 ps | 473.60 ps **-17%** | 578.30 ps |
 
 ## suggest_quantization
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `1B_1gpu` | 4.45 ns | 3.67 ns **-18%** | 2.87 ns **-36%** |
-| `7B_1gpu` | 4.75 ns | 3.81 ns **-20%** | 2.86 ns **-40%** |
-| `13B_1gpu` | 4.68 ns | 3.67 ns **-22%** | 2.90 ns **-38%** |
-| `70B_1gpu` | 6.36 ns | 4.73 ns **-26%** | 4.41 ns **-31%** |
-| `405B_1gpu` | 4.82 ns | 4.19 ns **-13%** | 4.58 ns **-5%** |
+| `1B_1gpu` | 3.67 ns | 2.87 ns **-22%** | 3.76 ns |
+| `7B_1gpu` | 3.81 ns | 2.86 ns **-25%** | 3.73 ns |
+| `13B_1gpu` | 3.67 ns | 2.90 ns **-21%** | 3.76 ns |
+| `70B_1gpu` | 4.73 ns | 4.41 ns **-7%** | 5.24 ns +11% |
+| `405B_1gpu` | 4.19 ns | 4.58 ns +9% | 4.78 ns +14% |
 
 ## registry_queries
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `available_4dev` | 1.84 ns | — | — |
-| `available_129dev` | 39.53 ns | — | — |
-| `available_61dev_mixed` | 15.84 ns | — | — |
-| `best_available_129dev` | 372.51 ns | 346.96 ns **-7%** | 366.00 ns |
-| `total_memory_129dev` | 68.61 ns | 66.80 ns | 71.72 ns +5% |
-| `total_accelerator_memory_129dev` | 70.69 ns | 74.53 ns +5% | 79.32 ns +12% |
-| `has_accelerator_129dev` | 1.22 ns | 1.29 ns +5% | 1.20 ns |
-| `by_family_gpu_61dev` | 45.50 ns | — | — |
-| `by_family_tpu_61dev` | 45.33 ns | — | — |
-| `satisfying_gpu_61dev` | 73.87 ns | — | — |
-| `satisfying_any_accel_61dev` | 45.68 ns | — | — |
-| `available_count_4dev` | — | 1.91 ns | 1.77 ns |
-| `available_count_129dev` | — | 41.65 ns | 39.77 ns |
-| `available_count_61dev_mixed` | — | 16.12 ns | 15.52 ns |
-| `available_collect_4dev` | — | 65.03 ns | 61.07 ns |
-| `available_collect_129dev` | — | 533.56 ns | 520.37 ns |
-| `available_collect_61dev_mixed` | — | 268.30 ns | 254.83 ns |
-| `by_family_gpu_count_61dev` | — | 33.84 ns | 32.27 ns |
-| `by_family_tpu_count_61dev` | — | 34.60 ns | 32.65 ns |
-| `by_family_gpu_collect_61dev` | — | 305.55 ns | 270.00 ns |
-| `by_family_tpu_collect_61dev` | — | 127.00 ns | 124.98 ns |
-| `satisfying_gpu_count_61dev` | — | 137.46 ns | 130.63 ns |
-| `satisfying_any_accel_count_61dev` | — | 105.55 ns | 102.26 ns |
-| `satisfying_gpu_collect_61dev` | — | 392.18 ns | 337.18 ns |
-| `satisfying_any_accel_collect_61dev` | — | 384.44 ns | 334.52 ns |
+| `available_count_4dev` | 1.91 ns | 1.77 ns **-7%** | 2.09 ns +9% |
+| `available_count_129dev` | 41.65 ns | 39.77 ns **-5%** | 47.67 ns +14% |
+| `available_count_61dev_mixed` | 16.12 ns | 15.52 ns **-4%** | 17.74 ns +10% |
+| `available_collect_4dev` | 65.03 ns | 61.07 ns **-6%** | 71.97 ns +11% |
+| `available_collect_129dev` | 533.56 ns | 520.37 ns | 583.25 ns +9% |
+| `available_collect_61dev_mixed` | 268.30 ns | 254.83 ns **-5%** | 300.58 ns +12% |
+| `best_available_129dev` | 346.96 ns | 366.00 ns +5% | 388.00 ns +12% |
+| `total_memory_129dev` | 66.80 ns | 71.72 ns +7% | 75.00 ns +12% |
+| `total_accelerator_memory_129dev` | 74.53 ns | 79.32 ns +6% | 81.34 ns +9% |
+| `has_accelerator_129dev` | 1.29 ns | 1.20 ns **-7%** | 1.36 ns +6% |
+| `by_family_gpu_count_61dev` | 33.84 ns | 32.27 ns **-5%** | 36.63 ns +8% |
+| `by_family_tpu_count_61dev` | 34.60 ns | 32.65 ns **-6%** | 36.82 ns +6% |
+| `by_family_gpu_collect_61dev` | 305.55 ns | 270.00 ns **-12%** | 319.35 ns +5% |
+| `by_family_tpu_collect_61dev` | 127.00 ns | 124.98 ns | 142.32 ns +12% |
+| `satisfying_gpu_count_61dev` | 137.46 ns | 130.63 ns **-5%** | 146.78 ns +7% |
+| `satisfying_any_accel_count_61dev` | 105.55 ns | 102.26 ns **-3%** | 115.94 ns +10% |
+| `satisfying_gpu_collect_61dev` | 392.18 ns | 337.18 ns **-14%** | 387.83 ns |
+| `satisfying_any_accel_collect_61dev` | 384.44 ns | 334.52 ns **-13%** | 410.19 ns +7% |
 
 ## cached_registry
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `get_cached_hit` | 28.79 ns | 29.87 ns +4% | 29.01 ns |
-| `invalidate` | 6.03 ns | 5.97 ns | 5.32 ns **-12%** |
+| `get_cached_hit` | 29.87 ns | 29.01 ns | 31.47 ns +5% |
+| `invalidate` | 5.97 ns | 5.32 ns **-11%** | 5.76 ns **-4%** |
 
 ## lazy_registry
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `new` | 9.70 µs | 10.14 µs +5% | 9.78 µs |
+| `new` | 10.14 µs | 9.78 µs **-4%** | 10.74 µs +6% |
 | `by_family_gpu_cold` | 1.00 ms | 1.00 ms | 1.00 ms |
-| `by_family_gpu_warm` | 62.93 ns | 62.41 ns | 61.20 ns |
-| `into_registry` | 2.00 ms | 2.01 ms | 3.22 ms +61% |
+| `by_family_gpu_warm` | 62.41 ns | 61.20 ns | 66.65 ns +7% |
+| `into_registry` | 2.01 ms | 3.22 ms +61% | 3.17 ms +58% |
 
 ## large_registry_sharding
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `plan_sharding_70B_128gpu` | 1.60 µs | 1.55 µs **-3%** | 1.55 µs **-3%** |
-| `plan_sharding_405B_128gpu` | 1.60 µs | 1.57 µs | 1.44 µs **-10%** |
-| `suggest_quantization_70B_128gpu` | 366.38 ns | 382.33 ns +4% | 363.40 ns |
-| `plan_sharding_70B_mixed_61dev` | 193.31 ns | 179.45 ns **-7%** | 173.52 ns **-10%** |
+| `plan_sharding_70B_128gpu` | 1.55 µs | 1.55 µs | 1.76 µs +14% |
+| `plan_sharding_405B_128gpu` | 1.57 µs | 1.44 µs **-8%** | 1.61 µs |
+| `suggest_quantization_70B_128gpu` | 382.33 ns | 363.40 ns **-5%** | 400.42 ns +5% |
+| `plan_sharding_70B_mixed_61dev` | 179.45 ns | 173.52 ns **-3%** | 204.79 ns +14% |
 
 ## large_json
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `serialize_129dev` | 35.23 µs | 35.76 µs | 33.00 µs **-6%** |
-| `deserialize_129dev` | 42.70 µs | 47.71 µs +12% | 42.35 µs |
+| `serialize_129dev` | 35.76 µs | 33.00 µs **-8%** | 36.07 µs |
+| `deserialize_129dev` | 47.71 µs | 42.35 µs **-11%** | 46.82 µs |
 
 ## training_memory
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `7B_full_finetune_gpu` | 2.85 ns | 3.56 ns +25% | 3.26 ns +15% |
-| `7B_lora_gpu` | 2.85 ns | 3.65 ns +28% | 3.05 ns +7% |
-| `7B_qlora_4bit_gpu` | 3.07 ns | 3.21 ns +5% | 3.06 ns |
-| `7B_qlora_8bit_gpu` | 3.07 ns | 3.39 ns +11% | 3.06 ns |
-| `7B_prefix_gpu` | 3.05 ns | 5.92 ns +94% | 3.28 ns +8% |
-| `7B_dpo_gpu` | 3.07 ns | 3.81 ns +24% | 3.05 ns |
-| `7B_rlhf_gpu` | 3.06 ns | 3.69 ns +21% | 3.05 ns |
-| `7B_distillation_gpu` | 2.84 ns | 3.50 ns +23% | 2.83 ns |
+| `7B_full_finetune_gpu` | 3.56 ns | 3.26 ns **-8%** | 3.60 ns |
+| `7B_lora_gpu` | 3.65 ns | 3.05 ns **-16%** | 3.34 ns **-8%** |
+| `7B_qlora_4bit_gpu` | 3.21 ns | 3.06 ns **-5%** | 3.35 ns +4% |
+| `7B_qlora_8bit_gpu` | 3.39 ns | 3.06 ns **-10%** | 3.33 ns |
+| `7B_prefix_gpu` | 5.92 ns | 3.28 ns **-45%** | 3.60 ns **-39%** |
+| `7B_dpo_gpu` | 3.81 ns | 3.05 ns **-20%** | 3.34 ns **-12%** |
+| `7B_rlhf_gpu` | 3.69 ns | 3.05 ns **-17%** | 3.55 ns **-4%** |
+| `7B_distillation_gpu` | 3.50 ns | 2.83 ns **-19%** | 3.09 ns **-12%** |
 
 ## training_targets
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `7B_full_gpu` | 1.17 ns | 823.70 ps **-30%** | 710.80 ps **-39%** |
-| `7B_full_tpu` | 1.17 ns | 746.80 ps **-36%** | 705.80 ps **-40%** |
-| `7B_full_gaudi` | 1.17 ns | 745.40 ps **-36%** | 708.10 ps **-39%** |
-| `7B_full_cpu` | 1.17 ns | 747.20 ps **-36%** | 706.90 ps **-39%** |
+| `7B_full_gpu` | 823.70 ps | 710.80 ps **-14%** | 780.00 ps **-5%** |
+| `7B_full_tpu` | 746.80 ps | 705.80 ps **-5%** | 773.50 ps +4% |
+| `7B_full_gaudi` | 745.40 ps | 708.10 ps **-5%** | 768.50 ps +3% |
+| `7B_full_cpu` | 747.20 ps | 706.90 ps **-5%** | 777.10 ps +4% |
 
 ## training_model_sizes
 
-| Benchmark | Baseline (`649834b`) | Previous (`6fb0ccd`) | Current (`6fb0ccd`) |
+| Benchmark | Baseline (`6fb0ccd`) | Previous (`6fb0ccd`) | Current (`234419b`) |
 |-----------|------|------|------|
-| `1B_lora_gpu` | 938.90 ps | 981.10 ps +4% | 920.00 ps |
-| `7B_lora_gpu` | 937.90 ps | 981.50 ps +5% | 918.50 ps |
-| `13B_lora_gpu` | 939.20 ps | 978.40 ps +4% | 917.30 ps |
-| `70B_lora_gpu` | 939.60 ps | 978.00 ps +4% | 932.60 ps |
-| `405B_lora_gpu` | 939.00 ps | 990.90 ps +6% | 930.20 ps |
+| `1B_lora_gpu` | 981.10 ps | 920.00 ps **-6%** | 1.02 ns +4% |
+| `7B_lora_gpu` | 981.50 ps | 918.50 ps **-6%** | 1.02 ns +4% |
+| `13B_lora_gpu` | 978.40 ps | 917.30 ps **-6%** | 1.02 ns +5% |
+| `70B_lora_gpu` | 978.00 ps | 932.60 ps **-5%** | 1.02 ns +5% |
+| `405B_lora_gpu` | 990.90 ps | 930.20 ps **-6%** | 1.02 ns +3% |
 
 ---
 
