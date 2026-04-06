@@ -263,7 +263,31 @@ pub fn parse_nvswitch_topo(stdout: &str, interconnects: &mut Vec<Interconnect>) 
 
     for line in stdout.lines() {
         let trimmed = line.trim();
+        // Data rows: "GPU0\t X \tNV18\t..." — start with "GPU" followed by a
+        // digit and then whitespace/tab before the matrix values.
+        // Header row: "\tGPU0\tGPU1\t..." — after trimming looks like
+        // "GPU0\tGPU1\t..." with multiple GPUs. We distinguish by checking
+        // that the line has matrix tokens (X, NV*, SYS, etc.) after the
+        // leading GPU label, not additional GPU labels.
         if !trimmed.starts_with("GPU") {
+            continue;
+        }
+        // Skip header rows that list multiple GPU column names.
+        // Header: "GPU0  GPU1  GPU2 ..." — second token also starts with GPU.
+        let mut tokens = trimmed.split_whitespace();
+        let first = tokens.next().unwrap_or_default();
+        // Data rows have "GPUN" then "X" or "NV*" or "SYS" etc.
+        // Header rows have "GPU0" then "GPU1" then "GPU2" etc.
+        if let Some(second) = tokens.next()
+            && second.starts_with("GPU")
+        {
+            continue; // This is the header row.
+        }
+        // Verify first token is a single GPU label (e.g. "GPU0", not "GPUs").
+        if !first
+            .strip_prefix("GPU")
+            .is_some_and(|rest| rest.chars().all(|c| c.is_ascii_digit()))
+        {
             continue;
         }
         gpu_count += 1;
@@ -330,8 +354,8 @@ fn detect_xgmi_sysfs(interconnects: &mut Vec<Interconnect>) -> bool {
         return false;
     };
 
-    let mut hive_gpus: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
+    // Typically 1-2 hives at most; Vec is lighter than HashMap here.
+    let mut hive_gpus: Vec<(String, Vec<String>)> = Vec::new();
 
     for entry in drm_entries.flatten() {
         let name = entry.file_name();
@@ -357,18 +381,16 @@ fn detect_xgmi_sysfs(interconnects: &mut Vec<Interconnect>) -> bool {
             let hive = hive.trim().to_string();
             // Hive ID of "0" or empty means no XGMI.
             if !hive.is_empty() && hive != "0" && hive != "0x0" {
-                hive_gpus
-                    .entry(hive)
-                    .or_default()
-                    .push(name_str.to_string());
+                if let Some((_, gpus)) = hive_gpus.iter_mut().find(|(h, _)| h == &hive) {
+                    gpus.push(name_str.to_string());
+                } else {
+                    hive_gpus.push((hive, vec![name_str.to_string()]));
+                }
             }
         }
     }
 
-    if hive_gpus.is_empty() {
-        return false;
-    }
-
+    let mut found = false;
     for (hive_id, gpus) in &hive_gpus {
         if gpus.len() < 2 {
             continue;
@@ -390,8 +412,9 @@ fn detect_xgmi_sysfs(interconnects: &mut Vec<Interconnect>) -> bool {
             bandwidth_gbps,
             state: Some(format!("{} GPUs", gpus.len())),
         });
+        found = true;
     }
-    true
+    found
 }
 
 /// Parse `rocm-smi --showtopo` output to detect XGMI links.
@@ -476,15 +499,29 @@ fn detect_tpu_ici(interconnects: &mut Vec<Interconnect>) {
     let mut version_str = String::new();
 
     for device_id in super::iter_dev_devices("accel") {
+        let base = format!("/sys/class/accel/accel{device_id}/device");
+
         // Skip AMD XDNA devices that also appear under /dev/accel.
-        let driver_link = format!("/sys/class/accel/accel{device_id}/device/driver");
+        let driver_link = format!("{base}/driver");
         if let Ok(target) = std::fs::read_link(&driver_link)
             && target.to_string_lossy().contains("amdxdna")
         {
             continue;
         }
 
-        let chip_path = format!("/sys/class/accel/accel{device_id}/device/chip_count");
+        // Verify this is actually a TPU by checking for tpu_version.
+        let ver_path = format!("{base}/tpu_version");
+        let ver = super::read_sysfs_string(std::path::Path::new(&ver_path), 256);
+        if ver.is_none() {
+            continue; // Not a TPU device.
+        }
+        if version_str.is_empty()
+            && let Some(ref v) = ver
+        {
+            version_str = v.trim().to_string();
+        }
+
+        let chip_path = format!("{base}/chip_count");
         if let Some(count_str) = super::read_sysfs_string(std::path::Path::new(&chip_path), 64)
             && let Ok(n) = count_str.trim().parse::<u32>()
             && n > 0
@@ -492,13 +529,6 @@ fn detect_tpu_ici(interconnects: &mut Vec<Interconnect>) {
             total_chips += n;
         } else {
             total_chips += 1;
-        }
-
-        if version_str.is_empty() {
-            let ver_path = format!("/sys/class/accel/accel{device_id}/device/tpu_version");
-            if let Some(v) = super::read_sysfs_string(std::path::Path::new(&ver_path), 256) {
-                version_str = v.trim().to_string();
-            }
         }
     }
 
