@@ -74,11 +74,11 @@ Python bindings, WASM, interconnect detection.
 
 ### Interconnect gaps
 
-- [ ] **NVSwitch auto-detection** — probe
+- [x] **NVSwitch auto-detection** — probe
   `/sys/devices/virtual/nvidia-nvswitch/` or `nvidia-smi topo -m`
-- [ ] **AMD XGMI / Infinity Fabric** — `rocm-smi --showtopo` or sysfs
-- [ ] **Google TPU ICI detection** — populate `InterconnectKind::Ici`
-- [ ] **RoCE v2 detection** — distinguish v1/v2 via sysfs gid_attrs
+- [x] **AMD XGMI / Infinity Fabric** — `rocm-smi --showtopo` or sysfs
+- [x] **Google TPU ICI detection** — populate `InterconnectKind::Ici`
+- [x] **RoCE v2 detection** — distinguish v1/v2 via sysfs gid_attrs
 
 ---
 

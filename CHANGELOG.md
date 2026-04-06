@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [Unreleased]
+
+### Added
+
+- **NVSwitch auto-detection** — probes sysfs
+  `/sys/devices/virtual/nvidia-nvswitch/` and parses `nvidia-smi topo -m`
+  output. High NVLink counts (NV8+) with multiple GPUs indicate NVSwitch
+  fabric. Both sync and async detection paths supported.
+- **AMD XGMI / Infinity Fabric detection** — reads XGMI hive IDs from
+  `/sys/class/drm/card*/device/xgmi_hive_info` and parses
+  `rocm-smi --showtopo` link-type matrix as fallback.
+- **Google TPU ICI detection** — multi-chip TPU configurations now report
+  `InterconnectKind::Ici` with version-specific bandwidth (v4: 192 GB/s/chip,
+  v5e: 204.8, v5p: 409.6).
+- **RoCE v2 detection** — new `InterconnectKind::RoCEv2` variant. Distinguished
+  from RoCE v1 by reading sysfs `gid_attrs/types` for "RoCE v2" entries.
+- **Fuzz targets** for NVSwitch topology and XGMI topology parsers.
+
+### Changed
+
+- **Sharding planner now accounts for all interconnect types** —
+  `InterconnectInfo::scan()` incorporates InfiniBand, RoCE, RoCEv2, and ICI
+  bandwidth into `high_bw` for better sharding decisions.
+- **Async interconnect detection collects warnings** — CLI tool errors
+  (non-tool-not-found) are now propagated as warnings in the async path.
+
+### Fixed
+
+- **`parse_nvswitch_topo` header row inflation** — the GPU column header
+  (`GPU0 GPU1 ...`) was incorrectly counted as a data row, inflating the
+  reported GPU count by 1.
+- **`detect_xgmi_sysfs` false positive** — returned `true` (suppressing CLI
+  fallback) even when all XGMI hives had only 1 GPU.
+- **`detect_tpu_ici` non-TPU device counting** — non-TPU accelerator devices
+  under `/dev/accel` are now skipped by requiring `tpu_version` sysfs file.
+
 ## [1.1.1] - 2026-04-03
 
 ### Fixed
