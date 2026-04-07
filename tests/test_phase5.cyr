@@ -1,0 +1,162 @@
+# test_phase5.cyr — tests for Phase 5 low-priority detectors
+# Tests detection logic, default values, and profile construction
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/cuda.cyr"
+include "src/detect/rocm.cyr"
+include "src/detect/tpu.cyr"
+include "src/detect/gaudi.cyr"
+include "src/detect/neuron.cyr"
+include "src/detect/vulkan.cyr"
+include "src/detect/apple.cyr"
+include "src/detect/intel.cyr"
+include "src/detect/amd_xdna.cyr"
+include "src/detect/edge.cyr"
+include "src/detect/cloud_asic.cyr"
+
+# --- Apple macOS output parsing ---
+
+fn test_apple_macos_parse() {
+    var hw = str_from("Hardware Overview:\n  Chip: Apple M4 Pro\n  Memory: 36 GB\n  Cores: 14\n");
+    var profiles = vec_new();
+    _parse_apple_macos(hw, profiles);
+
+    assert_eq(vec_len(profiles), 2, "2 profiles (Metal + ANE)");
+
+    var gpu = vec_get(profiles, 0);
+    assert_eq(profile_accel_type(gpu), ACCEL_METAL, "Metal GPU");
+    assert_eq(profile_memory_bytes(gpu) / BYTES_PER_GIB, 36, "36 GiB");
+    assert(streq(profile_device_name(gpu), "Apple M4 Pro") == 1, "M4 Pro name");
+
+    var ane = vec_get(profiles, 1);
+    assert_eq(profile_accel_type(ane), ACCEL_APPLE_NPU, "Apple NPU");
+    # M4 gets 8 GiB ANE estimate
+    assert_eq(profile_memory_bytes(ane) / BYTES_PER_GIB, 8, "M4 ANE 8 GiB");
+    return 0;
+}
+
+fn test_apple_m2_ane() {
+    var hw = str_from("  Chip: Apple M2\n  Memory: 16 GB\n");
+    var profiles = vec_new();
+    _parse_apple_macos(hw, profiles);
+
+    var ane = vec_get(profiles, 1);
+    assert_eq(profile_memory_bytes(ane) / BYTES_PER_GIB, 6, "M2 ANE 6 GiB");
+    return 0;
+}
+
+# --- Edge device defaults ---
+
+fn test_edge_defaults() {
+    # Qualcomm: 32 GiB
+    var qp = profile_new(ACCEL_QUALCOMM, 0, 32 * BYTES_PER_GIB);
+    assert_eq(profile_memory_bytes(qp) / BYTES_PER_GIB, 32, "Qualcomm 32 GiB");
+    assert_eq(profile_family(qp), FAMILY_AI_ASIC, "Qualcomm = AI ASIC");
+
+    # Samsung NPU: 2 GiB
+    var sp = profile_new(ACCEL_SAMSUNG_NPU, 0, 2 * BYTES_PER_GIB);
+    assert_eq(profile_memory_bytes(sp) / BYTES_PER_GIB, 2, "Samsung 2 GiB");
+    assert_eq(profile_family(sp), FAMILY_NPU, "Samsung = NPU");
+
+    # MediaTek: 2 GiB
+    var mp = profile_new(ACCEL_MEDIATEK_APU, 0, 2 * BYTES_PER_GIB);
+    assert_eq(profile_memory_bytes(mp) / BYTES_PER_GIB, 2, "MediaTek 2 GiB");
+    assert_eq(profile_family(mp), FAMILY_NPU, "MediaTek = NPU");
+    return 0;
+}
+
+# --- Cloud ASIC defaults ---
+
+fn test_cloud_asic_defaults() {
+    # Cerebras: 44 GiB
+    var cp = profile_new(ACCEL_CEREBRAS, 0, 44 * BYTES_PER_GIB);
+    assert_eq(profile_memory_bytes(cp) / BYTES_PER_GIB, 44, "Cerebras 44 GiB");
+    assert_eq(profile_family(cp), FAMILY_AI_ASIC, "Cerebras = AI ASIC");
+    assert_eq(accel_rank(ACCEL_CEREBRAS), 85, "Cerebras rank 85");
+
+    # Graphcore: 900 MiB
+    var gp = profile_new(ACCEL_GRAPHCORE, 0, 900 * 1024 * 1024);
+    assert_eq(profile_memory_bytes(gp) / (1024 * 1024), 900, "Graphcore 900 MiB");
+    assert_eq(profile_family(gp), FAMILY_AI_ASIC, "Graphcore = AI ASIC");
+
+    # Groq: 230 MiB
+    var grp = profile_new(ACCEL_GROQ, 0, 230 * 1024 * 1024);
+    assert_eq(profile_memory_bytes(grp) / (1024 * 1024), 230, "Groq 230 MiB");
+    assert_eq(profile_family(grp), FAMILY_AI_ASIC, "Groq = AI ASIC");
+    assert_eq(groq_rank(), 55, "Groq rank 55");
+    return 0;
+}
+
+# --- Intel profiles ---
+
+fn test_intel_profiles() {
+    # Intel NPU: 2 GiB, NPU family
+    var inp = profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB);
+    assert_eq(profile_family(inp), FAMILY_NPU, "Intel NPU = NPU");
+    assert_eq(accel_supports_training(ACCEL_INTEL_NPU), 0, "Intel NPU no train");
+
+    # Intel oneAPI: GPU family
+    var iop = profile_new(ACCEL_INTEL_ONEAPI, 0, 16 * BYTES_PER_GIB);
+    assert_eq(profile_family(iop), FAMILY_GPU, "oneAPI = GPU");
+    assert_eq(accel_supports_training(ACCEL_INTEL_ONEAPI), 1, "oneAPI trains");
+    return 0;
+}
+
+# --- AMD XDNA ---
+
+fn test_amd_xdna_profile() {
+    var xp = profile_new(ACCEL_AMD_XDNA, 0, 2 * BYTES_PER_GIB);
+    assert_eq(profile_family(xp), FAMILY_NPU, "XDNA = NPU");
+    assert_eq(accel_supports_training(ACCEL_AMD_XDNA), 0, "XDNA no train");
+    return 0;
+}
+
+# --- All backend names ---
+
+fn test_all_backend_names() {
+    assert(streq(backend_name(BACKEND_APPLE), "apple") == 1, "apple");
+    assert(streq(backend_name(BACKEND_INTEL_NPU), "intel-npu") == 1, "intel-npu");
+    assert(streq(backend_name(BACKEND_AMD_XDNA), "amd-xdna") == 1, "amd-xdna");
+    assert(streq(backend_name(BACKEND_INTEL_ONEAPI), "intel-oneapi") == 1, "intel-oneapi");
+    assert(streq(backend_name(BACKEND_QUALCOMM), "qualcomm") == 1, "qualcomm");
+    assert(streq(backend_name(BACKEND_CEREBRAS), "cerebras") == 1, "cerebras");
+    assert(streq(backend_name(BACKEND_GRAPHCORE), "graphcore") == 1, "graphcore");
+    assert(streq(backend_name(BACKEND_GROQ), "groq") == 1, "groq");
+    assert(streq(backend_name(BACKEND_SAMSUNG_NPU), "samsung-npu") == 1, "samsung-npu");
+    assert(streq(backend_name(BACKEND_MEDIATEK_APU), "mediatek-apu") == 1, "mediatek-apu");
+    return 0;
+}
+
+# --- Run all tests ---
+
+alloc_init();
+
+test_apple_macos_parse();
+test_apple_m2_ane();
+test_edge_defaults();
+test_cloud_asic_defaults();
+test_intel_profiles();
+test_amd_xdna_profile();
+test_all_backend_names();
+
+var fails = assert_summary();
+syscall(60, fails);

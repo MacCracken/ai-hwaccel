@@ -1,0 +1,47 @@
+# edge.cyr — edge/mobile NPU detectors
+# Qualcomm Cloud AI 100, Samsung Exynos NPU, MediaTek APU (MDLA)
+
+fn detect_qualcomm(profiles, warnings) {
+    var found = 0;
+    if (path_exists("/sys/class/qaic") == 1) { found = 1; }
+    if (found == 0) {
+        if (has_dev_device("qaic_") == 1) { found = 1; }
+    }
+    if (found == 1) {
+        var p = profile_new(ACCEL_QUALCOMM, 0, 32 * BYTES_PER_GIB);
+        profile_set_device_name(p, "Qualcomm Cloud AI 100");
+        profile_set_compute_cap(p, "AI 100");
+        vec_push(profiles, p);
+    }
+    return 0;
+}
+
+fn detect_samsung_npu(profiles, warnings) {
+    var found = 0;
+    if (path_exists("/sys/class/misc/samsung_npu") == 1) { found = 1; }
+    if (found == 0) {
+        if (has_dev_device("samsung_npu") == 1) { found = 1; }
+    }
+    if (found == 1) {
+        var p = profile_new(ACCEL_SAMSUNG_NPU, 0, 2 * BYTES_PER_GIB);
+        profile_set_device_name(p, "Samsung Exynos NPU");
+        profile_set_compute_cap(p, "Exynos AI");
+        vec_push(profiles, p);
+    }
+    return 0;
+}
+
+fn detect_mediatek_apu(profiles, warnings) {
+    var found = 0;
+    if (path_exists("/sys/class/misc/mtk_apu") == 1) { found = 1; }
+    if (found == 0) {
+        if (has_dev_device("mtk_mdla") == 1) { found = 1; }
+    }
+    if (found == 1) {
+        var p = profile_new(ACCEL_MEDIATEK_APU, 0, 2 * BYTES_PER_GIB);
+        profile_set_device_name(p, "MediaTek APU");
+        profile_set_compute_cap(p, "MDLA");
+        vec_push(profiles, p);
+    }
+    return 0;
+}

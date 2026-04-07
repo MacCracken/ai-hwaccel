@@ -1,0 +1,59 @@
+# intel.cyr — Intel NPU + Intel oneAPI GPU detection
+
+# Intel NPU (Meteor Lake+): simple sysfs check
+fn detect_intel_npu(profiles, warnings) {
+    if (path_exists("/sys/class/misc/intel_npu") == 1) {
+        var p = profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB);
+        profile_set_device_name(p, "Intel NPU");
+        vec_push(profiles, p);
+    }
+    return 0;
+}
+
+# Intel oneAPI (Arc / Data Center GPU Max): xpu-smi CLI
+fn detect_intel_oneapi(profiles, warnings) {
+    var result = run_tool2("xpu-smi", "discovery", "--dump 1,2,18,19", warnings);
+    if (result == 0) { return 0; }
+
+    var lines = str_split(result, 10);
+    var nlines = vec_len(lines);
+    var li = 0;
+    while (li < nlines) {
+        var line = vec_get(lines, li);
+        li = li + 1;
+        if (str_len(line) == 0) { continue; }
+        # Skip header lines
+        if (str_contains(line, str_from("DeviceId")) == 1) { continue; }
+
+        var fields = parse_csv_line(line, 2);
+        if (fields == 0) { continue; }
+
+        var dev_id = str_to_int(vec_get(fields, 0));
+        if (dev_id < 0) { dev_id = 0; }
+
+        # Memory field (MB) — usually field 2 or 3
+        var mem_bytes = 16 * BYTES_PER_GIB;
+        if (vec_len(fields) > 2) {
+            var mem_mb = str_to_int(vec_get(fields, 2));
+            if (mem_mb > 0) { mem_bytes = mem_mb * 1024 * 1024; }
+        }
+
+        var p = profile_new(ACCEL_INTEL_ONEAPI, dev_id, mem_bytes);
+
+        # Device name from field 1
+        if (vec_len(fields) > 1) {
+            var nm = vec_get(fields, 1);
+            if (str_len(nm) > 0) {
+                var nd = str_data(nm);
+                var nl = str_len(nm);
+                var nc = alloc(nl + 1);
+                memcpy(nc, nd, nl);
+                store8(nc + nl, 0);
+                profile_set_device_name(p, nc);
+            }
+        }
+
+        vec_push(profiles, p);
+    }
+    return 0;
+}

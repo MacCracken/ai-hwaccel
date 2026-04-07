@@ -1,0 +1,87 @@
+# apple.cyr — Apple Metal GPU + Neural Engine detection
+# macOS: system_profiler parsing
+# Linux (Asahi): /proc/device-tree/compatible check
+
+fn detect_apple(profiles, warnings) {
+    # Try macOS detection first
+    var hw = run_tool1("system_profiler", "SPHardwareDataType", warnings);
+    if (hw != 0) {
+        if (str_len(hw) > 0) {
+            _parse_apple_macos(hw, profiles);
+            return 0;
+        }
+    }
+
+    # Linux Asahi fallback
+    var compat = sysfs_read("/proc/device-tree/compatible");
+    if (compat != 0) {
+        if (str_contains(compat, str_from("apple")) == 1) {
+            # Detect system memory for Metal GPU
+            var sys_mem = detect_system_memory();
+            if (sys_mem == 0) { sys_mem = 8 * BYTES_PER_GIB; }
+            var p = profile_new(ACCEL_METAL, 0, sys_mem);
+            profile_set_device_name(p, "Apple Silicon (Asahi Linux)");
+            vec_push(profiles, p);
+
+            # Apple Neural Engine (ANE)
+            var ane = profile_new(ACCEL_APPLE_NPU, 0, 4 * BYTES_PER_GIB);
+            profile_set_device_name(ane, "Apple Neural Engine");
+            vec_push(profiles, ane);
+        }
+    }
+    return 0;
+}
+
+fn _parse_apple_macos(hw_output, profiles) {
+    var lines = str_split(hw_output, 10);
+    var nlines = vec_len(lines);
+    var chip_name = "Apple Silicon";
+    var mem_bytes = 8 * BYTES_PER_GIB;
+    var ane_mem = 4 * BYTES_PER_GIB;
+
+    var li = 0;
+    while (li < nlines) {
+        var line = vec_get(lines, li);
+        li = li + 1;
+
+        # Chip name: "Chip: Apple M4 Pro"
+        if (str_contains(line, str_from("Chip:")) == 1) {
+            var col = str_index_of(line, 58);
+            if (col >= 0) {
+                var cn = str_trim(str_sub(line, col + 1, str_len(line) - col - 1));
+                if (str_len(cn) > 0) {
+                    var cnd = str_data(cn);
+                    var cnl = str_len(cn);
+                    var cnc = alloc(cnl + 1);
+                    memcpy(cnc, cnd, cnl);
+                    store8(cnc + cnl, 0);
+                    chip_name = cnc;
+
+                    # ANE memory estimate by chip generation
+                    if (str_contains(cn, str_from("M4")) == 1) { ane_mem = 8 * BYTES_PER_GIB; }
+                    elif (str_contains(cn, str_from("M3")) == 1) { ane_mem = 8 * BYTES_PER_GIB; }
+                    elif (str_contains(cn, str_from("M2")) == 1) { ane_mem = 6 * BYTES_PER_GIB; }
+                }
+            }
+        }
+
+        # Memory: "Memory: 36 GB"
+        if (str_contains(line, str_from("Memory:")) == 1) {
+            var mcol = str_index_of(line, 58);
+            if (mcol >= 0) {
+                var mval = str_trim(str_sub(line, mcol + 1, str_len(line) - mcol - 1));
+                var val = parse_value_with_suffix(mval);
+                if (val > 0) { mem_bytes = val * BYTES_PER_GIB; }
+            }
+        }
+    }
+
+    var gpu = profile_new(ACCEL_METAL, 0, mem_bytes);
+    profile_set_device_name(gpu, chip_name);
+    vec_push(profiles, gpu);
+
+    var ane = profile_new(ACCEL_APPLE_NPU, 0, ane_mem);
+    profile_set_device_name(ane, "Apple Neural Engine");
+    vec_push(profiles, ane);
+    return 0;
+}

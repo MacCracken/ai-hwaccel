@@ -1,0 +1,83 @@
+# cloud_asic.cyr — cloud/datacenter AI ASIC detectors
+# Cerebras WSE, Graphcore IPU, Groq LPU
+
+fn detect_cerebras(profiles, warnings) {
+    # Try CLI first
+    var result = run_tool1("cerebras_cli", "system-info", warnings);
+    if (result != 0) {
+        if (str_len(result) > 0) {
+            var mem_gb = 44;
+            # Parse memory from output if available
+            var lines = str_split(result, 10);
+            var li = 0;
+            while (li < vec_len(lines)) {
+                var line = vec_get(lines, li);
+                li = li + 1;
+                if (str_contains(line, str_from("memory")) == 1) {
+                    var val = parse_value_with_suffix(line);
+                    if (val > 0) { mem_gb = val; }
+                }
+            }
+            var p = profile_new(ACCEL_CEREBRAS, 0, mem_gb * BYTES_PER_GIB);
+            profile_set_device_name(p, "Cerebras WSE");
+            vec_push(profiles, p);
+            return 0;
+        }
+    }
+
+    # Fallback: /dev/cerebras* check
+    if (has_dev_device("cerebras") == 1) {
+        var p = profile_new(ACCEL_CEREBRAS, 0, 44 * BYTES_PER_GIB);
+        profile_set_device_name(p, "Cerebras WSE");
+        vec_push(profiles, p);
+    }
+    return 0;
+}
+
+fn detect_graphcore(profiles, warnings) {
+    # Try gc-info CLI
+    var result = run_tool3("gc-info", "-d", "0", "-i", warnings);
+    if (result != 0) {
+        if (str_len(result) > 0) {
+            var mem_mb = 900;
+            var lines = str_split(result, 10);
+            var li = 0;
+            while (li < vec_len(lines)) {
+                var line = vec_get(lines, li);
+                li = li + 1;
+                if (str_contains(line, str_from("memory")) == 1) {
+                    var val = parse_value_with_suffix(line);
+                    if (val > 0) { mem_mb = val; }
+                }
+                elif (str_contains(line, str_from("sram")) == 1) {
+                    var val2 = parse_value_with_suffix(line);
+                    if (val2 > 0) { mem_mb = val2; }
+                }
+            }
+            var p = profile_new(ACCEL_GRAPHCORE, 0, mem_mb * 1024 * 1024);
+            profile_set_device_name(p, "Graphcore IPU");
+            profile_set_compute_cap(p, "IPU");
+            vec_push(profiles, p);
+            return 0;
+        }
+    }
+
+    # Fallback: /dev/ipu* check
+    if (has_dev_device("ipu") == 1) {
+        var p = profile_new(ACCEL_GRAPHCORE, 0, 900 * 1024 * 1024);
+        profile_set_device_name(p, "Graphcore IPU");
+        profile_set_compute_cap(p, "IPU");
+        vec_push(profiles, p);
+    }
+    return 0;
+}
+
+fn detect_groq(profiles, warnings) {
+    if (has_dev_device("groq") == 1) {
+        var p = profile_new(ACCEL_GROQ, 0, 230 * 1024 * 1024);
+        profile_set_device_name(p, "Groq LPU");
+        profile_set_compute_cap(p, "LPU");
+        vec_push(profiles, p);
+    }
+    return 0;
+}
