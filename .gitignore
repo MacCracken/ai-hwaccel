@@ -1,7 +1,11 @@
 # Build artifacts
-/target/
-/py/target/
-/py/Cargo.lock
+target/
+*.so
+*.dylib
+*.dll
+
+# Old Rust crate (archived, not tracked)
+rust-old/
 
 # Editor / IDE
 *.swp
