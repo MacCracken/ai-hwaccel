@@ -1,0 +1,104 @@
+# training.cyr — training method types and memory estimation
+# All memory values in x1000 GB fixed-point to avoid floats.
+# e.g., 14000 = 14.0 GB, 1400 = 1.4 GB
+
+enum TrainingMethod {
+    TRAIN_FULL = 0;
+    TRAIN_LORA = 1;
+    TRAIN_QLORA_4 = 2;
+    TRAIN_QLORA_8 = 3;
+    TRAIN_PREFIX = 4;
+    TRAIN_DPO = 5;
+    TRAIN_RLHF = 6;
+    TRAIN_DISTILL = 7;
+}
+
+fn training_method_name(m) {
+    if (m == TRAIN_FULL) { return "full"; }
+    if (m == TRAIN_LORA) { return "lora"; }
+    if (m == TRAIN_QLORA_4) { return "qlora-4bit"; }
+    if (m == TRAIN_QLORA_8) { return "qlora-8bit"; }
+    if (m == TRAIN_PREFIX) { return "prefix"; }
+    if (m == TRAIN_DPO) { return "dpo"; }
+    if (m == TRAIN_RLHF) { return "rlhf"; }
+    if (m == TRAIN_DISTILL) { return "distillation"; }
+    return "unknown";
+}
+
+enum TrainingTarget {
+    TARGET_GPU = 0;
+    TARGET_TPU = 1;
+    TARGET_GAUDI = 2;
+    TARGET_CPU = 3;
+}
+
+# MemoryEstimate struct layout:
+#   0: model_gb_x1000 (i64)
+#   8: optimizer_gb_x1000 (i64)
+#  16: activation_gb_x1000 (i64)
+#  24: total_gb_x1000 (i64)
+var MEM_EST_SIZE = 32;
+
+fn mem_est_new(model, optimizer, activation) {
+    var e = alloc(MEM_EST_SIZE);
+    store64(e, model);
+    store64(e + 8, optimizer);
+    store64(e + 16, activation);
+    store64(e + 24, model + optimizer + activation);
+    return e;
+}
+
+fn est_model_x1000(e) { return load64(e); }
+fn est_optimizer_x1000(e) { return load64(e + 8); }
+fn est_activation_x1000(e) { return load64(e + 16); }
+fn est_total_x1000(e) { return load64(e + 24); }
+
+# Estimate training memory for a model
+# model_params_millions: e.g., 7000 for 7B
+# Returns MemoryEstimate pointer
+fn estimate_training_memory(model_params_m, method, target) {
+    # base_gb = params_M * 1M * 2 bytes / GiB
+    # base_gb_x1000 = params_M * 2 * 1000000 / 1073741824 * 1000
+    # Simplified: base_gb_x1000 ~= params_M * 1863 / 1000
+    var base_x1000 = model_params_m * 1863 / 1000;
+
+    if (target == TARGET_TPU) { return _est_tpu(base_x1000, method); }
+    if (target == TARGET_GAUDI) { return _est_gaudi(base_x1000, method); }
+    return _est_gpu(base_x1000, method);
+}
+
+fn _est_gpu(base, method) {
+    if (method == TRAIN_FULL) { return mem_est_new(base, base * 2, base); }
+    if (method == TRAIN_LORA) { return mem_est_new(base, base / 10, base / 10); }
+    if (method == TRAIN_QLORA_4) { return mem_est_new(base / 4, base / 10, base / 40); }
+    if (method == TRAIN_QLORA_8) { return mem_est_new(base / 2, base / 10, base / 20); }
+    if (method == TRAIN_PREFIX) { return mem_est_new(base, base / 20, base / 20); }
+    if (method == TRAIN_DPO) { return mem_est_new(base * 2, base * 2, base * 3 / 2); }
+    if (method == TRAIN_RLHF) { return mem_est_new(base * 2, base * 2, base * 3 / 2); }
+    if (method == TRAIN_DISTILL) { return mem_est_new(base * 3 / 2, base, base * 4 / 5); }
+    return mem_est_new(base, base * 2, base);
+}
+
+fn _est_tpu(base, method) {
+    if (method == TRAIN_FULL) { return mem_est_new(base, base * 3 / 2, base * 4 / 5); }
+    if (method == TRAIN_LORA) { return mem_est_new(base, base * 15 / 100, base * 12 / 100); }
+    if (method == TRAIN_QLORA_4) { return mem_est_new(base * 2 / 5, base * 15 / 100, base * 12 / 250); }
+    if (method == TRAIN_QLORA_8) { return mem_est_new(base * 3 / 5, base * 15 / 100, base * 12 / 167); }
+    if (method == TRAIN_PREFIX) { return mem_est_new(base, base / 20, base / 20); }
+    if (method == TRAIN_DPO) { return mem_est_new(base * 2, base * 3 / 2, base * 6 / 5); }
+    if (method == TRAIN_RLHF) { return mem_est_new(base * 2, base * 3 / 2, base * 6 / 5); }
+    if (method == TRAIN_DISTILL) { return mem_est_new(base * 3 / 2, base * 4 / 5, base * 3 / 5); }
+    return mem_est_new(base, base * 3 / 2, base * 4 / 5);
+}
+
+fn _est_gaudi(base, method) {
+    if (method == TRAIN_FULL) { return mem_est_new(base, base * 3 / 2, base * 9 / 10); }
+    if (method == TRAIN_LORA) { return mem_est_new(base, base * 12 / 100, base * 12 / 100); }
+    if (method == TRAIN_QLORA_4) { return mem_est_new(base * 35 / 100, base * 12 / 100, base * 12 / 286); }
+    if (method == TRAIN_QLORA_8) { return mem_est_new(base * 55 / 100, base * 12 / 100, base * 12 / 182); }
+    if (method == TRAIN_PREFIX) { return mem_est_new(base, base / 20, base * 6 / 100); }
+    if (method == TRAIN_DPO) { return mem_est_new(base * 2, base * 3 / 2, base * 13 / 10); }
+    if (method == TRAIN_RLHF) { return mem_est_new(base * 2, base * 3 / 2, base * 13 / 10); }
+    if (method == TRAIN_DISTILL) { return mem_est_new(base * 3 / 2, base * 9 / 10, base * 7 / 10); }
+    return mem_est_new(base, base * 3 / 2, base * 9 / 10);
+}

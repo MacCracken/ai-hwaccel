@@ -1,0 +1,270 @@
+# cost.cyr — cloud instance cost recommendation
+# Reads data/cloud_pricing.json at runtime.
+# Recommends cheapest instance that fits model memory requirements.
+
+# CloudGpuInstance struct layout:
+#   0: name (ptr)
+#   8: provider (ptr)
+#  16: gpu (ptr)
+#  24: gpu_count (i64)
+#  32: gpu_mem_gb (i64)
+#  40: total_gpu_mem_gb (i64)
+#  48: vcpus (i64)
+#  56: ram_gb (i64)
+#  64: interconnect (ptr)
+#  72: price_x100 (i64)  — cents per hour (avoid float)
+var CLOUD_INST_SIZE = 80;
+
+fn cloud_inst_name(ci) { return load64(ci); }
+fn cloud_inst_provider(ci) { return load64(ci + 8); }
+fn cloud_inst_gpu(ci) { return load64(ci + 16); }
+fn cloud_inst_gpu_count(ci) { return load64(ci + 24); }
+fn cloud_inst_gpu_mem_gb(ci) { return load64(ci + 32); }
+fn cloud_inst_total_mem_gb(ci) { return load64(ci + 40); }
+fn cloud_inst_vcpus(ci) { return load64(ci + 48); }
+fn cloud_inst_ram_gb(ci) { return load64(ci + 56); }
+fn cloud_inst_interconnect(ci) { return load64(ci + 64); }
+fn cloud_inst_price_x100(ci) { return load64(ci + 72); }
+
+# CloudProvider enum
+enum CloudProvider {
+    CLOUD_AWS = 0;
+    CLOUD_GCP = 1;
+    CLOUD_AZURE = 2;
+}
+
+fn cloud_provider_str(p) {
+    if (p == CLOUD_AWS) { return "aws"; }
+    if (p == CLOUD_GCP) { return "gcp"; }
+    if (p == CLOUD_AZURE) { return "azure"; }
+    return "unknown";
+}
+
+# InstanceRecommendation struct layout:
+#   0: instance (ptr)
+#   8: mem_required_bytes (i64)
+#  16: mem_headroom_pct_x100 (i64)
+var INST_REC_SIZE = 24;
+
+fn inst_rec_new(inst, mem_req) {
+    var rec = alloc(INST_REC_SIZE);
+    store64(rec, inst);
+    store64(rec + 8, mem_req);
+    var total_mem = cloud_inst_total_mem_gb(inst) * BYTES_PER_GIB;
+    var headroom = 0;
+    if (mem_req > 0) {
+        headroom = (total_mem - mem_req) * 10000 / mem_req;
+    }
+    store64(rec + 16, headroom);
+    return rec;
+}
+
+fn rec_instance(rec) { return load64(rec); }
+fn rec_mem_required(rec) { return load64(rec + 8); }
+fn rec_headroom_x100(rec) { return load64(rec + 16); }
+
+# Load cloud pricing from JSON file
+# Returns vec of CloudGpuInstance pointers
+fn load_cloud_instances() {
+    var buf = alloc(32768);
+    var n = file_read_all("data/cloud_pricing.json", buf, 32768);
+    if (n <= 0) { return vec_new(); }
+    store8(buf + n, 0);
+
+    var instances = vec_new();
+    # Simple JSON array parsing — find each { ... } object
+    var pos = 0;
+    while (pos < n) {
+        # Find opening brace
+        if (load8(buf + pos) != 123) { pos = pos + 1; continue; }
+
+        var ci = alloc(CLOUD_INST_SIZE);
+        memset(ci, 0, CLOUD_INST_SIZE);
+
+        # Parse key-value pairs within this object
+        var obj_end = pos;
+        var depth = 1;
+        obj_end = obj_end + 1;
+        while (obj_end < n && depth > 0) {
+            if (load8(buf + obj_end) == 123) { depth = depth + 1; }
+            if (load8(buf + obj_end) == 125) { depth = depth - 1; }
+            obj_end = obj_end + 1;
+        }
+
+        # Extract fields using simple string scanning
+        var obj = str_new(buf + pos, obj_end - pos);
+        _parse_cloud_field_str(obj, "name", ci, 0);
+        _parse_cloud_field_str(obj, "provider", ci, 8);
+        _parse_cloud_field_str(obj, "gpu", ci, 16);
+        _parse_cloud_field_int(obj, "gpu_count", ci, 24);
+        _parse_cloud_field_int(obj, "gpu_memory_gb", ci, 32);
+        _parse_cloud_field_int(obj, "total_gpu_memory_gb", ci, 40);
+        _parse_cloud_field_int(obj, "vcpus", ci, 48);
+        _parse_cloud_field_int(obj, "ram_gb", ci, 56);
+        _parse_cloud_field_str(obj, "interconnect", ci, 64);
+        _parse_cloud_field_price(obj, ci);
+
+        if (cloud_inst_name(ci) != 0) {
+            vec_push(instances, ci);
+        }
+        pos = obj_end;
+    }
+    return instances;
+}
+
+# Helper: extract a string value for a key from JSON object
+fn _parse_cloud_field_str(obj, key, ci, offset) {
+    var od = str_data(obj);
+    var ol = str_len(obj);
+    var klen = strlen(key);
+    var pi = 0;
+    while (pi < ol - klen - 4) {
+        if (load8(od + pi) == 34) {
+            if (memeq(od + pi + 1, key, klen) == 1) {
+                if (load8(od + pi + 1 + klen) == 34) {
+                    # Found key, find value string
+                    var vi = pi + klen + 2;
+                    while (vi < ol && load8(od + vi) != 34) { vi = vi + 1; }
+                    vi = vi + 1;
+                    var vstart = vi;
+                    while (vi < ol && load8(od + vi) != 34) { vi = vi + 1; }
+                    var vlen = vi - vstart;
+                    if (vlen > 0) {
+                        var val = alloc(vlen + 1);
+                        memcpy(val, od + vstart, vlen);
+                        store8(val + vlen, 0);
+                        store64(ci + offset, val);
+                    }
+                    return 0;
+                }
+            }
+        }
+        pi = pi + 1;
+    }
+    return 0;
+}
+
+# Helper: extract an integer value for a key
+fn _parse_cloud_field_int(obj, key, ci, offset) {
+    var od = str_data(obj);
+    var ol = str_len(obj);
+    var klen = strlen(key);
+    var pi = 0;
+    while (pi < ol - klen - 3) {
+        if (load8(od + pi) == 34) {
+            if (memeq(od + pi + 1, key, klen) == 1) {
+                if (load8(od + pi + 1 + klen) == 34) {
+                    var vi = pi + klen + 3;
+                    while (vi < ol) {
+                        var c = load8(od + vi);
+                        if (c >= 48 && c <= 57) { break; }
+                        vi = vi + 1;
+                    }
+                    var num = 0;
+                    while (vi < ol) {
+                        var c2 = load8(od + vi);
+                        if (c2 >= 48 && c2 <= 57) { num = num * 10 + c2 - 48; vi = vi + 1; }
+                        else { break; }
+                    }
+                    store64(ci + offset, num);
+                    return 0;
+                }
+            }
+        }
+        pi = pi + 1;
+    }
+    return 0;
+}
+
+# Parse price_per_hour as cents (x100)
+fn _parse_cloud_field_price(obj, ci) {
+    var od = str_data(obj);
+    var ol = str_len(obj);
+    var key = "price_per_hour";
+    var klen = 14;
+    var pi = 0;
+    while (pi < ol - klen - 3) {
+        if (load8(od + pi) == 34) {
+            if (memeq(od + pi + 1, key, klen) == 1) {
+                var vi = pi + klen + 3;
+                while (vi < ol) {
+                    var c = load8(od + vi);
+                    if (c >= 48 && c <= 57) { break; }
+                    vi = vi + 1;
+                }
+                # Parse dollars.cents as integer cents
+                var dollars = 0;
+                while (vi < ol) {
+                    var c2 = load8(od + vi);
+                    if (c2 >= 48 && c2 <= 57) { dollars = dollars * 10 + c2 - 48; vi = vi + 1; }
+                    else { break; }
+                }
+                var cents = 0;
+                if (vi < ol && load8(od + vi) == 46) {
+                    vi = vi + 1;
+                    var dec_places = 0;
+                    while (vi < ol && dec_places < 2) {
+                        var c3 = load8(od + vi);
+                        if (c3 >= 48 && c3 <= 57) { cents = cents * 10 + c3 - 48; vi = vi + 1; dec_places = dec_places + 1; }
+                        else { break; }
+                    }
+                    if (dec_places == 1) { cents = cents * 10; }
+                }
+                store64(ci + 72, dollars * 100 + cents);
+                return 0;
+            }
+        }
+        pi = pi + 1;
+    }
+    return 0;
+}
+
+# Recommend instances for a model, sorted by price (cheapest first)
+# provider_filter: -1 for any, or CloudProvider enum value
+fn recommend_instances(model_params, quant, provider_filter) {
+    var instances = load_cloud_instances();
+    var needed = reg_estimate_memory(model_params, quant);
+    var needed_gb = needed / BYTES_PER_GIB;
+
+    var recs = vec_new();
+    var ni = vec_len(instances);
+    var i = 0;
+    while (i < ni) {
+        var inst = vec_get(instances, i);
+        i = i + 1;
+
+        # Provider filter
+        if (provider_filter >= 0) {
+            var prov = cloud_inst_provider(inst);
+            var target = cloud_provider_str(provider_filter);
+            if (streq(prov, target) != 1) { continue; }
+        }
+
+        # Memory check
+        if (cloud_inst_total_mem_gb(inst) < needed_gb) { continue; }
+
+        vec_push(recs, inst_rec_new(inst, needed));
+    }
+
+    # Sort by price (bubble sort — small list, no vec_set needed)
+    var nr = vec_len(recs);
+    var si = 0;
+    while (si < nr) {
+        var sj = 0;
+        while (sj < nr - si - 1) {
+            var ra = vec_get(recs, sj);
+            var rb = vec_get(recs, sj + 1);
+            if (cloud_inst_price_x100(rec_instance(ra)) > cloud_inst_price_x100(rec_instance(rb))) {
+                # Swap via internal vec data pointer
+                var vdata = load64(recs);
+                var tmp = load64(vdata + sj * 8);
+                store64(vdata + sj * 8, load64(vdata + (sj + 1) * 8));
+                store64(vdata + (sj + 1) * 8, tmp);
+            }
+            sj = sj + 1;
+        }
+        si = si + 1;
+    }
+
+    return recs;
+}

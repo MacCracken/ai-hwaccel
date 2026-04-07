@@ -1,0 +1,172 @@
+# model.cyr — model compatibility database
+# Reads data/models.json at runtime for model profiles.
+
+# ModelProfile struct layout:
+#   0: name (ptr)
+#   8: family (ptr)
+#  16: params_billions_x1000 (i64)  — e.g., 70000 for 70B
+#  24: default_dtype (ptr)
+var MODEL_PROFILE_SIZE = 32;
+
+fn model_name(m) { return load64(m); }
+fn model_family(m) { return load64(m + 8); }
+fn model_params_b_x1000(m) { return load64(m + 16); }
+fn model_dtype(m) { return load64(m + 24); }
+
+# Total parameter count (not billions)
+fn model_param_count(m) {
+    return model_params_b_x1000(m) * 1000000;
+}
+
+# Estimate memory at given quantization (bytes)
+fn model_memory_bytes(m, quant) {
+    return reg_estimate_memory(model_param_count(m), quant);
+}
+
+# Check if model fits in available memory
+fn model_can_run(m, quant, avail_bytes) {
+    return model_memory_bytes(m, quant) <= avail_bytes;
+}
+
+# Load model catalogue from JSON
+fn load_models() {
+    var buf = alloc(32768);
+    var n = file_read_all("data/models.json", buf, 32768);
+    if (n <= 0) { return vec_new(); }
+    store8(buf + n, 0);
+
+    var models = vec_new();
+    var pos = 0;
+    while (pos < n) {
+        if (load8(buf + pos) != 123) { pos = pos + 1; continue; }
+
+        var m = alloc(MODEL_PROFILE_SIZE);
+        memset(m, 0, MODEL_PROFILE_SIZE);
+
+        # Find object end
+        var obj_end = pos + 1;
+        var depth = 1;
+        while (obj_end < n && depth > 0) {
+            var c = load8(buf + obj_end);
+            if (c == 123) { depth = depth + 1; }
+            if (c == 125) { depth = depth - 1; }
+            obj_end = obj_end + 1;
+        }
+
+        var obj = str_new(buf + pos, obj_end - pos);
+        _parse_model_field_str(obj, "name", m, 0);
+        _parse_model_field_str(obj, "family", m, 8);
+        _parse_model_field_str(obj, "default_dtype", m, 24);
+        _parse_model_params(obj, m);
+
+        if (model_name(m) != 0) {
+            vec_push(models, m);
+        }
+        pos = obj_end;
+    }
+    return models;
+}
+
+fn _parse_model_field_str(obj, key, m, offset) {
+    var od = str_data(obj);
+    var ol = str_len(obj);
+    var klen = strlen(key);
+    var pi = 0;
+    while (pi < ol - klen - 4) {
+        if (load8(od + pi) == 34) {
+            if (memeq(od + pi + 1, key, klen) == 1) {
+                if (load8(od + pi + 1 + klen) == 34) {
+                    var vi = pi + klen + 2;
+                    while (vi < ol && load8(od + vi) != 34) { vi = vi + 1; }
+                    vi = vi + 1;
+                    var vstart = vi;
+                    while (vi < ol && load8(od + vi) != 34) { vi = vi + 1; }
+                    var vlen = vi - vstart;
+                    if (vlen > 0) {
+                        var val = alloc(vlen + 1);
+                        memcpy(val, od + vstart, vlen);
+                        store8(val + vlen, 0);
+                        store64(m + offset, val);
+                    }
+                    return 0;
+                }
+            }
+        }
+        pi = pi + 1;
+    }
+    return 0;
+}
+
+# Parse params_billions as x1000 integer (e.g., 70.0 -> 70000)
+fn _parse_model_params(obj, m) {
+    var od = str_data(obj);
+    var ol = str_len(obj);
+    var key = "params_billions";
+    var klen = 15;
+    var pi = 0;
+    while (pi < ol - klen - 3) {
+        if (load8(od + pi) == 34) {
+            if (memeq(od + pi + 1, key, klen) == 1) {
+                var vi = pi + klen + 3;
+                while (vi < ol) {
+                    var c = load8(od + vi);
+                    if (c >= 48 && c <= 57) { break; }
+                    vi = vi + 1;
+                }
+                var whole = 0;
+                while (vi < ol) {
+                    var c2 = load8(od + vi);
+                    if (c2 >= 48 && c2 <= 57) { whole = whole * 10 + c2 - 48; vi = vi + 1; }
+                    else { break; }
+                }
+                var frac = 0;
+                var frac_digits = 0;
+                if (vi < ol && load8(od + vi) == 46) {
+                    vi = vi + 1;
+                    while (vi < ol && frac_digits < 3) {
+                        var c3 = load8(od + vi);
+                        if (c3 >= 48 && c3 <= 57) { frac = frac * 10 + c3 - 48; vi = vi + 1; frac_digits = frac_digits + 1; }
+                        else { break; }
+                    }
+                    while (frac_digits < 3) { frac = frac * 10; frac_digits = frac_digits + 1; }
+                }
+                store64(m + 16, whole * 1000 + frac);
+                return 0;
+            }
+        }
+        pi = pi + 1;
+    }
+    return 0;
+}
+
+# Find all models that fit in available memory at given quantization
+fn compatible_models(models, quant, avail_bytes) {
+    var result = vec_new();
+    var nm = vec_len(models);
+    var i = 0;
+    while (i < nm) {
+        var m = vec_get(models, i);
+        i = i + 1;
+        if (model_can_run(m, quant, avail_bytes) == 1) {
+            vec_push(result, m);
+        }
+    }
+    return result;
+}
+
+# Find a model by name (substring match)
+fn find_model(models, name) {
+    var nm = vec_len(models);
+    var i = 0;
+    while (i < nm) {
+        var m = vec_get(models, i);
+        i = i + 1;
+        var mn = model_name(m);
+        if (mn != 0) {
+            var mn_str = str_from(mn);
+            var name_str = str_from(name);
+            if (str_contains(mn_str, name_str) == 1) { return m; }
+        }
+    }
+    return 0;
+}

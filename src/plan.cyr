@@ -1,0 +1,180 @@
+# plan.cyr — sharding and workload planning logic
+# Strategy selection: single device -> tensor parallel -> pipeline parallel
+
+# Estimate tokens/sec for a single device
+# Returns x1000 fixed-point
+fn estimate_tps_x1000(accel_type, tput_x1000, model_params, quant) {
+    if (model_params == 0) { return 0; }
+    # base = 1B / model_params (tok/s at 1B params baseline)
+    # Scale by throughput multiplier and quant speedup
+    var base_x1000 = TOKENS_PER_SEC_BASE * 1000 / model_params;
+    var quant_x1000 = quant_reduction_x1000(quant);
+    return base_x1000 * tput_x1000 / 1000 * quant_x1000 / 1000;
+}
+
+# Generate a sharding plan for a model
+fn reg_plan_sharding(r, model_params, quant) {
+    var needed = reg_estimate_memory(model_params, quant);
+    var sio = reg_system_io(r);
+    var profs = reg_profiles(r);
+
+    # Find best available device
+    var best = reg_best_available(r);
+    if (best == 0) {
+        return sharding_plan_new(SHARD_DATA, 0);
+    }
+
+    # Case 1: fits on single best device
+    if (needed <= profile_memory_bytes(best)) {
+        var sp = sharding_plan_new(SHARD_NONE, 1);
+        var ms = model_shard_new(0, 0, 0, profile_accel_type(best), profile_device_id(best), needed);
+        plan_add_shard(sp, ms);
+        plan_set_total_memory(sp, needed);
+        var tps = estimate_tps_x1000(profile_accel_type(best), profile_throughput_x1000(best), model_params, quant);
+        plan_set_est_tps_x1000(sp, tps);
+        return sp;
+    }
+
+    # Collect TPU and GPU/ASIC devices
+    var tpu_devs = vec_new();
+    var tpu_mem = 0;
+    var tpu_chips = 0;
+    var tpu_min_tput = 999999000;
+    var gpu_devs = vec_new();
+    var gpu_mem = 0;
+
+    var n = vec_len(profs);
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        if (profile_available(p) != 1) { continue; }
+        var at = profile_accel_type(p);
+
+        if (at == ACCEL_TPU) {
+            vec_push(tpu_devs, p);
+            tpu_mem = tpu_mem + profile_memory_bytes(p);
+            tpu_chips = tpu_chips + profile_tpu_chips(p);
+            var tt = profile_throughput_x1000(p);
+            if (tt < tpu_min_tput) { tpu_min_tput = tt; }
+        }
+        if (accel_is_gpu(at) == 1 || accel_is_ai_asic(at) == 1 || at == ACCEL_TPU) {
+            vec_push(gpu_devs, p);
+            gpu_mem = gpu_mem + profile_memory_bytes(p);
+        }
+    }
+
+    # Case 2: TPU tensor parallel
+    if (vec_len(tpu_devs) > 0 && tpu_mem >= needed) {
+        if (tpu_chips < 1) { tpu_chips = 1; }
+        var per_chip = needed / tpu_chips;
+        if (needed > per_chip * tpu_chips) { per_chip = per_chip + 1; }
+
+        var sp = sharding_plan_new(SHARD_TENSOR, tpu_chips);
+        var ci = 0;
+        while (ci < tpu_chips) {
+            var tp = vec_get(tpu_devs, 0);
+            var ms = model_shard_new(ci, 0, 0, ACCEL_TPU, ci, per_chip);
+            plan_add_shard(sp, ms);
+            ci = ci + 1;
+        }
+        plan_set_total_memory(sp, needed);
+        var quant_x1000 = quant_reduction_x1000(quant);
+        var tps = tpu_min_tput * tpu_chips * quant_x1000 / 1000 * TPU_TP_ICI_BONUS_X1000 / 1000;
+        plan_set_est_tps_x1000(sp, tps);
+        return sp;
+    }
+
+    # Case 3: GPU/ASIC multi-device
+    if (vec_len(gpu_devs) > 0 && gpu_mem >= needed) {
+        var has_nvsw = sio_has_nvswitch(sio);
+        var max_bw = sio_max_ic_bw_x1000(sio);
+        var num_devs = vec_len(gpu_devs);
+
+        # Decide tensor vs pipeline parallel
+        var use_tp = 0;
+        if (has_nvsw == 1) { use_tp = 1; }
+        elif (max_bw > TP_MIN_INTERCONNECT_BW * 1000 && num_devs <= TP_MAX_DEVICES_WITHOUT_NVSWITCH) {
+            use_tp = 1;
+        }
+
+        if (use_tp == 1) {
+            # Tensor parallel
+            var per_dev = needed / num_devs;
+            if (needed > per_dev * num_devs) { per_dev = per_dev + 1; }
+
+            var sp = sharding_plan_new(SHARD_TENSOR, num_devs);
+            var di = 0;
+            while (di < num_devs) {
+                var gp = vec_get(gpu_devs, di);
+                var ms = model_shard_new(di, 0, 0, profile_accel_type(gp), profile_device_id(gp), per_dev);
+                plan_add_shard(sp, ms);
+                di = di + 1;
+            }
+            plan_set_total_memory(sp, needed);
+
+            # Throughput: slowest device * num_devices * quant * IC bonus
+            var slowest = 999999000;
+            di = 0;
+            while (di < num_devs) {
+                var gt = profile_throughput_x1000(vec_get(gpu_devs, di));
+                if (gt < slowest) { slowest = gt; }
+                di = di + 1;
+            }
+            var quant_x1000 = quant_reduction_x1000(quant);
+            var ic_bonus = 1000;
+            if (has_nvsw == 1) { ic_bonus = NVSWITCH_TP_BONUS_X1000; }
+            else { ic_bonus = 1000 + max_bw / TP_INTERCONNECT_BW_DIVISOR; if (ic_bonus > 1000 + MAX_NON_NVSWITCH_TP_BONUS_X1000) { ic_bonus = 1000 + MAX_NON_NVSWITCH_TP_BONUS_X1000; } }
+            var tps = slowest * num_devs * quant_x1000 / 1000 * ic_bonus / 1000;
+            plan_set_est_tps_x1000(sp, tps);
+            return sp;
+        }
+
+        # Pipeline parallel
+        var num_stages = num_devs;
+        var per_shard = needed / num_stages;
+        if (needed > per_shard * num_stages) { per_shard = per_shard + 1; }
+        var est_layers = model_params / PARAMS_PER_LAYER_ESTIMATE;
+        if (est_layers < 1) { est_layers = 1; }
+        var layers_per = est_layers / num_stages;
+        if (layers_per < 1) { layers_per = 1; }
+
+        var sp = sharding_plan_new(SHARD_PIPELINE, num_stages);
+        var si = 0;
+        while (si < num_stages) {
+            var gp2 = vec_get(gpu_devs, si);
+            var lstart = si * layers_per;
+            if (lstart >= est_layers) { lstart = est_layers - 1; }
+            var lend = lstart + layers_per - 1;
+            if (si == num_stages - 1) { lend = est_layers - 1; }
+            if (lend >= est_layers) { lend = est_layers - 1; }
+            var ms = model_shard_new(si, lstart, lend, profile_accel_type(gp2), profile_device_id(gp2), per_shard);
+            plan_add_shard(sp, ms);
+            si = si + 1;
+        }
+        plan_set_total_memory(sp, needed);
+
+        var slowest2 = 999999000;
+        si = 0;
+        while (si < num_stages) {
+            var st = profile_throughput_x1000(vec_get(gpu_devs, si));
+            if (st < slowest2) { slowest2 = st; }
+            si = si + 1;
+        }
+        var quant_x2 = quant_reduction_x1000(quant);
+        var ic_eff = PP_PCIE_ONLY_EFFICIENCY_X1000;
+        if (max_bw > 0) { ic_eff = PP_HIGH_BW_EFFICIENCY_X1000; }
+        var tps2 = slowest2 * num_stages * quant_x2 / 1000 * ic_eff / 1000;
+        plan_set_est_tps_x1000(sp, tps2);
+        return sp;
+    }
+
+    # Case 4: CPU fallback
+    var sp = sharding_plan_new(SHARD_NONE, 1);
+    var ms = model_shard_new(0, 0, 0, ACCEL_CPU, 0, needed);
+    plan_add_shard(sp, ms);
+    plan_set_total_memory(sp, needed);
+    var cpu_tps = estimate_tps_x1000(ACCEL_CPU, 1000, model_params, quant);
+    plan_set_est_tps_x1000(sp, cpu_tps);
+    return sp;
+}

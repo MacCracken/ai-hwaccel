@@ -1,0 +1,268 @@
+# test_phase8.cyr — tests for Phase 8 planning & estimation
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+# Skip detector includes — use stubs to stay under fixup table limit (4096).
+# Only plan/training/cost/model need testing here, not detection.
+
+# Stub detectors (never called — registry_from_profiles bypasses detection)
+fn detect_cuda(p, w) { return 0; }
+fn detect_rocm(p, w) { return 0; }
+fn detect_apple(p, w) { return 0; }
+fn detect_vulkan(p, w) { return 0; }
+fn detect_intel_npu(p, w) { return 0; }
+fn detect_amd_xdna(p, w) { return 0; }
+fn detect_tpu(p, w) { return 0; }
+fn detect_gaudi(p, w) { return 0; }
+fn detect_neuron(p, w) { return 0; }
+fn detect_intel_oneapi(p, w) { return 0; }
+fn detect_qualcomm(p, w) { return 0; }
+fn detect_cerebras(p, w) { return 0; }
+fn detect_graphcore(p, w) { return 0; }
+fn detect_groq(p, w) { return 0; }
+fn detect_samsung_npu(p, w) { return 0; }
+fn detect_mediatek_apu(p, w) { return 0; }
+fn enrich_bandwidth(p) { return 0; }
+fn enrich_pcie(p) { return 0; }
+fn enrich_numa(p) { return 0; }
+fn detect_interconnects(s, p, w) { return 0; }
+fn detect_storage(s) { return 0; }
+fn detect_environment(s) { return 0; }
+fn detect_system_memory() { return 16 * 1073741824; }
+fn cmd_getenv(n) { return 0; }
+fn which(n) { return 0; }
+fn run_tool(t, a, w) { return 0; }
+fn sysfs_read(p) { return 0; }
+fn sysfs_read_int(p) { return 0 - 1; }
+fn sysfs_list_dir(p) { return vec_new(); }
+fn path_exists(p) { return 0; }
+fn dir_exists(p) { return 0; }
+fn scan_dev_devices(p) { return vec_new(); }
+fn has_dev_device(p) { return 0; }
+fn sysfs_path(a, b, c) { return ""; }
+fn sysfs_path_str(a, b, c) { return ""; }
+fn read_symlink(p) { return 0; }
+fn parse_value_with_suffix(s) { return 0; }
+fn parse_csv_line(l, m) { return 0; }
+fn validate_device_id(s) { return 0; }
+fn validate_memory_mb(s) { return 0; }
+
+include "src/registry.cyr"
+include "src/plan.cyr"
+include "src/training.cyr"
+include "src/cost.cyr"
+include "src/model.cyr"
+
+# --- Planning tests ---
+
+fn test_plan_single_device() {
+    # 7B model on 80 GiB GPU — fits on one device
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(64 * BYTES_PER_GIB));
+    vec_push(profiles, profile_cuda(0, 80 * BYTES_PER_GIB));
+    var r = registry_from_profiles(profiles);
+
+    var sp = reg_plan_sharding(r, 7000000000, QUANT_FP16);
+    assert_eq(plan_strategy(sp), SHARD_NONE, "single device = no shard");
+    assert_eq(plan_num_shards(sp), 1, "1 shard");
+    assert_eq(plan_min_devices(sp), 1, "1 device");
+    assert(plan_est_tps_x1000(sp) > 0, "positive throughput");
+    return 0;
+}
+
+fn test_plan_pipeline_parallel() {
+    # 70B model on 2x 24 GiB GPUs — doesn't fit on one, pipeline parallel
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(64 * BYTES_PER_GIB));
+    vec_push(profiles, profile_cuda(0, 24 * BYTES_PER_GIB));
+    vec_push(profiles, profile_cuda(1, 24 * BYTES_PER_GIB));
+    var r = registry_from_profiles(profiles);
+
+    # 70B at INT4: 42 GB needed, 48 GB available
+    var sp = reg_plan_sharding(r, 70000000000, QUANT_INT4);
+    assert_eq(plan_strategy(sp), SHARD_PIPELINE, "pipeline parallel");
+    assert_eq(plan_num_shards(sp), 2, "2 shards");
+    assert_eq(plan_min_devices(sp), 2, "2 devices");
+
+    # Verify shards have layer ranges
+    var s0 = vec_get(plan_shards(sp), 0);
+    var s1 = vec_get(plan_shards(sp), 1);
+    assert(shard_layer_end(s1) > shard_layer_start(s0), "layers distributed");
+    return 0;
+}
+
+fn test_plan_tensor_parallel_nvswitch() {
+    # 70B model on 4x 80 GiB GPUs with NVSwitch -> tensor parallel
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(64 * BYTES_PER_GIB));
+    var gi = 0;
+    while (gi < 4) {
+        vec_push(profiles, profile_cuda(gi, 80 * BYTES_PER_GIB));
+        gi = gi + 1;
+    }
+    var r = registry_from_profiles(profiles);
+
+    # Add NVSwitch to system_io
+    var sio = reg_system_io(r);
+    sio_add_interconnect(sio, interconnect_new(ICK_NVSWITCH, "nvswitch", 900000));
+
+    var sp = reg_plan_sharding(r, 70000000000, QUANT_BF16);
+    assert_eq(plan_strategy(sp), SHARD_TENSOR, "tensor parallel with NVSwitch");
+    assert_eq(plan_num_shards(sp), 4, "4 shards");
+    return 0;
+}
+
+fn test_plan_tpu_tensor() {
+    # Multiple TPU profiles (4 separate 1-chip TPUs), model too large for one
+    # 70B at BF16 = 168 GB. Each V5p chip = 95 GiB ~= 102 GB. Doesn't fit one.
+    # 4 chips = 408 GB total. 168 GB < 408 GB. Fits across 4.
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(64 * BYTES_PER_GIB));
+    vec_push(profiles, profile_tpu(0, 1, TPU_V5P));
+    vec_push(profiles, profile_tpu(1, 1, TPU_V5P));
+    vec_push(profiles, profile_tpu(2, 1, TPU_V5P));
+    vec_push(profiles, profile_tpu(3, 1, TPU_V5P));
+    var r = registry_from_profiles(profiles);
+
+    var sp = reg_plan_sharding(r, 70000000000, QUANT_BF16);
+    assert_eq(plan_strategy(sp), SHARD_TENSOR, "TPU tensor parallel");
+    assert(plan_est_tps_x1000(sp) > 0, "TPU throughput");
+    return 0;
+}
+
+fn test_plan_cpu_fallback() {
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(256 * BYTES_PER_GIB));
+    var r = registry_from_profiles(profiles);
+
+    var sp = reg_plan_sharding(r, 7000000000, QUANT_FP16);
+    assert_eq(plan_strategy(sp), SHARD_NONE, "CPU fallback = no shard");
+    assert_eq(shard_device_type(vec_get(plan_shards(sp), 0)), ACCEL_CPU, "CPU device");
+    return 0;
+}
+
+# --- Training memory estimation ---
+
+fn test_training_full_gpu() {
+    # 7B model (7000M params) full fine-tune on GPU
+    var est = estimate_training_memory(7000, TRAIN_FULL, TARGET_GPU);
+    var total = est_total_x1000(est);
+    assert(total > 0, "positive total");
+    # Full fine-tune: ~model + 2x optimizer + activations = ~4x base
+    # base ~= 7000 * 1863 / 1000 = 13041 (13.0 GB)
+    # total ~= 13.0 * 4 = ~52 GB
+    assert(total > 40000, "full > 40 GB");
+    assert(total < 70000, "full < 70 GB");
+    return 0;
+}
+
+fn test_training_lora_gpu() {
+    var est = estimate_training_memory(7000, TRAIN_LORA, TARGET_GPU);
+    var total = est_total_x1000(est);
+    # LoRA: model + 0.1x optimizer + 0.1x activation = ~1.2x base
+    # ~13.0 * 1.2 = ~15.6 GB
+    assert(total > 12000, "lora > 12 GB");
+    assert(total < 20000, "lora < 20 GB");
+    return 0;
+}
+
+fn test_training_qlora_gpu() {
+    var est4 = estimate_training_memory(7000, TRAIN_QLORA_4, TARGET_GPU);
+    var est8 = estimate_training_memory(7000, TRAIN_QLORA_8, TARGET_GPU);
+    # QLoRA 4-bit should use less memory than 8-bit
+    assert(est_total_x1000(est4) < est_total_x1000(est8), "qlora4 < qlora8");
+    # Both should be less than LoRA
+    var est_lora = estimate_training_memory(7000, TRAIN_LORA, TARGET_GPU);
+    assert(est_total_x1000(est4) < est_total_x1000(est_lora), "qlora4 < lora");
+    return 0;
+}
+
+fn test_training_tpu() {
+    var est_gpu = estimate_training_memory(7000, TRAIN_FULL, TARGET_GPU);
+    var est_tpu = estimate_training_memory(7000, TRAIN_FULL, TARGET_TPU);
+    # TPU should use less memory (BF16 optimizer states 1.5x not 2x)
+    assert(est_total_x1000(est_tpu) < est_total_x1000(est_gpu), "TPU < GPU for full");
+    return 0;
+}
+
+fn test_training_method_names() {
+    assert(streq(training_method_name(TRAIN_FULL), "full") == 1, "full name");
+    assert(streq(training_method_name(TRAIN_LORA), "lora") == 1, "lora name");
+    assert(streq(training_method_name(TRAIN_DPO), "dpo") == 1, "dpo name");
+    assert(streq(training_method_name(TRAIN_RLHF), "rlhf") == 1, "rlhf name");
+    assert(streq(training_method_name(TRAIN_DISTILL), "distillation") == 1, "distill name");
+    return 0;
+}
+
+# --- Model compatibility ---
+
+fn test_model_param_count() {
+    var m = alloc(MODEL_PROFILE_SIZE);
+    store64(m, "Test Model");
+    store64(m + 8, "test");
+    store64(m + 16, 7000);
+    store64(m + 24, "bf16");
+
+    assert_eq(model_param_count(m), 7000000000, "7B param count");
+    return 0;
+}
+
+fn test_model_can_run() {
+    var m = alloc(MODEL_PROFILE_SIZE);
+    store64(m, "Test 7B");
+    store64(m + 8, "test");
+    store64(m + 16, 7000);
+    store64(m + 24, "bf16");
+
+    # 7B at FP16 needs ~16.8 GB
+    assert_eq(model_can_run(m, QUANT_FP16, 24 * BYTES_PER_GIB), 1, "7B FP16 on 24GB");
+    assert_eq(model_can_run(m, QUANT_FP16, 8 * BYTES_PER_GIB), 0, "7B FP16 on 8GB no");
+    assert_eq(model_can_run(m, QUANT_INT4, 8 * BYTES_PER_GIB), 1, "7B INT4 on 8GB");
+    return 0;
+}
+
+# --- Cost types ---
+
+fn test_cloud_provider() {
+    assert(streq(cloud_provider_str(CLOUD_AWS), "aws") == 1, "aws str");
+    assert(streq(cloud_provider_str(CLOUD_GCP), "gcp") == 1, "gcp str");
+    assert(streq(cloud_provider_str(CLOUD_AZURE), "azure") == 1, "azure str");
+    return 0;
+}
+
+# --- Run all tests ---
+
+alloc_init();
+
+test_plan_single_device();
+test_plan_pipeline_parallel();
+test_plan_tensor_parallel_nvswitch();
+test_plan_tpu_tensor();
+test_plan_cpu_fallback();
+test_training_full_gpu();
+test_training_lora_gpu();
+test_training_qlora_gpu();
+test_training_tpu();
+test_training_method_names();
+test_model_param_count();
+test_model_can_run();
+test_cloud_provider();
+
+var fails = assert_summary();
+syscall(60, fails);
