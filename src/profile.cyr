@@ -1,0 +1,237 @@
+# profile.cyr — accelerator capability profile
+# Heap-allocated struct with typed accessors for each field.
+#
+# Layout (bytes):
+#   0: accel_type (i64)       — AcceleratorType enum
+#   8: device_id (i64)        — device index
+#  16: available (i64)        — 1 = available, 0 = not
+#  24: memory_bytes (i64)     — total VRAM/HBM/RAM
+#  32: compute_cap (ptr)      — null-terminated string, 0 if none
+#  40: driver_version (ptr)   — null-terminated string, 0 if none
+#  48: device_name (ptr)      — null-terminated string, 0 if none
+#  56: mem_bw_gbps_x1000 (i64) — memory bandwidth GB/s * 1000, -1 if none
+#  64: mem_used_bytes (i64)   — current VRAM used, -1 if none
+#  72: mem_free_bytes (i64)   — current VRAM free, -1 if none
+#  80: pcie_bw_gbps_x1000 (i64) — PCIe BW GB/s * 1000, -1 if none
+#  88: numa_node (i64)        — NUMA node, -1 if none
+#  96: temp_c (i64)           — temperature Celsius, -1 if none
+# 104: power_watts_x1000 (i64) — power draw W * 1000, -1 if none
+# 112: gpu_util_pct (i64)     — GPU utilization 0-100, -1 if none
+#
+# --- Hardware-specific fields (for TPU/Gaudi/Neuron) ---
+# 120: tpu_version (i64)      — TpuVersion enum, -1 if N/A
+# 128: tpu_chip_count (i64)   — chip count, 0 if N/A
+# 136: gaudi_gen (i64)        — GaudiGeneration enum, -1 if N/A
+# 144: neuron_chip (i64)      — NeuronChipType enum, -1 if N/A
+# 152: neuron_cores (i64)     — NeuronCore count, 0 if N/A
+
+var PROFILE_SIZE = 160;
+var PROFILE_NONE = 0 - 1;
+
+fn profile_new(atype, dev_id, mem_bytes) {
+    var p = alloc(PROFILE_SIZE);
+    store64(p, atype);
+    store64(p + 8, dev_id);
+    store64(p + 16, 1);
+    store64(p + 24, mem_bytes);
+    store64(p + 32, 0);
+    store64(p + 40, 0);
+    store64(p + 48, 0);
+    store64(p + 56, PROFILE_NONE);
+    store64(p + 64, PROFILE_NONE);
+    store64(p + 72, PROFILE_NONE);
+    store64(p + 80, PROFILE_NONE);
+    store64(p + 88, PROFILE_NONE);
+    store64(p + 96, PROFILE_NONE);
+    store64(p + 104, PROFILE_NONE);
+    store64(p + 112, PROFILE_NONE);
+    store64(p + 120, PROFILE_NONE);
+    store64(p + 128, 0);
+    store64(p + 136, PROFILE_NONE);
+    store64(p + 144, PROFILE_NONE);
+    store64(p + 152, 0);
+    return p;
+}
+
+# --- Getters ---
+fn profile_accel_type(p) { return load64(p); }
+fn profile_device_id(p) { return load64(p + 8); }
+fn profile_available(p) { return load64(p + 16); }
+fn profile_memory_bytes(p) { return load64(p + 24); }
+fn profile_compute_cap(p) { return load64(p + 32); }
+fn profile_driver_version(p) { return load64(p + 40); }
+fn profile_device_name(p) { return load64(p + 48); }
+fn profile_mem_bw_x1000(p) { return load64(p + 56); }
+fn profile_mem_used(p) { return load64(p + 64); }
+fn profile_mem_free(p) { return load64(p + 72); }
+fn profile_pcie_bw_x1000(p) { return load64(p + 80); }
+fn profile_numa_node(p) { return load64(p + 88); }
+fn profile_temp_c(p) { return load64(p + 96); }
+fn profile_power_x1000(p) { return load64(p + 104); }
+fn profile_gpu_util(p) { return load64(p + 112); }
+fn profile_tpu_version(p) { return load64(p + 120); }
+fn profile_tpu_chips(p) { return load64(p + 128); }
+fn profile_gaudi_gen(p) { return load64(p + 136); }
+fn profile_neuron_chip(p) { return load64(p + 144); }
+fn profile_neuron_cores(p) { return load64(p + 152); }
+
+# --- Setters ---
+fn profile_set_available(p, v) { store64(p + 16, v); return 0; }
+fn profile_set_compute_cap(p, s) { store64(p + 32, s); return 0; }
+fn profile_set_driver_version(p, s) { store64(p + 40, s); return 0; }
+fn profile_set_device_name(p, s) { store64(p + 48, s); return 0; }
+fn profile_set_mem_bw_x1000(p, v) { store64(p + 56, v); return 0; }
+fn profile_set_mem_used(p, v) { store64(p + 64, v); return 0; }
+fn profile_set_mem_free(p, v) { store64(p + 72, v); return 0; }
+fn profile_set_pcie_bw_x1000(p, v) { store64(p + 80, v); return 0; }
+fn profile_set_numa_node(p, v) { store64(p + 88, v); return 0; }
+fn profile_set_temp_c(p, v) { store64(p + 96, v); return 0; }
+fn profile_set_power_x1000(p, v) { store64(p + 104, v); return 0; }
+fn profile_set_gpu_util(p, v) { store64(p + 112, v); return 0; }
+fn profile_set_tpu_version(p, v) { store64(p + 120, v); return 0; }
+fn profile_set_tpu_chips(p, v) { store64(p + 128, v); return 0; }
+fn profile_set_gaudi_gen(p, v) { store64(p + 136, v); return 0; }
+fn profile_set_neuron_chip(p, v) { store64(p + 144, v); return 0; }
+fn profile_set_neuron_cores(p, v) { store64(p + 152, v); return 0; }
+
+# --- Convenience constructors ---
+
+fn profile_cpu(mem_bytes) {
+    return profile_new(ACCEL_CPU, 0, mem_bytes);
+}
+
+fn profile_cuda(dev_id, vram_bytes) {
+    return profile_new(ACCEL_CUDA, dev_id, vram_bytes);
+}
+
+fn profile_rocm(dev_id, vram_bytes) {
+    return profile_new(ACCEL_ROCM, dev_id, vram_bytes);
+}
+
+fn profile_tpu(dev_id, chip_count, version) {
+    var hbm = tpu_hbm_per_chip(version) * chip_count;
+    var p = profile_new(ACCEL_TPU, dev_id, hbm);
+    profile_set_tpu_version(p, version);
+    profile_set_tpu_chips(p, chip_count);
+    return p;
+}
+
+fn profile_gaudi(dev_id, gen) {
+    var p = profile_new(ACCEL_GAUDI, dev_id, gaudi_hbm_bytes(gen));
+    profile_set_gaudi_gen(p, gen);
+    return p;
+}
+
+fn profile_neuron(dev_id, chip_type, core_count) {
+    var mem = neuron_hbm_per_core(chip_type) * core_count;
+    var p = profile_new(ACCEL_NEURON, dev_id, mem);
+    profile_set_neuron_chip(p, chip_type);
+    profile_set_neuron_cores(p, core_count);
+    return p;
+}
+
+# --- Derived queries ---
+
+# Get the accelerator family for this profile
+fn profile_family(p) {
+    return accel_family(profile_accel_type(p));
+}
+
+# Get throughput multiplier (x1000) for this profile
+fn profile_throughput_x1000(p) {
+    var at = profile_accel_type(p);
+    if (at == ACCEL_TPU) { return tpu_throughput_x1000(profile_tpu_version(p)); }
+    if (at == ACCEL_GAUDI) { return gaudi_throughput_x1000(profile_gaudi_gen(p)); }
+    if (at == ACCEL_NEURON) { return neuron_throughput_x1000(profile_neuron_chip(p), profile_neuron_cores(p)); }
+    return accel_throughput_x1000(at);
+}
+
+# Get training multiplier (x1000) for this profile
+fn profile_training_x1000(p) {
+    var at = profile_accel_type(p);
+    if (at == ACCEL_TPU) { return tpu_training_x1000(profile_tpu_version(p)); }
+    if (at == ACCEL_GAUDI) { return gaudi_training_x1000(profile_gaudi_gen(p)); }
+    if (at == ACCEL_NEURON) { return neuron_training_x1000(profile_neuron_chip(p), profile_neuron_cores(p)); }
+    return accel_training_x1000(at);
+}
+
+# Get rank for this profile (higher = preferred)
+fn profile_rank(p) {
+    var at = profile_accel_type(p);
+    if (at == ACCEL_TPU) { return tpu_rank(profile_tpu_version(p)); }
+    if (at == ACCEL_GAUDI) { return gaudi_rank(profile_gaudi_gen(p)); }
+    if (at == ACCEL_NEURON) { return neuron_rank(profile_neuron_chip(p)); }
+    if (at == ACCEL_GROQ) { return groq_rank(); }
+    return accel_rank(at);
+}
+
+# Whether this profile supports training
+fn profile_supports_training(p) {
+    return profile_training_x1000(p) > 0;
+}
+
+# --- Quantization support ---
+
+fn profile_supports_quant(p, quant) {
+    var fam = profile_family(p);
+    # CPU and GPU support all quant levels
+    if (fam == FAMILY_CPU) { return 1; }
+    if (fam == FAMILY_GPU) { return 1; }
+    # NPU: INT8 and INT4 only
+    if (fam == FAMILY_NPU) {
+        if (quant == QUANT_INT8) { return 1; }
+        if (quant == QUANT_INT4) { return 1; }
+        return 0;
+    }
+    # TPU: FP32, BF16, INT8
+    if (fam == FAMILY_TPU) {
+        if (quant == QUANT_NONE) { return 1; }
+        if (quant == QUANT_BF16) { return 1; }
+        if (quant == QUANT_INT8) { return 1; }
+        return 0;
+    }
+    # AI ASICs: device-specific
+    var at = profile_accel_type(p);
+    if (at == ACCEL_QUALCOMM) {
+        if (quant == QUANT_FP16) { return 1; }
+        if (quant == QUANT_INT8) { return 1; }
+        if (quant == QUANT_INT4) { return 1; }
+        return 0;
+    }
+    if (at == ACCEL_GROQ) {
+        if (quant == QUANT_FP16) { return 1; }
+        if (quant == QUANT_INT8) { return 1; }
+        if (quant == QUANT_INT4) { return 1; }
+        return 0;
+    }
+    if (at == ACCEL_GRAPHCORE) {
+        if (quant == QUANT_NONE) { return 1; }
+        if (quant == QUANT_FP16) { return 1; }
+        if (quant == QUANT_INT8) { return 1; }
+        return 0;
+    }
+    # Gaudi, Neuron, Cerebras: FP32, BF16, FP16, INT8
+    if (quant == QUANT_NONE) { return 1; }
+    if (quant == QUANT_BF16) { return 1; }
+    if (quant == QUANT_FP16) { return 1; }
+    if (quant == QUANT_INT8) { return 1; }
+    return 0;
+}
+
+# Preferred quantization for this profile
+fn profile_preferred_quant(p) {
+    var fam = profile_family(p);
+    if (fam == FAMILY_CPU) { return QUANT_FP16; }
+    if (fam == FAMILY_GPU) { return QUANT_FP16; }
+    if (fam == FAMILY_NPU) { return QUANT_INT8; }
+    if (fam == FAMILY_TPU) { return QUANT_BF16; }
+    # AI ASICs
+    var at = profile_accel_type(p);
+    if (at == ACCEL_GAUDI) { return QUANT_BF16; }
+    if (at == ACCEL_NEURON) { return QUANT_BF16; }
+    if (at == ACCEL_QUALCOMM) { return QUANT_INT8; }
+    if (at == ACCEL_CEREBRAS) { return QUANT_BF16; }
+    if (at == ACCEL_GRAPHCORE) { return QUANT_FP16; }
+    if (at == ACCEL_GROQ) { return QUANT_INT8; }
+    return QUANT_FP16;
+}

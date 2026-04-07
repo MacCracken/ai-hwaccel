@@ -1,0 +1,290 @@
+# test_phase2.cyr — tests for Phase 2 core data structures
+# Tests: profile, system_io, sharding types
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+
+# --- Profile creation tests ---
+
+fn test_profile_cpu() {
+    var p = profile_cpu(16 * BYTES_PER_GIB);
+    assert_eq(profile_accel_type(p), ACCEL_CPU, "CPU type");
+    assert_eq(profile_device_id(p), 0, "CPU dev id");
+    assert_eq(profile_available(p), 1, "CPU available");
+    assert_eq(profile_memory_bytes(p) / BYTES_PER_GIB, 16, "CPU 16 GiB");
+    assert_eq(profile_family(p), FAMILY_CPU, "CPU family");
+    # Optional fields default to -1
+    assert_eq(profile_temp_c(p), PROFILE_NONE, "no temp");
+    assert_eq(profile_numa_node(p), PROFILE_NONE, "no numa");
+    return 0;
+}
+
+fn test_profile_cuda() {
+    var p = profile_cuda(0, 24 * BYTES_PER_GIB);
+    assert_eq(profile_accel_type(p), ACCEL_CUDA, "CUDA type");
+    assert_eq(profile_device_id(p), 0, "CUDA dev 0");
+    assert_eq(profile_memory_bytes(p) / BYTES_PER_GIB, 24, "24 GiB VRAM");
+    assert_eq(profile_family(p), FAMILY_GPU, "GPU family");
+
+    # Test setters
+    profile_set_device_name(p, "RTX 4090");
+    assert(streq(profile_device_name(p), "RTX 4090") == 1, "device name");
+
+    profile_set_compute_cap(p, "8.9");
+    assert(streq(profile_compute_cap(p), "8.9") == 1, "compute cap");
+
+    profile_set_temp_c(p, 65);
+    assert_eq(profile_temp_c(p), 65, "temp 65C");
+
+    profile_set_gpu_util(p, 42);
+    assert_eq(profile_gpu_util(p), 42, "42% util");
+
+    profile_set_numa_node(p, 0);
+    assert_eq(profile_numa_node(p), 0, "numa 0");
+
+    profile_set_mem_used(p, 8 * BYTES_PER_GIB);
+    profile_set_mem_free(p, 16 * BYTES_PER_GIB);
+    assert_eq(profile_mem_used(p) / BYTES_PER_GIB, 8, "8 GiB used");
+    assert_eq(profile_mem_free(p) / BYTES_PER_GIB, 16, "16 GiB free");
+    return 0;
+}
+
+fn test_profile_tpu() {
+    var p = profile_tpu(0, 4, TPU_V5P);
+    assert_eq(profile_accel_type(p), ACCEL_TPU, "TPU type");
+    assert_eq(profile_tpu_version(p), TPU_V5P, "V5p version");
+    assert_eq(profile_tpu_chips(p), 4, "4 chips");
+    # 4 chips * 95 GiB = 380 GiB
+    assert_eq(profile_memory_bytes(p) / BYTES_PER_GIB, 380, "380 GiB HBM");
+    assert_eq(profile_family(p), FAMILY_TPU, "TPU family");
+    return 0;
+}
+
+fn test_profile_gaudi() {
+    var p = profile_gaudi(0, GAUDI3);
+    assert_eq(profile_accel_type(p), ACCEL_GAUDI, "Gaudi type");
+    assert_eq(profile_gaudi_gen(p), GAUDI3, "Gaudi3 gen");
+    assert_eq(profile_memory_bytes(p) / BYTES_PER_GIB, 128, "128 GiB HBM");
+    assert_eq(profile_family(p), FAMILY_AI_ASIC, "AI ASIC family");
+    return 0;
+}
+
+fn test_profile_neuron() {
+    var p = profile_neuron(0, NEURON_TRAINIUM, 2);
+    assert_eq(profile_accel_type(p), ACCEL_NEURON, "Neuron type");
+    assert_eq(profile_neuron_chip(p), NEURON_TRAINIUM, "Trainium chip");
+    assert_eq(profile_neuron_cores(p), 2, "2 cores");
+    # 2 cores * 32 GiB = 64 GiB
+    assert_eq(profile_memory_bytes(p) / BYTES_PER_GIB, 64, "64 GiB HBM");
+    return 0;
+}
+
+# --- Profile derived queries ---
+
+fn test_profile_throughput() {
+    var cuda = profile_cuda(0, 24 * BYTES_PER_GIB);
+    var cpu = profile_cpu(16 * BYTES_PER_GIB);
+    assert(profile_throughput_x1000(cuda) > profile_throughput_x1000(cpu), "CUDA > CPU throughput");
+    assert_eq(profile_throughput_x1000(cpu), 1000, "CPU = 1.0x");
+    assert_eq(profile_throughput_x1000(cuda), 20000, "CUDA = 20.0x");
+
+    var tpu = profile_tpu(0, 1, TPU_V5P);
+    assert_eq(profile_throughput_x1000(tpu), 35000, "TPU V5p = 35.0x");
+
+    var gaudi = profile_gaudi(0, GAUDI3);
+    assert_eq(profile_throughput_x1000(gaudi), 30000, "Gaudi3 = 30.0x");
+    return 0;
+}
+
+fn test_profile_rank() {
+    var cuda = profile_cuda(0, 24 * BYTES_PER_GIB);
+    var cpu = profile_cpu(16 * BYTES_PER_GIB);
+    var tpu = profile_tpu(0, 1, TPU_V5P);
+    assert(profile_rank(tpu) > profile_rank(cuda), "TPU V5p > CUDA rank");
+    assert(profile_rank(cuda) > profile_rank(cpu), "CUDA > CPU rank");
+    return 0;
+}
+
+fn test_profile_training() {
+    var cuda = profile_cuda(0, 24 * BYTES_PER_GIB);
+    assert_eq(profile_supports_training(cuda), 1, "CUDA trains");
+
+    var inf = profile_neuron(0, NEURON_INFERENTIA, 2);
+    assert_eq(profile_supports_training(inf), 0, "Inferentia no train");
+
+    var trn = profile_neuron(0, NEURON_TRAINIUM, 2);
+    assert_eq(profile_supports_training(trn), 1, "Trainium trains");
+    return 0;
+}
+
+# --- Quantization support tests ---
+
+fn test_profile_quant_support() {
+    var gpu = profile_cuda(0, 24 * BYTES_PER_GIB);
+    assert_eq(profile_supports_quant(gpu, QUANT_NONE), 1, "GPU FP32");
+    assert_eq(profile_supports_quant(gpu, QUANT_FP16), 1, "GPU FP16");
+    assert_eq(profile_supports_quant(gpu, QUANT_INT4), 1, "GPU INT4");
+
+    var tpu = profile_tpu(0, 1, TPU_V4);
+    assert_eq(profile_supports_quant(tpu, QUANT_BF16), 1, "TPU BF16");
+    assert_eq(profile_supports_quant(tpu, QUANT_FP16), 0, "TPU no FP16");
+    assert_eq(profile_supports_quant(tpu, QUANT_INT4), 0, "TPU no INT4");
+
+    var npu = profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB);
+    assert_eq(profile_supports_quant(npu, QUANT_INT8), 1, "NPU INT8");
+    assert_eq(profile_supports_quant(npu, QUANT_FP16), 0, "NPU no FP16");
+    return 0;
+}
+
+fn test_profile_preferred_quant() {
+    var gpu = profile_cuda(0, 24 * BYTES_PER_GIB);
+    assert_eq(profile_preferred_quant(gpu), QUANT_FP16, "GPU prefers FP16");
+
+    var tpu = profile_tpu(0, 1, TPU_V4);
+    assert_eq(profile_preferred_quant(tpu), QUANT_BF16, "TPU prefers BF16");
+
+    var npu = profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB);
+    assert_eq(profile_preferred_quant(npu), QUANT_INT8, "NPU prefers INT8");
+    return 0;
+}
+
+# --- System I/O tests ---
+
+fn test_system_io_empty() {
+    var sio = system_io_new();
+    assert_eq(sio_has_interconnect(sio), 0, "no interconnects");
+    assert_eq(sio_total_ic_bw_x1000(sio), 0, "zero bw");
+    assert_eq(sio_has_nvswitch(sio), 0, "no nvswitch");
+    assert_eq(sio_has_nvlink(sio), 0, "no nvlink");
+    assert_eq(sio_has_ici(sio), 0, "no ici");
+    assert_eq(sio_environment(sio), 0, "no env");
+    return 0;
+}
+
+fn test_system_io_interconnects() {
+    var sio = system_io_new();
+
+    var nvsw = interconnect_new(ICK_NVSWITCH, "nvswitch0", 900000);
+    ic_set_state(nvsw, "Active");
+    sio_add_interconnect(sio, nvsw);
+
+    var ib = interconnect_new(ICK_INFINIBAND, "mlx5_0", 200000);
+    sio_add_interconnect(sio, ib);
+
+    assert_eq(sio_has_interconnect(sio), 1, "has ic");
+    assert_eq(sio_has_nvswitch(sio), 1, "has nvswitch");
+    assert_eq(sio_has_nvlink(sio), 1, "nvswitch counts as nvlink");
+    assert_eq(sio_total_ic_bw_x1000(sio), 1100000, "total bw");
+    assert_eq(sio_max_ic_bw_x1000(sio), 900000, "max bw = nvswitch");
+    return 0;
+}
+
+fn test_system_io_storage() {
+    var sio = system_io_new();
+    var nvme = storage_new("nvme0n1", STK_NVME, 3500);
+    sio_add_storage(sio, nvme);
+
+    var devs = sio_storage(sio);
+    assert_eq(vec_len(devs), 1, "1 storage dev");
+
+    var d = vec_get(devs, 0);
+    assert(streq(storage_name(d), "nvme0n1") == 1, "nvme name");
+    assert_eq(storage_kind(d), STK_NVME, "nvme kind");
+    assert_eq(storage_bw_x1000(d), 3500, "nvme bw");
+    return 0;
+}
+
+fn test_runtime_env() {
+    var env = runtime_env_new();
+    assert_eq(env_is_docker(env), 0, "not docker");
+    assert_eq(env_is_k8s(env), 0, "not k8s");
+
+    env_set_docker(env, 1);
+    env_set_cloud_provider(env, "aws");
+    env_set_instance_type(env, "p4d.24xlarge");
+    env_set_region(env, "us-east-1");
+
+    assert_eq(env_is_docker(env), 1, "is docker");
+    assert(streq(env_cloud_provider(env), "aws") == 1, "aws provider");
+    assert(streq(env_instance_type(env), "p4d.24xlarge") == 1, "instance type");
+    assert(streq(env_region(env), "us-east-1") == 1, "region");
+    return 0;
+}
+
+# --- Sharding type tests ---
+
+fn test_sharding_strategy() {
+    assert(streq(shard_strategy_name(SHARD_NONE), "None") == 1, "none name");
+    assert(streq(shard_strategy_name(SHARD_PIPELINE), "Pipeline Parallel") == 1, "pp name");
+    assert(streq(shard_strategy_name(SHARD_TENSOR), "Tensor Parallel") == 1, "tp name");
+    assert(streq(shard_strategy_name(SHARD_DATA), "Data Parallel") == 1, "dp name");
+    return 0;
+}
+
+fn test_model_shard() {
+    var ms = model_shard_new(0, 0, 15, ACCEL_CUDA, 0, 8 * BYTES_PER_GIB);
+    assert_eq(shard_id(ms), 0, "shard 0");
+    assert_eq(shard_layer_start(ms), 0, "layer start 0");
+    assert_eq(shard_layer_end(ms), 15, "layer end 15");
+    assert_eq(shard_num_layers(ms), 16, "16 layers");
+    assert_eq(shard_is_valid(ms), 1, "valid shard");
+    assert_eq(shard_device_type(ms), ACCEL_CUDA, "cuda device");
+    assert_eq(shard_memory_bytes(ms) / BYTES_PER_GIB, 8, "8 GiB");
+    return 0;
+}
+
+fn test_sharding_plan() {
+    var sp = sharding_plan_new(SHARD_PIPELINE, 2);
+    assert_eq(plan_strategy(sp), SHARD_PIPELINE, "pipeline strategy");
+    assert_eq(plan_strategy_count(sp), 2, "2 stages");
+    assert_eq(plan_min_devices(sp), 2, "min 2 devices");
+    assert_eq(plan_num_shards(sp), 0, "no shards yet");
+
+    var s0 = model_shard_new(0, 0, 15, ACCEL_CUDA, 0, 8 * BYTES_PER_GIB);
+    var s1 = model_shard_new(1, 16, 31, ACCEL_CUDA, 1, 8 * BYTES_PER_GIB);
+    plan_add_shard(sp, s0);
+    plan_add_shard(sp, s1);
+    assert_eq(plan_num_shards(sp), 2, "2 shards");
+
+    plan_set_total_memory(sp, 16 * BYTES_PER_GIB);
+    assert_eq(plan_total_memory(sp) / BYTES_PER_GIB, 16, "16 GiB total");
+
+    var sp_none = sharding_plan_new(SHARD_NONE, 1);
+    assert_eq(plan_min_devices(sp_none), 1, "none = 1 device");
+    return 0;
+}
+
+# --- Run all tests ---
+
+alloc_init();
+
+test_profile_cpu();
+test_profile_cuda();
+test_profile_tpu();
+test_profile_gaudi();
+test_profile_neuron();
+test_profile_throughput();
+test_profile_rank();
+test_profile_training();
+test_profile_quant_support();
+test_profile_preferred_quant();
+test_system_io_empty();
+test_system_io_interconnects();
+test_system_io_storage();
+test_runtime_env();
+test_sharding_strategy();
+test_model_shard();
+test_sharding_plan();
+
+assert_summary();

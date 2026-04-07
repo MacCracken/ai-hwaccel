@@ -1,0 +1,312 @@
+# system_io.cyr — system-level I/O topology
+# Interconnects, storage devices, runtime environment, sharding types.
+
+# --- Interconnect kind ---
+
+enum InterconnectKind {
+    ICK_INFINIBAND = 0;
+    ICK_ROCE = 1;
+    ICK_ROCEV2 = 2;
+    ICK_NVLINK = 3;
+    ICK_NVSWITCH = 4;
+    ICK_XGMI = 5;
+    ICK_ICI = 6;
+    ICK_PCIE = 7;
+}
+
+fn ick_name(k) {
+    if (k == ICK_INFINIBAND) { return "InfiniBand"; }
+    if (k == ICK_ROCE) { return "RoCE"; }
+    if (k == ICK_ROCEV2) { return "RoCE v2"; }
+    if (k == ICK_NVLINK) { return "NVLink"; }
+    if (k == ICK_NVSWITCH) { return "NVSwitch"; }
+    if (k == ICK_XGMI) { return "XGMI"; }
+    if (k == ICK_ICI) { return "ICI"; }
+    if (k == ICK_PCIE) { return "PCIe"; }
+    return "Unknown";
+}
+
+# Interconnect struct layout:
+#   0: kind (i64)       — InterconnectKind
+#   8: name (ptr)       — port/device name (null-terminated)
+#  16: bw_gbps_x1000 (i64) — bandwidth GB/s * 1000
+#  24: state (ptr)      — link state string, 0 if none
+var INTERCONNECT_SIZE = 32;
+
+fn interconnect_new(kind, name, bw_x1000) {
+    var ic = alloc(INTERCONNECT_SIZE);
+    store64(ic, kind);
+    store64(ic + 8, name);
+    store64(ic + 16, bw_x1000);
+    store64(ic + 24, 0);
+    return ic;
+}
+
+fn ic_kind(ic) { return load64(ic); }
+fn ic_name(ic) { return load64(ic + 8); }
+fn ic_bw_x1000(ic) { return load64(ic + 16); }
+fn ic_state(ic) { return load64(ic + 24); }
+fn ic_set_state(ic, s) { store64(ic + 24, s); return 0; }
+
+# --- Storage kind ---
+
+enum StorageKind {
+    STK_NVME = 0;
+    STK_SATA_SSD = 1;
+    STK_HDD = 2;
+    STK_UNKNOWN = 3;
+}
+
+fn stk_name(k) {
+    if (k == STK_NVME) { return "NVMe"; }
+    if (k == STK_SATA_SSD) { return "SATA SSD"; }
+    if (k == STK_HDD) { return "HDD"; }
+    return "Unknown";
+}
+
+# StorageDevice struct layout:
+#   0: name (ptr)       — block device name (null-terminated)
+#   8: kind (i64)       — StorageKind
+#  16: bw_gbps_x1000 (i64) — bandwidth GB/s * 1000
+var STORAGE_SIZE = 24;
+
+fn storage_new(name, kind, bw_x1000) {
+    var sd = alloc(STORAGE_SIZE);
+    store64(sd, name);
+    store64(sd + 8, kind);
+    store64(sd + 16, bw_x1000);
+    return sd;
+}
+
+fn storage_name(sd) { return load64(sd); }
+fn storage_kind(sd) { return load64(sd + 8); }
+fn storage_bw_x1000(sd) { return load64(sd + 16); }
+
+# --- Runtime environment ---
+# Layout:
+#   0: is_docker (i64)
+#   8: is_kubernetes (i64)
+#  16: k8s_namespace (ptr)     — 0 if none
+#  24: cloud_provider (ptr)    — "aws"/"gcp"/"azure", 0 if none
+#  32: instance_type (ptr)     — 0 if none
+#  40: region (ptr)            — 0 if none
+#  48: k8s_gpu_count (i64)     — 0 if none
+#  56: k8s_gpu_source (ptr)    — 0 if none
+var RUNTIME_ENV_SIZE = 64;
+
+fn runtime_env_new() {
+    var e = alloc(RUNTIME_ENV_SIZE);
+    store64(e, 0);
+    store64(e + 8, 0);
+    store64(e + 16, 0);
+    store64(e + 24, 0);
+    store64(e + 32, 0);
+    store64(e + 40, 0);
+    store64(e + 48, 0);
+    store64(e + 56, 0);
+    return e;
+}
+
+fn env_is_docker(e) { return load64(e); }
+fn env_is_k8s(e) { return load64(e + 8); }
+fn env_k8s_namespace(e) { return load64(e + 16); }
+fn env_cloud_provider(e) { return load64(e + 24); }
+fn env_instance_type(e) { return load64(e + 32); }
+fn env_region(e) { return load64(e + 40); }
+fn env_k8s_gpu_count(e) { return load64(e + 48); }
+fn env_k8s_gpu_source(e) { return load64(e + 56); }
+
+fn env_set_docker(e, v) { store64(e, v); return 0; }
+fn env_set_k8s(e, v) { store64(e + 8, v); return 0; }
+fn env_set_k8s_namespace(e, s) { store64(e + 16, s); return 0; }
+fn env_set_cloud_provider(e, s) { store64(e + 24, s); return 0; }
+fn env_set_instance_type(e, s) { store64(e + 32, s); return 0; }
+fn env_set_region(e, s) { store64(e + 40, s); return 0; }
+fn env_set_k8s_gpu_count(e, v) { store64(e + 48, v); return 0; }
+fn env_set_k8s_gpu_source(e, s) { store64(e + 56, s); return 0; }
+
+# --- SystemIo container ---
+# Layout:
+#   0: interconnects (ptr)  — vec of interconnect pointers
+#   8: storage (ptr)        — vec of storage device pointers
+#  16: environment (ptr)    — RuntimeEnvironment pointer, 0 if none
+var SYSTEM_IO_SIZE = 24;
+
+fn system_io_new() {
+    var sio = alloc(SYSTEM_IO_SIZE);
+    store64(sio, vec_new());
+    store64(sio + 8, vec_new());
+    store64(sio + 16, 0);
+    return sio;
+}
+
+fn sio_interconnects(sio) { return load64(sio); }
+fn sio_storage(sio) { return load64(sio + 8); }
+fn sio_environment(sio) { return load64(sio + 16); }
+fn sio_set_environment(sio, e) { store64(sio + 16, e); return 0; }
+
+fn sio_add_interconnect(sio, ic) {
+    vec_push(load64(sio), ic);
+    return 0;
+}
+
+fn sio_add_storage(sio, sd) {
+    vec_push(load64(sio + 8), sd);
+    return 0;
+}
+
+fn sio_has_interconnect(sio) {
+    return vec_len(load64(sio)) > 0;
+}
+
+# Total interconnect bandwidth (x1000)
+fn sio_total_ic_bw_x1000(sio) {
+    var ics = load64(sio);
+    var total = 0;
+    var n = vec_len(ics);
+    for (var i = 0; i < n; i = i + 1) {
+        total = total + ic_bw_x1000(vec_get(ics, i));
+    }
+    return total;
+}
+
+# Has NVSwitch?
+fn sio_has_nvswitch(sio) {
+    var ics = load64(sio);
+    var n = vec_len(ics);
+    for (var i = 0; i < n; i = i + 1) {
+        if (ic_kind(vec_get(ics, i)) == ICK_NVSWITCH) { return 1; }
+    }
+    return 0;
+}
+
+# Has NVLink?
+fn sio_has_nvlink(sio) {
+    var ics = load64(sio);
+    var n = vec_len(ics);
+    for (var i = 0; i < n; i = i + 1) {
+        var k = ic_kind(vec_get(ics, i));
+        if (k == ICK_NVLINK) { return 1; }
+        if (k == ICK_NVSWITCH) { return 1; }
+    }
+    return 0;
+}
+
+# Has ICI (TPU interconnect)?
+fn sio_has_ici(sio) {
+    var ics = load64(sio);
+    var n = vec_len(ics);
+    for (var i = 0; i < n; i = i + 1) {
+        if (ic_kind(vec_get(ics, i)) == ICK_ICI) { return 1; }
+    }
+    return 0;
+}
+
+# Max interconnect bandwidth (x1000) — used for sharding decisions
+fn sio_max_ic_bw_x1000(sio) {
+    var ics = load64(sio);
+    var best = 0;
+    var n = vec_len(ics);
+    for (var i = 0; i < n; i = i + 1) {
+        var bw = ic_bw_x1000(vec_get(ics, i));
+        if (bw > best) { best = bw; }
+    }
+    return best;
+}
+
+# --- Sharding strategy ---
+
+enum ShardingStrategy {
+    SHARD_NONE = 0;
+    SHARD_PIPELINE = 1;
+    SHARD_TENSOR = 2;
+    SHARD_DATA = 3;
+}
+
+fn shard_strategy_name(s) {
+    if (s == SHARD_NONE) { return "None"; }
+    if (s == SHARD_PIPELINE) { return "Pipeline Parallel"; }
+    if (s == SHARD_TENSOR) { return "Tensor Parallel"; }
+    if (s == SHARD_DATA) { return "Data Parallel"; }
+    return "Unknown";
+}
+
+# ModelShard struct layout:
+#   0: shard_id (i64)
+#   8: layer_start (i64)
+#  16: layer_end (i64)
+#  24: device_type (i64)    — AcceleratorType
+#  32: device_id (i64)
+#  40: memory_bytes (i64)
+var MODEL_SHARD_SIZE = 48;
+
+fn model_shard_new(sid, lstart, lend, devtype, devid, membytes) {
+    var ms = alloc(MODEL_SHARD_SIZE);
+    store64(ms, sid);
+    store64(ms + 8, lstart);
+    store64(ms + 16, lend);
+    store64(ms + 24, devtype);
+    store64(ms + 32, devid);
+    store64(ms + 40, membytes);
+    return ms;
+}
+
+fn shard_id(ms) { return load64(ms); }
+fn shard_layer_start(ms) { return load64(ms + 8); }
+fn shard_layer_end(ms) { return load64(ms + 16); }
+fn shard_device_type(ms) { return load64(ms + 24); }
+fn shard_device_id(ms) { return load64(ms + 32); }
+fn shard_memory_bytes(ms) { return load64(ms + 40); }
+
+fn shard_num_layers(ms) {
+    var s = load64(ms + 8);
+    var e = load64(ms + 16);
+    if (e >= s) { return e - s + 1; }
+    return 0;
+}
+
+fn shard_is_valid(ms) {
+    return load64(ms + 8) <= load64(ms + 16);
+}
+
+# ShardingPlan struct layout:
+#   0: shards (ptr)              — vec of ModelShard pointers
+#   8: strategy (i64)            — ShardingStrategy
+#  16: strategy_count (i64)      — num_stages/devices/replicas
+#  24: total_memory_bytes (i64)
+#  32: est_tokens_per_sec_x1000 (i64) — -1 if none
+var SHARDING_PLAN_SIZE = 40;
+
+fn sharding_plan_new(strategy, count) {
+    var sp = alloc(SHARDING_PLAN_SIZE);
+    store64(sp, vec_new());
+    store64(sp + 8, strategy);
+    store64(sp + 16, count);
+    store64(sp + 24, 0);
+    store64(sp + 32, PROFILE_NONE);
+    return sp;
+}
+
+fn plan_shards(sp) { return load64(sp); }
+fn plan_strategy(sp) { return load64(sp + 8); }
+fn plan_strategy_count(sp) { return load64(sp + 16); }
+fn plan_total_memory(sp) { return load64(sp + 24); }
+fn plan_est_tps_x1000(sp) { return load64(sp + 32); }
+
+fn plan_set_total_memory(sp, v) { store64(sp + 24, v); return 0; }
+fn plan_set_est_tps_x1000(sp, v) { store64(sp + 32, v); return 0; }
+
+fn plan_add_shard(sp, ms) {
+    vec_push(load64(sp), ms);
+    return 0;
+}
+
+fn plan_num_shards(sp) {
+    return vec_len(load64(sp));
+}
+
+fn plan_min_devices(sp) {
+    var s = plan_strategy(sp);
+    if (s == SHARD_NONE) { return 1; }
+    return plan_strategy_count(sp);
+}

@@ -1,0 +1,3 @@
+- [Cyrius enum syntax](feedback_cyrius_enums.md) — bare variant names, no dot prefix
+- [Cyrius function ordering](feedback_cyrius_fn_order.md) — fn defs before global statements
+- [Cyrius bump allocator](feedback_cyrius_alloc.md) — alloc_init() first, no free(), use alloc()
