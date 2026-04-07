@@ -1,0 +1,277 @@
+# registry.cyr — accelerator registry: detect, query, plan
+#
+# Registry layout:
+#   0: profiles (ptr)      — vec of profile pointers
+#   8: warnings (ptr)      — vec of warning pointers
+#  16: system_io (ptr)     — SystemIo pointer
+#  24: schema_version (i64)
+var REGISTRY_SIZE = 32;
+
+fn registry_new() {
+    var r = alloc(REGISTRY_SIZE);
+    store64(r, vec_new());
+    store64(r + 8, vec_new());
+    store64(r + 16, system_io_new());
+    store64(r + 24, SCHEMA_VERSION);
+    return r;
+}
+
+fn reg_profiles(r) { return load64(r); }
+fn reg_warnings(r) { return load64(r + 8); }
+fn reg_system_io(r) { return load64(r + 16); }
+fn reg_schema(r) { return load64(r + 24); }
+
+fn reg_add_profile(r, p) {
+    vec_push(load64(r), p);
+    return 0;
+}
+
+# --- Query methods ---
+
+fn reg_num_profiles(r) {
+    return vec_len(load64(r));
+}
+
+fn reg_get_profile(r, idx) {
+    return vec_get(load64(r), idx);
+}
+
+fn reg_num_warnings(r) {
+    return vec_len(load64(r + 8));
+}
+
+# Total memory across all available devices
+fn reg_total_memory(r) {
+    var profs = load64(r);
+    var total = 0;
+    var n = vec_len(profs);
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        if (profile_available(p) == 1) {
+            total = total + profile_memory_bytes(p);
+        }
+    }
+    return total;
+}
+
+# Total accelerator memory (excludes CPU)
+fn reg_total_accel_memory(r) {
+    var profs = load64(r);
+    var total = 0;
+    var n = vec_len(profs);
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        if (profile_available(p) != 1) { continue; }
+        if (profile_accel_type(p) == ACCEL_CPU) { continue; }
+        total = total + profile_memory_bytes(p);
+    }
+    return total;
+}
+
+# Whether any non-CPU accelerator is available
+fn reg_has_accelerator(r) {
+    var profs = load64(r);
+    var n = vec_len(profs);
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        if (profile_available(p) != 1) { continue; }
+        if (profile_accel_type(p) != ACCEL_CPU) { return 1; }
+    }
+    return 0;
+}
+
+# Best available device (highest rank)
+fn reg_best_available(r) {
+    var profs = load64(r);
+    var n = vec_len(profs);
+    var best = 0;
+    var best_rank = 0;
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        if (profile_available(p) != 1) { continue; }
+        var rank = profile_rank(p);
+        if (rank > best_rank) {
+            best_rank = rank;
+            best = p;
+        }
+    }
+    return best;
+}
+
+# Count profiles by family
+fn reg_count_by_family(r, family) {
+    var profs = load64(r);
+    var count = 0;
+    var n = vec_len(profs);
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        if (profile_available(p) != 1) { continue; }
+        if (profile_family(p) == family) { count = count + 1; }
+    }
+    return count;
+}
+
+# Collect available profiles by family into a vec
+fn reg_by_family(r, family) {
+    var profs = load64(r);
+    var result = vec_new();
+    var n = vec_len(profs);
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        if (profile_available(p) != 1) { continue; }
+        if (profile_family(p) == family) { vec_push(result, p); }
+    }
+    return result;
+}
+
+# Estimate memory for model_params at given quantization
+fn reg_estimate_memory(model_params, quant) {
+    return quant_model_bytes_with_overhead(model_params, quant);
+}
+
+# Suggest quantization level based on available hardware
+fn reg_suggest_quant(r, model_params) {
+    var best_tpu = 0;
+    var best_gaudi = 0;
+    var best_gpu = 0;
+    var best_npu = 0;
+    var best_cpu = 0;
+
+    var profs = load64(r);
+    var n = vec_len(profs);
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        if (profile_available(p) != 1) { continue; }
+        var mem = profile_memory_bytes(p);
+        var fam = profile_family(p);
+        if (fam == FAMILY_TPU) { if (mem > best_tpu) { best_tpu = mem; } }
+        elif (fam == FAMILY_GPU) { if (mem > best_gpu) { best_gpu = mem; } }
+        elif (fam == FAMILY_NPU) { if (mem > best_npu) { best_npu = mem; } }
+        elif (fam == FAMILY_CPU) { if (mem > best_cpu) { best_cpu = mem; } }
+        elif (fam == FAMILY_AI_ASIC) {
+            if (profile_accel_type(p) == ACCEL_GAUDI) {
+                if (mem > best_gaudi) { best_gaudi = mem; }
+            }
+        }
+    }
+
+    var est_bf16 = reg_estimate_memory(model_params, QUANT_BF16);
+    var est_fp16 = reg_estimate_memory(model_params, QUANT_FP16);
+    var est_int8 = reg_estimate_memory(model_params, QUANT_INT8);
+    var est_int4 = reg_estimate_memory(model_params, QUANT_INT4);
+
+    # TPU -> BF16
+    if (best_tpu > 0) {
+        if (est_bf16 <= best_tpu) { return QUANT_BF16; }
+        if (est_int8 <= best_tpu) { return QUANT_INT8; }
+    }
+    # Gaudi -> BF16
+    if (best_gaudi > 0) {
+        if (est_bf16 <= best_gaudi) { return QUANT_BF16; }
+        if (est_int8 <= best_gaudi) { return QUANT_INT8; }
+    }
+    # GPU -> FP16
+    if (best_gpu > 0) {
+        if (est_fp16 <= best_gpu) { return QUANT_FP16; }
+        if (est_int8 <= best_gpu) { return QUANT_INT8; }
+        if (est_int4 <= best_gpu) { return QUANT_INT4; }
+    }
+    # NPU -> INT8/INT4
+    if (best_npu > 0) {
+        if (est_int8 <= best_npu) { return QUANT_INT8; }
+        if (est_int4 <= best_npu) { return QUANT_INT4; }
+    }
+    # CPU fallback
+    var cpu_mem = best_cpu;
+    if (cpu_mem == 0) { cpu_mem = 16 * BYTES_PER_GIB; }
+    if (est_fp16 <= cpu_mem) { return QUANT_FP16; }
+    if (est_int8 <= cpu_mem) { return QUANT_INT8; }
+    return QUANT_INT4;
+}
+
+# --- Detection builder (bitmask) ---
+
+# All backends enabled
+fn builder_all() { return (1 << BACKEND_COUNT) - 1; }
+
+# No backends enabled
+fn builder_none() { return 0; }
+
+# Enable/disable a backend
+fn builder_with(mask, backend) { return mask | (1 << backend); }
+fn builder_without(mask, backend) { return mask & (~(1 << backend)); }
+fn builder_is_enabled(mask, backend) { return (mask >> backend) & 1; }
+
+# --- Full detection orchestration ---
+
+fn registry_detect() {
+    return registry_detect_with(builder_all());
+}
+
+fn registry_detect_with(builder_mask) {
+    var r = registry_new();
+    var profs = reg_profiles(r);
+    var warns = reg_warnings(r);
+    var sio = reg_system_io(r);
+
+    # Always add CPU profile
+    var sys_mem = detect_system_memory();
+    if (sys_mem == 0) { sys_mem = 16 * BYTES_PER_GIB; }
+    reg_add_profile(r, profile_cpu(sys_mem));
+
+    # Run enabled detectors
+    if (builder_is_enabled(builder_mask, BACKEND_CUDA) == 1) { detect_cuda(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_ROCM) == 1) { detect_rocm(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_APPLE) == 1) { detect_apple(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_VULKAN) == 1) { detect_vulkan(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_INTEL_NPU) == 1) { detect_intel_npu(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_AMD_XDNA) == 1) { detect_amd_xdna(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_TPU) == 1) { detect_tpu(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_GAUDI) == 1) { detect_gaudi(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_NEURON) == 1) { detect_neuron(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_INTEL_ONEAPI) == 1) { detect_intel_oneapi(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_QUALCOMM) == 1) { detect_qualcomm(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_CEREBRAS) == 1) { detect_cerebras(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_GRAPHCORE) == 1) { detect_graphcore(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_GROQ) == 1) { detect_groq(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_SAMSUNG_NPU) == 1) { detect_samsung_npu(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_MEDIATEK_APU) == 1) { detect_mediatek_apu(profs, warns); }
+
+    # Post-passes: enrich profiles
+    enrich_bandwidth(profs);
+    enrich_pcie(profs);
+    enrich_numa(profs);
+
+    # Detect system I/O
+    detect_interconnects(sio, profs, warns);
+    detect_storage(sio);
+    detect_environment(sio);
+
+    return r;
+}
+
+# Build a registry from a list of profiles (for testing)
+fn registry_from_profiles(profile_vec) {
+    var r = registry_new();
+    var n = vec_len(profile_vec);
+    var i = 0;
+    while (i < n) {
+        reg_add_profile(r, vec_get(profile_vec, i));
+        i = i + 1;
+    }
+    return r;
+}

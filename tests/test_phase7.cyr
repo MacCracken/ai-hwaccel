@@ -1,0 +1,227 @@
+# test_phase7.cyr — tests for Phase 7 registry & detection orchestration
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/cuda.cyr"
+include "src/detect/rocm.cyr"
+include "src/detect/tpu.cyr"
+include "src/detect/gaudi.cyr"
+include "src/detect/neuron.cyr"
+include "src/detect/vulkan.cyr"
+include "src/detect/apple.cyr"
+include "src/detect/intel.cyr"
+include "src/detect/amd_xdna.cyr"
+include "src/detect/edge.cyr"
+include "src/detect/cloud_asic.cyr"
+include "src/detect/bandwidth.cyr"
+include "src/detect/pcie.cyr"
+include "src/detect/numa.cyr"
+include "src/detect/interconnect.cyr"
+include "src/detect/disk.cyr"
+include "src/detect/environment.cyr"
+include "src/registry.cyr"
+
+# --- Registry construction ---
+
+fn test_registry_new() {
+    var r = registry_new();
+    assert_eq(reg_num_profiles(r), 0, "empty registry");
+    assert_eq(reg_num_warnings(r), 0, "no warnings");
+    assert_eq(reg_schema(r), SCHEMA_VERSION, "schema v3");
+    assert_eq(reg_has_accelerator(r), 0, "no accelerators");
+    assert_eq(reg_total_memory(r), 0, "zero memory");
+    return 0;
+}
+
+fn test_registry_from_profiles() {
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(64 * BYTES_PER_GIB));
+    vec_push(profiles, profile_cuda(0, 24 * BYTES_PER_GIB));
+    vec_push(profiles, profile_cuda(1, 24 * BYTES_PER_GIB));
+
+    var r = registry_from_profiles(profiles);
+    assert_eq(reg_num_profiles(r), 3, "3 profiles");
+    assert_eq(reg_has_accelerator(r), 1, "has accelerator");
+
+    # Total memory: 64 + 24 + 24 = 112 GiB
+    assert_eq(reg_total_memory(r) / BYTES_PER_GIB, 112, "112 GiB total");
+
+    # Accelerator memory (excludes CPU): 24 + 24 = 48 GiB
+    assert_eq(reg_total_accel_memory(r) / BYTES_PER_GIB, 48, "48 GiB accel");
+    return 0;
+}
+
+fn test_registry_best_available() {
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(64 * BYTES_PER_GIB));
+    vec_push(profiles, profile_cuda(0, 80 * BYTES_PER_GIB));
+    vec_push(profiles, profile_tpu(0, 4, TPU_V5P));
+
+    var r = registry_from_profiles(profiles);
+    var best = reg_best_available(r);
+    assert(best != 0, "best exists");
+    # TPU V5p (rank 80) > CUDA (rank 60) > CPU (rank 10)
+    assert_eq(profile_accel_type(best), ACCEL_TPU, "best = TPU V5p");
+    return 0;
+}
+
+fn test_registry_by_family() {
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(64 * BYTES_PER_GIB));
+    vec_push(profiles, profile_cuda(0, 24 * BYTES_PER_GIB));
+    vec_push(profiles, profile_cuda(1, 24 * BYTES_PER_GIB));
+    vec_push(profiles, profile_rocm(0, 16 * BYTES_PER_GIB));
+
+    var r = registry_from_profiles(profiles);
+    assert_eq(reg_count_by_family(r, FAMILY_GPU), 3, "3 GPUs");
+    assert_eq(reg_count_by_family(r, FAMILY_CPU), 1, "1 CPU");
+    assert_eq(reg_count_by_family(r, FAMILY_TPU), 0, "0 TPUs");
+
+    var gpus = reg_by_family(r, FAMILY_GPU);
+    assert_eq(vec_len(gpus), 3, "3 GPU profiles");
+    return 0;
+}
+
+# --- Builder bitmask ---
+
+fn test_builder_all() {
+    var mask = builder_all();
+    assert_eq(builder_is_enabled(mask, BACKEND_CUDA), 1, "cuda enabled");
+    assert_eq(builder_is_enabled(mask, BACKEND_ROCM), 1, "rocm enabled");
+    assert_eq(builder_is_enabled(mask, BACKEND_TPU), 1, "tpu enabled");
+    assert_eq(builder_is_enabled(mask, BACKEND_MEDIATEK_APU), 1, "mediatek enabled");
+    return 0;
+}
+
+fn test_builder_none() {
+    var mask = builder_none();
+    assert_eq(builder_is_enabled(mask, BACKEND_CUDA), 0, "cuda disabled");
+    assert_eq(builder_is_enabled(mask, BACKEND_ROCM), 0, "rocm disabled");
+    return 0;
+}
+
+fn test_builder_selective() {
+    var mask = builder_none();
+    mask = builder_with(mask, BACKEND_CUDA);
+    mask = builder_with(mask, BACKEND_ROCM);
+
+    assert_eq(builder_is_enabled(mask, BACKEND_CUDA), 1, "cuda on");
+    assert_eq(builder_is_enabled(mask, BACKEND_ROCM), 1, "rocm on");
+    assert_eq(builder_is_enabled(mask, BACKEND_TPU), 0, "tpu off");
+    assert_eq(builder_is_enabled(mask, BACKEND_VULKAN), 0, "vulkan off");
+
+    # Disable CUDA
+    mask = builder_without(mask, BACKEND_CUDA);
+    assert_eq(builder_is_enabled(mask, BACKEND_CUDA), 0, "cuda now off");
+    assert_eq(builder_is_enabled(mask, BACKEND_ROCM), 1, "rocm still on");
+    return 0;
+}
+
+# --- Suggest quantization ---
+
+fn test_suggest_quant_gpu_small() {
+    # 7B model on 24 GiB GPU -> FP16 fits (14 GB + 20% = 16.8 GB < 24 GB)
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(64 * BYTES_PER_GIB));
+    vec_push(profiles, profile_cuda(0, 24 * BYTES_PER_GIB));
+    var r = registry_from_profiles(profiles);
+
+    var q = reg_suggest_quant(r, 7000000000);
+    assert_eq(q, QUANT_FP16, "7B on 24GB GPU -> FP16");
+    return 0;
+}
+
+fn test_suggest_quant_gpu_large() {
+    # 70B model on 24 GiB GPU -> FP16 won't fit (140 GB), INT8 won't fit (70 GB), INT4 fits (35 GB)
+    # But 35 GB > 24 GB, so INT4 doesn't fit either -> fallback to CPU INT4
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(64 * BYTES_PER_GIB));
+    vec_push(profiles, profile_cuda(0, 24 * BYTES_PER_GIB));
+    var r = registry_from_profiles(profiles);
+
+    var q = reg_suggest_quant(r, 70000000000);
+    # CPU has 64 GB: FP16=168GB no, INT8=84GB no, INT4=42GB yes
+    assert_eq(q, QUANT_INT4, "70B on 24GB GPU -> INT4");
+    return 0;
+}
+
+fn test_suggest_quant_tpu() {
+    # 7B on TPU -> BF16 preferred
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(64 * BYTES_PER_GIB));
+    vec_push(profiles, profile_tpu(0, 4, TPU_V5P));
+    var r = registry_from_profiles(profiles);
+
+    var q = reg_suggest_quant(r, 7000000000);
+    assert_eq(q, QUANT_BF16, "7B on TPU -> BF16");
+    return 0;
+}
+
+fn test_suggest_quant_cpu_only() {
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(16 * BYTES_PER_GIB));
+    var r = registry_from_profiles(profiles);
+
+    # 7B on 16 GiB CPU: FP16=16.8GB < 17.18GB (16 GiB) -> fits
+    var q = reg_suggest_quant(r, 7000000000);
+    assert_eq(q, QUANT_FP16, "7B on 16GiB CPU -> FP16");
+
+    # 13B on 16 GiB CPU: FP16=31.2GB no, INT8=15.6GB yes
+    var profiles2 = vec_new();
+    vec_push(profiles2, profile_cpu(16 * BYTES_PER_GIB));
+    var r2 = registry_from_profiles(profiles2);
+    var q2 = reg_suggest_quant(r2, 13000000000);
+    assert_eq(q2, QUANT_INT8, "13B on 16GiB CPU -> INT8");
+    return 0;
+}
+
+# --- Memory estimation ---
+
+fn test_estimate_memory() {
+    # 7B at FP16: 7B * 16 / 8 = 14 GB + 20% = 16.8 GB
+    var est = reg_estimate_memory(7000000000, QUANT_FP16);
+    assert_eq(est, 16800000000, "7B FP16 = 16.8 GB");
+
+    # 70B at INT4: 70B * 4 / 8 = 35 GB + 20% = 42 GB
+    var est2 = reg_estimate_memory(70000000000, QUANT_INT4);
+    assert_eq(est2, 42000000000, "70B INT4 = 42 GB");
+    return 0;
+}
+
+# --- Run all tests ---
+
+alloc_init();
+
+test_registry_new();
+test_registry_from_profiles();
+test_registry_best_available();
+test_registry_by_family();
+test_builder_all();
+test_builder_none();
+test_builder_selective();
+test_suggest_quant_gpu_small();
+test_suggest_quant_gpu_large();
+test_suggest_quant_tpu();
+test_suggest_quant_cpu_only();
+test_estimate_memory();
+
+var fails = assert_summary();
+syscall(60, fails);
