@@ -1,0 +1,260 @@
+# main.cyr — CLI entry point for ai-hwaccel
+#
+# Usage:
+#   ai-hwaccel                  # Full registry JSON
+#   ai-hwaccel --summary        # Compact summary JSON
+#   ai-hwaccel --table          # Human-readable table
+#   ai-hwaccel --cost 70B       # Cloud instance recommendation
+#   ai-hwaccel --version        # Print version
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+include "lib/args.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/cuda.cyr"
+include "src/detect/rocm.cyr"
+include "src/detect/tpu.cyr"
+include "src/detect/gaudi.cyr"
+include "src/detect/neuron.cyr"
+include "src/detect/vulkan.cyr"
+include "src/detect/apple.cyr"
+include "src/detect/intel.cyr"
+include "src/detect/amd_xdna.cyr"
+include "src/detect/edge.cyr"
+include "src/detect/cloud_asic.cyr"
+include "src/detect/bandwidth.cyr"
+include "src/detect/pcie.cyr"
+include "src/detect/numa.cyr"
+include "src/detect/interconnect.cyr"
+include "src/detect/disk.cyr"
+include "src/detect/environment.cyr"
+include "src/registry.cyr"
+include "src/plan.cyr"
+include "src/training.cyr"
+# cost.cyr and model.cyr deferred — fixup table overflow (4096 limit)
+# Cost mode outputs a message directing users to the JSON data files.
+include "src/json_out.cyr"
+
+# --- CLI argument helpers (using lib/args.cyr) ---
+
+fn _has_flag(flag) {
+    var n = argc();
+    var i = 1;
+    while (i < n) {
+        var arg = argv(i);
+        if (arg != 0) {
+            if (streq(arg, flag) == 1) { return 1; }
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn _get_val(flag) {
+    var n = argc();
+    var i = 1;
+    while (i < n) {
+        var arg = argv(i);
+        if (arg != 0) {
+            if (streq(arg, flag) == 1) {
+                if (i + 1 < n) { return argv(i + 1); }
+                return 0;
+            }
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# --- Output helpers ---
+
+fn _print_str(s) {
+    var data = str_data(s);
+    var len = str_len(s);
+    syscall(1, 1, data, len);
+    return 0;
+}
+
+fn _println_cstr(s) {
+    syscall(1, 1, s, strlen(s));
+    syscall(1, 1, "\n", 1);
+    return 0;
+}
+
+# --- Table output ---
+
+fn _print_table(r) {
+    # Header
+    var hdr = "ID     Device                       Memory     Free       Family   Status";
+    _println_cstr(hdr);
+    var sep = "-----  ---------------------------  ---------  ---------  -------  ------";
+    _println_cstr(sep);
+
+    var profs = reg_profiles(r);
+    var np = vec_len(profs);
+    var i = 0;
+    while (i < np) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        var sb = str_builder_new();
+
+        # ID (device_id, 5 chars padded)
+        str_builder_add_int(sb, profile_device_id(p));
+        str_builder_add_cstr(sb, "      ");
+
+        # Device name (27 chars)
+        var dn = profile_device_name(p);
+        if (dn != 0) {
+            str_builder_add_cstr(sb, dn);
+        } else {
+            str_builder_add_cstr(sb, accel_name(profile_accel_type(p)));
+        }
+        str_builder_add_cstr(sb, "  ");
+
+        # Memory (GiB)
+        var mem_gib = profile_memory_bytes(p) / BYTES_PER_GIB;
+        str_builder_add_int(sb, mem_gib);
+        str_builder_add_cstr(sb, " GiB     ");
+
+        # Free memory
+        var mem_free = profile_mem_free(p);
+        if (mem_free != PROFILE_NONE) {
+            str_builder_add_int(sb, mem_free / BYTES_PER_GIB);
+            str_builder_add_cstr(sb, " GiB     ");
+        } else {
+            str_builder_add_cstr(sb, "-          ");
+        }
+
+        # Family
+        str_builder_add_cstr(sb, family_name(profile_family(p)));
+        str_builder_add_cstr(sb, "    ");
+
+        # Status
+        if (profile_available(p) == 1) {
+            str_builder_add_cstr(sb, "OK");
+        } else {
+            str_builder_add_cstr(sb, "N/A");
+        }
+
+        var line = str_builder_build(sb);
+        _print_str(line);
+        syscall(1, 1, "\n", 1);
+    }
+    return 0;
+}
+
+# --- Cost mode (stub — full cost module exceeds fixup table limit) ---
+
+fn _handle_cost(model_str) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Model: ");
+    str_builder_add_cstr(sb, model_str);
+    str_builder_add_cstr(sb, "\n");
+
+    var quant_str = _get_val("--quant");
+    var quant = QUANT_BF16;
+    if (quant_str != 0) {
+        var q = quant_from_str(quant_str);
+        if (q >= 0) { quant = q; }
+    }
+
+    # Parse model size
+    var num = 0;
+    var pi = 0;
+    while (load8(model_str + pi) != 0) {
+        var c = load8(model_str + pi);
+        if (c >= 48 && c <= 57) { num = num * 10 + c - 48; }
+        elif (c == 66 || c == 98) { break; }
+        pi = pi + 1;
+    }
+    var params = num * 1000000000;
+    var needed = quant_model_bytes_with_overhead(params, quant);
+
+    str_builder_add_cstr(sb, "Quantization: ");
+    str_builder_add_cstr(sb, quant_name(quant));
+    str_builder_add_cstr(sb, "\nMemory required: ");
+    str_builder_add_int(sb, needed / BYTES_PER_GIB);
+    str_builder_add_cstr(sb, " GiB\n");
+    str_builder_add_cstr(sb, "\nSee data/cloud_pricing.json for instance recommendations.\n");
+    _print_str(str_builder_build(sb));
+    return 0;
+}
+
+# --- Version ---
+
+fn _print_version() {
+    var buf = alloc(64);
+    var n = file_read_all("VERSION", buf, 63);
+    if (n > 0) {
+        store8(buf + n, 0);
+        # Trim newline
+        if (n > 0 && load8(buf + n - 1) == 10) { store8(buf + n - 1, 0); n = n - 1; }
+        syscall(1, 1, buf, n);
+        syscall(1, 1, "\n", 1);
+    } else {
+        _println_cstr("unknown");
+    }
+    return 0;
+}
+
+# --- Main ---
+
+args_init();
+alloc_init();
+
+if (_has_flag("--version") == 1) {
+    _print_version();
+    syscall(60, 0);
+}
+
+if (_has_flag("--help") == 1) {
+    _println_cstr("ai-hwaccel — universal AI hardware accelerator detection");
+    _println_cstr("");
+    _println_cstr("Usage:");
+    _println_cstr("  ai-hwaccel              Full registry JSON");
+    _println_cstr("  ai-hwaccel --summary    Compact summary JSON");
+    _println_cstr("  ai-hwaccel --table      Human-readable table");
+    _println_cstr("  ai-hwaccel --cost 70B   Cloud instance recommendation");
+    _println_cstr("  ai-hwaccel --version    Print version");
+    syscall(60, 0);
+}
+
+var cost_val = _get_val("--cost");
+if (cost_val != 0) {
+    _handle_cost(cost_val);
+    syscall(60, 0);
+}
+
+# Detect hardware
+var registry = registry_detect();
+
+if (_has_flag("--table") == 1) {
+    _print_table(registry);
+} elif (_has_flag("--summary") == 1) {
+    var json = registry_to_summary_json(registry);
+    _print_str(json);
+    syscall(1, 1, "\n", 1);
+} else {
+    # Default: full JSON
+    var json = registry_to_json(registry);
+    _print_str(json);
+    syscall(1, 1, "\n", 1);
+}
+
+syscall(60, 0);
