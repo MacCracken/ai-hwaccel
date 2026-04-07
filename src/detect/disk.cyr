@@ -1,0 +1,51 @@
+# disk.cyr — storage device detection via /sys/block/
+
+fn detect_storage(sio) {
+    var block_dir = str_from("/sys/block");
+    var entries = dir_list(block_dir);
+    var nent = vec_len(entries);
+
+    var ei = 0;
+    while (ei < nent) {
+        var name = vec_get(entries, ei);
+        ei = ei + 1;
+        var nd = str_data(name);
+
+        # Skip virtual devices: loop, dm-, ram, zram, sr, fd, md
+        if (str_starts_with(name, "loop") == 1) { continue; }
+        if (str_starts_with(name, "dm-") == 1) { continue; }
+        if (str_starts_with(name, "ram") == 1) { continue; }
+        if (str_starts_with(name, "zram") == 1) { continue; }
+        if (str_starts_with(name, "sr") == 1) { continue; }
+        if (str_starts_with(name, "fd") == 1) { continue; }
+        if (str_starts_with(name, "md") == 1) { continue; }
+
+        # Determine storage kind and bandwidth
+        var kind = STK_UNKNOWN;
+        var bw_x1000 = 100;
+
+        if (str_starts_with(name, "nvme") == 1) {
+            kind = STK_NVME;
+            bw_x1000 = 3500;
+        } else {
+            # Check rotational flag
+            var rot_path = sysfs_path_str("/sys/block", name, "queue/rotational");
+            var rot = sysfs_read_int(rot_path);
+            if (rot == 0) {
+                kind = STK_SATA_SSD;
+                bw_x1000 = 550;
+            } elif (rot == 1) {
+                kind = STK_HDD;
+                bw_x1000 = 150;
+            }
+        }
+
+        var nc = alloc(str_len(name) + 1);
+        memcpy(nc, nd, str_len(name));
+        store8(nc + str_len(name), 0);
+
+        var sd = storage_new(nc, kind, bw_x1000);
+        sio_add_storage(sio, sd);
+    }
+    return 0;
+}

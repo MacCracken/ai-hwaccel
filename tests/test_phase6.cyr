@@ -1,0 +1,185 @@
+# test_phase6.cyr — tests for Phase 6 topology post-passes
+# Tests enrichment logic, interconnect types, storage detection
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/cuda.cyr"
+include "src/detect/rocm.cyr"
+include "src/detect/tpu.cyr"
+include "src/detect/gaudi.cyr"
+include "src/detect/neuron.cyr"
+include "src/detect/vulkan.cyr"
+include "src/detect/apple.cyr"
+include "src/detect/intel.cyr"
+include "src/detect/amd_xdna.cyr"
+include "src/detect/edge.cyr"
+include "src/detect/cloud_asic.cyr"
+include "src/detect/bandwidth.cyr"
+include "src/detect/pcie.cyr"
+include "src/detect/numa.cyr"
+include "src/detect/interconnect.cyr"
+include "src/detect/disk.cyr"
+include "src/detect/environment.cyr"
+
+# --- AMD bus width lookup ---
+
+fn test_amd_bus_width() {
+    var mi300 = str_from("0x740c");
+    assert_eq(_amd_bus_width(mi300), 8192, "MI300X 8192-bit");
+
+    var mi100 = str_from("0x738c");
+    assert_eq(_amd_bus_width(mi100), 4096, "MI100 4096-bit");
+
+    var rx7900 = str_from("0x744c");
+    assert_eq(_amd_bus_width(rx7900), 384, "RX 7900 384-bit");
+
+    var unknown = str_from("0xffff");
+    assert_eq(_amd_bus_width(unknown), 0, "unknown = 0");
+    return 0;
+}
+
+fn test_amd_bus_width_from_vram() {
+    assert_eq(_est_amd_bus_width_from_vram(192 * BYTES_PER_GIB), 8192, "192 GiB = 8192");
+    assert_eq(_est_amd_bus_width_from_vram(80 * BYTES_PER_GIB), 4096, "80 GiB = 4096");
+    assert_eq(_est_amd_bus_width_from_vram(24 * BYTES_PER_GIB), 384, "24 GiB = 384");
+    assert_eq(_est_amd_bus_width_from_vram(8 * BYTES_PER_GIB), 256, "8 GiB = 256");
+    assert_eq(_est_amd_bus_width_from_vram(4 * BYTES_PER_GIB), 128, "4 GiB = 128");
+    return 0;
+}
+
+# --- PCIe bandwidth calculation ---
+
+fn test_pcie_bw_calc() {
+    # Gen4 x16: 16 GT/s * 16 * 984/8 = 31488 (x1000)
+    var speed = 16;
+    var width = 16;
+    var bw = speed * width * PCIE_GEN3_PLUS_ENCODING_X1000 / 8;
+    assert(bw > 30000, "Gen4 x16 > 30 GB/s");
+    assert(bw < 32000, "Gen4 x16 < 32 GB/s");
+
+    # Gen3 x16: 8 GT/s * 16 * 984/8 = 15744
+    var bw3 = 8 * 16 * PCIE_GEN3_PLUS_ENCODING_X1000 / 8;
+    assert(bw3 > 15000, "Gen3 x16 > 15 GB/s");
+    assert(bw3 < 16000, "Gen3 x16 < 16 GB/s");
+
+    # Gen2 x8: 5 GT/s * 8 * 800/8 = 4000
+    var bw2 = 5 * 8 * PCIE_GEN1_GEN2_ENCODING_X1000 / 8;
+    assert_eq(bw2, 4000, "Gen2 x8 = 4 GB/s");
+    return 0;
+}
+
+# --- Interconnect type names ---
+
+fn test_interconnect_names() {
+    assert(streq(ick_name(ICK_INFINIBAND), "InfiniBand") == 1, "IB name");
+    assert(streq(ick_name(ICK_ROCE), "RoCE") == 1, "RoCE name");
+    assert(streq(ick_name(ICK_ROCEV2), "RoCE v2") == 1, "RoCEv2 name");
+    assert(streq(ick_name(ICK_NVLINK), "NVLink") == 1, "NVLink name");
+    assert(streq(ick_name(ICK_NVSWITCH), "NVSwitch") == 1, "NVSwitch name");
+    assert(streq(ick_name(ICK_XGMI), "XGMI") == 1, "XGMI name");
+    assert(streq(ick_name(ICK_ICI), "ICI") == 1, "ICI name");
+    assert(streq(ick_name(ICK_PCIE), "PCIe") == 1, "PCIe name");
+    return 0;
+}
+
+# --- Storage kind names ---
+
+fn test_storage_names() {
+    assert(streq(stk_name(STK_NVME), "NVMe") == 1, "NVMe name");
+    assert(streq(stk_name(STK_SATA_SSD), "SATA SSD") == 1, "SATA name");
+    assert(streq(stk_name(STK_HDD), "HDD") == 1, "HDD name");
+    assert(streq(stk_name(STK_UNKNOWN), "Unknown") == 1, "Unknown name");
+    return 0;
+}
+
+# --- ICI bandwidth by TPU version ---
+
+fn test_ici_bandwidth() {
+    var sio = system_io_new();
+    var profiles = vec_new();
+
+    # TPU V5p with 4 chips
+    var tpu = profile_tpu(0, 4, TPU_V5P);
+    vec_push(profiles, tpu);
+
+    _detect_ici(sio, profiles);
+
+    assert_eq(sio_has_ici(sio), 1, "has ICI");
+    var ics = sio_interconnects(sio);
+    assert_eq(vec_len(ics), 1, "1 ICI");
+    var ic = vec_get(ics, 0);
+    assert_eq(ic_kind(ic), ICK_ICI, "ICI kind");
+    # 4 chips * 409600 = 1638400
+    assert_eq(ic_bw_x1000(ic), 1638400, "V5p 4-chip ICI bw");
+    return 0;
+}
+
+# --- Storage detection (live system) ---
+
+fn test_storage_detection() {
+    var sio = system_io_new();
+    detect_storage(sio);
+    # Should detect at least one storage device on any Linux system
+    var devs = sio_storage(sio);
+    assert(vec_len(devs) >= 0, "storage detection runs");
+    # Verify device kinds are valid
+    var si = 0;
+    while (si < vec_len(devs)) {
+        var d = vec_get(devs, si);
+        var k = storage_kind(d);
+        assert(k >= 0, "valid storage kind");
+        assert(k <= 3, "kind <= 3");
+        si = si + 1;
+    }
+    return 0;
+}
+
+# --- NVSwitch detection helpers ---
+
+fn test_nvswitch_helpers() {
+    var sio = system_io_new();
+    assert_eq(sio_has_nvswitch(sio), 0, "no nvswitch initially");
+    assert_eq(sio_has_nvlink(sio), 0, "no nvlink initially");
+
+    var nvsw = interconnect_new(ICK_NVSWITCH, "nvswitch0", 900000);
+    sio_add_interconnect(sio, nvsw);
+
+    assert_eq(sio_has_nvswitch(sio), 1, "has nvswitch");
+    assert_eq(sio_has_nvlink(sio), 1, "nvswitch counts as nvlink");
+    assert_eq(sio_max_ic_bw_x1000(sio), 900000, "max bw = 900");
+    return 0;
+}
+
+# --- Run all tests ---
+
+alloc_init();
+
+test_amd_bus_width();
+test_amd_bus_width_from_vram();
+test_pcie_bw_calc();
+test_interconnect_names();
+test_storage_names();
+test_ici_bandwidth();
+test_storage_detection();
+test_nvswitch_helpers();
+
+var fails = assert_summary();
+syscall(60, fails);

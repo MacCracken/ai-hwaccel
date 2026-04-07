@@ -1,0 +1,90 @@
+# bandwidth.cyr — memory bandwidth enrichment post-pass
+# Enriches CUDA and ROCm profiles with memory_bandwidth_gbps
+
+# AMD bus width lookup by PCI device ID substring
+# Returns bus width in bits
+fn _amd_bus_width(dev_id_str) {
+    # MI300X: 8192-bit
+    if (str_contains(dev_id_str, str_from("740c")) == 1) { return 8192; }
+    if (str_contains(dev_id_str, str_from("740f")) == 1) { return 8192; }
+    # MI250X: 8192-bit
+    if (str_contains(dev_id_str, str_from("7408")) == 1) { return 8192; }
+    # MI100: 4096-bit
+    if (str_contains(dev_id_str, str_from("738c")) == 1) { return 4096; }
+    # RX 7900 XTX: 384-bit
+    if (str_contains(dev_id_str, str_from("744c")) == 1) { return 384; }
+    # Default: estimate from VRAM size
+    return 0;
+}
+
+fn _est_amd_bus_width_from_vram(vram_bytes) {
+    # Rough heuristic: larger VRAM = wider bus
+    if (vram_bytes >= 128 * BYTES_PER_GIB) { return 8192; }
+    if (vram_bytes >= 64 * BYTES_PER_GIB) { return 4096; }
+    if (vram_bytes >= 16 * BYTES_PER_GIB) { return 384; }
+    if (vram_bytes >= 8 * BYTES_PER_GIB) { return 256; }
+    return 128;
+}
+
+# Enrich profiles with memory bandwidth
+fn enrich_bandwidth(profiles) {
+    var np = vec_len(profiles);
+    var pi = 0;
+    while (pi < np) {
+        var p = vec_get(profiles, pi);
+        pi = pi + 1;
+        var at = profile_accel_type(p);
+
+        # Skip if already has bandwidth
+        if (profile_mem_bw_x1000(p) != PROFILE_NONE) { continue; }
+
+        if (at == ACCEL_ROCM) {
+            # Try to read memory clock from sysfs
+            var dev_id = profile_device_id(p);
+            var sb = str_builder_new();
+            str_builder_add_cstr(sb, "/sys/class/drm/card");
+            str_builder_add_int(sb, dev_id);
+            str_builder_add_cstr(sb, "/device");
+            var dev_path = str_builder_build(sb);
+            var dpd = str_data(dev_path);
+            var dpl = str_len(dev_path);
+            var dp_cstr = alloc(dpl + 1);
+            memcpy(dp_cstr, dpd, dpl);
+            store8(dp_cstr + dpl, 0);
+
+            # Read max memory clock from pp_dpm_mclk
+            var mclk_path = sysfs_path(dp_cstr, 0, "pp_dpm_mclk");
+            var mclk_data = sysfs_read(mclk_path);
+            var max_mclk = 0;
+            if (mclk_data != 0) {
+                # Parse last line for max clock: "N: XXXMhz"
+                var mlines = str_split(mclk_data, 10);
+                var mli = 0;
+                while (mli < vec_len(mlines)) {
+                    var ml = vec_get(mlines, mli);
+                    mli = mli + 1;
+                    var val = parse_value_with_suffix(ml);
+                    if (val > max_mclk) { max_mclk = val; }
+                }
+            }
+
+            # Read PCI device ID for bus width lookup
+            var devid_path = sysfs_path(dp_cstr, 0, "device");
+            var devid_str = sysfs_read(devid_path);
+            var bus_width = 0;
+            if (devid_str != 0) {
+                bus_width = _amd_bus_width(devid_str);
+            }
+            if (bus_width == 0) {
+                bus_width = _est_amd_bus_width_from_vram(profile_memory_bytes(p));
+            }
+
+            if (max_mclk > 0 && bus_width > 0) {
+                var bw_x1000 = max_mclk * bus_width * 2 / 8;
+                profile_set_mem_bw_x1000(p, bw_x1000);
+            }
+        }
+        # CUDA bandwidth is already computed inline during parse_cuda_output
+    }
+    return 0;
+}

@@ -1,0 +1,101 @@
+# environment.cyr — runtime environment detection
+# Docker, Kubernetes, cloud provider (AWS/GCP/Azure)
+
+fn detect_environment(sio) {
+    var env = runtime_env_new();
+    var detected = 0;
+
+    # --- Docker detection ---
+    if (path_exists("/.dockerenv") == 1) {
+        env_set_docker(env, 1);
+        detected = 1;
+    } else {
+        # Check /proc/1/cgroup for docker/containerd
+        var cgroup = sysfs_read("/proc/1/cgroup");
+        if (cgroup != 0) {
+            if (str_contains(cgroup, str_from("docker")) == 1) {
+                env_set_docker(env, 1);
+                detected = 1;
+            } elif (str_contains(cgroup, str_from("containerd")) == 1) {
+                env_set_docker(env, 1);
+                detected = 1;
+            }
+        }
+    }
+
+    # --- Kubernetes detection ---
+    if (path_exists("/var/run/secrets/kubernetes.io") == 1) {
+        env_set_k8s(env, 1);
+        detected = 1;
+        # Read namespace
+        var ns = sysfs_read("/var/run/secrets/kubernetes.io/serviceaccount/namespace");
+        if (ns != 0) {
+            var nsd = str_data(ns);
+            var nsl = str_len(ns);
+            var nsc = alloc(nsl + 1);
+            memcpy(nsc, nsd, nsl);
+            store8(nsc + nsl, 0);
+            env_set_k8s_namespace(env, nsc);
+        }
+
+        # GPU count from env vars
+        var nv_devs = cmd_getenv("NVIDIA_VISIBLE_DEVICES");
+        if (nv_devs != 0) {
+            # Count commas + 1 = device count
+            var count = 1;
+            var ci = 0;
+            while (load8(nv_devs + ci) != 0) {
+                if (load8(nv_devs + ci) == 44) { count = count + 1; }
+                ci = ci + 1;
+            }
+            env_set_k8s_gpu_count(env, count);
+            env_set_k8s_gpu_source(env, "NVIDIA_VISIBLE_DEVICES");
+        }
+    }
+
+    # --- Cloud provider detection via DMI ---
+    var vendor = sysfs_read("/sys/class/dmi/id/sys_vendor");
+    var bios = sysfs_read("/sys/class/dmi/id/bios_vendor");
+    var product = sysfs_read("/sys/class/dmi/id/product_name");
+
+    if (vendor != 0) {
+        if (str_contains(vendor, str_from("Amazon")) == 1) {
+            env_set_cloud_provider(env, "aws");
+            detected = 1;
+        } elif (str_contains(vendor, str_from("Google")) == 1) {
+            env_set_cloud_provider(env, "gcp");
+            detected = 1;
+        } elif (str_contains(vendor, str_from("Microsoft")) == 1) {
+            env_set_cloud_provider(env, "azure");
+            detected = 1;
+        }
+    }
+    if (env_cloud_provider(env) == 0 && bios != 0) {
+        if (str_contains(bios, str_from("amazon")) == 1) {
+            env_set_cloud_provider(env, "aws");
+            detected = 1;
+        } elif (str_contains(bios, str_from("Amazon")) == 1) {
+            env_set_cloud_provider(env, "aws");
+            detected = 1;
+        }
+    }
+
+    # Instance type from product name (AWS)
+    if (product != 0) {
+        if (env_cloud_provider(env) != 0) {
+            if (streq(env_cloud_provider(env), "aws") == 1) {
+                var pd = str_data(product);
+                var pl = str_len(product);
+                var pc = alloc(pl + 1);
+                memcpy(pc, pd, pl);
+                store8(pc + pl, 0);
+                env_set_instance_type(env, pc);
+            }
+        }
+    }
+
+    if (detected == 1) {
+        sio_set_environment(sio, env);
+    }
+    return 0;
+}

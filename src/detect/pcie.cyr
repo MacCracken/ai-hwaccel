@@ -1,0 +1,85 @@
+# pcie.cyr — PCIe link bandwidth enrichment post-pass
+# Reads /sys/bus/pci/devices/<addr>/current_link_{width,speed}
+
+fn enrich_pcie(profiles) {
+    var np = vec_len(profiles);
+    var pi = 0;
+    while (pi < np) {
+        var p = vec_get(profiles, pi);
+        pi = pi + 1;
+        var at = profile_accel_type(p);
+
+        # Only enrich CUDA and ROCm GPUs
+        if (at != ACCEL_CUDA) {
+            if (at != ACCEL_ROCM) { continue; }
+        }
+
+        # Skip if already has PCIe bandwidth
+        if (profile_pcie_bw_x1000(p) != PROFILE_NONE) { continue; }
+
+        var dev_id = profile_device_id(p);
+        var pci_addr = _find_pci_addr(at, dev_id);
+        if (pci_addr == 0) { continue; }
+
+        # Read link width
+        var width_path = sysfs_path(pci_addr, 0, "current_link_width");
+        var width = sysfs_read_int(width_path);
+        if (width <= 0) { continue; }
+
+        # Read link speed (e.g., "16 GT/s", "8 GT/s")
+        var speed_path = sysfs_path(pci_addr, 0, "current_link_speed");
+        var speed_str = sysfs_read(speed_path);
+        if (speed_str == 0) { continue; }
+        var speed_gts = parse_value_with_suffix(speed_str);
+        if (speed_gts <= 0) { continue; }
+
+        # Calculate bandwidth: speed_gts * width * encoding / 8
+        # Gen3+ (>= 8 GT/s): 128b/130b encoding (~0.984)
+        # Gen1/2 (< 8 GT/s): 8b/10b encoding (0.8)
+        var bw_x1000 = 0;
+        if (speed_gts >= PCIE_GEN3_SPEED_GTS) {
+            # speed * width * 984 / 1000 / 8 * 1000 = speed * width * 984 / 8
+            bw_x1000 = speed_gts * width * PCIE_GEN3_PLUS_ENCODING_X1000 / 8;
+        } else {
+            bw_x1000 = speed_gts * width * PCIE_GEN1_GEN2_ENCODING_X1000 / 8;
+        }
+        profile_set_pcie_bw_x1000(p, bw_x1000);
+    }
+    return 0;
+}
+
+# Find PCI address for a GPU device
+fn _find_pci_addr(accel_type, dev_id) {
+    var driver_dir = "/sys/bus/pci/drivers/nvidia";
+    if (accel_type == ACCEL_ROCM) { driver_dir = "/sys/bus/pci/drivers/amdgpu"; }
+
+    var entries = sysfs_list_dir(driver_dir);
+    var nent = vec_len(entries);
+    var idx = 0;
+    var ei = 0;
+    while (ei < nent) {
+        var name = vec_get(entries, ei);
+        ei = ei + 1;
+        # PCI addresses look like "0000:XX:XX.X"
+        if (str_len(name) < 10) { continue; }
+        var d0 = load8(str_data(name));
+        if (d0 < 48) { continue; }
+        if (d0 > 57) { continue; }
+
+        if (idx == dev_id) {
+            # Build full sysfs path
+            var sb = str_builder_new();
+            str_builder_add_cstr(sb, "/sys/bus/pci/devices/");
+            str_builder_add(sb, name);
+            var result = str_builder_build(sb);
+            var rd = str_data(result);
+            var rl = str_len(result);
+            var rc = alloc(rl + 1);
+            memcpy(rc, rd, rl);
+            store8(rc + rl, 0);
+            return rc;
+        }
+        idx = idx + 1;
+    }
+    return 0;
+}

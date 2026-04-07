@@ -1,0 +1,170 @@
+# interconnect.cyr — network interconnect detection
+# InfiniBand, RoCE, NVLink, NVSwitch, XGMI, ICI
+
+fn detect_interconnects(sio, profiles, warnings) {
+    _detect_infiniband(sio);
+    _detect_nvlink_nvswitch(sio, warnings);
+    _detect_xgmi(sio);
+    _detect_ici(sio, profiles);
+    return 0;
+}
+
+# --- InfiniBand / RoCE ---
+
+fn _detect_infiniband(sio) {
+    var ib_dir = str_from("/sys/class/infiniband");
+    var entries = dir_list(ib_dir);
+    var nent = vec_len(entries);
+
+    var ei = 0;
+    while (ei < nent) {
+        var name = vec_get(entries, ei);
+        ei = ei + 1;
+
+        # Read port 1 state
+        var state_path = sysfs_path_str("/sys/class/infiniband", name, "ports/1/state");
+        var state = sysfs_read(state_path);
+
+        # Read rate (e.g., "200 Gb/sec (4X HDR)")
+        var rate_path = sysfs_path_str("/sys/class/infiniband", name, "ports/1/rate");
+        var rate_str = sysfs_read(rate_path);
+        var bw_x1000 = 0;
+        if (rate_str != 0) {
+            var gbps = parse_value_with_suffix(rate_str);
+            # Convert Gb/s to GB/s (* 1000 / 8)
+            bw_x1000 = gbps * 1000 / GBITS_PER_GBYTE;
+        }
+
+        # Determine kind: IB vs RoCE
+        var kind = ICK_INFINIBAND;
+        var ll_path = sysfs_path_str("/sys/class/infiniband", name, "ports/1/link_layer");
+        var ll = sysfs_read(ll_path);
+        if (ll != 0) {
+            if (str_contains(ll, str_from("Ethernet")) == 1) {
+                kind = ICK_ROCEV2;
+            }
+        }
+
+        var nd = str_data(name);
+        var nl = str_len(name);
+        var nc = alloc(nl + 1);
+        memcpy(nc, nd, nl);
+        store8(nc + nl, 0);
+
+        var ic = interconnect_new(kind, nc, bw_x1000);
+        if (state != 0) {
+            var sd = str_data(state);
+            var sl = str_len(state);
+            var sc = alloc(sl + 1);
+            memcpy(sc, sd, sl);
+            store8(sc + sl, 0);
+            ic_set_state(ic, sc);
+        }
+        sio_add_interconnect(sio, ic);
+    }
+    return 0;
+}
+
+# --- NVLink / NVSwitch ---
+
+fn _detect_nvlink_nvswitch(sio, warnings) {
+    # Check for NVSwitch via sysfs
+    if (dir_exists("/sys/devices/virtual/nvidia-nvswitch") == 1) {
+        var ic = interconnect_new(ICK_NVSWITCH, "nvswitch", 900000);
+        ic_set_state(ic, "Active");
+        sio_add_interconnect(sio, ic);
+        return 0;
+    }
+    if (path_exists("/sys/bus/nvidia_nvswitch/devices") == 1) {
+        var nvsw_entries = sysfs_list_dir("/sys/bus/nvidia_nvswitch/devices");
+        if (vec_len(nvsw_entries) > 0) {
+            var ic = interconnect_new(ICK_NVSWITCH, "nvswitch", 900000);
+            ic_set_state(ic, "Active");
+            sio_add_interconnect(sio, ic);
+            return 0;
+        }
+    }
+
+    # Try nvidia-smi nvlink -s for NVLink
+    var result = run_tool2("nvidia-smi", "nvlink", "-s", warnings);
+    if (result != 0) {
+        if (str_len(result) > 0) {
+            # Count NVLink entries and estimate bandwidth
+            var link_count = 0;
+            var link_bw = 25000;
+            var lines = str_split(result, 10);
+            var li = 0;
+            while (li < vec_len(lines)) {
+                var line = vec_get(lines, li);
+                li = li + 1;
+                if (str_contains(line, str_from("Link")) == 1) {
+                    link_count = link_count + 1;
+                    # Parse bandwidth if available
+                    var bval = parse_value_with_suffix(line);
+                    if (bval > 0) { link_bw = bval * 1000; }
+                }
+            }
+            if (link_count > 0) {
+                var total_bw = link_bw * link_count;
+                var ic = interconnect_new(ICK_NVLINK, "nvlink", total_bw);
+                sio_add_interconnect(sio, ic);
+            }
+        }
+    }
+    return 0;
+}
+
+# --- AMD XGMI / Infinity Fabric ---
+
+fn _detect_xgmi(sio) {
+    # Check sysfs for XGMI hive
+    var drm_dir = str_from("/sys/class/drm");
+    var entries = dir_list(drm_dir);
+    var nent = vec_len(entries);
+    var has_xgmi = 0;
+
+    var ei = 0;
+    while (ei < nent) {
+        var name = vec_get(entries, ei);
+        ei = ei + 1;
+        if (str_starts_with(name, "card") != 1) { continue; }
+        if (str_index_of(name, 45) >= 0) { continue; }
+
+        var hive_path = sysfs_path_str("/sys/class/drm", name, "device/xgmi_hive_info");
+        if (path_exists(str_data(hive_path)) == 1) {
+            has_xgmi = 1;
+            break;
+        }
+    }
+
+    if (has_xgmi == 1) {
+        var ic = interconnect_new(ICK_XGMI, "xgmi", 400000);
+        sio_add_interconnect(sio, ic);
+    }
+    return 0;
+}
+
+# --- Google TPU ICI ---
+
+fn _detect_ici(sio, profiles) {
+    var np = vec_len(profiles);
+    var pi = 0;
+    while (pi < np) {
+        var p = vec_get(profiles, pi);
+        pi = pi + 1;
+        if (profile_accel_type(p) != ACCEL_TPU) { continue; }
+
+        var version = profile_tpu_version(p);
+        var chips = profile_tpu_chips(p);
+        # Per-chip ICI bandwidth by version (GB/s * 1000)
+        var per_chip_bw = 192000;
+        if (version == TPU_V5E) { per_chip_bw = 204800; }
+        elif (version == TPU_V5P) { per_chip_bw = 409600; }
+
+        var total_bw = per_chip_bw * chips;
+        var ic = interconnect_new(ICK_ICI, "ici", total_bw);
+        sio_add_interconnect(sio, ic);
+        break;
+    }
+    return 0;
+}
