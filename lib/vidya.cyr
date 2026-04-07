@@ -1,0 +1,231 @@
+# vidya.cyr — content loader and search for the vidya knowledge corpus
+# Usage: include "lib/vidya.cyr"
+# Requires: string.cyr, fmt.cyr, alloc.cyr, vec.cyr, str.cyr, hashmap.cyr,
+#           io.cyr, fs.cyr, toml.cyr
+#
+# Loads TOML content files from a directory, indexes by name, supports
+# full-text search across names, descriptions, and content.
+#
+# Two content formats supported:
+#   1. [[entries]] with name, description, category, content (cyrius/*.toml)
+#   2. concept.toml with id, title, topic, description (topic directories)
+
+# Entry: { name: Str, description: Str, category: Str, content: Str }
+# Create a new entry
+fn vidya_entry_new(name, desc, cat, content) {
+    var e = alloc(32);
+    store64(e, name);
+    store64(e + 8, desc);
+    store64(e + 16, cat);
+    store64(e + 24, content);
+    return e;
+}
+
+# Get entry name
+fn vidya_entry_name(e) { return load64(e); }
+# Get entry description
+fn vidya_entry_desc(e) { return load64(e + 8); }
+# Get entry category
+fn vidya_entry_category(e) { return load64(e + 16); }
+# Get entry content
+fn vidya_entry_content(e) { return load64(e + 24); }
+
+# Registry: generic indexed collection for any entity type.
+# Stores entries in a vec + indexes by string key via hashmap.
+# Layout: { entries: vec, index: hashmap(key → entry), name: Str }
+# Works for vidya entries, itihas civilizations, eras, events, etc.
+
+# Create a new named registry
+fn registry_new(name) {
+    var r = alloc(24);
+    store64(r, vec_new());
+    store64(r + 8, map_new());
+    store64(r + 16, name);
+    return r;
+}
+
+# Get entries vec from registry
+fn registry_entries(r) { return load64(r); }
+# Get index hashmap from registry
+fn registry_index(r) { return load64(r + 8); }
+# Get registry name
+fn registry_name(r) { return load64(r + 16); }
+
+# Add an entry with a string key. Entry can be any pointer.
+fn registry_add(r, key, entry) {
+    vec_push(registry_entries(r), entry);
+    if (key != 0) {
+        map_set(registry_index(r), str_data(key), entry);
+    }
+    return 0;
+}
+
+# Look up an entry by string key. Returns entry pointer or 0.
+fn registry_get(r, key) {
+    return map_get(registry_index(r), key);
+}
+
+# Return total number of entries
+fn registry_count(r) {
+    return vec_len(registry_entries(r));
+}
+
+# Filter entries: calls predicate(entry) for each, returns vec of matches
+fn registry_filter(r, pred) {
+    var results = vec_new();
+    var entries = registry_entries(r);
+    var count = vec_len(entries);
+    var i = 0;
+    while (i < count) {
+        var e = vec_get(entries, i);
+        if (fncall1(pred, e) == 1) { vec_push(results, e); }
+        i = i + 1;
+    }
+    return results;
+}
+
+# Convenience: create a vidya-style registry
+fn vidya_registry_new() {
+    return registry_new(str_from("vidya"));
+}
+
+# Vidya-specific helpers using generic registry
+fn vidya_entries(r) { return registry_entries(r); }
+# Vidya index accessor
+fn vidya_index(r) { return registry_index(r); }
+
+# Add a vidya entry to the registry
+fn vidya_register(r, entry) {
+    registry_add(r, vidya_entry_name(entry), entry);
+    return 0;
+}
+
+# Look up a vidya entry by name. Returns entry pointer or 0.
+fn vidya_get(r, name) {
+    return registry_get(r, name);
+}
+
+# Return total number of vidya entries
+fn vidya_count(r) {
+    return registry_count(r);
+}
+
+# Load a single TOML file with [[entries]] format (cyrius content)
+fn vidya_load_entries(r, path) {
+    var sections = toml_parse_file(path);
+    var entries = toml_get_sections(sections, str_from("entries"));
+    var count = vec_len(entries);
+    var i = 0;
+    while (i < count) {
+        var sec = vec_get(entries, i);
+        var pairs = toml_section_pairs(sec);
+        var name = toml_get(pairs, str_from("name"));
+        var desc = toml_get(pairs, str_from("description"));
+        var cat = toml_get(pairs, str_from("category"));
+        var content = toml_get(pairs, str_from("content"));
+        if (name != 0) {
+            vidya_register(r, vidya_entry_new(name, desc, cat, content));
+        }
+        i = i + 1;
+    }
+    return count;
+}
+
+# Load a concept.toml file (topic directory format)
+fn vidya_load_concept(r, path) {
+    var sections = toml_parse_file(path);
+    if (vec_len(sections) == 0) { return 0; }
+    # Top-level section has id, title, topic, description
+    var top = vec_get(sections, 0);
+    var pairs = toml_section_pairs(top);
+    var name = toml_get(pairs, str_from("id"));
+    var desc = toml_get(pairs, str_from("description"));
+    var cat = toml_get(pairs, str_from("topic"));
+    if (name == 0) { name = toml_get(pairs, str_from("title")); }
+    if (name != 0) {
+        vidya_register(r, vidya_entry_new(name, desc, cat, str_from("")));
+    }
+    return 1;
+}
+
+# Load all content from a vidya content directory.
+# Scans for: topic/concept.toml and cyrius/*.toml
+# Load all content from a vidya content directory (pass a Str path).
+fn vidya_load_dir(r, content_path) {
+    var total = 0;
+    var dirs = dir_list(content_path);
+    var ndirs = vec_len(dirs);
+    var i = 0;
+    while (i < ndirs) {
+        var dname = vec_get(dirs, i);
+        var dpath = path_join(content_path, dname);
+        if (is_dir(dpath) == 1) {
+            # Check for concept.toml
+            var concept = path_join(dpath, str_from("concept.toml"));
+            if (file_exists(str_data(concept)) == 1) {
+                total = total + vidya_load_concept(r, str_data(concept));
+            }
+            # Check for *.toml files with [[entries]]
+            var files = find_files(dpath, str_from(".toml"));
+            var nf = vec_len(files);
+            var fi = 0;
+            while (fi < nf) {
+                var fpath = vec_get(files, fi);
+                var bname = path_basename(fpath);
+                if (str_eq(bname, str_from("concept.toml")) == 0) {
+                    total = total + vidya_load_entries(r, str_data(fpath));
+                }
+                fi = fi + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return total;
+}
+
+# Search: find entries where name, description, or content contains the query.
+# Returns a vec of matching entry pointers.
+fn vidya_search(r, query) {
+    var results = vec_new();
+    var entries = vidya_entries(r);
+    var count = vec_len(entries);
+    var i = 0;
+    while (i < count) {
+        var e = vec_get(entries, i);
+        var found = 0;
+        var name = vidya_entry_name(e);
+        if (name != 0 && found == 0) {
+            if (str_contains(name, query) == 1) { found = 1; }
+        }
+        var desc = vidya_entry_desc(e);
+        if (desc != 0 && found == 0) {
+            if (str_contains(desc, query) == 1) { found = 1; }
+        }
+        var content = vidya_entry_content(e);
+        if (content != 0 && found == 0) {
+            if (str_contains(content, query) == 1) { found = 1; }
+        }
+        if (found == 1) { vec_push(results, e); }
+        i = i + 1;
+    }
+    return results;
+}
+
+# Print search results
+fn vidya_print_results(results) {
+    var count = vec_len(results);
+    fmt_int(count);
+    syscall(1, 1, " results:\n", 10);
+    var i = 0;
+    while (i < count) {
+        var e = vec_get(results, i);
+        syscall(1, 1, "  ", 2);
+        var name = vidya_entry_name(e);
+        if (name != 0) { str_print(name); }
+        var cat = vidya_entry_category(e);
+        if (cat != 0) { syscall(1, 1, " [", 2); str_print(cat); syscall(1, 1, "]", 1); }
+        syscall(1, 1, "\n", 1);
+        i = i + 1;
+    }
+    return 0;
+}

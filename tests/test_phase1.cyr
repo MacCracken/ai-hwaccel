@@ -1,0 +1,272 @@
+# test_phase1.cyr — tests for Phase 1 foundation types
+# Tests: error codes, accelerator types, units, quantization
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+
+# --- Error enum tests ---
+
+fn test_error_codes() {
+    assert_eq(ERR_NONE, 0, "ERR_NONE == 0");
+    assert_eq(ERR_TOOL_NOT_FOUND, 1, "ERR_TOOL_NOT_FOUND == 1");
+    assert_eq(ERR_TOOL_FAILED, 2, "ERR_TOOL_FAILED == 2");
+    assert_eq(ERR_TIMEOUT, 3, "ERR_TIMEOUT == 3");
+    assert_eq(ERR_PARSE, 4, "ERR_PARSE == 4");
+    assert_eq(ERR_SYSFS_READ, 5, "ERR_SYSFS_READ == 5");
+    return 0;
+}
+
+fn test_warning_struct() {
+    var w = warning_tool_not_found("nvidia-smi");
+    assert_eq(warning_code(w), ERR_TOOL_NOT_FOUND, "tool_not_found code");
+    assert(streq(warning_tool(w), "nvidia-smi") == 1, "tool name");
+    assert_eq(warning_message(w), 0, "no message");
+    # bump allocator — no individual free
+
+    var w2 = warning_tool_failed("hl-smi", 1, "device not found");
+    assert_eq(warning_code(w2), ERR_TOOL_FAILED, "tool_failed code");
+    assert_eq(warning_exit_code(w2), 1, "exit code");
+    assert(streq(warning_message(w2), "device not found") == 1, "stderr msg");
+
+
+    var w3 = warning_timeout("vulkaninfo", 5000);
+    assert_eq(warning_code(w3), ERR_TIMEOUT, "timeout code");
+    assert_eq(warning_timeout_ms(w3), 5000, "timeout ms");
+
+    var w4 = warning_parse("cuda", "invalid CSV");
+    assert_eq(warning_code(w4), ERR_PARSE, "parse code");
+    assert(streq(warning_message(w4), "invalid CSV") == 1, "parse msg");
+
+    var w5 = warning_sysfs("/sys/class/drm/card0", "permission denied");
+    assert_eq(warning_code(w5), ERR_SYSFS_READ, "sysfs code");
+    assert(streq(warning_message(w5), "permission denied") == 1, "sysfs msg");
+    return 0;
+}
+
+# --- Accelerator type tests ---
+
+fn test_accel_family() {
+    assert_eq(accel_family(ACCEL_CPU), FAMILY_CPU, "CPU family");
+    assert_eq(accel_family(ACCEL_CUDA), FAMILY_GPU, "CUDA family");
+    assert_eq(accel_family(ACCEL_ROCM), FAMILY_GPU, "ROCm family");
+    assert_eq(accel_family(ACCEL_METAL), FAMILY_GPU, "Metal family");
+    assert_eq(accel_family(ACCEL_VULKAN), FAMILY_GPU, "Vulkan family");
+    assert_eq(accel_family(ACCEL_INTEL_ONEAPI), FAMILY_GPU, "oneAPI family");
+    assert_eq(accel_family(ACCEL_INTEL_NPU), FAMILY_NPU, "Intel NPU family");
+    assert_eq(accel_family(ACCEL_APPLE_NPU), FAMILY_NPU, "Apple NPU family");
+    assert_eq(accel_family(ACCEL_AMD_XDNA), FAMILY_NPU, "AMD XDNA family");
+    assert_eq(accel_family(ACCEL_TPU), FAMILY_TPU, "TPU family");
+    assert_eq(accel_family(ACCEL_GAUDI), FAMILY_AI_ASIC, "Gaudi family");
+    assert_eq(accel_family(ACCEL_NEURON), FAMILY_AI_ASIC, "Neuron family");
+    assert_eq(accel_family(ACCEL_CEREBRAS), FAMILY_AI_ASIC, "Cerebras family");
+    assert_eq(accel_family(ACCEL_GROQ), FAMILY_AI_ASIC, "Groq family");
+    assert_eq(accel_family(ACCEL_SAMSUNG_NPU), FAMILY_NPU, "Samsung family");
+    assert_eq(accel_family(ACCEL_MEDIATEK_APU), FAMILY_NPU, "MediaTek family");
+    return 0;
+}
+
+fn test_accel_is_gpu() {
+    assert_eq(accel_is_gpu(ACCEL_CUDA), 1, "CUDA is GPU");
+    assert_eq(accel_is_gpu(ACCEL_ROCM), 1, "ROCm is GPU");
+    assert_eq(accel_is_gpu(ACCEL_METAL), 1, "Metal is GPU");
+    assert_eq(accel_is_gpu(ACCEL_VULKAN), 1, "Vulkan is GPU");
+    assert_eq(accel_is_gpu(ACCEL_INTEL_ONEAPI), 1, "oneAPI is GPU");
+    assert_eq(accel_is_gpu(ACCEL_CPU), 0, "CPU not GPU");
+    assert_eq(accel_is_gpu(ACCEL_TPU), 0, "TPU not GPU");
+    assert_eq(accel_is_gpu(ACCEL_INTEL_NPU), 0, "NPU not GPU");
+    return 0;
+}
+
+fn test_accel_training() {
+    assert(accel_supports_training(ACCEL_CUDA) == 1, "CUDA trains");
+    assert(accel_supports_training(ACCEL_ROCM) == 1, "ROCm trains");
+    assert(accel_supports_training(ACCEL_INTEL_NPU) == 0, "Intel NPU no train");
+    assert(accel_supports_training(ACCEL_APPLE_NPU) == 0, "Apple NPU no train");
+    assert(accel_supports_training(ACCEL_QUALCOMM) == 0, "Qualcomm no train");
+    assert(accel_supports_training(ACCEL_GROQ) == 0, "Groq no train");
+    assert(accel_supports_training(ACCEL_CEREBRAS) == 1, "Cerebras trains");
+    return 0;
+}
+
+# --- TPU/Gaudi/Neuron sub-type tests ---
+
+fn test_tpu_versions() {
+    assert(streq(tpu_version_name(TPU_V4), "v4") == 1, "TPU v4 name");
+    assert(streq(tpu_version_name(TPU_V5E), "v5e") == 1, "TPU v5e name");
+    assert(streq(tpu_version_name(TPU_V5P), "v5p") == 1, "TPU v5p name");
+
+    # HBM checks (in GiB)
+    assert_eq(tpu_hbm_per_chip(TPU_V4) / BYTES_PER_GIB, 32, "TPU v4 32 GiB");
+    assert_eq(tpu_hbm_per_chip(TPU_V5E) / BYTES_PER_GIB, 16, "TPU v5e 16 GiB");
+    assert_eq(tpu_hbm_per_chip(TPU_V5P) / BYTES_PER_GIB, 95, "TPU v5p 95 GiB");
+
+    # Throughput ordering
+    assert(tpu_throughput_x1000(TPU_V5P) > tpu_throughput_x1000(TPU_V4), "V5p > V4");
+    assert(tpu_throughput_x1000(TPU_V4) > tpu_throughput_x1000(TPU_V5E), "V4 > V5e");
+
+    # Rank ordering
+    assert(tpu_rank(TPU_V5P) > tpu_rank(TPU_V4), "V5p rank > V4");
+    assert(tpu_rank(TPU_V4) > tpu_rank(TPU_V5E), "V4 rank > V5e");
+    return 0;
+}
+
+fn test_gaudi_generations() {
+    assert(streq(gaudi_gen_name(GAUDI2), "Gaudi2") == 1, "Gaudi2 name");
+    assert(streq(gaudi_gen_name(GAUDI3), "Gaudi3") == 1, "Gaudi3 name");
+
+    assert_eq(gaudi_hbm_bytes(GAUDI2) / BYTES_PER_GIB, 96, "Gaudi2 96 GiB");
+    assert_eq(gaudi_hbm_bytes(GAUDI3) / BYTES_PER_GIB, 128, "Gaudi3 128 GiB");
+
+    assert(gaudi_throughput_x1000(GAUDI3) > gaudi_throughput_x1000(GAUDI2), "G3 > G2");
+    assert(gaudi_rank(GAUDI3) > gaudi_rank(GAUDI2), "G3 rank > G2");
+    return 0;
+}
+
+fn test_neuron_chips() {
+    assert(streq(neuron_chip_name(NEURON_INFERENTIA), "Inferentia") == 1, "Inferentia name");
+    assert(streq(neuron_chip_name(NEURON_TRAINIUM), "Trainium") == 1, "Trainium name");
+
+    assert_eq(neuron_hbm_per_core(NEURON_INFERENTIA) / BYTES_PER_GIB, 16, "Inf 16 GiB/core");
+    assert_eq(neuron_hbm_per_core(NEURON_TRAINIUM) / BYTES_PER_GIB, 32, "Trn 32 GiB/core");
+
+    # Trainium trains, Inferentia does not
+    assert(neuron_training_x1000(NEURON_TRAINIUM, 2) > 0, "Trainium trains");
+    assert_eq(neuron_training_x1000(NEURON_INFERENTIA, 2), 0, "Inferentia no train");
+
+    # Rank
+    assert(neuron_rank(NEURON_TRAINIUM) > neuron_rank(NEURON_INFERENTIA), "Trn rank > Inf");
+    return 0;
+}
+
+# --- Units tests ---
+
+fn test_units() {
+    assert_eq(BYTES_PER_GIB, 1073741824, "GiB constant");
+    assert_eq(BYTES_PER_GB, 1000000000, "GB constant");
+    assert_eq(BITS_PER_BYTE, 8, "bits/byte");
+    assert_eq(PARAMS_PER_MILLION, 1000000, "params/M");
+    assert_eq(FP16_BYTES_PER_PARAM, 2, "FP16 2 bytes");
+    assert_eq(ACTIVATION_OVERHEAD_DIVISOR, 5, "20% overhead");
+    assert_eq(PARAMS_PER_LAYER_ESTIMATE, 250000000, "250M/layer");
+    assert_eq(SCHEMA_VERSION, 3, "schema v3");
+    return 0;
+}
+
+# --- Quantization tests ---
+
+fn test_quant_bits() {
+    assert_eq(quant_bits(QUANT_NONE), 32, "FP32 = 32 bits");
+    assert_eq(quant_bits(QUANT_FP16), 16, "FP16 = 16 bits");
+    assert_eq(quant_bits(QUANT_BF16), 16, "BF16 = 16 bits");
+    assert_eq(quant_bits(QUANT_INT8), 8, "INT8 = 8 bits");
+    assert_eq(quant_bits(QUANT_INT4), 4, "INT4 = 4 bits");
+    return 0;
+}
+
+fn test_quant_reduction() {
+    assert_eq(quant_reduction_x1000(QUANT_NONE), 1000, "FP32 = 1.0x");
+    assert_eq(quant_reduction_x1000(QUANT_FP16), 2000, "FP16 = 2.0x");
+    assert_eq(quant_reduction_x1000(QUANT_INT8), 4000, "INT8 = 4.0x");
+    assert_eq(quant_reduction_x1000(QUANT_INT4), 8000, "INT4 = 8.0x");
+    return 0;
+}
+
+fn test_quant_names() {
+    assert(streq(quant_name(QUANT_NONE), "FP32") == 1, "FP32 name");
+    assert(streq(quant_name(QUANT_FP16), "FP16") == 1, "FP16 name");
+    assert(streq(quant_name(QUANT_BF16), "BF16") == 1, "BF16 name");
+    assert(streq(quant_name(QUANT_INT8), "INT8") == 1, "INT8 name");
+    assert(streq(quant_name(QUANT_INT4), "INT4") == 1, "INT4 name");
+    return 0;
+}
+
+fn test_quant_from_bits() {
+    assert_eq(quant_from_bits(32), QUANT_NONE, "32 -> NONE");
+    assert_eq(quant_from_bits(16), QUANT_FP16, "16 -> FP16");
+    assert_eq(quant_from_bits(8), QUANT_INT8, "8 -> INT8");
+    assert_eq(quant_from_bits(4), QUANT_INT4, "4 -> INT4");
+    assert_eq(quant_from_bits(7), 0 - 1, "7 -> invalid");
+    return 0;
+}
+
+fn test_quant_from_str() {
+    assert_eq(quant_from_str("fp32"), QUANT_NONE, "fp32 parse");
+    assert_eq(quant_from_str("FP16"), QUANT_FP16, "FP16 parse");
+    assert_eq(quant_from_str("bf16"), QUANT_BF16, "bf16 parse");
+    assert_eq(quant_from_str("int8"), QUANT_INT8, "int8 parse");
+    assert_eq(quant_from_str("INT4"), QUANT_INT4, "INT4 parse");
+    assert_eq(quant_from_str("nope"), 0 - 1, "invalid parse");
+    return 0;
+}
+
+fn test_quant_model_bytes() {
+    # 7B params at FP16 = 7B * 16 / 8 = 14 GB
+    var params_7b = 7000000000;
+    var mem = quant_model_bytes(params_7b, QUANT_FP16);
+    assert_eq(mem, 14000000000, "7B FP16 = 14GB");
+
+    # 7B params at INT4 = 7B * 4 / 8 = 3.5 GB
+    var mem4 = quant_model_bytes(params_7b, QUANT_INT4);
+    assert_eq(mem4, 3500000000, "7B INT4 = 3.5GB");
+
+    # With overhead: 14GB + 14GB/5 = 16.8GB
+    var mem_oh = quant_model_bytes_with_overhead(params_7b, QUANT_FP16);
+    assert_eq(mem_oh, 16800000000, "7B FP16 + overhead = 16.8GB");
+    return 0;
+}
+
+# --- Backend tests ---
+
+fn test_backends() {
+    assert_eq(BACKEND_COUNT, 16, "16 backends");
+    assert(streq(backend_name(BACKEND_CUDA), "cuda") == 1, "cuda name");
+    assert(streq(backend_name(BACKEND_ROCM), "rocm") == 1, "rocm name");
+    assert(streq(backend_name(BACKEND_VULKAN), "vulkan") == 1, "vulkan name");
+    assert(streq(backend_name(BACKEND_TPU), "tpu") == 1, "tpu name");
+    assert(streq(backend_name(BACKEND_GAUDI), "gaudi") == 1, "gaudi name");
+    assert(streq(backend_name(BACKEND_NEURON), "neuron") == 1, "neuron name");
+    return 0;
+}
+
+# --- Family name tests ---
+
+fn test_family_names() {
+    assert(streq(family_name(FAMILY_CPU), "CPU") == 1, "CPU name");
+    assert(streq(family_name(FAMILY_GPU), "GPU") == 1, "GPU name");
+    assert(streq(family_name(FAMILY_NPU), "NPU") == 1, "NPU name");
+    assert(streq(family_name(FAMILY_TPU), "TPU") == 1, "TPU name");
+    assert(streq(family_name(FAMILY_AI_ASIC), "AI ASIC") == 1, "AI ASIC name");
+    return 0;
+}
+
+# --- Run all tests ---
+
+alloc_init();
+test_error_codes();
+test_warning_struct();
+test_accel_family();
+test_accel_is_gpu();
+test_accel_training();
+test_tpu_versions();
+test_gaudi_generations();
+test_neuron_chips();
+test_units();
+test_quant_bits();
+test_quant_reduction();
+test_quant_names();
+test_quant_from_bits();
+test_quant_from_str();
+test_quant_model_bytes();
+test_backends();
+test_family_names();
+
+assert_summary();

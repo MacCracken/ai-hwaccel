@@ -1,0 +1,104 @@
+# vec.cyr — dynamic array (vector)
+# Usage: include "lib/alloc.cyr" then include "lib/vec.cyr"
+# Requires alloc_init() called first.
+#
+# A Vec is a heap-allocated struct: { data_ptr, len, cap }
+# Elements are 8 bytes each (i64).
+#
+# >>> include "lib/alloc.cyr"
+# >>> include "lib/vec.cyr"
+# >>> alloc_init(); var v = vec_new();
+# >>> vec_push(v, 10); vec_push(v, 20); vec_push(v, 12);
+# >>> var r = vec_len(v);
+# === 3
+
+# Create a new empty vector with initial capacity 16
+fn vec_new() {
+    var v = alloc(24);
+    var cap = 16;
+    var data = alloc(cap * 8);
+    store64(v, data);
+    store64(v + 8, 0);
+    store64(v + 16, cap);
+    return v;
+}
+
+# Return the number of elements in the vector
+fn vec_len(v) {
+    return load64(v + 8);
+}
+
+# Return the current capacity of the vector
+fn vec_cap(v) {
+    return load64(v + 16);
+}
+
+# Get element at index, abort if out of bounds
+fn vec_get(v, idx) {
+    if (idx < 0) { syscall(1, 2, "vec: index < 0\n", 15); syscall(60, 1); }
+    if (idx >= load64(v + 8)) { syscall(1, 2, "vec: index out of bounds\n", 25); syscall(60, 1); }
+    var data = load64(v);
+    return load64(data + idx * 8);
+}
+
+# Set element at index, abort if out of bounds
+fn vec_set(v, idx, val) {
+    if (idx < 0) { syscall(1, 2, "vec: index < 0\n", 15); syscall(60, 1); }
+    if (idx >= load64(v + 8)) { syscall(1, 2, "vec: index out of bounds\n", 25); syscall(60, 1); }
+    var data = load64(v);
+    store64(data + idx * 8, val);
+    return 0;
+}
+
+# Append a value to the end, growing if needed
+fn vec_push(v, val) {
+    var len = load64(v + 8);
+    var cap = load64(v + 16);
+    if (len >= cap) {
+        # Grow: allocate new buffer 2x, copy old data
+        var old_data = load64(v);
+        var new_cap = cap * 2;
+        var new_data = alloc(new_cap * 8);
+        for (var ci = 0; ci < len; ci = ci + 1) {
+            store64(new_data + ci * 8, load64(old_data + ci * 8));
+        }
+        store64(v, new_data);
+        store64(v + 16, new_cap);
+    }
+    var data = load64(v);
+    store64(data + len * 8, val);
+    store64(v + 8, len + 1);
+    return 0;
+}
+
+# Remove and return the last element, or 0 if empty
+fn vec_pop(v) {
+    var len = load64(v + 8);
+    if (len == 0) { return 0; }
+    len = len - 1;
+    store64(v + 8, len);
+    var data = load64(v);
+    return load64(data + len * 8);
+}
+
+# Find first occurrence of val, return index or -1
+fn vec_find(v, val) {
+    var len = load64(v + 8);
+    for (var fi = 0; fi < len; fi = fi + 1) {
+        if (vec_get(v, fi) == val) { return fi; }
+    }
+    return 0 - 1;
+}
+
+# Remove element at index, shift remaining left
+fn vec_remove(v, idx) {
+    var len = load64(v + 8);
+    if (idx < 0) { return 0 - 1; }
+    if (idx >= len) { return 0 - 1; }
+    var data = load64(v);
+    for (var ri = idx; ri < len - 1; ri = ri + 1) {
+        store64(data + ri * 8, load64(data + (ri + 1) * 8));
+    }
+    store64(v + 8, len - 1);
+    return 0;
+}

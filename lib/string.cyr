@@ -1,0 +1,85 @@
+# string.cyr — string standard library
+# Usage: include "lib/string.cyr"
+# All functions take raw pointers (addresses from &var or &buf).
+
+# Length of null-terminated string
+fn strlen(s) {
+    var n: i64 = 0;
+    while (load8(s + n) != 0) { n = n + 1; }
+    return n;
+}
+
+# Compare two null-terminated strings. Returns 1 if equal, 0 if not.
+fn streq(a, b) {
+    var la = strlen(a);
+    var lb = strlen(b);
+    if (la != lb) { return 0; }
+    return memeq(a, b, la);
+}
+
+# Compare first n bytes. Returns 1 if equal, 0 if not.
+fn memeq(a, b, n) {
+    for (var i = 0; i < n; i = i + 1) {
+        if (load8(a + i) != load8(b + i)) { return 0; }
+    }
+    return 1;
+}
+
+# Copy n bytes from src to dst
+fn memcpy(dst, src, n) {
+    for (var i = 0; i < n; i = i + 1) {
+        store8(dst + i, load8(src + i));
+    }
+    return dst;
+}
+
+# Fill n bytes at dst with val
+fn memset(dst, val, n) {
+    for (var i = 0; i < n; i = i + 1) {
+        store8(dst + i, val);
+    }
+    return dst;
+}
+
+# Find first occurrence of byte c in first n bytes. Returns offset or -1.
+fn memchr(s, c, n) {
+    for (var i = 0; i < n; i = i + 1) {
+        if (load8(s + i) == c) { return i; }
+    }
+    return 0 - 1;
+}
+
+# Find first occurrence of byte c in null-terminated string. Returns offset or -1.
+fn strchr(s, c) {
+    var i: i64 = 0;
+    while (load8(s + i) != 0) {
+        if (load8(s + i) == c) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+# Print a decimal number to stdout
+fn print_num(n: i64) {
+    var pbuf[24];
+    var pi: i64 = 23;
+    var neg: i64 = 0;
+    if (n < 0) { neg = 1; n = 0 - n; }
+    if (n == 0) { store8(&pbuf + pi, 48); pi = pi - 1; }
+    while (n > 0) {
+        store8(&pbuf + pi, 48 + n % 10);
+        pi = pi - 1;
+        n = n / 10;
+    }
+    if (neg == 1) { store8(&pbuf + pi, 45); pi = pi - 1; }
+    syscall(1, 1, &pbuf + pi + 1, 23 - pi);
+    return 0;
+}
+
+# Print string + newline to stdout
+fn println(s) {
+    var len = strlen(s);
+    syscall(1, 1, s, len);
+    syscall(1, 1, "\n", 1);
+    return 0;
+}

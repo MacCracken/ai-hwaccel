@@ -1,0 +1,119 @@
+# io.cyr — file I/O library
+# Usage: include "lib/io.cyr"
+# Wraps Linux syscalls for file operations.
+
+# Open flags
+var O_RDONLY = 0;
+var O_WRONLY = 1;
+var O_RDWR = 2;
+var O_CREAT = 64;
+var O_TRUNC = 512;
+var O_APPEND = 1024;
+
+# File descriptors
+var STDIN = 0;
+var STDOUT = 1;
+var STDERR = 2;
+
+# Open a file with given flags and mode, return fd
+fn file_open(path, flags, mode) {
+    return syscall(2, path, flags, mode);
+}
+
+# Close a file descriptor
+fn file_close(fd) {
+    return syscall(3, fd);
+}
+
+# Read up to len bytes from fd into buf
+fn file_read(fd, buf, len) {
+    return syscall(0, fd, buf, len);
+}
+
+# Write len bytes from buf to fd
+fn file_write(fd, buf, len) {
+    return syscall(1, fd, buf, len);
+}
+
+# Read entire file into buffer. Returns bytes read.
+fn file_read_all(path, buf, maxlen) {
+    var fd = file_open(path, 0, 0);
+    if (fd < 0) { return fd; }
+    var total: i64 = 0;
+    var rgo: i64 = 1;
+    while (rgo == 1) {
+        var n = file_read(fd, buf + total, maxlen - total);
+        if (n <= 0) { rgo = 0; }
+        else {
+            total = total + n;
+            if (total >= maxlen) { rgo = 0; }
+        }
+    }
+    file_close(fd);
+    return total;
+}
+
+# Write buffer to file. Returns bytes written or error.
+fn file_write_all(path, buf, len) {
+    var fd = file_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0x1A4);
+    if (fd < 0) { return fd; }
+    var written = file_write(fd, buf, len);
+    file_close(fd);
+    return written;
+}
+
+# Check if file exists (try to open read-only)
+fn file_exists(path) {
+    var fd = file_open(path, 0, 0);
+    if (fd < 0) { return 0; }
+    file_close(fd);
+    return 1;
+}
+
+# Write string to stdout
+fn print(msg, len) {
+    file_write(STDOUT, msg, len);
+    return 0;
+}
+
+# Write string to stderr
+fn eprint(msg, len) {
+    file_write(STDERR, msg, len);
+    return 0;
+}
+
+# Read environment variable by name. Returns pointer to value or 0 if not found.
+# Reads from /proc/self/environ (null-separated KEY=VALUE pairs).
+fn getenv(name) {
+    var buf[8192];
+    var fd = file_open("/proc/self/environ", 0, 0);
+    if (fd < 0) { return 0; }
+    var n = file_read(fd, &buf, 8192);
+    file_close(fd);
+    if (n <= 0) { return 0; }
+    var nlen = strlen(name);
+    var pos = 0;
+    while (pos < n) {
+        # Check if this entry starts with name=
+        var eq = 1;
+        var ci = 0;
+        while (ci < nlen) {
+            if (load8(&buf + pos + ci) != load8(name + ci)) { eq = 0; break; }
+            ci = ci + 1;
+        }
+        if (eq == 1 && load8(&buf + pos + nlen) == 61) {
+            # Found: return pointer to value (copy to heap for safety)
+            var vstart = pos + nlen + 1;
+            var vlen = 0;
+            while (vstart + vlen < n && load8(&buf + vstart + vlen) != 0) { vlen = vlen + 1; }
+            var result = alloc(vlen + 1);
+            memcpy(result, &buf + vstart, vlen);
+            store8(result + vlen, 0);
+            return result;
+        }
+        # Skip to next null terminator
+        while (pos < n && load8(&buf + pos) != 0) { pos = pos + 1; }
+        pos = pos + 1;
+    }
+    return 0;
+}

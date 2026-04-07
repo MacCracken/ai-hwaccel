@@ -1,0 +1,65 @@
+# assert.cyr — test assertion library
+# Usage: include "lib/assert.cyr"
+# Requires: string.cyr, fmt.cyr
+#
+# Now that comparisons work in function arguments, assert(x == 42, "name") works.
+
+var _assert_pass = 0;
+var _assert_fail = 0;
+var _assert_total = 0;
+
+# Assert condition is true, print FAIL with name if not
+fn assert(cond, name) {
+    _assert_total = _assert_total + 1;
+    if (cond == 1) {
+        _assert_pass = _assert_pass + 1;
+    } else {
+        _assert_fail = _assert_fail + 1;
+        syscall(1, 2, "  FAIL: ", 8);
+        syscall(1, 2, name, strlen(name));
+        syscall(1, 2, "\n", 1);
+    }
+    return 0;
+}
+
+# Assert a equals b, print expected vs got on failure
+fn assert_eq(a, b, name) {
+    _assert_total = _assert_total + 1;
+    if (a == b) {
+        _assert_pass = _assert_pass + 1;
+    } else {
+        _assert_fail = _assert_fail + 1;
+        syscall(1, 2, "  FAIL: ", 8);
+        syscall(1, 2, name, strlen(name));
+        syscall(1, 2, " (got ", 6);
+        fmt_int(a);
+        syscall(1, 2, ", expected ", 11);
+        fmt_int(b);
+        syscall(1, 2, ")\n", 2);
+    }
+    return 0;
+}
+
+# Assert a does not equal b
+fn assert_neq(a, b, name) {
+    assert(a != b, name);
+    return 0;
+}
+
+# Assert a is greater than b
+fn assert_gt(a, b, name) {
+    assert(a > b, name);
+    return 0;
+}
+
+# Print pass/fail summary and return number of failures
+fn assert_summary() {
+    syscall(1, 1, "\n", 1);
+    fmt_int(_assert_pass);
+    syscall(1, 1, " passed, ", 9);
+    fmt_int(_assert_fail);
+    syscall(1, 1, " failed (", 9);
+    fmt_int(_assert_total);
+    syscall(1, 1, " total)\n", 8);
+    return _assert_fail;
+}

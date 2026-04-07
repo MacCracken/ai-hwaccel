@@ -1,0 +1,46 @@
+# fnptr.cyr — function pointer support via indirect call
+# Usage: include "lib/fnptr.cyr"
+#
+# Call a function through a pointer stored in a variable.
+# The fncallN functions set up args, call through the pointer,
+# and return the result.
+
+# Call function pointer fp with zero arguments
+fn fncall0(fp) {
+    var result = 0;
+    # call [rbp-8] (fp), save result
+    asm {
+        0x48; 0x8B; 0x45; 0xF8;
+        0xFF; 0xD0;
+        0x48; 0x89; 0x45; 0xF0;
+    }
+    # mov rax,[rbp-8](fp); call rax; mov [rbp-16](result),rax
+    return result;
+}
+
+# Call function pointer fp with one argument
+fn fncall1(fp, a) {
+    var result = 0;
+    asm {
+        0x48; 0x8B; 0x7D; 0xF0;
+        0x48; 0x8B; 0x45; 0xF8;
+        0xFF; 0xD0;
+        0x48; 0x89; 0x45; 0xE8;
+    }
+    # mov rdi,[rbp-16](a); mov rax,[rbp-8](fp); call rax; mov [rbp-24](result),rax
+    return result;
+}
+
+# Call function pointer fp with two arguments
+fn fncall2(fp, a, b) {
+    var result = 0;
+    asm {
+        0x48; 0x8B; 0x75; 0xE8;
+        0x48; 0x8B; 0x7D; 0xF0;
+        0x48; 0x8B; 0x45; 0xF8;
+        0xFF; 0xD0;
+        0x48; 0x89; 0x45; 0xE0;
+    }
+    # mov rsi,b; mov rdi,a; mov rax,fp; call rax; mov result,rax
+    return result;
+}

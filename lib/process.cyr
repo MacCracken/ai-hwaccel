@@ -1,0 +1,222 @@
+# process.cyr — process management
+# Usage: include "lib/process.cyr"
+# Requires: agnosys/syscalls.cyr, string.cyr, alloc.cyr, tagged.cyr
+
+# Build argv array and execve. Called in child after fork. Does not return.
+fn _exec3(cmd, arg1, arg2) {
+    var argv[4];
+    store64(&argv, cmd);
+    var ai = 1;
+    if (arg1 != 0) { store64(&argv + ai * 8, arg1); ai = ai + 1; }
+    if (arg2 != 0) { store64(&argv + ai * 8, arg2); ai = ai + 1; }
+    store64(&argv + ai * 8, 0);
+    var envp[1];
+    store64(&envp, 0);
+    sys_execve(cmd, &argv, &envp);
+    sys_exit(127);
+}
+
+# Run a command and wait for it. Returns Result(exit_code).
+fn run(cmd, arg1, arg2) {
+    var pid = sys_fork();
+    if (pid < 0) { return Err(0 - pid); }
+    if (pid == 0) { _exec3(cmd, arg1, arg2); }
+    var status_buf[1];
+    sys_waitpid(pid, &status_buf, 0);
+    var status = load32(&status_buf);
+    if (WIFEXITED(status) == 1) { return Ok(WEXITSTATUS(status)); }
+    if (WIFSIGNALED(status) == 1) { return Ok(128 + WTERMSIG(status)); }
+    return Err(1);
+}
+
+# Run a command and capture stdout into a buffer.
+# Returns Result(bytes_read).
+fn run_capture(cmd, arg1, arg2, buf, buflen) {
+    var pipefd[2];
+    var pr = sys_pipe(&pipefd);
+    if (pr < 0) { return Err(0 - pr); }
+    var read_fd = load64(&pipefd);
+    var write_fd = load64(&pipefd + 8);
+
+    var pid = sys_fork();
+    if (pid < 0) {
+        sys_close(read_fd);
+        sys_close(write_fd);
+        return Err(0 - pid);
+    }
+    if (pid == 0) {
+        sys_close(read_fd);
+        sys_dup2(write_fd, 1);
+        sys_close(write_fd);
+        var devnull = sys_open("/dev/null", O_WRONLY, 0);
+        if (devnull >= 0) { sys_dup2(devnull, 2); sys_close(devnull); }
+        _exec3(cmd, arg1, arg2);
+    }
+    sys_close(write_fd);
+    var total = 0;
+    var rgo = 1;
+    while (rgo == 1) {
+        var n = sys_read(read_fd, buf + total, buflen - total);
+        if (n <= 0) { rgo = 0; }
+        else {
+            total = total + n;
+            if (total >= buflen) { rgo = 0; }
+        }
+    }
+    sys_close(read_fd);
+    var status_buf[1];
+    sys_waitpid(pid, &status_buf, 0);
+    return Ok(total);
+}
+
+# Spawn a command in the background (don't wait).
+# Returns Result(child_pid).
+fn spawn(cmd, arg1, arg2) {
+    var pid = sys_fork();
+    if (pid < 0) { return Err(0 - pid); }
+    if (pid == 0) { _exec3(cmd, arg1, arg2); }
+    return Ok(pid);
+}
+
+# Wait for a specific pid. Returns Result(exit_code).
+fn wait_pid(pid) {
+    var status_buf[1];
+    var r = sys_waitpid(pid, &status_buf, 0);
+    if (r < 0) { return Err(0 - r); }
+    var status = load32(&status_buf);
+    if (WIFEXITED(status) == 1) { return Ok(WEXITSTATUS(status)); }
+    if (WIFSIGNALED(status) == 1) { return Ok(128 + WTERMSIG(status)); }
+    return Err(1);
+}
+
+# Get current process ID
+fn getpid() { return sys_getpid(); }
+
+# Get parent process ID
+fn getppid() { return sys_getppid(); }
+
+# ================================================================
+# Enhanced subprocess — variable args via vec, env passing
+# ================================================================
+
+# Run command with a vec of string args. Returns exit code or -1.
+# Usage: var args = vec_new(); vec_push(args, "/usr/bin/ls");
+#        vec_push(args, "-la"); var rc = exec_vec(args);
+# Usage: var args = vec_new(); vec_push(args, "/usr/bin/ls"); vec_push(args, "-la");
+#        var rc = exec_vec(args);
+fn exec_vec(args) {
+    var argc = vec_len(args);
+    if (argc < 1) { return 0 - 1; }
+    var cmd = vec_get(args, 0);
+    # Build argv array (argc + 1 for null terminator)
+    var argv = alloc((argc + 1) * 8);
+    var avi = 0;
+    while (avi < argc) {
+        store64(argv + avi * 8, vec_get(args, avi));
+        avi = avi + 1;
+    }
+    store64(argv + argc * 8, 0);
+    var envp = alloc(8);
+    store64(envp, 0);
+    var pid = sys_fork();
+    if (pid < 0) { return 0 - 1; }
+    if (pid == 0) {
+        sys_execve(cmd, argv, envp);
+        sys_exit(127);
+    }
+    var stbuf[1];
+    sys_waitpid(pid, &stbuf, 0);
+    var st = load32(&stbuf);
+    if (WIFEXITED(st) == 1) { return WEXITSTATUS(st); }
+    return 0 - 1;
+}
+
+# Run command with args vec and capture stdout. Returns bytes read.
+# buf must be pre-allocated.
+fn exec_capture(args, buf, buflen) {
+    var argc = vec_len(args);
+    if (argc < 1) { return 0 - 1; }
+    var cmd = vec_get(args, 0);
+    var argv = alloc((argc + 1) * 8);
+    var avi = 0;
+    while (avi < argc) {
+        store64(argv + avi * 8, vec_get(args, avi));
+        avi = avi + 1;
+    }
+    store64(argv + argc * 8, 0);
+    var envp = alloc(8);
+    store64(envp, 0);
+    var pipefd[2];
+    sys_pipe(&pipefd);
+    var rfd = load64(&pipefd);
+    var wfd = load64(&pipefd + 8);
+    var pid = sys_fork();
+    if (pid < 0) { sys_close(rfd); sys_close(wfd); return 0 - 1; }
+    if (pid == 0) {
+        sys_close(rfd);
+        sys_dup2(wfd, 1);
+        sys_close(wfd);
+        sys_execve(cmd, argv, envp);
+        sys_exit(127);
+    }
+    sys_close(wfd);
+    var total = 0;
+    var rgo = 1;
+    while (rgo == 1) {
+        var n = sys_read(rfd, buf + total, buflen - total);
+        if (n <= 0) { rgo = 0; }
+        else { total = total + n; if (total >= buflen) { rgo = 0; } }
+    }
+    sys_close(rfd);
+    var stbuf[1];
+    sys_waitpid(pid, &stbuf, 0);
+    return total;
+}
+
+# Run command with args vec and environment vec.
+# env is a vec of "KEY=VALUE" strings.
+fn exec_env(args, env) {
+    var argc = vec_len(args);
+    if (argc < 1) { return 0 - 1; }
+    var cmd = vec_get(args, 0);
+    var argv = alloc((argc + 1) * 8);
+    var avi = 0;
+    while (avi < argc) {
+        store64(argv + avi * 8, vec_get(args, avi));
+        avi = avi + 1;
+    }
+    store64(argv + argc * 8, 0);
+    var envc = vec_len(env);
+    var envp = alloc((envc + 1) * 8);
+    var evi = 0;
+    while (evi < envc) {
+        store64(envp + evi * 8, vec_get(env, evi));
+        evi = evi + 1;
+    }
+    store64(envp + envc * 8, 0);
+    var pid = sys_fork();
+    if (pid < 0) { return 0 - 1; }
+    if (pid == 0) {
+        sys_execve(cmd, argv, envp);
+        sys_exit(127);
+    }
+    var stbuf[1];
+    sys_waitpid(pid, &stbuf, 0);
+    var st = load32(&stbuf);
+    if (WIFEXITED(st) == 1) { return WEXITSTATUS(st); }
+    return 0 - 1;
+}
+
+# Helper: build args vec from command string (split by spaces)
+# For simple cases like exec_cmd("/usr/bin/ls -la /tmp")
+fn exec_cmd(cmdline) {
+    var args = vec_new();
+    var parts = str_split(str_from(cmdline), " ");
+    var pi = 0;
+    while (pi < vec_len(parts)) {
+        var part = vec_get(parts, pi);
+        vec_push(args, str_data(part));
+        pi = pi + 1;
+    }
+    return exec_vec(args);
+}

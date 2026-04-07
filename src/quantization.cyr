@@ -1,0 +1,75 @@
+# quantization.cyr — model weight quantization levels
+
+enum QuantizationLevel {
+    QUANT_NONE = 0;
+    QUANT_FP16 = 1;
+    QUANT_BF16 = 2;
+    QUANT_INT8 = 3;
+    QUANT_INT4 = 4;
+}
+
+# Bits per parameter for each quantization level
+fn quant_bits(q) {
+    if (q == QUANT_NONE) { return 32; }
+    if (q == QUANT_FP16) { return 16; }
+    if (q == QUANT_BF16) { return 16; }
+    if (q == QUANT_INT8) { return 8; }
+    if (q == QUANT_INT4) { return 4; }
+    return 32;
+}
+
+# Memory reduction factor vs FP32, returns x1000 fixed-point
+# e.g., INT8 = 4000 (4.0x reduction)
+fn quant_reduction_x1000(q) {
+    var bits = quant_bits(q);
+    if (bits == 0) { return 1000; }
+    return 32 * 1000 / bits;
+}
+
+# Display name
+fn quant_name(q) {
+    if (q == QUANT_NONE) { return "FP32"; }
+    if (q == QUANT_FP16) { return "FP16"; }
+    if (q == QUANT_BF16) { return "BF16"; }
+    if (q == QUANT_INT8) { return "INT8"; }
+    if (q == QUANT_INT4) { return "INT4"; }
+    return "Unknown";
+}
+
+# Parse from bit width (32 -> QUANT_NONE, 16 -> QUANT_FP16, etc.)
+# Returns -1 on invalid input
+fn quant_from_bits(bits) {
+    if (bits == 32) { return QUANT_NONE; }
+    if (bits == 16) { return QUANT_FP16; }
+    if (bits == 8) { return QUANT_INT8; }
+    if (bits == 4) { return QUANT_INT4; }
+    return 0 - 1;
+}
+
+# Parse from string name ("fp32", "fp16", "bf16", "int8", "int4")
+# Returns -1 on no match
+fn quant_from_str(s) {
+    if (streq(s, "fp32") == 1) { return QUANT_NONE; }
+    if (streq(s, "FP32") == 1) { return QUANT_NONE; }
+    if (streq(s, "fp16") == 1) { return QUANT_FP16; }
+    if (streq(s, "FP16") == 1) { return QUANT_FP16; }
+    if (streq(s, "bf16") == 1) { return QUANT_BF16; }
+    if (streq(s, "BF16") == 1) { return QUANT_BF16; }
+    if (streq(s, "int8") == 1) { return QUANT_INT8; }
+    if (streq(s, "INT8") == 1) { return QUANT_INT8; }
+    if (streq(s, "int4") == 1) { return QUANT_INT4; }
+    if (streq(s, "INT4") == 1) { return QUANT_INT4; }
+    return 0 - 1;
+}
+
+# Calculate model memory in bytes given param count and quant level
+fn quant_model_bytes(param_count, quant) {
+    var bits = quant_bits(quant);
+    return param_count * bits / BITS_PER_BYTE;
+}
+
+# Calculate model memory with activation overhead (20%)
+fn quant_model_bytes_with_overhead(param_count, quant) {
+    var raw = quant_model_bytes(param_count, quant);
+    return raw + raw / ACTIVATION_OVERHEAD_DIVISOR;
+}

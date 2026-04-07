@@ -1,0 +1,103 @@
+# alloc.cyr — heap allocator using brk syscall
+# Usage: include "lib/alloc.cyr"
+# Call alloc_init() before any allocations.
+#
+# Bump allocator: fast, no individual free.
+# alloc(size) returns aligned pointer or 0 on failure.
+# alloc_reset() frees everything (batch).
+
+var _heap_base = 0;
+var _heap_ptr = 0;
+var _heap_end = 0;
+
+# Initialize the heap allocator (must call before any alloc)
+fn alloc_init() {
+    _heap_base = syscall(12, 0);
+    _heap_end = _heap_base + 0x100000;
+    syscall(12, _heap_end);
+    _heap_ptr = _heap_base;
+    return _heap_base;
+}
+
+# Allocate size bytes from the heap, 8-byte aligned
+fn alloc(size) {
+    # Align to 8 bytes
+    size = (size + 7) & (0 - 8);
+    var ptr = _heap_ptr;
+    _heap_ptr = _heap_ptr + size;
+    if (_heap_ptr > _heap_end) {
+        # Grow heap by 1MB
+        var new_end = _heap_end + 0x100000;
+        var result = syscall(12, new_end);
+        if (result < new_end) {
+            # brk failed — out of memory
+            _heap_ptr = ptr;
+            return 0;
+        }
+        _heap_end = new_end;
+    }
+    return ptr;
+}
+
+# Reset the heap, freeing all allocations at once
+fn alloc_reset() {
+    _heap_ptr = _heap_base;
+    return 0;
+}
+
+# Return the number of heap bytes currently in use
+fn alloc_used() {
+    return _heap_ptr - _heap_base;
+}
+
+# ================================================================
+# Arena allocator — independent memory pools
+# ================================================================
+# Unlike alloc_reset() which frees EVERYTHING, arenas are independent.
+# Each arena has its own bump pointer. Freeing one arena doesn't
+# affect allocations from other arenas or the global allocator.
+#
+# Usage:
+#   var a = arena_new(4096);          # 4KB arena
+#   var p1 = arena_alloc(a, 64);     # allocate from arena
+#   var p2 = arena_alloc(a, 128);    # still valid after arena_reset
+#   arena_reset(a);                   # frees p1 and p2, not global allocs
+#   arena_free(a);                    # release the arena itself
+#
+# Layout: { base: i64, ptr: i64, end: i64 } = 24 bytes
+
+# Create a new arena with the given capacity (bytes)
+fn arena_new(capacity) {
+    var a = alloc(24);
+    var base = alloc(capacity);
+    store64(a, base);
+    store64(a + 8, base);
+    store64(a + 16, base + capacity);
+    return a;
+}
+
+# Allocate size bytes from the arena, 8-byte aligned. Returns 0 on overflow.
+fn arena_alloc(a, size) {
+    size = (size + 7) & (0 - 8);
+    var ptr = load64(a + 8);
+    var new_ptr = ptr + size;
+    if (new_ptr > load64(a + 16)) { return 0; }
+    store64(a + 8, new_ptr);
+    return ptr;
+}
+
+# Reset the arena — all allocations from this arena are freed
+fn arena_reset(a) {
+    store64(a + 8, load64(a));
+    return 0;
+}
+
+# Return bytes used in the arena
+fn arena_used(a) {
+    return load64(a + 8) - load64(a);
+}
+
+# Return bytes remaining in the arena
+fn arena_remaining(a) {
+    return load64(a + 16) - load64(a + 8);
+}

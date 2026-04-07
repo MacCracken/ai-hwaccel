@@ -1,0 +1,315 @@
+# str.cyr — string type (fat pointer: data + length)
+# Usage: include "lib/str.cyr"
+# Requires: include "lib/alloc.cyr" for dynamic strings
+# Requires: include "lib/string.cyr" for strlen/memcpy
+
+struct Str { data; len; }
+
+# Create a Str from a C string literal (null-terminated)
+fn str_from(cstr) {
+    var slen = strlen(cstr);
+    var s = alloc(16);
+    store64(s, cstr);
+    store64(s + 8, slen);
+    return s;
+}
+
+# Create a Str from buffer + length
+fn str_new(data, len) {
+    var s = alloc(16);
+    store64(s, data);
+    store64(s + 8, len);
+    return s;
+}
+
+# Get length
+fn str_len(s) {
+    return load64(s + 8);
+}
+
+# Get data pointer
+fn str_data(s) {
+    return load64(s);
+}
+
+# Print a Str to stdout
+fn str_print(s) {
+    syscall(1, 1, load64(s), load64(s + 8));
+    return 0;
+}
+
+# Print Str + newline
+fn str_println(s) {
+    str_print(s);
+    syscall(1, 1, "\n", 1);
+    return 0;
+}
+
+# Compare two Strs
+fn str_eq(a, b) {
+    var la = load64(a + 8);
+    var lb = load64(b + 8);
+    if (la != lb) { return 0; }
+    return memeq(load64(a), load64(b), la);
+}
+
+# Concatenate two Strs (allocates new)
+fn str_cat(a, b) {
+    var la = load64(a + 8);
+    var lb = load64(b + 8);
+    var newlen = la + lb;
+    var buf = alloc(newlen);
+    memcpy(buf, load64(a), la);
+    memcpy(buf + la, load64(b), lb);
+    return str_new(buf, newlen);
+}
+
+# Substring (allocates new Str header, shares data)
+fn str_sub(s, start, len) {
+    return str_new(load64(s) + start, len);
+}
+
+# Clone a Str (deep copy — new buffer)
+fn str_clone(s) {
+    var slen = str_len(s);
+    var buf = alloc(slen + 1);
+    memcpy(buf, str_data(s), slen);
+    store8(buf + slen, 0);
+    return str_new(buf, slen);
+}
+
+# Check if Str contains needle Str
+fn str_contains(s, needle) {
+    var slen = str_len(s);
+    var nlen = str_len(needle);
+    if (nlen > slen) { return 0; }
+    var sd = str_data(s);
+    var nd = str_data(needle);
+    var ci = 0;
+    while (ci <= slen - nlen) {
+        if (memeq(sd + ci, nd, nlen) == 1) { return 1; }
+        ci = ci + 1;
+    }
+    return 0;
+}
+
+# Check if Str starts with a C string prefix
+fn str_starts_with(s, prefix) {
+    var plen = strlen(prefix);
+    if (plen > str_len(s)) { return 0; }
+    return memeq(str_data(s), prefix, plen);
+}
+
+# Check if Str ends with a C string suffix
+# Check if Str ends with suffix Str
+fn str_ends_with(s, suffix) {
+    var xlen = str_len(suffix);
+    var slen = str_len(s);
+    if (xlen > slen) { return 0; }
+    return memeq(str_data(s) + slen - xlen, str_data(suffix), xlen);
+}
+
+# Find first occurrence of byte in Str, return index or -1
+fn str_index_of(s, ch) {
+    var slen = str_len(s);
+    var sd = str_data(s);
+    var fi = 0;
+    while (fi < slen) {
+        if (load8(sd + fi) == ch) { return fi; }
+        fi = fi + 1;
+    }
+    return 0 - 1;
+}
+
+# Convert integer to Str
+fn str_from_int(n) {
+    var buf = alloc(24);
+    var blen = fmt_int_buf(n, buf);
+    return str_new(buf, blen);
+}
+
+# Parse integer from Str (returns 0 on invalid)
+fn str_to_int(s) {
+    var slen = str_len(s);
+    var sd = str_data(s);
+    var result = 0;
+    var neg = 0;
+    var ti = 0;
+    if (slen > 0) {
+        if (load8(sd) == 45) { neg = 1; ti = 1; }
+    }
+    while (ti < slen) {
+        var c = load8(sd + ti);
+        if (c >= 48) {
+            if (c <= 57) {
+                result = result * 10 + c - 48;
+            }
+        }
+        ti = ti + 1;
+    }
+    if (neg == 1) { result = 0 - result; }
+    return result;
+}
+
+# Trim leading and trailing whitespace (returns new Str)
+fn str_trim(s) {
+    var slen = str_len(s);
+    var sd = str_data(s);
+    var start = 0;
+    while (start < slen) {
+        var c = load8(sd + start);
+        if (c != 32) { if (c != 9) { if (c != 10) { if (c != 13) { break; } } } }
+        start = start + 1;
+    }
+    var end = slen;
+    while (end > start) {
+        var c2 = load8(sd + end - 1);
+        if (c2 != 32) { if (c2 != 9) { if (c2 != 10) { if (c2 != 13) { break; } } } }
+        end = end - 1;
+    }
+    return str_sub(s, start, end - start);
+}
+
+# Split Str by byte separator, return vec of Str pointers
+fn str_split(s, sep) {
+    var parts = vec_new();
+    var slen = str_len(s);
+    var sd = str_data(s);
+    var start = 0;
+    var si = 0;
+    while (si < slen) {
+        if (load8(sd + si) == sep) {
+            vec_push(parts, str_new(sd + start, si - start));
+            start = si + 1;
+        }
+        si = si + 1;
+    }
+    if (start <= slen) {
+        vec_push(parts, str_new(sd + start, slen - start));
+    }
+    return parts;
+}
+
+# String builder — direct buffer approach (no per-segment heap allocation)
+# Layout: { buf: ptr, len: i64, cap: i64 } = 24 bytes
+# Starts with 64-byte inline buffer, grows via alloc if needed.
+fn str_builder_new() {
+    var sb = alloc(24 + 64);
+    store64(sb, sb + 24);
+    store64(sb + 8, 0);
+    store64(sb + 16, 64);
+    return sb;
+}
+
+# Ensure builder has room for n more bytes
+fn _sb_grow(sb, n) {
+    var len = load64(sb + 8);
+    var cap = load64(sb + 16);
+    if (len + n <= cap) { return 0; }
+    var new_cap = cap * 2;
+    if (new_cap < len + n) { new_cap = len + n + 64; }
+    var new_buf = alloc(new_cap);
+    memcpy(new_buf, load64(sb), len);
+    store64(sb, new_buf);
+    store64(sb + 16, new_cap);
+    return 0;
+}
+
+# Append a Str to the string builder
+fn str_builder_add(sb, s) {
+    var slen = str_len(s);
+    _sb_grow(sb, slen);
+    var buf = load64(sb);
+    var len = load64(sb + 8);
+    memcpy(buf + len, str_data(s), slen);
+    store64(sb + 8, len + slen);
+    return 0;
+}
+
+# Append a C string to the string builder
+fn str_builder_add_cstr(sb, cstr) {
+    var slen = strlen(cstr);
+    _sb_grow(sb, slen);
+    var buf = load64(sb);
+    var len = load64(sb + 8);
+    memcpy(buf + len, cstr, slen);
+    store64(sb + 8, len + slen);
+    return 0;
+}
+
+# Append an integer (as decimal string) to the string builder
+fn str_builder_add_int(sb, n) {
+    var tmp[24];
+    var tlen = fmt_int_buf(n, &tmp);
+    _sb_grow(sb, tlen);
+    var buf = load64(sb);
+    var len = load64(sb + 8);
+    memcpy(buf + len, &tmp, tlen);
+    store64(sb + 8, len + tlen);
+    return 0;
+}
+
+# Build final Str from the builder's buffer
+fn str_builder_build(sb) {
+    var buf = load64(sb);
+    var total = load64(sb + 8);
+    if (total == 0) { return str_from(""); }
+    # Copy to a permanent buffer (builder's inline buf may be reused)
+    var out = alloc(total + 1);
+    memcpy(out, buf, total);
+    store8(out + total, 0);
+    return str_new(out, total);
+}
+
+# Join a vec of Str with separator
+fn str_join(parts, sep) {
+    var plen = vec_len(parts);
+    if (plen == 0) { return str_from(""); }
+    var sb = str_builder_new();
+    var ji = 0;
+    while (ji < plen) {
+        if (ji > 0) { str_builder_add_cstr(sb, sep); }
+        str_builder_add(sb, vec_get(parts, ji));
+        ji = ji + 1;
+    }
+    return str_builder_build(sb);
+}
+
+# ================================================================
+# Method wrappers — enable s.len(), s.print(), s.contains("x") etc.
+# Requires: var s: Str = str_from("hello");
+# These delegate to the str_* functions above.
+# ================================================================
+
+# Return length of string
+fn Str_len(self) { return str_len(self); }
+# Return pointer to raw byte data
+fn Str_data(self) { return str_data(self); }
+# Print string to stdout
+fn Str_print(self) { return str_print(self); }
+# Print string + newline to stdout
+fn Str_println(self) { return str_println(self); }
+# Compare two Strs for equality
+fn Str_eq(self, other) { return str_eq(self, other); }
+# Concatenate two Strs (allocates new)
+fn Str_cat(self, other) { return str_cat(self, other); }
+# Substring from start with given length
+fn Str_sub(self, start, len) { return str_sub(self, start, len); }
+# Deep copy of string
+fn Str_clone(self) { return str_clone(self); }
+# Check if string contains needle (C string)
+fn Str_contains(self, needle) { return str_contains(self, needle); }
+# Check if string starts with prefix (C string)
+fn Str_starts_with(self, prefix) { return str_starts_with(self, prefix); }
+# Check if string ends with suffix (C string)
+fn Str_ends_with(self, suffix) { return str_ends_with(self, suffix); }
+# Find first occurrence of needle, return offset or -1
+fn Str_index_of(self, needle) { return str_index_of(self, needle); }
+# Create Str from integer
+fn Str_from_int(n) { return str_from_int(n); }
+# Parse Str as integer
+fn Str_to_int(self) { return str_to_int(self); }
+# Trim whitespace from both ends
+fn Str_trim(self) { return str_trim(self); }
+# Split by separator into vec of Strs
+fn Str_split(self, sep) { return str_split(self, sep); }

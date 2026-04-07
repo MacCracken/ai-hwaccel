@@ -1,0 +1,128 @@
+# net.cyr — TCP/UDP network sockets via Linux syscalls
+# Usage: include "lib/net.cyr"
+# Requires: agnosys/syscalls.cyr, alloc.cyr, tagged.cyr
+
+# Syscall numbers
+var SYS_SOCKET = 41;
+var SYS_CONNECT = 42;
+var SYS_ACCEPT = 43;
+var SYS_BIND = 49;
+var SYS_LISTEN = 50;
+var SYS_SETSOCKOPT = 54;
+var SYS_SHUTDOWN = 48;
+
+# Socket constants
+enum SockDomain { AF_INET = 2; AF_INET6 = 10; }
+enum SockType { SOCK_STREAM = 1; SOCK_DGRAM = 2; }
+enum SockOpt { SOL_SOCKET = 1; SO_REUSEADDR = 2; }
+
+# sockaddr_in: { family(2), port(2), addr(4), zero(8) } = 16 bytes
+# Build a sockaddr_in struct from address and port
+fn sockaddr_in(addr, port) {
+    var sa = alloc(16);
+    memset(sa, 0, 16);
+    store16(sa, AF_INET);
+    # Port in network byte order (big-endian)
+    store8(sa + 2, (port >> 8) & 0xFF);
+    store8(sa + 3, port & 0xFF);
+    # Address: 4 bytes
+    store32(sa + 4, addr);
+    return sa;
+}
+
+# Common addresses
+fn INADDR_ANY() { return 0; }
+# Loopback address 127.0.0.1 in network byte order
+fn INADDR_LOOPBACK() { return 0x0100007F; }
+
+# Create a TCP socket. Returns Result(fd).
+fn tcp_socket() {
+    var fd = syscall(SYS_SOCKET, AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) { return Err(0 - fd); }
+    return Ok(fd);
+}
+
+# Create a UDP socket. Returns Result(fd).
+fn udp_socket() {
+    var fd = syscall(SYS_SOCKET, AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) { return Err(0 - fd); }
+    return Ok(fd);
+}
+
+# Set socket option SO_REUSEADDR
+fn sock_reuse(fd) {
+    var val = alloc(4);
+    store32(val, 1);
+    return syscall(SYS_SETSOCKOPT, fd, SOL_SOCKET, SO_REUSEADDR, val, 4);
+}
+
+# Bind socket to address:port. Returns Result(0).
+fn sock_bind(fd, addr, port) {
+    var sa = sockaddr_in(addr, port);
+    var r = syscall(SYS_BIND, fd, sa, 16);
+    if (r < 0) { return Err(0 - r); }
+    return Ok(0);
+}
+
+# Listen on socket. Returns Result(0).
+fn sock_listen(fd, backlog) {
+    var r = syscall(SYS_LISTEN, fd, backlog);
+    if (r < 0) { return Err(0 - r); }
+    return Ok(0);
+}
+
+# Accept a connection. Returns Result(client_fd).
+fn sock_accept(fd) {
+    var client_addr = alloc(16);
+    var addrlen = alloc(4);
+    store32(addrlen, 16);
+    var cfd = syscall(SYS_ACCEPT, fd, client_addr, addrlen);
+    if (cfd < 0) { return Err(0 - cfd); }
+    return Ok(cfd);
+}
+
+# Connect to address:port. Returns Result(0).
+fn sock_connect(fd, addr, port) {
+    var sa = sockaddr_in(addr, port);
+    var r = syscall(SYS_CONNECT, fd, sa, 16);
+    if (r < 0) { return Err(0 - r); }
+    return Ok(0);
+}
+
+# Send data on socket. Returns Result(bytes_sent).
+fn sock_send(fd, buf, len) {
+    var n = sys_write(fd, buf, len);
+    if (n < 0) { return Err(0 - n); }
+    return Ok(n);
+}
+
+# Receive data from socket. Returns Result(bytes_read).
+fn sock_recv(fd, buf, len) {
+    var n = sys_read(fd, buf, len);
+    if (n < 0) { return Err(0 - n); }
+    return Ok(n);
+}
+
+# Close socket
+fn sock_close(fd) {
+    return sys_close(fd);
+}
+
+# Shutdown socket (0=read, 1=write, 2=both)
+fn sock_shutdown(fd, how) {
+    return syscall(SYS_SHUTDOWN, fd, how);
+}
+
+# === Simple TCP server pattern ===
+# fn handle_client(cfd) { ... }
+# fn serve(port) {
+    #     var sfd = result_unwrap(tcp_socket());
+    #     sock_reuse(sfd);
+    #     result_unwrap(sock_bind(sfd, INADDR_ANY(), port));
+    #     result_unwrap(sock_listen(sfd, 16));
+    #     while (1 == 1) {
+        #         var cfd = result_unwrap(sock_accept(sfd));
+        #         handle_client(cfd);
+        #         sock_close(cfd);
+        #     }
+    # }

@@ -1,0 +1,442 @@
+# agnosys/syscalls.cyr — Linux x86_64 syscall wrappers
+# Usage: include "lib/agnosys/syscalls.cyr"
+#
+# Cyrius re-implementation of agnosys syscall bindings.
+# Constants use enums to avoid gvar_toks overflow (64 slot limit).
+
+# ================================================================
+# Syscall numbers (x86_64)
+# ================================================================
+enum SysNr {
+    SYS_READ = 0;
+    SYS_WRITE = 1;
+    SYS_OPEN = 2;
+    SYS_CLOSE = 3;
+    SYS_STAT = 4;
+    SYS_FSTAT = 5;
+    SYS_LSEEK = 8;
+    SYS_MMAP = 9;
+    SYS_BRK = 12;
+    SYS_RT_SIGPROCMASK = 14;
+    SYS_IOCTL = 16;
+    SYS_ACCESS = 21;
+    SYS_PIPE = 22;
+    SYS_DUP = 32;
+    SYS_DUP2 = 33;
+    SYS_PAUSE = 34;
+    SYS_GETPID = 39;
+    SYS_FORK = 57;
+    SYS_EXECVE = 59;
+    SYS_EXIT = 60;
+    SYS_WAIT4 = 61;
+    SYS_KILL = 62;
+    SYS_UNAME = 63;
+    SYS_FCNTL = 72;
+    SYS_GETCWD = 79;
+    SYS_CHDIR = 80;
+    SYS_MKDIR = 83;
+    SYS_RMDIR = 84;
+    SYS_UNLINK = 87;
+    SYS_CHMOD = 90;
+    SYS_GETUID = 102;
+    SYS_GETGID = 104;
+    SYS_SETUID = 105;
+    SYS_SETGID = 106;
+    SYS_GETEUID = 107;
+    SYS_GETEGID = 108;
+    SYS_GETPPID = 110;
+    SYS_SETSID = 112;
+    SYS_SETGROUPS = 116;
+    SYS_SYNC = 162;
+    SYS_MOUNT = 165;
+    SYS_UMOUNT2 = 166;
+    SYS_REBOOT = 169;
+    SYS_EPOLL_WAIT = 232;
+    SYS_EPOLL_CTL = 233;
+    SYS_WAITID = 247;
+    SYS_TIMERFD_CREATE = 283;
+    SYS_TIMERFD_SETTIME = 286;
+    SYS_SIGNALFD4 = 289;
+    SYS_EPOLL_CREATE1 = 291;
+}
+
+# ================================================================
+# Open flags
+# ================================================================
+enum OpenFlag {
+    O_RDONLY = 0;
+    O_WRONLY = 1;
+    O_RDWR = 2;
+    O_CREAT = 64;
+    O_EXCL = 128;
+    O_TRUNC = 512;
+    O_APPEND = 1024;
+    O_NONBLOCK = 2048;
+    O_CLOEXEC = 524288;
+}
+
+# ================================================================
+# Signals
+# ================================================================
+enum Signal {
+    SIGHUP = 1;
+    SIGINT = 2;
+    SIGQUIT = 3;
+    SIGKILL = 9;
+    SIGUSR1 = 10;
+    SIGUSR2 = 12;
+    SIGTERM = 15;
+    SIGCHLD = 17;
+    SIGCONT = 18;
+    SIGSTOP = 19;
+    SIGPWR = 30;
+}
+
+enum SigAction {
+    SIG_BLOCK = 0;
+    SIG_UNBLOCK = 1;
+    SIG_SETMASK = 2;
+}
+
+# ================================================================
+# Mount flags
+# ================================================================
+enum MsFlag {
+    MS_RDONLY = 1;
+    MS_NOSUID = 2;
+    MS_NODEV = 4;
+    MS_NOEXEC = 8;
+    MS_REMOUNT = 32;
+    MS_BIND = 4096;
+    MS_MOVE = 8192;
+}
+
+# ================================================================
+# Epoll constants
+# ================================================================
+enum EpollConst {
+    EPOLL_CLOEXEC = 524288;
+    EPOLL_CTL_ADD = 1;
+    EPOLL_CTL_DEL = 2;
+    EPOLL_CTL_MOD = 3;
+    EPOLLIN = 1;
+    EPOLLOUT = 4;
+    EPOLLERR = 8;
+    EPOLLHUP = 16;
+}
+
+# ================================================================
+# Timer, wait, signalfd, reboot, errno
+# ================================================================
+enum TimerConst {
+    CLOCK_MONOTONIC = 1;
+    TFD_NONBLOCK = 2048;
+    TFD_CLOEXEC = 524288;
+}
+
+enum WaitFlag {
+    WNOHANG = 1;
+    WUNTRACED = 2;
+}
+
+enum SfdFlag {
+    SFD_NONBLOCK = 2048;
+    SFD_CLOEXEC = 524288;
+}
+
+enum RebootCmd {
+    RB_POWER_OFF = 0x4321FEDC;
+    RB_AUTOBOOT = 0x01234567;
+    RB_HALT_SYSTEM = 0xCDEF0123;
+}
+
+enum Errno {
+    EPERM = 1;
+    ENOENT = 2;
+    ESRCH = 3;
+    EINTR = 4;
+    EIO = 5;
+    ENXIO = 6;
+    EAGAIN = 11;
+    EACCES = 13;
+    EBUSY = 16;
+    EEXIST = 17;
+    ENOTDIR = 20;
+    EISDIR = 21;
+    EINVAL = 22;
+    ENFILE = 23;
+    EMFILE = 24;
+    ENOSPC = 28;
+    ECHILD = 10;
+}
+
+# Standard fds
+enum StdFd {
+    STDIN_FD = 0;
+    STDOUT_FD = 1;
+    STDERR_FD = 2;
+}
+
+# Reboot magic
+var LINUX_REBOOT_MAGIC1 = 0xFEE1DEAD;
+var LINUX_REBOOT_MAGIC2 = 672274793;
+
+# ================================================================
+# Syscall wrappers
+# ================================================================
+
+# File operations
+fn sys_open(path, flags, mode) {
+    return syscall(SYS_OPEN, path, flags, mode);
+}
+
+# Close a file descriptor.
+fn sys_close(fd) {
+    return syscall(SYS_CLOSE, fd);
+}
+
+# Read bytes from fd into buffer. Returns bytes read.
+fn sys_read(fd, buf, count) {
+    return syscall(SYS_READ, fd, buf, count);
+}
+
+# Write bytes from buffer to fd. Returns bytes written.
+fn sys_write(fd, buf, count) {
+    return syscall(SYS_WRITE, fd, buf, count);
+}
+
+# Duplicate fd oldfd to newfd.
+fn sys_dup2(oldfd, newfd) {
+    return syscall(SYS_DUP2, oldfd, newfd);
+}
+
+# Create a directory at path with given mode.
+fn sys_mkdir(path, mode) {
+    return syscall(SYS_MKDIR, path, mode);
+}
+
+# Remove an empty directory.
+fn sys_rmdir(path) {
+    return syscall(SYS_RMDIR, path);
+}
+
+# Delete a file.
+fn sys_unlink(path) {
+    return syscall(SYS_UNLINK, path);
+}
+
+# Change file permissions.
+fn sys_chmod(path, mode) {
+    return syscall(SYS_CHMOD, path, mode);
+}
+
+# Check file access permissions.
+fn sys_access(path, mode) {
+    return syscall(SYS_ACCESS, path, mode);
+}
+
+# Process operations
+fn sys_fork() {
+    return syscall(SYS_FORK);
+}
+
+# Terminate process with exit code.
+fn sys_exit(code) {
+    syscall(SYS_EXIT, code);
+    return 0;
+}
+
+# execve: replace process image. argv and envp are null-terminated arrays of pointers.
+fn sys_execve(path, argv, envp) {
+    return syscall(SYS_EXECVE, path, argv, envp);
+}
+
+# pipe: create pipe, fds[0]=read end, fds[1]=write end
+fn sys_pipe(fds) {
+    return syscall(SYS_PIPE, fds);
+}
+
+# Get current process ID.
+fn sys_getpid() {
+    return syscall(SYS_GETPID);
+}
+
+# Get parent process ID.
+fn sys_getppid() {
+    return syscall(SYS_GETPPID);
+}
+
+# Send signal to process.
+fn sys_kill(pid, sig) {
+    return syscall(SYS_KILL, pid, sig);
+}
+
+# Wait for a signal.
+fn sys_pause() {
+    return syscall(SYS_PAUSE);
+}
+
+# Create a new session.
+fn sys_setsid() {
+    return syscall(SYS_SETSID);
+}
+
+# waitpid via wait4 with rusage=NULL
+fn sys_waitpid(pid, status_ptr, options) {
+    return syscall(SYS_WAIT4, pid, status_ptr, options, 0);
+}
+
+# Wait status macros
+fn WIFEXITED(status) {
+    if ((status & 0x7F) == 0) { return 1; }
+    return 0;
+}
+
+# Get exit status from wait status.
+fn WEXITSTATUS(status) {
+    return (status >> 8) & 0xFF;
+}
+
+# Check if child was killed by signal.
+fn WIFSIGNALED(status) {
+    var sig = status & 0x7F;
+    if (sig > 0) {
+        if (sig != 0x7F) { return 1; }
+    }
+    return 0;
+}
+
+# Get signal number from wait status.
+fn WTERMSIG(status) {
+    return status & 0x7F;
+}
+
+# Identity
+fn sys_getuid() { return syscall(SYS_GETUID); }
+# Get group ID.
+fn sys_getgid() { return syscall(SYS_GETGID); }
+# Get effective user ID.
+fn sys_geteuid() { return syscall(SYS_GETEUID); }
+# Get effective group ID.
+fn sys_getegid() { return syscall(SYS_GETEGID); }
+# Set user ID.
+fn sys_setuid(uid) { return syscall(SYS_SETUID, uid); }
+# Set group ID.
+fn sys_setgid(gid) { return syscall(SYS_SETGID, gid); }
+# sys_setgroups syscall wrapper.
+fn sys_setgroups(size, list) { return syscall(SYS_SETGROUPS, size, list); }
+
+# Mount
+fn sys_mount(source, target, fstype, flags, data) {
+    return syscall(SYS_MOUNT, source, target, fstype, flags, data);
+}
+
+# Unmount a filesystem.
+fn sys_umount2(target, flags) {
+    return syscall(SYS_UMOUNT2, target, flags);
+}
+
+# Sync + reboot
+fn sys_sync() {
+    syscall(SYS_SYNC);
+    return 0;
+}
+
+# sys_reboot syscall wrapper.
+fn sys_reboot(cmd) {
+    return syscall(SYS_REBOOT, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, cmd, 0);
+}
+
+# Signal operations
+fn sigset_new() {
+    var set = alloc(8);
+    store64(set, 0);
+    return set;
+}
+
+# sigset_add syscall wrapper.
+fn sigset_add(set, signum) {
+    var mask = load64(set);
+    mask = mask | (1 << (signum - 1));
+    store64(set, mask);
+    return 0;
+}
+
+# sigset_has syscall wrapper.
+fn sigset_has(set, signum) {
+    var mask = load64(set);
+    if ((mask & (1 << (signum - 1))) != 0) { return 1; }
+    return 0;
+}
+
+# sys_sigprocmask syscall wrapper.
+fn sys_sigprocmask(how, set, oldset) {
+    return syscall(SYS_RT_SIGPROCMASK, how, set, oldset, 8);
+}
+
+# sys_signalfd syscall wrapper.
+fn sys_signalfd(fd, mask, flags) {
+    return syscall(SYS_SIGNALFD4, fd, mask, 8, flags);
+}
+
+# Epoll
+fn sys_epoll_create() {
+    return syscall(SYS_EPOLL_CREATE1, EPOLL_CLOEXEC);
+}
+
+# epoll_event: { u32 events, u64 data } = 12 bytes
+fn epoll_event_new(events, data) {
+    var ev = alloc(16);
+    store32(ev, events);
+    store64(ev + 4, data);
+    return ev;
+}
+
+# Control epoll: add/mod/del fd.
+fn sys_epoll_ctl(epfd, op, fd, event) {
+    return syscall(SYS_EPOLL_CTL, epfd, op, fd, event);
+}
+
+# Wait for epoll events.
+fn sys_epoll_wait(epfd, events, maxevents, timeout) {
+    return syscall(SYS_EPOLL_WAIT, epfd, events, maxevents, timeout);
+}
+
+# Timers
+fn sys_timerfd_create(clockid, flags) {
+    return syscall(SYS_TIMERFD_CREATE, clockid, flags);
+}
+
+# itimerspec: { interval: {sec, nsec}, value: {sec, nsec} } = 32 bytes
+fn timerspec_new(interval_sec, initial_sec) {
+    var ts = alloc(32);
+    store64(ts, interval_sec);
+    store64(ts + 8, 0);
+    store64(ts + 16, initial_sec);
+    store64(ts + 24, 0);
+    return ts;
+}
+
+# Set timer expiration.
+fn sys_timerfd_settime(fd, flags, new_value, old_value) {
+    return syscall(SYS_TIMERFD_SETTIME, fd, flags, new_value, old_value);
+}
+
+# timerfd_drain syscall wrapper.
+fn timerfd_drain(fd) {
+    var buf[1];
+    var n = sys_read(fd, &buf, 8);
+    if (n == 8) { return load64(&buf); }
+    return 0;
+}
+
+# Utility
+fn is_err(ret) {
+    if (ret < 0) { return 1; }
+    return 0;
+}
+
+# err_code syscall wrapper.
+fn err_code(ret) {
+    return 0 - ret;
+}

@@ -1,0 +1,72 @@
+# units.cyr — named constants for unit conversions and hardware math
+# All values are integer where possible. Float constants use x1000 fixed-point
+# or actual integer equivalents.
+
+# --- Byte / bit conversions ---
+
+var BITS_PER_BYTE = 8;
+var BYTES_PER_GIB = 1073741824;
+var BYTES_PER_GB = 1000000000;
+var MHZ_PER_GHZ = 1000;
+
+# --- DDR memory ---
+
+var DDR_MULTIPLIER = 2;
+
+# --- PCIe encoding overhead (x1000 fixed-point) ---
+# Gen3+: 128/130 = 984 (0.984x)
+# Gen1/2: 8/10 = 800 (0.800x)
+
+var PCIE_GEN3_PLUS_ENCODING_X1000 = 984;
+var PCIE_GEN1_GEN2_ENCODING_X1000 = 800;
+var PCIE_GEN3_SPEED_GTS = 8;
+
+# --- Model parameter conversions ---
+
+var PARAMS_PER_MILLION = 1000000;
+var FP16_BYTES_PER_PARAM = 2;
+var FP32_BITS = 32;
+
+# --- Memory estimation heuristics ---
+
+# Activation / KV-cache overhead (raw + raw / 5 = 20% overhead)
+var ACTIVATION_OVERHEAD_DIVISOR = 5;
+
+# ~250M parameters per transformer layer
+var PARAMS_PER_LAYER_ESTIMATE = 250000000;
+
+# Baseline: 1B params -> 1 tok/s
+var TOKENS_PER_SEC_BASE = 1000000000;
+
+# --- Sharding planner thresholds (x1000 fixed-point) ---
+
+# NVSwitch tensor-parallel bonus: 1.8x
+var NVSWITCH_TP_BONUS_X1000 = 1800;
+
+# Max non-NVSwitch tensor-parallel bonus: 0.8x
+var MAX_NON_NVSWITCH_TP_BONUS_X1000 = 800;
+
+# Interconnect BW divisor for bonus calculation: 200 GB/s
+var TP_INTERCONNECT_BW_DIVISOR = 200;
+
+# Pipeline-parallel efficiency with high-BW interconnect: 0.85x
+var PP_HIGH_BW_EFFICIENCY_X1000 = 850;
+
+# Pipeline-parallel efficiency with PCIe-only: 0.65x
+var PP_PCIE_ONLY_EFFICIENCY_X1000 = 650;
+
+# Minimum interconnect BW for tensor-parallel (GB/s)
+var TP_MIN_INTERCONNECT_BW = 100;
+
+# Max GPU count for tensor-parallel without NVSwitch
+var TP_MAX_DEVICES_WITHOUT_NVSWITCH = 8;
+
+# TPU ICI bonus: 2.0x
+var TPU_TP_ICI_BONUS_X1000 = 2000;
+
+# Gb/s to GB/s divisor
+var GBITS_PER_GBYTE = 8;
+
+# --- JSON schema version ---
+
+var SCHEMA_VERSION = 3;

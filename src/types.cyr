@@ -1,0 +1,355 @@
+# types.cyr — hardware accelerator type definitions
+# Enums for device families, accelerator types, backends,
+# and hardware-specific generations/versions.
+
+# --- Accelerator family (broad category) ---
+
+enum AcceleratorFamily {
+    FAMILY_CPU = 0;
+    FAMILY_GPU = 1;
+    FAMILY_NPU = 2;
+    FAMILY_TPU = 3;
+    FAMILY_AI_ASIC = 4;
+}
+
+fn family_name(f) {
+    if (f == FAMILY_CPU) { return "CPU"; }
+    if (f == FAMILY_GPU) { return "GPU"; }
+    if (f == FAMILY_NPU) { return "NPU"; }
+    if (f == FAMILY_TPU) { return "TPU"; }
+    if (f == FAMILY_AI_ASIC) { return "AI ASIC"; }
+    return "Unknown";
+}
+
+# --- Accelerator type (specific device kind) ---
+# In Cyrius, device_id is stored on the profile, not on the type enum.
+
+enum AcceleratorType {
+    ACCEL_CPU = 0;
+    ACCEL_CUDA = 1;
+    ACCEL_ROCM = 2;
+    ACCEL_METAL = 3;
+    ACCEL_VULKAN = 4;
+    ACCEL_INTEL_NPU = 5;
+    ACCEL_AMD_XDNA = 6;
+    ACCEL_APPLE_NPU = 7;
+    ACCEL_TPU = 8;
+    ACCEL_GAUDI = 9;
+    ACCEL_NEURON = 10;
+    ACCEL_QUALCOMM = 11;
+    ACCEL_INTEL_ONEAPI = 12;
+    ACCEL_CEREBRAS = 13;
+    ACCEL_GRAPHCORE = 14;
+    ACCEL_GROQ = 15;
+    ACCEL_SAMSUNG_NPU = 16;
+    ACCEL_MEDIATEK_APU = 17;
+}
+
+fn accel_name(a) {
+    if (a == ACCEL_CPU) { return "CPU"; }
+    if (a == ACCEL_CUDA) { return "CUDA GPU"; }
+    if (a == ACCEL_ROCM) { return "ROCm GPU"; }
+    if (a == ACCEL_METAL) { return "Metal GPU"; }
+    if (a == ACCEL_VULKAN) { return "Vulkan GPU"; }
+    if (a == ACCEL_INTEL_NPU) { return "Intel NPU"; }
+    if (a == ACCEL_AMD_XDNA) { return "AMD XDNA NPU"; }
+    if (a == ACCEL_APPLE_NPU) { return "Apple Neural Engine"; }
+    if (a == ACCEL_TPU) { return "TPU"; }
+    if (a == ACCEL_GAUDI) { return "Intel Gaudi"; }
+    if (a == ACCEL_NEURON) { return "AWS Neuron"; }
+    if (a == ACCEL_QUALCOMM) { return "Qualcomm Cloud AI 100"; }
+    if (a == ACCEL_INTEL_ONEAPI) { return "Intel oneAPI GPU"; }
+    if (a == ACCEL_CEREBRAS) { return "Cerebras WSE"; }
+    if (a == ACCEL_GRAPHCORE) { return "Graphcore IPU"; }
+    if (a == ACCEL_GROQ) { return "Groq LPU"; }
+    if (a == ACCEL_SAMSUNG_NPU) { return "Samsung NPU"; }
+    if (a == ACCEL_MEDIATEK_APU) { return "MediaTek APU"; }
+    return "Unknown";
+}
+
+# --- Family classification ---
+
+fn accel_is_gpu(a) {
+    if (a == ACCEL_CUDA) { return 1; }
+    if (a == ACCEL_ROCM) { return 1; }
+    if (a == ACCEL_METAL) { return 1; }
+    if (a == ACCEL_VULKAN) { return 1; }
+    if (a == ACCEL_INTEL_ONEAPI) { return 1; }
+    return 0;
+}
+
+fn accel_is_npu(a) {
+    if (a == ACCEL_INTEL_NPU) { return 1; }
+    if (a == ACCEL_APPLE_NPU) { return 1; }
+    if (a == ACCEL_AMD_XDNA) { return 1; }
+    if (a == ACCEL_SAMSUNG_NPU) { return 1; }
+    if (a == ACCEL_MEDIATEK_APU) { return 1; }
+    return 0;
+}
+
+fn accel_is_tpu(a) {
+    return a == ACCEL_TPU;
+}
+
+fn accel_is_ai_asic(a) {
+    if (a == ACCEL_GAUDI) { return 1; }
+    if (a == ACCEL_NEURON) { return 1; }
+    if (a == ACCEL_QUALCOMM) { return 1; }
+    if (a == ACCEL_CEREBRAS) { return 1; }
+    if (a == ACCEL_GRAPHCORE) { return 1; }
+    if (a == ACCEL_GROQ) { return 1; }
+    return 0;
+}
+
+fn accel_family(a) {
+    if (a == ACCEL_CPU) { return FAMILY_CPU; }
+    if (accel_is_gpu(a) == 1) { return FAMILY_GPU; }
+    if (accel_is_npu(a) == 1) { return FAMILY_NPU; }
+    if (accel_is_tpu(a) == 1) { return FAMILY_TPU; }
+    if (accel_is_ai_asic(a) == 1) { return FAMILY_AI_ASIC; }
+    return FAMILY_CPU;
+}
+
+# --- TPU version ---
+
+enum TpuVersion {
+    TPU_V4 = 0;
+    TPU_V5E = 1;
+    TPU_V5P = 2;
+}
+
+fn tpu_version_name(v) {
+    if (v == TPU_V4) { return "v4"; }
+    if (v == TPU_V5E) { return "v5e"; }
+    if (v == TPU_V5P) { return "v5p"; }
+    return "unknown";
+}
+
+# HBM per chip in bytes
+fn tpu_hbm_per_chip(v) {
+    if (v == TPU_V4) { return 32 * 1024 * 1024 * 1024; }
+    if (v == TPU_V5E) { return 16 * 1024 * 1024 * 1024; }
+    if (v == TPU_V5P) { return 95 * 1024 * 1024 * 1024; }
+    return 0;
+}
+
+# --- Gaudi generation ---
+
+enum GaudiGeneration {
+    GAUDI2 = 0;
+    GAUDI3 = 1;
+}
+
+fn gaudi_gen_name(g) {
+    if (g == GAUDI2) { return "Gaudi2"; }
+    if (g == GAUDI3) { return "Gaudi3"; }
+    return "unknown";
+}
+
+# HBM per device in bytes
+fn gaudi_hbm_bytes(g) {
+    if (g == GAUDI2) { return 96 * 1024 * 1024 * 1024; }
+    if (g == GAUDI3) { return 128 * 1024 * 1024 * 1024; }
+    return 0;
+}
+
+# --- Neuron chip type ---
+
+enum NeuronChipType {
+    NEURON_INFERENTIA = 0;
+    NEURON_TRAINIUM = 1;
+}
+
+fn neuron_chip_name(c) {
+    if (c == NEURON_INFERENTIA) { return "Inferentia"; }
+    if (c == NEURON_TRAINIUM) { return "Trainium"; }
+    return "unknown";
+}
+
+# HBM per core in bytes
+fn neuron_hbm_per_core(c) {
+    if (c == NEURON_INFERENTIA) { return 16 * 1024 * 1024 * 1024; }
+    if (c == NEURON_TRAINIUM) { return 32 * 1024 * 1024 * 1024; }
+    return 0;
+}
+
+# --- Throughput multiplier (inference, relative to CPU = 1.0x) ---
+# Returns multiplier * 1000 (fixed-point) to avoid float
+# e.g., CUDA = 20000 means 20.0x
+
+fn accel_throughput_x1000(a) {
+    if (a == ACCEL_CPU) { return 1000; }
+    if (a == ACCEL_CUDA) { return 20000; }
+    if (a == ACCEL_ROCM) { return 15000; }
+    if (a == ACCEL_METAL) { return 12000; }
+    if (a == ACCEL_VULKAN) { return 10000; }
+    if (a == ACCEL_INTEL_NPU) { return 8000; }
+    if (a == ACCEL_APPLE_NPU) { return 10000; }
+    if (a == ACCEL_AMD_XDNA) { return 7000; }
+    if (a == ACCEL_QUALCOMM) { return 14000; }
+    if (a == ACCEL_INTEL_ONEAPI) { return 13000; }
+    if (a == ACCEL_CEREBRAS) { return 50000; }
+    if (a == ACCEL_GRAPHCORE) { return 16000; }
+    if (a == ACCEL_GROQ) { return 30000; }
+    if (a == ACCEL_SAMSUNG_NPU) { return 6000; }
+    if (a == ACCEL_MEDIATEK_APU) { return 5000; }
+    # TPU and Gaudi/Neuron need version/gen — use profile-level functions
+    return 1000;
+}
+
+# TPU throughput (version-aware), returns x1000
+fn tpu_throughput_x1000(version) {
+    if (version == TPU_V4) { return 25000; }
+    if (version == TPU_V5E) { return 18000; }
+    if (version == TPU_V5P) { return 35000; }
+    return 1000;
+}
+
+# Gaudi throughput (generation-aware), returns x1000
+fn gaudi_throughput_x1000(gen) {
+    if (gen == GAUDI2) { return 22000; }
+    if (gen == GAUDI3) { return 30000; }
+    return 1000;
+}
+
+# Neuron throughput (chip+core-aware), returns x1000
+fn neuron_throughput_x1000(chip_type, core_count) {
+    var base = 15000;
+    if (chip_type == NEURON_TRAINIUM) { base = 24000; }
+    # base * (core_count / 2).max(1)
+    var scale = core_count / 2;
+    if (scale < 1) { scale = 1; }
+    return base * scale;
+}
+
+# --- Training multiplier (relative to CPU = 1.0x), returns x1000 ---
+# 0 = does not support training
+
+fn accel_training_x1000(a) {
+    if (a == ACCEL_CPU) { return 1000; }
+    if (a == ACCEL_CUDA) { return 20000; }
+    if (a == ACCEL_ROCM) { return 15000; }
+    if (a == ACCEL_METAL) { return 10000; }
+    if (a == ACCEL_VULKAN) { return 6000; }
+    # NPUs: inference only
+    if (a == ACCEL_INTEL_NPU) { return 0; }
+    if (a == ACCEL_APPLE_NPU) { return 0; }
+    if (a == ACCEL_AMD_XDNA) { return 0; }
+    if (a == ACCEL_SAMSUNG_NPU) { return 0; }
+    if (a == ACCEL_MEDIATEK_APU) { return 0; }
+    if (a == ACCEL_QUALCOMM) { return 0; }
+    if (a == ACCEL_GROQ) { return 0; }
+    if (a == ACCEL_INTEL_ONEAPI) { return 10000; }
+    if (a == ACCEL_CEREBRAS) { return 60000; }
+    if (a == ACCEL_GRAPHCORE) { return 18000; }
+    # TPU/Gaudi/Neuron need version — use specific functions
+    return 1000;
+}
+
+fn tpu_training_x1000(version) {
+    if (version == TPU_V4) { return 28000; }
+    if (version == TPU_V5E) { return 20000; }
+    if (version == TPU_V5P) { return 40000; }
+    return 1000;
+}
+
+fn gaudi_training_x1000(gen) {
+    if (gen == GAUDI2) { return 25000; }
+    if (gen == GAUDI3) { return 35000; }
+    return 1000;
+}
+
+fn neuron_training_x1000(chip_type, core_count) {
+    if (chip_type == NEURON_INFERENTIA) { return 0; }
+    var scale = core_count / 2;
+    if (scale < 1) { scale = 1; }
+    return 26000 * scale;
+}
+
+fn accel_supports_training(a) {
+    return accel_training_x1000(a) > 0;
+}
+
+# --- Priority rank (higher = preferred for best_available) ---
+
+fn accel_rank(a) {
+    if (a == ACCEL_CEREBRAS) { return 85; }
+    if (a == ACCEL_CUDA) { return 60; }
+    if (a == ACCEL_ROCM) { return 50; }
+    if (a == ACCEL_GRAPHCORE) { return 48; }
+    if (a == ACCEL_INTEL_ONEAPI) { return 42; }
+    if (a == ACCEL_METAL) { return 40; }
+    if (a == ACCEL_QUALCOMM) { return 38; }
+    if (a == ACCEL_VULKAN) { return 35; }
+    if (a == ACCEL_APPLE_NPU) { return 30; }
+    if (a == ACCEL_AMD_XDNA) { return 25; }
+    if (a == ACCEL_INTEL_NPU) { return 20; }
+    if (a == ACCEL_SAMSUNG_NPU) { return 18; }
+    if (a == ACCEL_MEDIATEK_APU) { return 15; }
+    if (a == ACCEL_CPU) { return 10; }
+    # TPU/Gaudi/Neuron/Groq need version — use specific functions
+    return 10;
+}
+
+fn tpu_rank(version) {
+    if (version == TPU_V5P) { return 80; }
+    if (version == TPU_V4) { return 70; }
+    if (version == TPU_V5E) { return 55; }
+    return 50;
+}
+
+fn gaudi_rank(gen) {
+    if (gen == GAUDI3) { return 75; }
+    if (gen == GAUDI2) { return 65; }
+    return 50;
+}
+
+fn neuron_rank(chip_type) {
+    if (chip_type == NEURON_TRAINIUM) { return 58; }
+    if (chip_type == NEURON_INFERENTIA) { return 45; }
+    return 40;
+}
+
+fn groq_rank() { return 55; }
+
+# --- Detection backends ---
+
+enum Backend {
+    BACKEND_CUDA = 0;
+    BACKEND_ROCM = 1;
+    BACKEND_APPLE = 2;
+    BACKEND_VULKAN = 3;
+    BACKEND_INTEL_NPU = 4;
+    BACKEND_AMD_XDNA = 5;
+    BACKEND_TPU = 6;
+    BACKEND_GAUDI = 7;
+    BACKEND_NEURON = 8;
+    BACKEND_INTEL_ONEAPI = 9;
+    BACKEND_QUALCOMM = 10;
+    BACKEND_CEREBRAS = 11;
+    BACKEND_GRAPHCORE = 12;
+    BACKEND_GROQ = 13;
+    BACKEND_SAMSUNG_NPU = 14;
+    BACKEND_MEDIATEK_APU = 15;
+}
+var BACKEND_COUNT = 16;
+
+fn backend_name(b) {
+    if (b == BACKEND_CUDA) { return "cuda"; }
+    if (b == BACKEND_ROCM) { return "rocm"; }
+    if (b == BACKEND_APPLE) { return "apple"; }
+    if (b == BACKEND_VULKAN) { return "vulkan"; }
+    if (b == BACKEND_INTEL_NPU) { return "intel-npu"; }
+    if (b == BACKEND_AMD_XDNA) { return "amd-xdna"; }
+    if (b == BACKEND_TPU) { return "tpu"; }
+    if (b == BACKEND_GAUDI) { return "gaudi"; }
+    if (b == BACKEND_NEURON) { return "neuron"; }
+    if (b == BACKEND_INTEL_ONEAPI) { return "intel-oneapi"; }
+    if (b == BACKEND_QUALCOMM) { return "qualcomm"; }
+    if (b == BACKEND_CEREBRAS) { return "cerebras"; }
+    if (b == BACKEND_GRAPHCORE) { return "graphcore"; }
+    if (b == BACKEND_GROQ) { return "groq"; }
+    if (b == BACKEND_SAMSUNG_NPU) { return "samsung-npu"; }
+    if (b == BACKEND_MEDIATEK_APU) { return "mediatek-apu"; }
+    return "unknown";
+}

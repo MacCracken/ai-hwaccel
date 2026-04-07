@@ -1,0 +1,123 @@
+# error.cyr — detection error codes
+# Non-fatal errors collected as warnings during hardware detection.
+# Each error carries a code + tool/path name + optional message.
+
+enum DetectionError {
+    ERR_NONE = 0;
+    ERR_TOOL_NOT_FOUND = 1;
+    ERR_TOOL_FAILED = 2;
+    ERR_TIMEOUT = 3;
+    ERR_PARSE = 4;
+    ERR_SYSFS_READ = 5;
+}
+
+# Warning struct layout (heap-allocated):
+#   0: code (i64)     — DetectionError enum value
+#   8: tool (ptr)     — tool name or sysfs path (null-terminated)
+#  16: message (ptr)  — detail string (null-terminated), 0 if none
+#  24: exit_code (i64) — for ERR_TOOL_FAILED, -1 if signal
+#  32: timeout_secs (i64) — for ERR_TIMEOUT, seconds * 1000 (millis)
+var WARNING_SIZE = 40;
+
+fn warning_new(code, tool) {
+    var w = alloc(WARNING_SIZE);
+    store64(w, code);
+    store64(w + 8, tool);
+    store64(w + 16, 0);
+    store64(w + 24, 0 - 1);
+    store64(w + 32, 0);
+    return w;
+}
+
+fn warning_code(w) { return load64(w); }
+fn warning_tool(w) { return load64(w + 8); }
+fn warning_message(w) { return load64(w + 16); }
+fn warning_exit_code(w) { return load64(w + 24); }
+fn warning_timeout_ms(w) { return load64(w + 32); }
+
+fn warning_set_message(w, msg) { store64(w + 16, msg); return 0; }
+fn warning_set_exit_code(w, ec) { store64(w + 24, ec); return 0; }
+fn warning_set_timeout_ms(w, ms) { store64(w + 32, ms); return 0; }
+
+fn warning_tool_not_found(tool) {
+    return warning_new(ERR_TOOL_NOT_FOUND, tool);
+}
+
+fn warning_tool_failed(tool, exit_code, stderr_msg) {
+    var w = warning_new(ERR_TOOL_FAILED, tool);
+    warning_set_exit_code(w, exit_code);
+    warning_set_message(w, stderr_msg);
+    return w;
+}
+
+fn warning_timeout(tool, timeout_ms) {
+    var w = warning_new(ERR_TIMEOUT, tool);
+    warning_set_timeout_ms(w, timeout_ms);
+    return w;
+}
+
+fn warning_parse(backend, msg) {
+    var w = warning_new(ERR_PARSE, backend);
+    warning_set_message(w, msg);
+    return w;
+}
+
+fn warning_sysfs(path, msg) {
+    var w = warning_new(ERR_SYSFS_READ, path);
+    warning_set_message(w, msg);
+    return w;
+}
+
+# Print a warning to stderr
+fn warning_print(w) {
+    var sb = str_builder_new();
+    var code = warning_code(w);
+    var tool = warning_tool(w);
+
+    if (code == ERR_TOOL_NOT_FOUND) {
+        str_builder_add_cstr(sb, tool);
+        str_builder_add_cstr(sb, ": tool not found on $PATH\n");
+    } elif (code == ERR_TOOL_FAILED) {
+        str_builder_add_cstr(sb, tool);
+        var ec = warning_exit_code(w);
+        if (ec != (0 - 1)) {
+            str_builder_add_cstr(sb, ": exited with code ");
+            str_builder_add_int(sb, ec);
+        } else {
+            str_builder_add_cstr(sb, ": exited with signal");
+        }
+        var msg2 = warning_message(w);
+        if (msg2 != 0) {
+            str_builder_add_cstr(sb, " - ");
+            str_builder_add_cstr(sb, msg2);
+        }
+        str_builder_add_cstr(sb, "\n");
+    } elif (code == ERR_TIMEOUT) {
+        str_builder_add_cstr(sb, tool);
+        str_builder_add_cstr(sb, ": timed out after ");
+        str_builder_add_int(sb, warning_timeout_ms(w) / 1000);
+        str_builder_add_cstr(sb, "s\n");
+    } elif (code == ERR_PARSE) {
+        str_builder_add_cstr(sb, tool);
+        str_builder_add_cstr(sb, ": parse error");
+        var msg3 = warning_message(w);
+        if (msg3 != 0) {
+            str_builder_add_cstr(sb, " - ");
+            str_builder_add_cstr(sb, msg3);
+        }
+        str_builder_add_cstr(sb, "\n");
+    } elif (code == ERR_SYSFS_READ) {
+        str_builder_add_cstr(sb, "sysfs ");
+        str_builder_add_cstr(sb, tool);
+        str_builder_add_cstr(sb, ": ");
+        var msg4 = warning_message(w);
+        if (msg4 != 0) {
+            str_builder_add_cstr(sb, msg4);
+        }
+        str_builder_add_cstr(sb, "\n");
+    }
+
+    var result = str_builder_build(sb);
+    syscall(1, 2, str_data(result), str_len(result));
+    return 0;
+}
