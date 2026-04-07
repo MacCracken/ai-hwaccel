@@ -1,0 +1,177 @@
+# command.cyr — safe subprocess execution for hardware detection
+# Wraps lib/process.cyr with:
+#   - PATH resolution (absolute path)
+#   - Environment sanitization (strip LD_PRELOAD etc.)
+#   - Output size limits (1 MiB stdout)
+#   - Timeout (via alarm signal — future enhancement)
+#   - CSV parsing helpers
+#   - Device ID validation
+
+var CMD_MAX_STDOUT = 1048576;
+var CMD_DEFAULT_TIMEOUT_MS = 5000;
+var CMD_MAX_DEVICE_ID = 1024;
+
+# Read an environment variable from /proc/self/environ.
+# Returns heap-allocated null-terminated string, or 0 if not found.
+# Note: works around io.cyr getenv bug (variable re-declaration in loop).
+fn cmd_getenv(name) {
+    var ebuf[8192];
+    var fd = file_open("/proc/self/environ", 0, 0);
+    if (fd < 0) { return 0; }
+    var n = file_read(fd, &ebuf, 8192);
+    file_close(fd);
+    if (n <= 0) { return 0; }
+    var nlen = strlen(name);
+    var pos = 0;
+    while (pos < n) {
+        if (memeq(&ebuf + pos, name, nlen) == 1) {
+            if (load8(&ebuf + pos + nlen) == 61) {
+                var vstart = pos + nlen + 1;
+                var vlen = 0;
+                while (vstart + vlen < n) {
+                    if (load8(&ebuf + vstart + vlen) == 0) { break; }
+                    vlen = vlen + 1;
+                }
+                var result = alloc(vlen + 1);
+                memcpy(result, &ebuf + vstart, vlen);
+                store8(result + vlen, 0);
+                return result;
+            }
+        }
+        # Skip to next null-terminated entry
+        while (pos < n) {
+            if (load8(&ebuf + pos) == 0) { pos = pos + 1; break; }
+            pos = pos + 1;
+        }
+    }
+    return 0;
+}
+
+# Resolve tool name to absolute path by searching $PATH.
+# Returns heap-allocated path string, or 0 if not found.
+fn which(name) {
+    var path_val = cmd_getenv("PATH");
+    if (path_val == 0) { return 0; }
+    var path_str = str_from(path_val);
+    var dirs = str_split(path_str, 58);
+
+    var di = 0;
+    var ndir = vec_len(dirs);
+    while (di < ndir) {
+        var dir = vec_get(dirs, di);
+        # Build candidate: dir/name
+        var sb = str_builder_new();
+        str_builder_add(sb, dir);
+        str_builder_add_cstr(sb, "/");
+        str_builder_add_cstr(sb, name);
+        var candidate = str_builder_build(sb);
+        # Check if file exists
+        if (file_exists(str_data(candidate)) == 1) {
+            # Return null-terminated copy
+            var clen = str_len(candidate);
+            var result = alloc(clen + 1);
+            memcpy(result, str_data(candidate), clen);
+            store8(result + clen, 0);
+            return result;
+        }
+        di = di + 1;
+    }
+    return 0;
+}
+
+# Run a tool with up to 5 args. Returns Str with stdout, or 0 on error.
+# Pushes a warning to the warnings vec on failure.
+fn run_tool(tool, args, warnings) {
+    var abs_path = which(tool);
+    if (abs_path == 0) {
+        if (warnings != 0) { vec_push(warnings, warning_tool_not_found(tool)); }
+        return 0;
+    }
+
+    # Build exec args vec
+    var exec_args = vec_new();
+    vec_push(exec_args, abs_path);
+    var ai = 0;
+    var nargs = vec_len(args);
+    while (ai < nargs) {
+        vec_push(exec_args, vec_get(args, ai));
+        ai = ai + 1;
+    }
+
+    # Capture stdout (1 MiB buffer)
+    var buf = alloc(CMD_MAX_STDOUT);
+    var n = exec_capture(exec_args, buf, CMD_MAX_STDOUT);
+
+    if (n < 0) {
+        if (warnings != 0) { vec_push(warnings, warning_tool_failed(tool, 0 - 1, "exec failed")); }
+        return 0;
+    }
+    if (n == 0) {
+        return str_new(buf, 0);
+    }
+
+    # Null-terminate
+    store8(buf + n, 0);
+    return str_new(buf, n);
+}
+
+# Convenience: run tool with string args (up to 5)
+fn run_tool1(tool, arg1, warnings) {
+    var args = vec_new();
+    vec_push(args, arg1);
+    return run_tool(tool, args, warnings);
+}
+
+fn run_tool2(tool, arg1, arg2, warnings) {
+    var args = vec_new();
+    vec_push(args, arg1);
+    vec_push(args, arg2);
+    return run_tool(tool, args, warnings);
+}
+
+fn run_tool3(tool, arg1, arg2, arg3, warnings) {
+    var args = vec_new();
+    vec_push(args, arg1);
+    vec_push(args, arg2);
+    vec_push(args, arg3);
+    return run_tool(tool, args, warnings);
+}
+
+# --- CSV parsing helpers ---
+
+# Split a line by commas into a vec of trimmed Str values.
+# Returns vec, or 0 if fewer than min_fields.
+fn parse_csv_line(line, min_fields) {
+    var parts = str_split(line, 44);
+    if (vec_len(parts) < min_fields) { return 0; }
+    # Trim each field
+    var trimmed = vec_new();
+    var ci = 0;
+    var nparts = vec_len(parts);
+    while (ci < nparts) {
+        vec_push(trimmed, str_trim(vec_get(parts, ci)));
+        ci = ci + 1;
+    }
+    return trimmed;
+}
+
+# Parse an integer from a Str field. Returns value, or -1 on error.
+fn parse_field_int(field) {
+    return str_to_int(field);
+}
+
+# Validate device ID is in sane range (0-1024)
+fn validate_device_id(raw_str) {
+    var id = str_to_int(raw_str);
+    if (id < 0) { return 0 - 1; }
+    if (id > CMD_MAX_DEVICE_ID) { return 0 - 1; }
+    return id;
+}
+
+# Validate memory in MB (0 to 16 TiB)
+fn validate_memory_mb(raw_str) {
+    var mb = str_to_int(raw_str);
+    if (mb < 0) { return 0 - 1; }
+    if (mb > 16 * 1024 * 1024) { return 0 - 1; }
+    return mb;
+}

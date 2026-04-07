@@ -1,0 +1,200 @@
+# platform.cyr — sysfs/procfs/devfs helpers for hardware detection
+# Wrappers around io.cyr and fs.cyr for common detection patterns.
+
+var SYSFS_MAX_READ = 4096;
+
+# Read a sysfs/procfs file into a Str. Returns Str or 0 on error.
+fn sysfs_read(path) {
+    var buf = alloc(SYSFS_MAX_READ);
+    var n = file_read_all(path, buf, SYSFS_MAX_READ);
+    if (n <= 0) { return 0; }
+    store8(buf + n, 0);
+    # Trim trailing newline
+    if (n > 0) {
+        if (load8(buf + n - 1) == 10) { n = n - 1; }
+    }
+    return str_new(buf, n);
+}
+
+# Read a sysfs file as an integer. Returns value, or -1 on error.
+fn sysfs_read_int(path) {
+    var s = sysfs_read(path);
+    if (s == 0) { return 0 - 1; }
+    return str_to_int(s);
+}
+
+# Check if a path exists (file or directory)
+fn path_exists(path) {
+    return file_exists(path);
+}
+
+# Check if a directory exists
+fn dir_exists(path) {
+    var s = str_from(path);
+    return is_dir(s);
+}
+
+# Read symlink target. Returns Str or 0.
+# Uses readlink syscall (SYS_readlink = 89)
+fn read_symlink(path) {
+    var buf = alloc(256);
+    var n = syscall(89, path, buf, 255);
+    if (n <= 0) { return 0; }
+    store8(buf + n, 0);
+    return str_new(buf, n);
+}
+
+# Scan /dev/ for devices matching a prefix (e.g., "neuron", "accel").
+# Returns vec of device IDs parsed from the suffix.
+fn scan_dev_devices(prefix) {
+    var ids = vec_new();
+    var dev_dir = str_from("/dev");
+    var entries = dir_list(dev_dir);
+    var plen = strlen(prefix);
+    var ei = 0;
+    var nent = vec_len(entries);
+    while (ei < nent) {
+        var entry = vec_get(entries, ei);
+        var elen = str_len(entry);
+        var edata = str_data(entry);
+        if (elen > plen) {
+            if (memeq(edata, prefix, plen) == 1) {
+                # Parse suffix as integer
+                var suffix = str_sub(entry, plen, elen - plen);
+                var id = str_to_int(suffix);
+                if (id >= 0) {
+                    vec_push(ids, id);
+                }
+            }
+        }
+        ei = ei + 1;
+    }
+    return ids;
+}
+
+# Check if any /dev/<prefix>* device exists
+fn has_dev_device(prefix) {
+    var ids = scan_dev_devices(prefix);
+    return vec_len(ids) > 0;
+}
+
+# Get total system memory from /proc/meminfo (in bytes)
+fn detect_system_memory() {
+    var buf = alloc(4096);
+    var n = file_read_all("/proc/meminfo", buf, 4096);
+    if (n <= 0) { return 0; }
+    store8(buf + n, 0);
+    # Find "MemTotal:" line, parse kB value
+    var pos = 0;
+    while (pos < n) {
+        if (memeq(buf + pos, "MemTotal:", 9) == 1) {
+            # Skip "MemTotal:" and whitespace
+            pos = pos + 9;
+            while (pos < n) {
+                var c = load8(buf + pos);
+                if (c != 32) { break; }
+                pos = pos + 1;
+            }
+            # Parse number
+            var kb = 0;
+            while (pos < n) {
+                var c2 = load8(buf + pos);
+                if (c2 >= 48) {
+                    if (c2 <= 57) {
+                        kb = kb * 10 + c2 - 48;
+                        pos = pos + 1;
+                        continue;
+                    }
+                }
+                break;
+            }
+            return kb * 1024;
+        }
+        # Skip to next line
+        while (pos < n) {
+            if (load8(buf + pos) == 10) { pos = pos + 1; break; }
+            pos = pos + 1;
+        }
+    }
+    return 0;
+}
+
+# List entries in a sysfs directory. Returns vec of Str names.
+fn sysfs_list_dir(path) {
+    var s = str_from(path);
+    return dir_list(s);
+}
+
+# Build a sysfs path: base/entry/suffix
+# Returns null-terminated C string (heap-allocated)
+fn sysfs_path(base, entry, suffix) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, base);
+    str_builder_add_cstr(sb, "/");
+    if (entry != 0) {
+        str_builder_add_cstr(sb, entry);
+        if (suffix != 0) {
+            str_builder_add_cstr(sb, "/");
+        }
+    }
+    if (suffix != 0) {
+        str_builder_add_cstr(sb, suffix);
+    }
+    var result = str_builder_build(sb);
+    # Return null-terminated C string for syscall compatibility
+    var clen = str_len(result);
+    var cstr = alloc(clen + 1);
+    memcpy(cstr, str_data(result), clen);
+    store8(cstr + clen, 0);
+    return cstr;
+}
+
+# Build sysfs path from Str components
+fn sysfs_path_str(base, entry_str, suffix) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, base);
+    str_builder_add_cstr(sb, "/");
+    if (entry_str != 0) {
+        str_builder_add(sb, entry_str);
+        if (suffix != 0) {
+            str_builder_add_cstr(sb, "/");
+        }
+    }
+    if (suffix != 0) {
+        str_builder_add_cstr(sb, suffix);
+    }
+    var result = str_builder_build(sb);
+    var clen = str_len(result);
+    var cstr = alloc(clen + 1);
+    memcpy(cstr, str_data(result), clen);
+    store8(cstr + clen, 0);
+    return cstr;
+}
+
+# Parse a line containing a number with a suffix like "123 MB" or "456GB"
+# Returns value in the base unit (MB stays MB, GB stays GB)
+fn parse_value_with_suffix(s) {
+    var slen = str_len(s);
+    var sd = str_data(s);
+    var num = 0;
+    var pi = 0;
+    # Skip leading whitespace
+    while (pi < slen) {
+        var c = load8(sd + pi);
+        if (c != 32) { break; }
+        pi = pi + 1;
+    }
+    # Parse digits
+    while (pi < slen) {
+        var c2 = load8(sd + pi);
+        if (c2 >= 48) {
+            if (c2 <= 57) {
+                num = num * 10 + c2 - 48;
+                pi = pi + 1;
+                continue;
+            }
+        }
+        break;
+    }
+    return num;
+}
