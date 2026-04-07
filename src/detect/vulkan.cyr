@@ -1,0 +1,129 @@
+# vulkan.cyr — Vulkan GPU detection via vulkaninfo + sysfs fallback
+
+fn detect_vulkan(profiles, warnings) {
+    # Try vulkaninfo --summary first
+    var result = run_tool1("vulkaninfo", "--summary", warnings);
+    if (result != 0) {
+        if (str_len(result) > 10) {
+            _parse_vulkaninfo(result, profiles);
+            return 0;
+        }
+    }
+
+    # Fallback: sysfs PCI device scan
+    _detect_vulkan_sysfs(profiles);
+    return 0;
+}
+
+# Parse vulkaninfo --summary output
+fn _parse_vulkaninfo(output, profiles) {
+    var lines = str_split(output, 10);
+    var nlines = vec_len(lines);
+    var dev_id = 0;
+    var li = 0;
+
+    while (li < nlines) {
+        var line = vec_get(lines, li);
+        li = li + 1;
+
+        # Look for "deviceName" lines
+        if (str_contains(line, str_from("deviceName")) != 1) { continue; }
+
+        # Extract device name after "= "
+        var eq_pos = str_index_of(line, 61);
+        if (eq_pos < 0) { continue; }
+        var name_part = str_trim(str_sub(line, eq_pos + 1, str_len(line) - eq_pos - 1));
+        if (str_len(name_part) == 0) { continue; }
+
+        # Create profile with estimated VRAM
+        var p = profile_new(ACCEL_VULKAN, dev_id, 4 * BYTES_PER_GIB);
+
+        var nd = str_data(name_part);
+        var nl = str_len(name_part);
+        var nc = alloc(nl + 1);
+        memcpy(nc, nd, nl);
+        store8(nc + nl, 0);
+        profile_set_device_name(p, nc);
+
+        # Look for memory size in nearby lines
+        var mi = li;
+        var mem_end = li + 10;
+        if (mem_end > nlines) { mem_end = nlines; }
+        while (mi < mem_end) {
+            var mline = vec_get(lines, mi);
+            mi = mi + 1;
+            if (str_contains(mline, str_from("heapSize")) == 1) {
+                # Extract number after "= "
+                var meq = str_index_of(mline, 61);
+                if (meq >= 0) {
+                    var mval = str_trim(str_sub(mline, meq + 1, str_len(mline) - meq - 1));
+                    var mem_bytes = str_to_int(mval);
+                    if (mem_bytes > 0) {
+                        store64(p + 24, mem_bytes);
+                        break;
+                    }
+                }
+            }
+        }
+
+        vec_push(profiles, p);
+        dev_id = dev_id + 1;
+    }
+    return 0;
+}
+
+# Sysfs fallback: scan /sys/class/drm/card*/device/{vendor,device}
+fn _detect_vulkan_sysfs(profiles) {
+    var drm_dir = str_from("/sys/class/drm");
+    var entries = dir_list(drm_dir);
+    var nent = vec_len(entries);
+    var dev_id = 0;
+
+    var ei = 0;
+    while (ei < nent) {
+        var name = vec_get(entries, ei);
+        ei = ei + 1;
+        if (str_starts_with(name, "card") != 1) { continue; }
+        if (str_index_of(name, 45) >= 0) { continue; }
+
+        var vendor_path = sysfs_path_str("/sys/class/drm", name, "device/vendor");
+        var vendor_str = sysfs_read(vendor_path);
+        if (vendor_str == 0) { continue; }
+
+        # Check for known GPU vendors
+        var vdata = str_data(vendor_str);
+        var vlen = str_len(vendor_str);
+        var is_gpu = 0;
+        var gpu_name = "Unknown GPU";
+        var est_vram = 4 * BYTES_PER_GIB;
+
+        # NVIDIA: 0x10de
+        if (str_contains(vendor_str, str_from("0x10de")) == 1) {
+            is_gpu = 1;
+            gpu_name = "NVIDIA GPU (Vulkan)";
+        }
+        # AMD: 0x1002
+        elif (str_contains(vendor_str, str_from("0x1002")) == 1) {
+            is_gpu = 1;
+            gpu_name = "AMD GPU (Vulkan)";
+            # Try reading actual VRAM
+            var vram_path = sysfs_path_str("/sys/class/drm", name, "device/mem_info_vram_total");
+            var vram = sysfs_read_int(vram_path);
+            if (vram > 0) { est_vram = vram; }
+        }
+        # Intel: 0x8086
+        elif (str_contains(vendor_str, str_from("0x8086")) == 1) {
+            is_gpu = 1;
+            gpu_name = "Intel GPU (Vulkan)";
+            est_vram = 2 * BYTES_PER_GIB;
+        }
+
+        if (is_gpu == 1) {
+            var p = profile_new(ACCEL_VULKAN, dev_id, est_vram);
+            profile_set_device_name(p, gpu_name);
+            vec_push(profiles, p);
+            dev_id = dev_id + 1;
+        }
+    }
+    return 0;
+}

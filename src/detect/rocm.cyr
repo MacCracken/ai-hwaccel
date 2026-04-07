@@ -1,0 +1,107 @@
+# rocm.cyr — AMD ROCm GPU detection via sysfs
+
+fn detect_rocm(profiles, warnings) {
+    var drm_dir = str_from("/sys/class/drm");
+    var entries = dir_list(drm_dir);
+    var nent = vec_len(entries);
+    var dev_id = 0;
+
+    var ei = 0;
+    while (ei < nent) {
+        var name = vec_get(entries, ei);
+        ei = ei + 1;
+
+        # Must start with "card" and not contain '-' (skip card0-DP-1 etc.)
+        if (str_starts_with(name, "card") != 1) { continue; }
+        if (str_index_of(name, 45) >= 0) { continue; }
+
+        # Check driver is amdgpu
+        var dev_path = sysfs_path_str("/sys/class/drm", name, "device/driver");
+        var driver_link = read_symlink(dev_path);
+        if (driver_link == 0) { continue; }
+        # Driver link target basename should be "amdgpu"
+        var drv_base = path_basename(driver_link);
+        var drv_data = str_data(drv_base);
+        if (memeq(drv_data, "amdgpu", 6) != 1) { continue; }
+
+        # Read VRAM total
+        var vram_path = sysfs_path_str("/sys/class/drm", name, "device/mem_info_vram_total");
+        var mem_total = sysfs_read_int(vram_path);
+        if (mem_total <= 0) { mem_total = 8 * BYTES_PER_GIB; }
+
+        # Read VRAM used
+        var used_path = sysfs_path_str("/sys/class/drm", name, "device/mem_info_vram_used");
+        var mem_used = sysfs_read_int(used_path);
+
+        var p = profile_rocm(dev_id, mem_total);
+
+        if (mem_used > 0) {
+            profile_set_mem_used(p, mem_used);
+            profile_set_mem_free(p, mem_total - mem_used);
+        }
+
+        # Temperature from hwmon (millidegrees C)
+        var hwmon_base = sysfs_path_str("/sys/class/drm", name, "device/hwmon");
+        var hwmon_entries = dir_list(str_from(hwmon_base));
+        if (vec_len(hwmon_entries) > 0) {
+            var hw_name = vec_get(hwmon_entries, 0);
+            var temp_path = sysfs_path_str(hwmon_base, hw_name, "temp1_input");
+            var millideg = sysfs_read_int(temp_path);
+            if (millideg > 0) { profile_set_temp_c(p, millideg / 1000); }
+
+            # Power (microwatts)
+            var pow_path = sysfs_path_str(hwmon_base, hw_name, "power1_average");
+            var microwatts = sysfs_read_int(pow_path);
+            if (microwatts <= 0) {
+                var pow_path2 = sysfs_path_str(hwmon_base, hw_name, "power1_input");
+                microwatts = sysfs_read_int(pow_path2);
+            }
+            if (microwatts > 0) { profile_set_power_x1000(p, microwatts / 1000); }
+        }
+
+        # GPU busy percent
+        var busy_path = sysfs_path_str("/sys/class/drm", name, "device/gpu_busy_percent");
+        var gpu_busy = sysfs_read_int(busy_path);
+        if (gpu_busy >= 0) { profile_set_gpu_util(p, gpu_busy); }
+
+        # VBIOS version as driver_version
+        var vbios_path = sysfs_path_str("/sys/class/drm", name, "device/vbios_version");
+        var vbios = sysfs_read(vbios_path);
+        if (vbios != 0) {
+            if (str_len(vbios) > 0) {
+                var vd = str_data(vbios);
+                var vl = str_len(vbios);
+                var vc = alloc(vl + 1);
+                memcpy(vc, vd, vl);
+                store8(vc + vl, 0);
+                profile_set_driver_version(p, vc);
+            }
+        }
+
+        # Compute capability from revision
+        var rev_path = sysfs_path_str("/sys/class/drm", name, "device/revision");
+        var rev = sysfs_read(rev_path);
+        if (rev != 0) {
+            if (str_len(rev) > 0) {
+                var rd = str_data(rev);
+                var rl = str_len(rev);
+                var rc = alloc(rl + 1);
+                memcpy(rc, rd, rl);
+                store8(rc + rl, 0);
+                profile_set_compute_cap(p, rc);
+            }
+        }
+
+        # CXL memory detection (MI300X/MI350)
+        var vis_path = sysfs_path_str("/sys/class/drm", name, "device/mem_info_vis_vram_total");
+        var vis_total = sysfs_read_int(vis_path);
+        if (vis_total > mem_total) {
+            # CXL memory detected — add to total
+            store64(p + 24, vis_total);
+        }
+
+        vec_push(profiles, p);
+        dev_id = dev_id + 1;
+    }
+    return 0;
+}

@@ -1,0 +1,51 @@
+# gaudi.cyr — Intel Gaudi (Habana Labs) detection via hl-smi
+
+var _HLSMI_QUERY = "--query-aip=index,name,memory.total,memory.free";
+var _HLSMI_FMT = "--format=csv,noheader,nounits";
+
+fn detect_gaudi(profiles, warnings) {
+    var result = run_tool2("hl-smi", _HLSMI_QUERY, _HLSMI_FMT, warnings);
+    if (result == 0) { return 0; }
+
+    var lines = str_split(result, 10);
+    var li = 0;
+    var nlines = vec_len(lines);
+    while (li < nlines) {
+        var line = vec_get(lines, li);
+        li = li + 1;
+        if (str_len(line) == 0) { continue; }
+
+        var fields = parse_csv_line(line, 3);
+        if (fields == 0) {
+            vec_push(warnings, warning_parse("gaudi", "too few CSV fields"));
+            continue;
+        }
+
+        var dev_id = str_to_int(vec_get(fields, 0));
+        if (dev_id < 0) { dev_id = 0; }
+
+        # Determine generation from device name
+        var gen = GAUDI2;
+        var name_field = vec_get(fields, 1);
+        var name_lower = str_data(name_field);
+        var name_len = str_len(name_field);
+        # Check for "gaudi3" or "hl-325" in name
+        if (name_len >= 6) {
+            if (str_contains(name_field, str_from("gaudi3")) == 1) { gen = GAUDI3; }
+            elif (str_contains(name_field, str_from("Gaudi3")) == 1) { gen = GAUDI3; }
+            elif (str_contains(name_field, str_from("HL-325")) == 1) { gen = GAUDI3; }
+            elif (str_contains(name_field, str_from("hl-325")) == 1) { gen = GAUDI3; }
+        }
+
+        # Memory in MB
+        var mem_mb = str_to_int(vec_get(fields, 2));
+        if (mem_mb <= 0) { mem_mb = gaudi_hbm_bytes(gen) / (1024 * 1024); }
+
+        var p = profile_gaudi(dev_id, gen);
+        # Override memory from hl-smi if available
+        store64(p + 24, mem_mb * 1024 * 1024);
+
+        vec_push(profiles, p);
+    }
+    return 0;
+}

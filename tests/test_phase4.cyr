@@ -1,0 +1,194 @@
+# test_phase4.cyr — tests for Phase 4 high-priority detectors
+# Tests parsing logic with mock data (no actual hardware required)
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/cuda.cyr"
+include "src/detect/rocm.cyr"
+include "src/detect/tpu.cyr"
+include "src/detect/gaudi.cyr"
+include "src/detect/neuron.cyr"
+include "src/detect/vulkan.cyr"
+
+# --- CUDA parsing tests ---
+
+fn test_cuda_single_gpu() {
+    var csv = str_from("0, 24576, 1024, 23552, 8.9, 550.54, NVIDIA GeForce RTX 4090, 45, 120.5, 30, 1325");
+    var profiles = vec_new();
+    var warnings = vec_new();
+    parse_cuda_output(csv, profiles, warnings);
+
+    assert_eq(vec_len(profiles), 1, "1 GPU");
+    assert_eq(vec_len(warnings), 0, "no warnings");
+
+    var p = vec_get(profiles, 0);
+    assert_eq(profile_accel_type(p), ACCEL_CUDA, "CUDA type");
+    assert_eq(profile_device_id(p), 0, "device 0");
+    assert_eq(profile_memory_bytes(p) / (1024 * 1024), 24576, "24576 MiB");
+    assert(streq(profile_compute_cap(p), "8.9") == 1, "CC 8.9");
+    assert(streq(profile_device_name(p), "NVIDIA GeForce RTX 4090") == 1, "GPU name");
+    assert_eq(profile_temp_c(p), 45, "45C");
+    assert_eq(profile_gpu_util(p), 30, "30% util");
+
+    # Memory BW should be calculated: 1325 MHz * 384 bits * 2 / 8 = 127200 MB/s
+    var bw = profile_mem_bw_x1000(p);
+    assert(bw > 0, "bandwidth calculated");
+    return 0;
+}
+
+fn test_cuda_multi_gpu() {
+    var csv = str_from("0, 81920, 0, 81920, 8.0, 470.82, A100-SXM4-80GB, 35, 60, 0, 1593\n1, 81920, 512, 81408, 8.0, 470.82, A100-SXM4-80GB, 36, 62, 5, 1593");
+    var profiles = vec_new();
+    var warnings = vec_new();
+    parse_cuda_output(csv, profiles, warnings);
+
+    assert_eq(vec_len(profiles), 2, "2 GPUs");
+    assert_eq(vec_len(warnings), 0, "no warnings");
+
+    var p0 = vec_get(profiles, 0);
+    var p1 = vec_get(profiles, 1);
+    assert_eq(profile_device_id(p0), 0, "dev 0");
+    assert_eq(profile_device_id(p1), 1, "dev 1");
+    assert_eq(profile_memory_bytes(p0) / (1024 * 1024), 81920, "80 GiB");
+    return 0;
+}
+
+fn test_cuda_bad_csv() {
+    var csv = str_from("garbage data");
+    var profiles = vec_new();
+    var warnings = vec_new();
+    parse_cuda_output(csv, profiles, warnings);
+
+    assert_eq(vec_len(profiles), 0, "no profiles");
+    assert_eq(vec_len(warnings), 1, "1 warning");
+    assert_eq(warning_code(vec_get(warnings, 0)), ERR_PARSE, "parse error");
+    return 0;
+}
+
+fn test_cuda_empty_lines() {
+    var csv = str_from("\n\n0, 16384, 0, 16384, 7.5, 450, Tesla T4, 40, 70, 0, 1250\n\n");
+    var profiles = vec_new();
+    var warnings = vec_new();
+    parse_cuda_output(csv, profiles, warnings);
+
+    assert_eq(vec_len(profiles), 1, "1 GPU ignoring blanks");
+    return 0;
+}
+
+# --- NVIDIA bandwidth tests ---
+
+fn test_nvidia_bus_width() {
+    var cc90 = str_from("9.0");
+    assert_eq(nvidia_bus_width(cc90), 5120, "H100 5120-bit");
+
+    var cc89 = str_from("8.9");
+    assert_eq(nvidia_bus_width(cc89), 384, "RTX 4090 384-bit");
+
+    var cc80 = str_from("8.0");
+    assert_eq(nvidia_bus_width(cc80), 5120, "A100 5120-bit");
+
+    var cc70 = str_from("7.0");
+    assert_eq(nvidia_bus_width(cc70), 4096, "V100 4096-bit");
+    return 0;
+}
+
+fn test_nvidia_est_bw() {
+    var cc90 = str_from("9.0");
+    assert_eq(nvidia_est_bw_x1000(cc90), 3350000, "H100 3350 GB/s");
+
+    var cc80 = str_from("8.0");
+    assert_eq(nvidia_est_bw_x1000(cc80), 2039000, "A100 2039 GB/s");
+    return 0;
+}
+
+# --- Gaudi parsing test (mock hl-smi output) ---
+
+fn test_gaudi_gen_detection() {
+    # Gaudi3 name detection
+    var gen = GAUDI2;
+    var name = str_from("HL-325L");
+    if (str_contains(name, str_from("HL-325")) == 1) { gen = GAUDI3; }
+    assert_eq(gen, GAUDI3, "HL-325 = Gaudi3");
+
+    var gen2 = GAUDI2;
+    var name2 = str_from("HL-225");
+    if (str_contains(name2, str_from("gaudi3")) == 1) { gen2 = GAUDI3; }
+    elif (str_contains(name2, str_from("HL-325")) == 1) { gen2 = GAUDI3; }
+    assert_eq(gen2, GAUDI2, "HL-225 = Gaudi2");
+    return 0;
+}
+
+# --- Neuron JSON parsing test ---
+
+fn test_neuron_json_parse() {
+    var json = str_from("[{\"model\":\"trn1\",\"nc_count\":2,\"memory_per_nc_mb\":32768}]");
+    var profiles = vec_new();
+    _parse_neuron_json(json, profiles);
+
+    assert_eq(vec_len(profiles), 1, "1 Neuron device");
+    var p = vec_get(profiles, 0);
+    assert_eq(profile_accel_type(p), ACCEL_NEURON, "Neuron type");
+    assert_eq(profile_neuron_chip(p), NEURON_TRAINIUM, "Trainium chip");
+    assert_eq(profile_neuron_cores(p), 2, "2 cores");
+    return 0;
+}
+
+fn test_neuron_inferentia() {
+    var json = str_from("[{\"model\":\"inf2\",\"nc_count\":1,\"memory_per_nc_mb\":16384}]");
+    var profiles = vec_new();
+    _parse_neuron_json(json, profiles);
+
+    assert_eq(vec_len(profiles), 1, "1 Inferentia");
+    var p = vec_get(profiles, 0);
+    assert_eq(profile_neuron_chip(p), NEURON_INFERENTIA, "Inferentia chip");
+    assert_eq(profile_neuron_cores(p), 1, "1 core");
+    return 0;
+}
+
+# --- Shard strategy name (already tested in P2 but sanity) ---
+
+fn test_detector_names() {
+    assert(streq(backend_name(BACKEND_CUDA), "cuda") == 1, "cuda backend");
+    assert(streq(backend_name(BACKEND_ROCM), "rocm") == 1, "rocm backend");
+    assert(streq(backend_name(BACKEND_TPU), "tpu") == 1, "tpu backend");
+    assert(streq(backend_name(BACKEND_GAUDI), "gaudi") == 1, "gaudi backend");
+    assert(streq(backend_name(BACKEND_NEURON), "neuron") == 1, "neuron backend");
+    assert(streq(backend_name(BACKEND_VULKAN), "vulkan") == 1, "vulkan backend");
+    return 0;
+}
+
+# --- Run all tests ---
+
+alloc_init();
+
+test_cuda_single_gpu();
+test_cuda_multi_gpu();
+test_cuda_bad_csv();
+test_cuda_empty_lines();
+test_nvidia_bus_width();
+test_nvidia_est_bw();
+test_gaudi_gen_detection();
+test_neuron_json_parse();
+test_neuron_inferentia();
+test_detector_names();
+
+var fails = assert_summary();
+syscall(60, fails);

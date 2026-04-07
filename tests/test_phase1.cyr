@@ -269,4 +269,5 @@ test_quant_model_bytes();
 test_backends();
 test_family_names();
 
-assert_summary();
+var fails = assert_summary();
+syscall(60, fails);

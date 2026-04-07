@@ -202,4 +202,5 @@ test_parse_value_suffix();
 # test_run_echo();
 # test_run_missing_tool();
 
-assert_summary();
+var fails = assert_summary();
+syscall(60, fails);

@@ -1,0 +1,104 @@
+# neuron.cyr — AWS Inferentia/Trainium detection via neuron-ls + sysfs fallback
+
+fn detect_neuron(profiles, warnings) {
+    # Try neuron-ls --json-output first
+    var result = run_tool1("neuron-ls", "--json-output", warnings);
+    if (result != 0) {
+        if (str_len(result) > 2) {
+            _parse_neuron_json(result, profiles);
+            return 0;
+        }
+    }
+
+    # Fallback: scan /dev/neuron*
+    var ids = scan_dev_devices("neuron");
+    if (vec_len(ids) == 0) { return 0; }
+
+    # Detect chip type from DMI product name
+    var chip = NEURON_INFERENTIA;
+    var dmi = sysfs_read("/sys/devices/virtual/dmi/id/product_name");
+    if (dmi != 0) {
+        if (str_contains(dmi, str_from("trn")) == 1) { chip = NEURON_TRAINIUM; }
+        elif (str_contains(dmi, str_from("Trn")) == 1) { chip = NEURON_TRAINIUM; }
+    }
+
+    var ni = 0;
+    var nids = vec_len(ids);
+    while (ni < nids) {
+        var dev_id = vec_get(ids, ni);
+        var p = profile_neuron(dev_id, chip, 2);
+        vec_push(profiles, p);
+        ni = ni + 1;
+    }
+    return 0;
+}
+
+# Parse neuron-ls JSON output (simplified — extract model, nc_count, memory)
+# JSON format: [{"model":"trn1","nc_count":2,"memory_per_nc_mb":32768},...]
+fn _parse_neuron_json(output, profiles) {
+    var data = str_data(output);
+    var dlen = str_len(output);
+    var pos = 0;
+
+    while (pos < dlen) {
+        # Find next "model"
+        var found_model = 0;
+        while (pos < dlen - 7) {
+            if (memeq(data + pos, "\"model\"", 7) == 1) { found_model = 1; break; }
+            pos = pos + 1;
+        }
+        if (found_model == 0) { break; }
+
+        # Determine chip type from model value
+        var chip = NEURON_INFERENTIA;
+        # Scan ahead for "trn" in the model value
+        var scan = pos;
+        var scan_end = pos + 50;
+        if (scan_end > dlen) { scan_end = dlen; }
+        while (scan < scan_end) {
+            if (memeq(data + scan, "trn", 3) == 1) { chip = NEURON_TRAINIUM; break; }
+            if (memeq(data + scan, "Trn", 3) == 1) { chip = NEURON_TRAINIUM; break; }
+            scan = scan + 1;
+        }
+
+        # Find nc_count
+        var cores = 2;
+        var nc_scan = pos;
+        var nc_end = pos + 200;
+        if (nc_end > dlen) { nc_end = dlen; }
+        while (nc_scan < nc_end - 10) {
+            if (memeq(data + nc_scan, "\"nc_count\"", 10) == 1) {
+                # Find the colon then the number
+                var ns = nc_scan + 10;
+                while (ns < nc_end) {
+                    var c = load8(data + ns);
+                    if (c >= 48) {
+                        if (c <= 57) {
+                            # Parse number
+                            var num = 0;
+                            while (ns < nc_end) {
+                                var d = load8(data + ns);
+                                if (d >= 48) {
+                                    if (d <= 57) { num = num * 10 + d - 48; ns = ns + 1; continue; }
+                                }
+                                break;
+                            }
+                            cores = num;
+                            break;
+                        }
+                    }
+                    ns = ns + 1;
+                }
+                break;
+            }
+            nc_scan = nc_scan + 1;
+        }
+
+        var dev_id = vec_len(profiles);
+        var p = profile_neuron(dev_id, chip, cores);
+        vec_push(profiles, p);
+
+        pos = pos + 10;
+    }
+    return 0;
+}

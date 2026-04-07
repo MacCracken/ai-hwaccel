@@ -287,4 +287,5 @@ test_sharding_strategy();
 test_model_shard();
 test_sharding_plan();
 
-assert_summary();
+var fails = assert_summary();
+syscall(60, fails);

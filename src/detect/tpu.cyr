@@ -1,0 +1,48 @@
+# tpu.cyr — Google TPU detection via sysfs
+
+fn detect_tpu(profiles, warnings) {
+    var accel_dir = str_from("/sys/class/accel");
+    var entries = dir_list(accel_dir);
+    var nent = vec_len(entries);
+
+    var ei = 0;
+    while (ei < nent) {
+        var name = vec_get(entries, ei);
+        ei = ei + 1;
+
+        # Must start with "accel"
+        if (str_starts_with(name, "accel") != 1) { continue; }
+
+        # Skip AMD XDNA devices (check driver)
+        var drv_path = sysfs_path_str("/sys/class/accel", name, "device/driver");
+        var drv_link = read_symlink(drv_path);
+        if (drv_link != 0) {
+            var drv_base = path_basename(drv_link);
+            if (memeq(str_data(drv_base), "amdxdna", 7) == 1) { continue; }
+        }
+
+        # Parse device ID from "accelN"
+        var dev_id_str = str_sub(name, 5, str_len(name) - 5);
+        var dev_id = str_to_int(dev_id_str);
+        if (dev_id < 0) { continue; }
+
+        # Read TPU version
+        var ver_path = sysfs_path_str("/sys/class/accel", name, "device/tpu_version");
+        var ver_str = sysfs_read(ver_path);
+        var version = TPU_V4;
+        if (ver_str != 0) {
+            if (str_contains(ver_str, str_from("v5p")) == 1) { version = TPU_V5P; }
+            elif (str_contains(ver_str, str_from("v5e")) == 1) { version = TPU_V5E; }
+            elif (str_contains(ver_str, str_from("v5litepod")) == 1) { version = TPU_V5E; }
+        }
+
+        # Read chip count
+        var chip_path = sysfs_path_str("/sys/class/accel", name, "device/chip_count");
+        var chip_count = sysfs_read_int(chip_path);
+        if (chip_count <= 0) { chip_count = 1; }
+
+        var p = profile_tpu(dev_id, chip_count, version);
+        vec_push(profiles, p);
+    }
+    return 0;
+}

@@ -1,0 +1,176 @@
+# cuda.cyr — NVIDIA CUDA GPU detection via nvidia-smi
+
+# nvidia-smi query args
+var _NVSMI_QUERY = "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name,temperature.gpu,power.draw,utilization.gpu,clocks.max.memory";
+var _NVSMI_FMT = "--format=csv,noheader,nounits";
+
+# Bus width lookup by compute capability (bits)
+fn nvidia_bus_width(cc) {
+    var cclen = str_len(cc);
+    var ccd = str_data(cc);
+    # 9.0 = H100/H200 (5120-bit HBM3)
+    if (cclen >= 3 && memeq(ccd, "9.0", 3) == 1) { return 5120; }
+    # 8.9 = RTX 4090 (384-bit)
+    if (cclen >= 3 && memeq(ccd, "8.9", 3) == 1) { return 384; }
+    # 8.6 = RTX 3090/3080 (384-bit)
+    if (cclen >= 3 && memeq(ccd, "8.6", 3) == 1) { return 384; }
+    # 8.0 = A100 (5120-bit HBM2e)
+    if (cclen >= 3 && memeq(ccd, "8.0", 3) == 1) { return 5120; }
+    # 7.5 = T4/RTX 2080 (256-bit)
+    if (cclen >= 3 && memeq(ccd, "7.5", 3) == 1) { return 256; }
+    # 7.0 = V100 (4096-bit HBM2)
+    if (cclen >= 3 && memeq(ccd, "7.0", 3) == 1) { return 4096; }
+    # Default
+    return 256;
+}
+
+# Estimate bandwidth from compute capability (GB/s * 1000)
+fn nvidia_est_bw_x1000(cc) {
+    var cclen = str_len(cc);
+    var ccd = str_data(cc);
+    if (cclen >= 3 && memeq(ccd, "9.0", 3) == 1) { return 3350000; }
+    if (cclen >= 3 && memeq(ccd, "8.9", 3) == 1) { return 1008000; }
+    if (cclen >= 3 && memeq(ccd, "8.6", 3) == 1) { return 936000; }
+    if (cclen >= 3 && memeq(ccd, "8.0", 3) == 1) { return 2039000; }
+    if (cclen >= 3 && memeq(ccd, "7.5", 3) == 1) { return 320000; }
+    if (cclen >= 3 && memeq(ccd, "7.0", 3) == 1) { return 900000; }
+    return 0;
+}
+
+# Parse nvidia-smi CSV output into profiles
+fn parse_cuda_output(output, profiles, warnings) {
+    var lines = str_split(output, 10);
+    var li = 0;
+    var nlines = vec_len(lines);
+    while (li < nlines) {
+        var line = vec_get(lines, li);
+        li = li + 1;
+        if (str_len(line) == 0) { continue; }
+
+        var fields = parse_csv_line(line, 6);
+        if (fields == 0) {
+            vec_push(warnings, warning_parse("cuda", "too few CSV fields"));
+            continue;
+        }
+
+        var f_id = vec_get(fields, 0);
+        var dev_id = validate_device_id(f_id);
+        if (dev_id < 0) {
+            vec_push(warnings, warning_parse("cuda", "bad device id"));
+            continue;
+        }
+
+        var f_mem = vec_get(fields, 1);
+        var mem_mb = validate_memory_mb(f_mem);
+        if (mem_mb < 0) {
+            vec_push(warnings, warning_parse("cuda", "bad memory"));
+            continue;
+        }
+
+        var mem_bytes = mem_mb * 1024 * 1024;
+        var mem_used_mb = str_to_int(vec_get(fields, 2));
+        var mem_free_mb = str_to_int(vec_get(fields, 3));
+
+        var p = profile_cuda(dev_id, mem_bytes);
+
+        # Compute capability (field 4)
+        if (vec_len(fields) > 4) {
+            var cc = vec_get(fields, 4);
+            if (str_len(cc) > 0) {
+                var ccdata = str_data(cc);
+                var cclen = str_len(cc);
+                var cc_cstr = alloc(cclen + 1);
+                memcpy(cc_cstr, ccdata, cclen);
+                store8(cc_cstr + cclen, 0);
+                profile_set_compute_cap(p, cc_cstr);
+
+                # Calculate memory bandwidth from clock + bus width
+                if (vec_len(fields) > 10) {
+                    var clock_str = vec_get(fields, 10);
+                    var clock_mhz = str_to_int(clock_str);
+                    if (clock_mhz > 0) {
+                        var bw_bits = nvidia_bus_width(cc);
+                        # BW = clock * bus_width * 2 (DDR) / 8 / 1000 (GB/s)
+                        # Store as x1000
+                        var bw_x1000 = clock_mhz * bw_bits * 2 / 8;
+                        profile_set_mem_bw_x1000(p, bw_x1000);
+                    }
+                }
+                # Fallback: estimate from CC
+                if (profile_mem_bw_x1000(p) == PROFILE_NONE) {
+                    var est = nvidia_est_bw_x1000(cc);
+                    if (est > 0) { profile_set_mem_bw_x1000(p, est); }
+                }
+            }
+        }
+
+        # Driver version (field 5)
+        if (vec_len(fields) > 5) {
+            var dv = vec_get(fields, 5);
+            if (str_len(dv) > 0) {
+                var dvdata = str_data(dv);
+                var dvlen = str_len(dv);
+                var dv_cstr = alloc(dvlen + 1);
+                memcpy(dv_cstr, dvdata, dvlen);
+                store8(dv_cstr + dvlen, 0);
+                profile_set_driver_version(p, dv_cstr);
+            }
+        }
+
+        # GPU name (field 6)
+        if (vec_len(fields) > 6) {
+            var gn = vec_get(fields, 6);
+            if (str_len(gn) > 0) {
+                var gndata = str_data(gn);
+                var gnlen = str_len(gn);
+                var gn_cstr = alloc(gnlen + 1);
+                memcpy(gn_cstr, gndata, gnlen);
+                store8(gn_cstr + gnlen, 0);
+                profile_set_device_name(p, gn_cstr);
+
+                # Grace Hopper: add unified CPU+GPU memory
+                if (str_contains(gn, str_from("GH200")) == 1) {
+                    if (mem_bytes > 80 * BYTES_PER_GIB) {
+                        if (mem_bytes < 100 * BYTES_PER_GIB) {
+                            # Add 480 GB unified LPDDR5X
+                            store64(p + 24, mem_bytes + 480 * BYTES_PER_GIB);
+                        }
+                    }
+                }
+            }
+        }
+
+        # Memory usage
+        if (mem_used_mb > 0) { profile_set_mem_used(p, mem_used_mb * 1024 * 1024); }
+        if (mem_free_mb > 0) { profile_set_mem_free(p, mem_free_mb * 1024 * 1024); }
+
+        # Temperature (field 7)
+        if (vec_len(fields) > 7) {
+            var tc = str_to_int(vec_get(fields, 7));
+            if (tc > 0) { profile_set_temp_c(p, tc); }
+        }
+
+        # Power (field 8) — integer watts (losing decimal precision, acceptable)
+        if (vec_len(fields) > 8) {
+            var pw = str_to_int(vec_get(fields, 8));
+            if (pw > 0) { profile_set_power_x1000(p, pw * 1000); }
+        }
+
+        # GPU utilization (field 9)
+        if (vec_len(fields) > 9) {
+            var gu = str_to_int(vec_get(fields, 9));
+            if (gu >= 0) { profile_set_gpu_util(p, gu); }
+        }
+
+        vec_push(profiles, p);
+    }
+    return 0;
+}
+
+# Detect CUDA GPUs
+fn detect_cuda(profiles, warnings) {
+    var result = run_tool2("nvidia-smi", _NVSMI_QUERY, _NVSMI_FMT, warnings);
+    if (result == 0) { return 0; }
+    parse_cuda_output(result, profiles, warnings);
+    return 0;
+}
