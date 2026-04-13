@@ -49,6 +49,8 @@ include "src/plan.cyr"
 include "src/training.cyr"
 include "src/cost.cyr"
 include "src/model.cyr"
+include "src/model_format.cyr"
+include "src/requirement.cyr"
 include "src/json_out.cyr"
 
 # --- CLI argument helpers (using lib/args.cyr) ---

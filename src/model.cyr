@@ -174,3 +174,36 @@ fn find_model(models, name) {
     }
     return 0;
 }
+
+# Find models by family (case-sensitive match)
+fn models_by_family(models, family) {
+    var result = vec_new();
+    var nm = vec_len(models);
+    var i = 0;
+    while (i < nm) {
+        var m = vec_get(models, i);
+        i = i + 1;
+        var mf = model_family(m);
+        if (mf != 0) {
+            if (streq(mf, family) == 1) {
+                vec_push(result, m);
+            }
+        }
+    }
+    return result;
+}
+
+# Headroom percentage (x100 fixed-point, e.g., 2500 = 25.00%)
+# Returns how much spare memory is available after loading the model
+fn model_headroom_x100(m, quant, avail_bytes) {
+    var needed = model_memory_bytes(m, quant);
+    if (avail_bytes == 0) { return 0; }
+    if (needed > avail_bytes) { return 0; }
+    return (avail_bytes - needed) * 10000 / avail_bytes;
+}
+
+# Compatible models with headroom, using registry total accel memory
+fn compatible_with_registry(models, r, quant) {
+    var avail = reg_total_accel_memory(r);
+    return compatible_models(models, quant, avail);
+}

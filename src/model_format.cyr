@@ -1,0 +1,479 @@
+# model_format.cyr — model file format detection
+# Parses .safetensors, .gguf, .onnx, .pt file headers to extract
+# model metadata without loading the full file.
+# Only the first 16 KB are read.
+
+# --- Format enum ---
+
+enum ModelFormat {
+    FMT_SAFETENSORS = 1;
+    FMT_GGUF = 2;
+    FMT_ONNX = 3;
+    FMT_PYTORCH = 4;
+}
+
+fn format_name(f) {
+    if (f == FMT_SAFETENSORS) { return "SafeTensors"; }
+    if (f == FMT_GGUF) { return "GGUF"; }
+    if (f == FMT_ONNX) { return "ONNX"; }
+    if (f == FMT_PYTORCH) { return "PyTorch"; }
+    return "Unknown";
+}
+
+# --- ModelMetadata struct layout ---
+#   0: format (ModelFormat enum)
+#   8: param_count (i64, 0 = unknown)
+#  16: dtype (ptr to cstr, 0 = unknown)
+#  24: tensor_count (i64, 0 = unknown)
+#  32: format_version (i64, 0 = unknown)
+
+fn meta_new(fmt, params, dtype, tensors, version) {
+    var m = alloc(40);
+    store64(m, fmt);
+    store64(m + 8, params);
+    store64(m + 16, dtype);
+    store64(m + 24, tensors);
+    store64(m + 32, version);
+    return m;
+}
+
+fn meta_format(m) { return load64(m); }
+fn meta_param_count(m) { return load64(m + 8); }
+fn meta_dtype(m) { return load64(m + 16); }
+fn meta_tensor_count(m) { return load64(m + 24); }
+fn meta_format_version(m) { return load64(m + 32); }
+
+# Constants inlined where used to avoid global var limit
+
+# --- Top-level API ---
+
+# Detect format from file path (reads first 16 KB)
+# Returns ModelMetadata ptr or 0 on failure
+fn detect_model_format(path) {
+    var buf = alloc(16384);
+    var n = file_read_all(path, buf, 16384);
+    if (n <= 0) { return 0; }
+    return detect_format_from_bytes(buf, n);
+}
+
+# Detect format from raw bytes (no file I/O)
+# Returns ModelMetadata ptr or 0 on failure
+fn detect_format_from_bytes(buf, len) {
+    var meta = _parse_safetensors(buf, len);
+    if (meta != 0) { return meta; }
+
+    meta = _parse_gguf(buf, len);
+    if (meta != 0) { return meta; }
+
+    meta = _parse_onnx(buf, len);
+    if (meta != 0) { return meta; }
+
+    if (_is_pytorch(buf, len) == 1) {
+        return meta_new(FMT_PYTORCH, 0, 0, 0, 0);
+    }
+    return 0;
+}
+
+# --- SafeTensors parser ---
+# Format: 8-byte LE header_size, then JSON metadata.
+# JSON keys are tensor names with {dtype, shape, data_offsets}.
+
+fn _parse_safetensors(buf, len) {
+    if (len < 8) { return 0; }
+
+    # Read header_size as 64-bit LE
+    var header_size = load64(buf);
+    # Sanity: > 0, < 100 MB
+    if (header_size <= 0) { return 0; }
+    if (header_size > 104857600) { return 0; }
+
+    # Check JSON starts with '{'
+        var json_start = buf + 8;
+        var json_avail = len - 8;
+        if (json_avail <= 0) { return 0; }
+
+        # Skip whitespace
+        var ws_i = 0;
+        while (ws_i < json_avail) {
+            var c = load8(json_start + ws_i);
+            if (c != 32 && c != 9 && c != 10 && c != 13) { break; }
+            ws_i = ws_i + 1;
+        }
+        if (ws_i >= json_avail) { return 0; }
+        if (load8(json_start + ws_i) != 123) { return 0; }  # '{'
+
+            # If we have the complete header, extract metadata
+            if (json_avail >= header_size) {
+                return _extract_safetensors_meta(json_start, header_size);
+            }
+
+            # Partial header — format identified but no metadata
+            return meta_new(FMT_SAFETENSORS, 0, 0, 0, 0);
+        }
+
+        # Extract tensor count, dtype, and param count from SafeTensors JSON
+        fn _extract_safetensors_meta(json, json_len) {
+            var total_params = 0;
+            var tensor_count = 0;
+            var dtype = 0;
+            var pos = 0;
+
+            # Scan for top-level keys (tensor names)
+            # Each key maps to {dtype, shape, data_offsets}
+            while (pos < json_len) {
+                # Find opening quote of a key
+                if (load8(json + pos) != 34) { pos = pos + 1; continue; }
+
+                # Read key name
+                var key_start = pos + 1;
+                var key_end = key_start;
+                while (key_end < json_len && load8(json + key_end) != 34) {
+                    key_end = key_end + 1;
+                }
+                var key_len = key_end - key_start;
+                pos = key_end + 1;
+
+                # Skip __metadata__
+                if (key_len == 12) {
+                    if (memeq(json + key_start, "__metadata__", 12) == 1) {
+                        # Skip to matching closing brace
+                        pos = _skip_json_value(json, json_len, pos);
+                        continue;
+                    }
+                }
+
+                # Find the value object '{'
+                    while (pos < json_len && load8(json + pos) != 123) {
+                        pos = pos + 1;
+                    }
+                    if (pos >= json_len) { break; }
+
+                    # This is a tensor entry
+                    tensor_count = tensor_count + 1;
+
+                    # Find end of tensor object
+                    var obj_start = pos;
+                    var obj_end = _skip_json_object(json, json_len, pos);
+
+                    # Extract dtype from this tensor (first tensor wins)
+                    if (dtype == 0) {
+                        dtype = _find_json_string(json + obj_start,
+                        obj_end - obj_start, "dtype");
+                    }
+
+                    # Extract shape and multiply dimensions for param count
+                    var params = _extract_shape_product(json + obj_start,
+                    obj_end - obj_start);
+                    total_params = total_params + params;
+
+                    pos = obj_end;
+                }
+
+                return meta_new(FMT_SAFETENSORS, total_params,
+                dtype, tensor_count, 0);
+            }
+
+            # Skip a JSON value (object, array, string, number, etc.)
+            fn _skip_json_value(json, json_len, pos) {
+                while (pos < json_len && load8(json + pos) != 123) {
+                    if (load8(json + pos) == 44) { return pos; }  # ','
+                    if (load8(json + pos) == 125) { return pos; }  # '}'
+                pos = pos + 1;
+            }
+            if (pos < json_len && load8(json + pos) == 123) {
+                return _skip_json_object(json, json_len, pos);
+            }
+            return pos;
+        }
+
+        # Skip a JSON object, returns position after closing '}'
+    fn _skip_json_object(json, json_len, pos) {
+        if (pos >= json_len) { return pos; }
+        if (load8(json + pos) != 123) { return pos; }
+        var depth = 1;
+        pos = pos + 1;
+        while (pos < json_len && depth > 0) {
+            var c = load8(json + pos);
+            if (c == 123) { depth = depth + 1; }
+            if (c == 125) { depth = depth - 1; }
+            if (c == 34) {
+                # Skip quoted strings (may contain braces)
+                pos = pos + 1;
+                while (pos < json_len && load8(json + pos) != 34) {
+                    if (load8(json + pos) == 92) { pos = pos + 1; }
+                    pos = pos + 1;
+                }
+            }
+            pos = pos + 1;
+        }
+        return pos;
+    }
+
+    # Find a JSON string value for a given key within a buffer
+    # Returns cstr ptr or 0
+    fn _find_json_string(buf, len, key) {
+        var klen = strlen(key);
+        var i = 0;
+        while (i < len - klen - 4) {
+            if (load8(buf + i) == 34) {
+                if (memeq(buf + i + 1, key, klen) == 1) {
+                    if (load8(buf + i + 1 + klen) == 34) {
+                        # Found key, find value string
+                        var vi = i + klen + 2;
+                        while (vi < len && load8(buf + vi) != 34) {
+                            vi = vi + 1;
+                        }
+                        vi = vi + 1;
+                        var vstart = vi;
+                        while (vi < len && load8(buf + vi) != 34) {
+                            vi = vi + 1;
+                        }
+                        var vlen = vi - vstart;
+                        if (vlen > 0) {
+                            var val = alloc(vlen + 1);
+                            memcpy(val, buf + vstart, vlen);
+                            store8(val + vlen, 0);
+                            return val;
+                        }
+                        return 0;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        return 0;
+    }
+
+    # Extract shape array and compute product of dimensions
+    # Returns 0 for empty or missing shape
+    fn _extract_shape_product(buf, len) {
+        # Find "shape" key
+        var needle = "shape";
+        var nlen = 5;
+        var i = 0;
+        while (i < len - nlen - 4) {
+            if (load8(buf + i) == 34) {
+                if (memeq(buf + i + 1, needle, nlen) == 1) {
+                    if (load8(buf + i + 1 + nlen) == 34) {
+                        # Found "shape", find '['
+                        var vi = i + nlen + 2;
+                        while (vi < len && load8(buf + vi) != 91) {
+                            vi = vi + 1;
+                        }
+                        if (vi >= len) { return 0; }
+                        vi = vi + 1;  # skip '['
+
+                        # Check for empty array
+                        var ws = vi;
+                        while (ws < len) {
+                            var c = load8(buf + ws);
+                            if (c != 32 && c != 10) { break; }
+                            ws = ws + 1;
+                        }
+                        if (ws < len && load8(buf + ws) == 93) {
+                            return 0;  # empty shape []
+                        }
+
+                        # Parse comma-separated integers
+                        var product = 1;
+                        var num = 0;
+                        var has_num = 0;
+                        while (vi < len) {
+                            var c2 = load8(buf + vi);
+                            if (c2 >= 48 && c2 <= 57) {
+                                num = num * 10 + c2 - 48;
+                                has_num = 1;
+                            } elif (c2 == 44) {
+                                if (has_num == 1) {
+                                    product = product * num;
+                                }
+                                num = 0;
+                                has_num = 0;
+                            } elif (c2 == 93) {
+                                if (has_num == 1) {
+                                    product = product * num;
+                                }
+                                return product;
+                            }
+                            vi = vi + 1;
+                        }
+                        return product;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        return 0;
+    }
+
+    # --- GGUF parser ---
+    # Format: 4-byte magic "GGUF", 4-byte version, 8-byte tensor count,
+    # 8-byte KV count, then metadata pairs.
+
+    fn _parse_gguf(buf, len) {
+        if (len < 24) { return 0; }
+
+        # Check magic bytes "GGUF"
+        if (load8(buf) != 71) { return 0; }
+        if (load8(buf + 1) != 71) { return 0; }
+        if (load8(buf + 2) != 85) { return 0; }
+        if (load8(buf + 3) != 70) { return 0; }
+
+        # Read version (32-bit LE) — manual LE read
+        var version = load8(buf + 4);
+        version = version + load8(buf + 5) * 256;
+        version = version + load8(buf + 6) * 65536;
+        version = version + load8(buf + 7) * 16777216;
+
+        # Read tensor_count (64-bit LE)
+        var tensor_count = load64(buf + 8);
+
+        # Try to extract dtype from metadata
+        var dtype = _extract_gguf_dtype(buf, len, 24);
+
+        var tc = tensor_count;
+        if (tc < 0) { tc = 0; }
+
+        return meta_new(FMT_GGUF, 0, dtype, tc, version);
+    }
+
+    # Scan for "general.file_type" key in GGUF metadata
+    fn _extract_gguf_dtype(buf, len, offset) {
+        var needle = "general.file_type";
+        var nlen = 17;
+
+        var i = offset;
+        while (i < len - nlen) {
+            if (memeq(buf + i, needle, nlen) == 1) {
+                # Found key. Value type + value follow.
+                var voff = i + nlen;
+                if (voff + 8 > len) { return 0; }
+
+                # Value type 4 = UINT32
+                var vtype = load8(buf + voff);
+                vtype = vtype + load8(buf + voff + 1) * 256;
+                vtype = vtype + load8(buf + voff + 2) * 65536;
+                vtype = vtype + load8(buf + voff + 3) * 16777216;
+                if (vtype != 4) { return 0; }
+
+                var ftype = load8(buf + voff + 4);
+                ftype = ftype + load8(buf + voff + 5) * 256;
+                ftype = ftype + load8(buf + voff + 6) * 65536;
+                ftype = ftype + load8(buf + voff + 7) * 16777216;
+
+                return _gguf_file_type_name(ftype);
+            }
+            i = i + 1;
+        }
+        return 0;
+    }
+
+    fn _gguf_file_type_name(ft) {
+        if (ft == 0) { return "F32"; }
+        if (ft == 1) { return "F16"; }
+        if (ft == 2) { return "Q4_0"; }
+        if (ft == 3) { return "Q4_1"; }
+        if (ft == 7) { return "Q8_0"; }
+        if (ft == 8) { return "Q5_0"; }
+        if (ft == 9) { return "Q5_1"; }
+        if (ft == 10) { return "Q2_K"; }
+        if (ft == 11) { return "Q3_K_S"; }
+        if (ft == 12) { return "Q3_K_M"; }
+        if (ft == 13) { return "Q3_K_L"; }
+        if (ft == 14) { return "Q4_K_S"; }
+        if (ft == 15) { return "Q4_K_M"; }
+        if (ft == 16) { return "Q5_K_S"; }
+        if (ft == 17) { return "Q5_K_M"; }
+        if (ft == 18) { return "Q6_K"; }
+        if (ft == 19) { return "IQ2_XXS"; }
+        if (ft == 20) { return "IQ2_XS"; }
+        return "unknown";
+    }
+
+    # --- ONNX parser ---
+    # ONNX uses Protocol Buffers. Field 1 (ir_version) tag = 0x08.
+
+    fn _parse_onnx(buf, len) {
+        if (len < 4) { return 0; }
+        if (load8(buf) != 8) { return 0; }
+
+        # Parse ir_version as varint
+        var ir_ver = 0;
+        var consumed = 0;
+        var shift = 0;
+        var vi = 1;
+        while (vi < len) {
+            var b = load8(buf + vi);
+            ir_ver = ir_ver + (b & 127) * _pow2(shift);
+            consumed = consumed + 1;
+            if ((b & 128) == 0) { break; }
+            shift = shift + 7;
+            if (shift >= 64) { return 0; }
+            vi = vi + 1;
+        }
+        if (consumed == 0) { return 0; }
+
+        # Sanity: ir_version 1-20
+        if (ir_ver == 0) { return 0; }
+        if (ir_ver > 20) { return 0; }
+
+        # Validate second protobuf field
+        var next_off = 1 + consumed;
+        if (next_off >= len) { return 0; }
+        var next_tag = load8(buf + next_off);
+        var wire_type = next_tag & 7;
+        var field_num = next_tag / 8;
+        if (wire_type > 2) { return 0; }
+        if (field_num == 0) { return 0; }
+
+        return meta_new(FMT_ONNX, 0, 0, 0, ir_ver);
+    }
+
+    # Simple power-of-2 for varint decoding
+    fn _pow2(n) {
+        var r = 1;
+        var i = 0;
+        while (i < n) { r = r * 2; i = i + 1; }
+        return r;
+    }
+
+    # --- PyTorch detector ---
+    # PyTorch files are ZIP archives: magic PK\x03\x04
+
+    fn _is_pytorch(buf, len) {
+        if (len < 4) { return 0; }
+        if (load8(buf) != 80) { return 0; }      # 'P'
+        if (load8(buf + 1) != 75) { return 0; }   # 'K'
+        if (load8(buf + 2) != 3) { return 0; }
+        if (load8(buf + 3) != 4) { return 0; }
+        return 1;
+    }
+
+    # --- JSON output for ModelMetadata ---
+
+    fn model_meta_to_json(m) {
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "{\"format\":\"");
+            str_builder_add_cstr(sb, format_name(meta_format(m)));
+            str_builder_add_cstr(sb, "\"");
+
+            if (meta_param_count(m) > 0) {
+                str_builder_add_cstr(sb, ",\"param_count\":");
+                str_builder_add_int(sb, meta_param_count(m));
+            }
+            if (meta_dtype(m) != 0) {
+                str_builder_add_cstr(sb, ",\"dtype\":\"");
+                str_builder_add_cstr(sb, meta_dtype(m));
+                str_builder_add_cstr(sb, "\"");
+            }
+            if (meta_tensor_count(m) > 0) {
+                str_builder_add_cstr(sb, ",\"tensor_count\":");
+                str_builder_add_int(sb, meta_tensor_count(m));
+            }
+            if (meta_format_version(m) > 0) {
+                str_builder_add_cstr(sb, ",\"format_version\":");
+                str_builder_add_int(sb, meta_format_version(m));
+            }
+            str_builder_add_cstr(sb, "}");
+        return str_builder_build(sb);
+    }

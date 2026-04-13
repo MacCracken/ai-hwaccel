@@ -1,0 +1,279 @@
+# test_phase10.cyr — tests for model_format detection
+# Covers: SafeTensors, GGUF, ONNX, PyTorch header parsing
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/model_format.cyr"
+
+# --- SafeTensors tests ---
+
+fn test_safetensors_valid() {
+    # Build a minimal SafeTensors file:
+    # 8-byte LE header_size + JSON
+    var json = "{\"weight\":{\"dtype\":\"F16\",\"shape\":[768,768],\"data_offsets\":[0,1179648]}}";
+    var jlen = strlen(json);
+    var buf = alloc(8 + jlen);
+    # Write header_size as 64-bit LE
+    store64(buf, jlen);
+    memcpy(buf + 8, json, jlen);
+
+    var meta = detect_format_from_bytes(buf, 8 + jlen);
+    assert(meta != 0, "safetensors detected");
+    assert_eq(meta_format(meta), FMT_SAFETENSORS, "format");
+    # 768 * 768 = 589824
+    assert_eq(meta_param_count(meta), 589824, "param count");
+    assert_eq(meta_tensor_count(meta), 1, "tensor count");
+    assert(streq(meta_dtype(meta), "F16") == 1, "dtype F16");
+    return 0;
+}
+
+fn test_safetensors_multi_tensor() {
+    var json = "{\"w1\":{\"dtype\":\"BF16\",\"shape\":[1024,512],\"data_offsets\":[0,1]},\"w2\":{\"dtype\":\"BF16\",\"shape\":[512,256],\"data_offsets\":[1,2]},\"__metadata__\":{\"format\":\"pt\"}}";
+    var jlen = strlen(json);
+    var buf = alloc(8 + jlen);
+    store64(buf, jlen);
+    memcpy(buf + 8, json, jlen);
+
+    var meta = detect_format_from_bytes(buf, 8 + jlen);
+    assert(meta != 0, "multi-tensor detected");
+    assert_eq(meta_format(meta), FMT_SAFETENSORS, "format");
+    # 1024*512 + 512*256 = 524288 + 131072 = 655360
+    assert_eq(meta_param_count(meta), 655360, "param count");
+    assert_eq(meta_tensor_count(meta), 2, "tensor count (excl metadata)");
+    assert(streq(meta_dtype(meta), "BF16") == 1, "dtype BF16");
+    return 0;
+}
+
+fn test_safetensors_empty_shape() {
+    # Scalar tensor — shape [] should give 0 params
+    var json = "{\"bias\":{\"dtype\":\"F32\",\"shape\":[],\"data_offsets\":[0,4]}}";
+    var jlen = strlen(json);
+    var buf = alloc(8 + jlen);
+    store64(buf, jlen);
+    memcpy(buf + 8, json, jlen);
+
+    var meta = detect_format_from_bytes(buf, 8 + jlen);
+    assert(meta != 0, "empty shape detected");
+    assert_eq(meta_format(meta), FMT_SAFETENSORS, "format");
+    assert_eq(meta_param_count(meta), 0, "no params for empty shape");
+    assert_eq(meta_tensor_count(meta), 1, "still 1 tensor");
+    return 0;
+}
+
+fn test_safetensors_too_small() {
+    var buf = alloc(4);
+    memset(buf, 0, 4);
+    var meta = detect_format_from_bytes(buf, 4);
+    assert_eq(meta, 0, "too small returns null");
+    return 0;
+}
+
+fn test_safetensors_bad_header_size() {
+    var buf = alloc(8);
+    # 1 billion — too large
+    store64(buf, 1000000000);
+    var meta = _parse_safetensors(buf, 8);
+    assert_eq(meta, 0, "huge header rejected");
+    return 0;
+}
+
+# --- GGUF tests ---
+
+fn test_gguf_valid() {
+    var buf = alloc(24);
+    # Magic: GGUF
+    store8(buf, 71);     # G
+    store8(buf + 1, 71); # G
+    store8(buf + 2, 85); # U
+    store8(buf + 3, 70); # F
+    # Version 3 (32-bit LE)
+    store8(buf + 4, 3);
+    store8(buf + 5, 0);
+    store8(buf + 6, 0);
+    store8(buf + 7, 0);
+    # Tensor count: 42 (64-bit LE)
+    store64(buf + 8, 42);
+    # KV count: 5
+    store64(buf + 16, 5);
+
+    var meta = detect_format_from_bytes(buf, 24);
+    assert(meta != 0, "gguf detected");
+    assert_eq(meta_format(meta), FMT_GGUF, "format GGUF");
+    assert_eq(meta_tensor_count(meta), 42, "42 tensors");
+    assert_eq(meta_format_version(meta), 3, "version 3");
+    return 0;
+}
+
+fn test_gguf_wrong_magic() {
+    var buf = alloc(24);
+    memset(buf, 0, 24);
+    var meta = _parse_gguf(buf, 24);
+    assert_eq(meta, 0, "wrong magic rejected");
+    return 0;
+}
+
+fn test_gguf_too_small() {
+    var buf = alloc(10);
+    memset(buf, 0, 10);
+    var meta = _parse_gguf(buf, 10);
+    assert_eq(meta, 0, "too small rejected");
+    return 0;
+}
+
+# --- ONNX tests ---
+
+fn test_onnx_valid() {
+    # ir_version=9: tag 0x08, value 0x09
+    # Then field 2 wire type 2: 0x12, length 0x00
+    var buf = alloc(4);
+    store8(buf, 8);     # 0x08
+    store8(buf + 1, 9); # ir_version = 9
+    store8(buf + 2, 18); # 0x12 = field 2, wire type 2
+    store8(buf + 3, 0);
+
+    var meta = detect_format_from_bytes(buf, 4);
+    assert(meta != 0, "onnx detected");
+    assert_eq(meta_format(meta), FMT_ONNX, "format ONNX");
+    assert_eq(meta_format_version(meta), 9, "ir_version 9");
+    return 0;
+}
+
+fn test_onnx_bad_ir_version() {
+    var buf = alloc(2);
+    store8(buf, 8);
+    store8(buf + 1, 0);   # ir_version = 0 — invalid
+    var meta = _parse_onnx(buf, 2);
+    assert_eq(meta, 0, "ir_version 0 rejected");
+    return 0;
+}
+
+fn test_onnx_too_short() {
+    # Only ir_version, no second field
+    var buf = alloc(2);
+    store8(buf, 8);
+    store8(buf + 1, 9);
+    var meta = _parse_onnx(buf, 2);
+    assert_eq(meta, 0, "too short rejected");
+    return 0;
+}
+
+fn test_onnx_invalid_second_field() {
+    var buf = alloc(3);
+    store8(buf, 8);
+    store8(buf + 1, 9);
+    store8(buf + 2, 7);   # wire type 7 = invalid
+    var meta = _parse_onnx(buf, 3);
+    assert_eq(meta, 0, "invalid wire type rejected");
+    return 0;
+}
+
+# --- PyTorch tests ---
+
+fn test_pytorch_zip_magic() {
+    var buf = alloc(6);
+    store8(buf, 80);     # P
+    store8(buf + 1, 75); # K
+    store8(buf + 2, 3);
+    store8(buf + 3, 4);
+    store8(buf + 4, 0);
+    store8(buf + 5, 0);
+
+    var meta = detect_format_from_bytes(buf, 6);
+    assert(meta != 0, "pytorch detected");
+    assert_eq(meta_format(meta), FMT_PYTORCH, "format PyTorch");
+    return 0;
+}
+
+fn test_pytorch_not_zip() {
+    var buf = alloc(4);
+    memset(buf, 0, 4);
+    assert_eq(_is_pytorch(buf, 4), 0, "not pytorch");
+    return 0;
+}
+
+# --- Unknown format ---
+
+fn test_unknown_format() {
+    var buf = alloc(10);
+    store8(buf, 255);
+    store8(buf + 1, 254);
+    store8(buf + 2, 253);
+    memset(buf + 3, 0, 7);
+    var meta = detect_format_from_bytes(buf, 10);
+    assert_eq(meta, 0, "unknown returns null");
+    return 0;
+}
+
+# --- Format name ---
+
+fn test_format_name() {
+    assert(streq(format_name(FMT_SAFETENSORS), "SafeTensors") == 1,
+        "SafeTensors name");
+    assert(streq(format_name(FMT_GGUF), "GGUF") == 1,
+        "GGUF name");
+    assert(streq(format_name(FMT_ONNX), "ONNX") == 1,
+        "ONNX name");
+    assert(streq(format_name(FMT_PYTORCH), "PyTorch") == 1,
+        "PyTorch name");
+    return 0;
+}
+
+# --- GGUF dtype lookup ---
+
+fn test_gguf_dtype_names() {
+    assert(streq(_gguf_file_type_name(0), "F32") == 1, "F32");
+    assert(streq(_gguf_file_type_name(1), "F16") == 1, "F16");
+    assert(streq(_gguf_file_type_name(2), "Q4_0") == 1, "Q4_0");
+    assert(streq(_gguf_file_type_name(7), "Q8_0") == 1, "Q8_0");
+    assert(streq(_gguf_file_type_name(15), "Q4_K_M") == 1, "Q4_K_M");
+    assert(streq(_gguf_file_type_name(18), "Q6_K") == 1, "Q6_K");
+    assert(streq(_gguf_file_type_name(999), "unknown") == 1,
+        "unknown type");
+    return 0;
+}
+
+# --- JSON output ---
+
+fn test_model_meta_json() {
+    var m = meta_new(FMT_GGUF, 0, "Q4_K_M", 42, 3);
+    var json = model_meta_to_json(m);
+    assert(str_contains(json, "GGUF") == 1, "json has GGUF");
+    assert(str_contains(json, "Q4_K_M") == 1, "json has dtype");
+    assert(str_contains(json, "42") == 1, "json has tensor count");
+    return 0;
+}
+
+# --- Main ---
+
+alloc_init();
+
+test_safetensors_valid();
+test_safetensors_multi_tensor();
+test_safetensors_empty_shape();
+test_safetensors_too_small();
+test_safetensors_bad_header_size();
+test_gguf_valid();
+test_gguf_wrong_magic();
+test_gguf_too_small();
+test_onnx_valid();
+test_onnx_bad_ir_version();
+test_onnx_too_short();
+test_onnx_invalid_second_field();
+test_pytorch_zip_magic();
+test_pytorch_not_zip();
+test_unknown_format();
+test_format_name();
+test_gguf_dtype_names();
+test_model_meta_json();
+
+var fails = assert_summary();
+syscall(60, fails);

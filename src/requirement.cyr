@@ -1,0 +1,91 @@
+# requirement.cyr — workload accelerator requirements
+# Used for scheduling integration: "does this profile meet the requirement?"
+
+# Requirement type enum
+enum AccelRequirement {
+    REQ_NONE = 0;            # CPU is sufficient
+    REQ_GPU = 1;             # CUDA, ROCm, Metal, Vulkan
+    REQ_TPU = 2;             # TPU (check min_chips separately)
+    REQ_GAUDI = 3;           # Intel Gaudi HPU
+    REQ_AWS_NEURON = 4;      # Inferentia or Trainium
+    REQ_GPU_OR_TPU = 5;      # Either GPU or TPU
+    REQ_ANY_ACCELERATOR = 6; # Any non-CPU accelerator
+}
+
+fn requirement_name(r) {
+    if (r == REQ_NONE) { return "none"; }
+    if (r == REQ_GPU) { return "gpu"; }
+    if (r == REQ_TPU) { return "tpu"; }
+    if (r == REQ_GAUDI) { return "gaudi"; }
+    if (r == REQ_AWS_NEURON) { return "aws-neuron"; }
+    if (r == REQ_GPU_OR_TPU) { return "gpu-or-tpu"; }
+    if (r == REQ_ANY_ACCELERATOR) { return "any-accelerator"; }
+    return "unknown";
+}
+
+# Check if a profile satisfies a requirement
+# For REQ_TPU, min_chips is checked against profile_tpu_chip_count
+fn requirement_satisfied(req, min_chips, profile) {
+    if (profile_available(profile) != 1) { return 0; }
+    var at = profile_accel_type(profile);
+
+    if (req == REQ_NONE) { return 1; }
+
+    if (req == REQ_GPU) {
+        return accel_is_gpu(at);
+    }
+
+    if (req == REQ_TPU) {
+        if (at != ACCEL_TPU) { return 0; }
+        var chips = profile_tpu_chip_count(profile);
+        return chips >= min_chips;
+    }
+
+    if (req == REQ_GAUDI) {
+        return at == ACCEL_GAUDI;
+    }
+
+    if (req == REQ_AWS_NEURON) {
+        return at == ACCEL_NEURON;
+    }
+
+    if (req == REQ_GPU_OR_TPU) {
+        if (accel_is_gpu(at) == 1) { return 1; }
+        return accel_is_tpu(at);
+    }
+
+    if (req == REQ_ANY_ACCELERATOR) {
+        return at != ACCEL_CPU;
+    }
+
+    return 0;
+}
+
+# Find first profile in registry that satisfies requirement
+fn find_satisfying_profile(req, min_chips, profiles) {
+    var np = vec_len(profiles);
+    var i = 0;
+    while (i < np) {
+        var p = vec_get(profiles, i);
+        if (requirement_satisfied(req, min_chips, p) == 1) {
+            return p;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Count profiles that satisfy requirement
+fn count_satisfying(req, min_chips, profiles) {
+    var np = vec_len(profiles);
+    var count = 0;
+    var i = 0;
+    while (i < np) {
+        var p = vec_get(profiles, i);
+        if (requirement_satisfied(req, min_chips, p) == 1) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    return count;
+}
