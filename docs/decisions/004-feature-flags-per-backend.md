@@ -1,4 +1,4 @@
-# ADR-004: Feature flags per hardware backend
+# ADR-004: Compile-time flags per hardware backend
 
 ## Status
 
@@ -6,41 +6,43 @@ Accepted
 
 ## Context
 
-Not every consumer needs all 11 detection backends. A Kubernetes scheduler
+Not every consumer needs all detection backends. A Kubernetes scheduler
 running on GPU-only nodes doesn't need TPU or Neuron detection code. Unused
 backends add compile time and (for CLI tools) unnecessary subprocess spawns.
 
 ## Decision
 
-Each backend is gated behind a cargo feature flag. All are enabled by default
-via the `all-backends` feature.
+Each backend is gated behind a `#ifdef` / `-D` compile-time flag. All are
+enabled by default.
 
-```toml
-[features]
-default = ["all-backends"]
-all-backends = ["cuda", "rocm", "apple", "vulkan", "intel-npu", ...]
-cuda = []
-rocm = []
-# ...
+```sh
+# Build with all backends (default)
+cyrius build src/main.cyr build/ai-hwaccel
+
+# Build with only CUDA and TPU
+cyrius build src/main.cyr build/ai-hwaccel -DCUDA -DTPU
+
+# Build with no backends (CPU-only)
+cyrius build src/main.cyr build/ai-hwaccel -DNO_BACKENDS
 ```
 
-When a feature is disabled, the corresponding `detect/*.rs` module is not
-compiled (`#[cfg(feature = "...")]`) and the backend is never spawned.
+When a flag is not set, the corresponding `detect/*.cyr` module is not
+compiled (`#ifdef BACKEND_NAME`) and the backend is never spawned.
 
 ## Consequences
 
 **Benefits:**
 
-- Downstream crates can opt into only the backends they care about:
-  `features = ["cuda", "tpu"]`.
+- Consumers can build with only the backends they care about:
+  `-DCUDA -DTPU`.
 - Faster compile times when most backends are disabled.
 - Smaller binary size (dead code is eliminated).
-- The `DetectBuilder` runtime toggle and feature-flag compile-time toggle
-  compose: features control what *can* run, builder controls what *does* run.
+- The `DetectBuilder` runtime toggle and `-D` compile-time toggle
+  compose: flags control what *can* run, builder controls what *does* run.
 
 **Trade-offs:**
 
-- More CI surface: we should test `--no-default-features` and a few
-  representative feature combos.
+- More CI surface: we should test `-DNO_BACKENDS` and a few
+  representative flag combos.
 - The `Backend` enum and `DetectBuilder` still exist even when backends are
   disabled — they just become no-ops.

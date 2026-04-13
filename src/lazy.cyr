@@ -1,0 +1,162 @@
+# lazy.cyr — lazy per-family detection
+# Defers backend probing until a specific family is queried.
+# Avoids spawning nvidia-smi when only TPU info is needed.
+#
+# Usage:
+#   var lr = lazy_new();
+#   var gpus = lazy_by_family(lr, FAMILY_GPU);  # probes GPU backends only
+#   var all = lazy_into_registry(lr);           # probe everything
+
+# LazyRegistry struct layout:
+#   0: profiles (vec ptr)
+#   8: probed[5] as bitmask (i64) — bit 0=CPU, 1=GPU, 2=NPU, 3=TPU, 4=ASIC
+#  16: mutex (ptr)
+
+fn lazy_new() {
+    var lr = alloc(24);
+    var profs = vec_new();
+    # Always include CPU
+    var sys_mem = detect_system_memory();
+    if (sys_mem == 0) { sys_mem = 16 * BYTES_PER_GIB; }
+    vec_push(profs, profile_cpu(sys_mem));
+    store64(lr, profs);
+    store64(lr + 8, 1);  # bit 0 = CPU probed
+    store64(lr + 16, mutex_new());
+    return lr;
+}
+
+# Check if family has been probed
+fn _lazy_is_probed(lr, family) {
+    var mask = load64(lr + 8);
+    var bit = 1;
+    var i = 0;
+    while (i < family) { bit = bit * 2; i = i + 1; }
+    return (mask & bit) != 0;
+}
+
+# Mark family as probed
+fn _lazy_mark_probed(lr, family) {
+    var mask = load64(lr + 8);
+    var bit = 1;
+    var i = 0;
+    while (i < family) { bit = bit * 2; i = i + 1; }
+    store64(lr + 8, mask | bit);
+    return 0;
+}
+
+# Build a builder mask for backends of a specific family
+fn _family_builder_mask(family) {
+    var mask = 0;
+    if (family == FAMILY_GPU) {
+        mask = builder_enable(mask, BACKEND_CUDA);
+        mask = builder_enable(mask, BACKEND_ROCM);
+        mask = builder_enable(mask, BACKEND_VULKAN);
+        mask = builder_enable(mask, BACKEND_APPLE);
+        return mask;
+    }
+    if (family == FAMILY_NPU) {
+        mask = builder_enable(mask, BACKEND_INTEL_NPU);
+        mask = builder_enable(mask, BACKEND_AMD_XDNA);
+        mask = builder_enable(mask, BACKEND_SAMSUNG_NPU);
+        mask = builder_enable(mask, BACKEND_MEDIATEK_APU);
+        return mask;
+    }
+    if (family == FAMILY_TPU) {
+        mask = builder_enable(mask, BACKEND_TPU);
+        return mask;
+    }
+    if (family == FAMILY_AI_ASIC) {
+        mask = builder_enable(mask, BACKEND_GAUDI);
+        mask = builder_enable(mask, BACKEND_NEURON);
+        mask = builder_enable(mask, BACKEND_INTEL_ONEAPI);
+        mask = builder_enable(mask, BACKEND_QUALCOMM);
+        mask = builder_enable(mask, BACKEND_CEREBRAS);
+        mask = builder_enable(mask, BACKEND_GRAPHCORE);
+        mask = builder_enable(mask, BACKEND_GROQ);
+        return mask;
+    }
+    return mask;
+}
+
+# Ensure a family is probed, run detection if not
+fn _lazy_ensure(lr, family) {
+    if (family == FAMILY_CPU) { return 0; }
+    if (_lazy_is_probed(lr, family) == 1) { return 0; }
+    _lazy_mark_probed(lr, family);
+
+    var mask = _family_builder_mask(family);
+    var partial = registry_detect_with(mask);
+    var partial_profs = reg_profiles(partial);
+    var main_profs = load64(lr);
+    var np = vec_len(partial_profs);
+    var i = 0;
+    while (i < np) {
+        var p = vec_get(partial_profs, i);
+        # Skip CPU profiles from partial (we already have one)
+        if (profile_accel_type(p) != ACCEL_CPU) {
+            vec_push(main_profs, p);
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Query profiles by family (probes on first access)
+fn lazy_by_family(lr, family) {
+    var mtx = load64(lr + 16);
+    mutex_lock(mtx);
+    _lazy_ensure(lr, family);
+    var profs = load64(lr);
+    var result = vec_new();
+    var np = vec_len(profs);
+    var i = 0;
+    while (i < np) {
+        var p = vec_get(profs, i);
+        if (profile_available(p) == 1) {
+            if (accel_family(profile_accel_type(p)) == family) {
+                vec_push(result, p);
+            }
+        }
+        i = i + 1;
+    }
+    mutex_unlock(mtx);
+    return result;
+}
+
+# Get all profiles detected so far (no new detection)
+fn lazy_probed_profiles(lr) {
+    var mtx = load64(lr + 16);
+    mutex_lock(mtx);
+    var profs = load64(lr);
+    mutex_unlock(mtx);
+    return profs;
+}
+
+# Probe all families and return a full registry
+fn lazy_into_registry(lr) {
+    var mtx = load64(lr + 16);
+    mutex_lock(mtx);
+    _lazy_ensure(lr, FAMILY_GPU);
+    _lazy_ensure(lr, FAMILY_NPU);
+    _lazy_ensure(lr, FAMILY_TPU);
+    _lazy_ensure(lr, FAMILY_AI_ASIC);
+    var profs = load64(lr);
+    mutex_unlock(mtx);
+
+    var r = registry_new();
+    var rp = reg_profiles(r);
+    var np = vec_len(profs);
+    var i = 0;
+    while (i < np) {
+        vec_push(rp, vec_get(profs, i));
+        i = i + 1;
+    }
+    # Post-passes
+    enrich_bandwidth(rp);
+    enrich_pcie(rp);
+    enrich_numa(rp);
+    enrich_disk(r);
+    detect_interconnect(r);
+    detect_environment(r);
+    return r;
+}

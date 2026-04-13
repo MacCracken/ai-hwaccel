@@ -20,5 +20,5 @@ the API is frozen, we will release `1.0.0`.
 
 - Downstream users can rely on SemVer guarantees once we reach `1.0.0`.
 - The `VERSION` file + `scripts/version-bump.sh` continue to work unchanged.
-- The release workflow (`release.yml`) validates VERSION/Cargo.toml/tag
+- The release workflow (`release.yml`) validates VERSION file/tag
   consistency regardless of versioning scheme.

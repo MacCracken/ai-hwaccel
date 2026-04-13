@@ -1,0 +1,200 @@
+# Benchmarks: registry operations — sharding, queries, JSON
+# Matches Rust criterion plan_sharding, best_available, etc.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/bench.cyr"
+include "lib/fnptr.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+include "lib/args.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/cuda.cyr"
+include "src/detect/rocm.cyr"
+include "src/detect/tpu.cyr"
+include "src/detect/gaudi.cyr"
+include "src/detect/neuron.cyr"
+include "src/detect/vulkan.cyr"
+include "src/detect/apple.cyr"
+include "src/detect/intel.cyr"
+include "src/detect/amd_xdna.cyr"
+include "src/detect/edge.cyr"
+include "src/detect/cloud_asic.cyr"
+include "src/detect/bandwidth.cyr"
+include "src/detect/pcie.cyr"
+include "src/detect/numa.cyr"
+include "src/detect/interconnect.cyr"
+include "src/detect/disk.cyr"
+include "src/detect/environment.cyr"
+include "src/registry.cyr"
+include "src/plan.cyr"
+include "src/training.cyr"
+include "src/cost.cyr"
+include "src/model.cyr"
+include "src/json_out.cyr"
+
+args_init();
+alloc_init();
+
+println("=== Registry Benchmarks ===");
+
+# Build a mock registry with 13 devices for query benchmarks
+fn _build_mock_registry() {
+    var r = registry_new();
+    var profs = reg_profiles(r);
+
+    # CPU
+    vec_push(profs, profile_cpu(64 * BYTES_PER_GIB));
+
+    # 4 CUDA GPUs
+    var i = 0;
+    while (i < 4) {
+        var p = profile_new(ACCEL_CUDA, i, 80 * BYTES_PER_GIB);
+        profile_set_device_name(p, "A100-SXM4-80GB");
+        vec_push(profs, p);
+        i = i + 1;
+    }
+
+    # 2 TPUs
+    i = 0;
+    while (i < 2) {
+        var p2 = profile_new(ACCEL_TPU, i + 4, 32 * BYTES_PER_GIB);
+        profile_set_tpu_version(p2, TPU_V4);
+        vec_push(profs, p2);
+        i = i + 1;
+    }
+
+    # 2 Gaudi
+    i = 0;
+    while (i < 2) {
+        var p3 = profile_new(ACCEL_GAUDI, i + 6, 96 * BYTES_PER_GIB);
+        profile_set_gaudi_gen(p3, GAUDI2);
+        vec_push(profs, p3);
+        i = i + 1;
+    }
+
+    # 2 Neuron
+    i = 0;
+    while (i < 2) {
+        var p4 = profile_new(ACCEL_NEURON, i + 8, 32 * BYTES_PER_GIB);
+        vec_push(profs, p4);
+        i = i + 1;
+    }
+
+    # 1 Vulkan, 1 Intel NPU
+    var p5 = profile_new(ACCEL_VULKAN, 10, 8 * BYTES_PER_GIB);
+    vec_push(profs, p5);
+    var p6 = profile_new(ACCEL_INTEL_NPU, 11, 4 * BYTES_PER_GIB);
+    vec_push(profs, p6);
+
+    return r;
+}
+
+var mock = _build_mock_registry();
+var mock_profs = reg_profiles(mock);
+
+# --- best_available (13 devices) ---
+# Rust: 39.56 ns
+
+var b1 = bench_new("best_available_13dev");
+var ri = 0;
+while (ri < 1000) {
+    bench_start(b1);
+    reg_best_available(mock);
+    bench_stop(b1);
+    ri = ri + 1;
+}
+bench_report(b1);
+
+# --- total_memory (13 devices) ---
+# Rust: 7.88 ns
+
+var b2 = bench_new("total_memory_13dev");
+bench_batch_start(b2);
+ri = 0;
+while (ri < 100000) {
+    reg_total_memory(mock);
+    ri = ri + 1;
+}
+bench_batch_stop(b2, 100000);
+bench_report(b2);
+
+# --- has_accelerator ---
+# Rust: 1.28 ns
+
+var b3 = bench_new("has_accelerator_13dev");
+bench_batch_start(b3);
+ri = 0;
+while (ri < 100000) {
+    reg_has_accelerator(mock);
+    ri = ri + 1;
+}
+bench_batch_stop(b3, 100000);
+bench_report(b3);
+
+# --- plan_sharding 70B BF16 (4 GPU) ---
+# Rust: 97.81 ns
+
+var b4 = bench_new("plan_70B_bf16_4gpu");
+ri = 0;
+while (ri < 1000) {
+    bench_start(b4);
+    reg_plan_sharding(mock, 70000000000, QUANT_BF16);
+    bench_stop(b4);
+    ri = ri + 1;
+}
+bench_report(b4);
+
+# --- count_by_family ---
+# Rust: by_family GPU (13 devices) = 7.88 ns
+
+var b5 = bench_new("count_family_gpu_13dev");
+bench_batch_start(b5);
+ri = 0;
+while (ri < 100000) {
+    reg_count_by_family(mock, FAMILY_GPU);
+    ri = ri + 1;
+}
+bench_batch_stop(b5, 100000);
+bench_report(b5);
+
+# --- JSON serialization ---
+# Rust: serialize (13 devices) = 4.89 µs
+
+var b6 = bench_new("json_serialize_13dev");
+ri = 0;
+while (ri < 100) {
+    bench_start(b6);
+    registry_to_json(mock);
+    bench_stop(b6);
+    ri = ri + 1;
+}
+bench_report(b6);
+
+# --- JSON summary ---
+
+var b7 = bench_new("json_summary_13dev");
+ri = 0;
+while (ri < 100) {
+    bench_start(b7);
+    registry_to_summary_json(mock);
+    bench_stop(b7);
+    ri = ri + 1;
+}
+bench_report(b7);
+
+syscall(60, 0);

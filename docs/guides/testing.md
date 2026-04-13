@@ -6,41 +6,39 @@ results.
 ## Quick start
 
 ```sh
-make check          # fmt + clippy + test (same as CI)
-cargo test          # unit + integration + doc tests
-cargo test --test mock_detection   # mock sysfs tests only
-cargo test --test integration      # integration tests only
+cyrius test                          # run all 491 assertions (10 test phases)
+cyrius lint src/main.cyr             # lint (zero warnings)
+cyrius fmt src/main.cyr --check      # check formatting
 ```
 
 ## Test categories
 
-| Suite | Count | Location | What it tests |
-|---|---|---|---|
-| Unit tests | 140 | `src/tests/` | Types, classification, quantization, registry queries, sharding, training, serde, display, builder, command runner, property-based |
-| Integration tests | 9 | `tests/integration.rs` | End-to-end detect→query→plan pipeline |
-| Mock detection | 11 | `tests/mock_detection.rs` | Fake sysfs trees, serde rejection, schema validation |
-| Doc tests | 13 | Inline in source | Code examples in rustdoc compile and run |
-| Benchmarks | 6 | `benches/` | Performance of detect, plan, estimate functions |
+Tests are organized as `.tcyr` files across 10 test phases, with 491 total
+assertions:
+
+| Suite | Location | What it tests |
+|---|---|---|
+| Unit tests | `src/tests/*.tcyr` | Types, classification, quantization, registry queries, sharding, training, JSON, display, builder, command runner, property-based |
+| Integration tests | `tests/*.tcyr` | End-to-end detect->query->plan pipeline |
+| Mock detection | `tests/mock_detection.tcyr` | Fake sysfs trees, JSON rejection, schema validation |
+| Benchmarks | `benches/` | Performance of detect, plan, estimate functions |
 
 ## Running benchmarks
 
 ```sh
-cargo bench                    # all benchmarks
-cargo bench --bench detect     # detection benchmarks only
-cargo bench --bench plan       # planning benchmarks only
+cyrius bench                   # all benchmarks
+cyrius bench detect            # detection benchmarks only
+cyrius bench plan              # planning benchmarks only
 ```
 
-## Feature flag testing
+## Backend selection at compile time
 
 ```sh
-# Test with no backends (CPU-only detection)
-cargo test --no-default-features
+# Build with specific backends only
+cyrius build src/main.cyr build/ai-hwaccel -DCUDA -DTPU
 
-# Test with specific backends
-cargo test --no-default-features --features cuda,tpu
-
-# Test with async support
-cargo test --features async-detect
+# Build with no backends (CPU-only detection)
+cyrius build src/main.cyr build/ai-hwaccel -DNO_BACKENDS
 ```
 
 ## Hardware-dependent testing
@@ -93,7 +91,7 @@ After installing tools, verify detection works:
 
 ```sh
 # Full detection with debug logging
-cargo run -- --table --debug
+build/ai-hwaccel --table --debug
 
 # Expected output for AMD GPU system:
 # ID     Device                        Memory   Family  Status
@@ -137,12 +135,4 @@ CI runs on:
 - `macos-latest` (aarch64 Apple Silicon)
 - `windows-latest` (x86_64 Windows)
 
-Plus a dedicated MSRV job with Rust 1.89.
-
-## Supply-chain checks
-
-```sh
-make audit          # cargo-audit (known vulnerabilities)
-make deny           # cargo-deny (licenses, advisories, sources)
-make vet            # cargo-vet (dependency audits)
-```
+No supply-chain checks needed -- zero external dependencies.

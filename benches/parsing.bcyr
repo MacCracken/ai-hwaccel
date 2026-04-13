@@ -1,0 +1,129 @@
+# Benchmarks: parser performance
+# Matches Rust criterion parse_cuda_output, parse_vulkan_output, etc.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/bench.cyr"
+include "lib/fnptr.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/bandwidth.cyr"
+include "src/detect/cuda.cyr"
+include "src/detect/vulkan.cyr"
+include "src/detect/neuron.cyr"
+include "src/detect/apple.cyr"
+include "src/model_format.cyr"
+
+alloc_init();
+
+println("=== Parsing Benchmarks ===");
+
+# --- parse_cuda_output_8gpu ---
+# Rust: 5.80 µs
+
+var sb = str_builder_new();
+var gi = 0;
+while (gi < 8) {
+    str_builder_add_int(sb, gi);
+    str_builder_add_cstr(sb, ", 81920, 512, 81408, 8.0, 470.82, A100-SXM4-80GB, 35, 60, 5, 1593\n");
+    gi = gi + 1;
+}
+var cuda_8gpu = str_builder_build(sb);
+
+var b1 = bench_new("parse_cuda_8gpu");
+var ri = 0;
+while (ri < 100) {
+    bench_start(b1);
+    var p = vec_new();
+    var w = vec_new();
+    parse_cuda_output(cuda_8gpu, p, w);
+    bench_stop(b1);
+    ri = ri + 1;
+}
+bench_report(b1);
+
+# --- parse_vulkan_output_2gpu ---
+# Rust: 1.85 µs
+
+var vk_out = str_from("VkPhysicalDeviceProperties:\n  deviceName = NVIDIA GeForce RTX 4090\n  deviceType = DISCRETE_GPU\nVkPhysicalDeviceProperties:\n  deviceName = NVIDIA GeForce RTX 3080\n  deviceType = DISCRETE_GPU\n");
+
+var b2 = bench_new("parse_vulkan_2gpu");
+ri = 0;
+while (ri < 100) {
+    bench_start(b2);
+    var p2 = vec_new();
+    _parse_vulkaninfo(vk_out, p2);
+    bench_stop(b2);
+    ri = ri + 1;
+}
+bench_report(b2);
+
+# --- parse_neuron_json ---
+
+var neuron_json = str_from("[{\"model\":\"trn1\",\"nc_count\":2,\"memory_per_nc_mb\":32768},{\"model\":\"trn1\",\"nc_count\":2,\"memory_per_nc_mb\":32768}]");
+
+var b3 = bench_new("parse_neuron_2dev");
+ri = 0;
+while (ri < 100) {
+    bench_start(b3);
+    var p3 = vec_new();
+    _parse_neuron_json(neuron_json, p3);
+    bench_stop(b3);
+    ri = ri + 1;
+}
+bench_report(b3);
+
+# --- model format detection ---
+
+# SafeTensors header
+var st_json = "{\"w\":{\"dtype\":\"F16\",\"shape\":[768,768],\"data_offsets\":[0,1179648]}}";
+var st_len = strlen(st_json);
+var st_buf = alloc(8 + st_len);
+store64(st_buf, st_len);
+memcpy(st_buf + 8, st_json, st_len);
+
+var b4 = bench_new("detect_safetensors");
+ri = 0;
+while (ri < 1000) {
+    bench_start(b4);
+    detect_format_from_bytes(st_buf, 8 + st_len);
+    bench_stop(b4);
+    ri = ri + 1;
+}
+bench_report(b4);
+
+# GGUF header
+var gguf_buf = alloc(24);
+store8(gguf_buf, 71); store8(gguf_buf + 1, 71);
+store8(gguf_buf + 2, 85); store8(gguf_buf + 3, 70);
+store8(gguf_buf + 4, 3); store8(gguf_buf + 5, 0);
+store8(gguf_buf + 6, 0); store8(gguf_buf + 7, 0);
+store64(gguf_buf + 8, 42);
+store64(gguf_buf + 16, 5);
+
+var b5 = bench_new("detect_gguf");
+ri = 0;
+while (ri < 1000) {
+    bench_start(b5);
+    detect_format_from_bytes(gguf_buf, 24);
+    bench_stop(b5);
+    ri = ri + 1;
+}
+bench_report(b5);
+
+syscall(60, 0);

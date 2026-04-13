@@ -1,23 +1,22 @@
 ---
-name: Rust to Cyrius port status
-description: ai-hwaccel fully ported to Cyrius with 18 source modules, 19 detectors, 10 test phases, 6 fuzz harnesses
+name: Rust to Cyrius port — complete
+description: ai-hwaccel fully ported, rust-old removed, 20 src modules, 19 detectors, 10 test phases, 6 fuzz, 3 bench suites
 type: project
 ---
 
-ai-hwaccel is fully ported from Rust to Cyrius. Original Rust preserved in `rust-old/`.
+ai-hwaccel Rust→Cyrius port is complete. Rust source removed (2026-04-12).
 
-Current Cyrius implementation (2026-04-12):
-- **18 source modules**: types, units, error, quantization, profile, system_io, registry, plan, training, cost, model, model_format, requirement, async_detect, json_out + 19 detect modules
+Final Cyrius implementation:
+- **20 source modules**: types, units, error, quantization, profile, system_io, registry, plan, training, cost, model, model_format, requirement, async_detect, cache, lazy, json_out + 19 detect modules
 - **10 test phases**: 491 assertions, 0 failures
 - **6 fuzz harnesses**: cuda_parser, model_format, vulkan_parser, neuron_parser, apple_parser, gaudi_parser
-- **Binary**: 188KB, 191ms compile
-- **Vendored stdlib**: str.cyr (with `: Str` annotations), fnptr.cyr, thread.cyr, async.cyr, syscalls.cyr synced from upstream Cyrius v3.7.x
+- **3 benchmark suites**: core (8 benchmarks), parsing (5), registry (7)
+- **Binary**: 197KB, 215ms compile, Cyrius 3.9.0
+- **0 dependencies**
 
-Remaining Rust modules NOT ported (by design):
-- ffi.rs — N/A, Cyrius is native
-- cache.rs — caching layer (threading available, not yet needed)
-- lazy.rs — lazy per-family detection (could use thread.cyr)
+Only 2 Rust modules not ported (by design): ffi.rs (N/A), detect/windows.rs (no Windows target).
 
-**Why:** Cyrius is the AGNOS ecosystem language. Sovereignty — no crates.io, no external governance.
+Performance vs Rust+LLVM: 3-35x slower on micro-ops, but all times sub-microsecond. Detection dominated by 100ms+ CLI tool calls.
 
-**How to apply:** All new code is Cyrius. Reference `rust-old/` for original logic when debugging.
+**Why:** Cyrius sovereignty — no crates.io, no external governance.
+**How to apply:** All code is Cyrius. Benchmarks doc preserves Rust numbers for comparison.

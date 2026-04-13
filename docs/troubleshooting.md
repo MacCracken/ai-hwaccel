@@ -23,13 +23,12 @@ Common issues and their solutions.
 1. Are the detection tools installed? (`nvidia-smi`, `vulkaninfo`, `hl-smi`, etc.)
 2. Is the kernel driver loaded? (`lsmod | grep nvidia`, `lsmod | grep amdgpu`)
 3. Are sysfs paths accessible? (`ls /sys/class/drm/card*`)
-4. Are the right cargo features enabled? Default is `all-backends`.
+4. Was the binary built with the right `-D` flags? Default builds all backends.
 
-If using selective features:
+If using selective backends:
 
-```toml
-[dependencies]
-ai-hwaccel = { version = "0.20", default-features = false, features = ["cuda"] }
+```sh
+cyrius build src/main.cyr build/ai-hwaccel -DCUDA
 ```
 
 ---
@@ -44,7 +43,7 @@ see Vulkan, it means the dedicated backend failed.
 working. Run with `--debug` to see detection diagnostics:
 
 ```sh
-RUST_LOG=debug ai-hwaccel --table
+AI_HWACCEL_LOG=debug ai-hwaccel --table
 ```
 
 ---
@@ -67,14 +66,14 @@ expose memory info on older versions.
 
 **Fix**:
 - Use `DetectBuilder` to probe only the backends you need:
-  ```rust
-  let registry = AcceleratorRegistry::builder()
+  ```cyr
+  let registry = registry_detect_builder()
       .with_cuda()
       .detect();
   ```
 - Use `CachedRegistry` to avoid re-detecting on every call:
-  ```rust
-  let cache = CachedRegistry::new(Duration::from_secs(60));
+  ```cyr
+  let cache = CachedRegistry::new(60);
   let registry = cache.get();
   ```
 - Check for hanging tools: run with `--debug` and look for `Timeout` warnings.
@@ -88,8 +87,8 @@ expose memory info on older versions.
 **Fix**:
 - Call `CachedRegistry::invalidate()` to force a fresh detection.
 - Delete cached JSON files and re-detect.
-- The library handles version differences gracefully via `#[serde(default)]` —
-  old JSON will deserialize with new fields set to `None`/empty.
+- The manual JSON parser handles version differences gracefully —
+  old JSON will deserialize with new fields set to `nil`/empty.
 
 ---
 

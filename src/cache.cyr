@@ -1,0 +1,179 @@
+# cache.cyr — detection result caching with configurable TTL
+# Avoids redundant hardware detection for apps that poll frequently.
+#
+# Usage:
+#   var c = cached_registry_new(60);  # 60 second TTL
+#   var r = cached_get(c);            # first call: detects
+#   var r = cached_get(c);            # within TTL: returns cached
+#   cached_invalidate(c);             # force re-detect on next get
+
+# clock_gettime(CLOCK_MONOTONIC) → seconds
+fn _monotonic_secs() {
+    var ts[16];
+    syscall(228, 1, &ts);  # SYS_CLOCK_GETTIME, CLOCK_MONOTONIC
+    return load64(&ts);
+}
+
+# CachedRegistry struct layout:
+#   0: registry (ptr, 0 = empty)
+#   8: last_detect_secs (i64)
+#  16: ttl_secs (i64)
+#  24: mutex (ptr)
+
+fn cached_registry_new(ttl_secs) {
+    var c = alloc(32);
+    store64(c, 0);
+    store64(c + 8, 0);
+    store64(c + 16, ttl_secs);
+    store64(c + 24, mutex_new());
+    return c;
+}
+
+fn cached_get(c) {
+    var mtx = load64(c + 24);
+    mutex_lock(mtx);
+
+    var reg = load64(c);
+    var last = load64(c + 8);
+    var ttl = load64(c + 16);
+    var now = _monotonic_secs();
+
+    # Cache hit: registry exists and within TTL
+    if (reg != 0 && now - last < ttl) {
+        mutex_unlock(mtx);
+        return reg;
+    }
+
+    mutex_unlock(mtx);
+
+    # Cache miss: run detection (outside lock)
+    var new_reg = registry_detect();
+
+    # Store result
+    mutex_lock(mtx);
+    store64(c, new_reg);
+    store64(c + 8, _monotonic_secs());
+    mutex_unlock(mtx);
+
+    return new_reg;
+}
+
+fn cached_invalidate(c) {
+    var mtx = load64(c + 24);
+    mutex_lock(mtx);
+    store64(c, 0);
+    store64(c + 8, 0);
+    mutex_unlock(mtx);
+    return 0;
+}
+
+fn cached_ttl(c) {
+    return load64(c + 16);
+}
+
+fn cached_is_valid(c) {
+    var reg = load64(c);
+    if (reg == 0) { return 0; }
+    var last = load64(c + 8);
+    var ttl = load64(c + 16);
+    var now = _monotonic_secs();
+    return now - last < ttl;
+}
+
+# --- Disk-backed cache ---
+# Reads/writes JSON to ~/.cache/ai-hwaccel/registry.json
+
+fn _disk_cache_path() {
+    var home = cmd_getenv("HOME");
+    if (home == 0) { return "/tmp/ai-hwaccel-cache.json"; }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, home);
+    str_builder_add_cstr(sb, "/.cache/ai-hwaccel/registry.json");
+    return str_data(str_builder_build(sb));
+}
+
+# DiskCachedRegistry struct layout:
+#   0: registry (ptr)
+#   8: last_detect_secs (i64)
+#  16: ttl_secs (i64)
+#  24: mutex (ptr)
+#  32: cache_path (ptr)
+
+fn disk_cached_new(ttl_secs) {
+    var c = alloc(40);
+    store64(c, 0);
+    store64(c + 8, 0);
+    store64(c + 16, ttl_secs);
+    store64(c + 24, mutex_new());
+    store64(c + 32, _disk_cache_path());
+    return c;
+}
+
+fn disk_cached_get(c) {
+    var mtx = load64(c + 24);
+    mutex_lock(mtx);
+
+    var reg = load64(c);
+    var last = load64(c + 8);
+    var ttl = load64(c + 16);
+    var now = _monotonic_secs();
+
+    # Memory cache hit
+    if (reg != 0 && now - last < ttl) {
+        mutex_unlock(mtx);
+        return reg;
+    }
+
+    # Try disk cache
+    var path = load64(c + 32);
+    var dbuf = alloc(65536);
+    var dn = file_read_all(path, dbuf, 65536);
+    if (dn > 0) {
+        # Check file age via stat
+        # For simplicity, trust memory TTL — disk is fallback for cold start
+        store8(dbuf + dn, 0);
+        # TODO: parse JSON registry from disk (requires from_json)
+        # For now, fall through to fresh detection
+    }
+
+    mutex_unlock(mtx);
+
+    # Cache miss: detect
+    var new_reg = registry_detect();
+
+    # Write to disk (best effort)
+    var json = registry_to_json(new_reg);
+    var jdata = str_data(json);
+    var jlen = str_len(json);
+    # Ensure directory exists
+    var dir_sb = str_builder_new();
+    var home = cmd_getenv("HOME");
+    if (home != 0) {
+        str_builder_add_cstr(dir_sb, home);
+        str_builder_add_cstr(dir_sb, "/.cache/ai-hwaccel");
+        var dir_s = str_builder_build(dir_sb);
+        # mkdir -p via syscall
+        syscall(83, str_data(dir_s), 493);  # SYS_MKDIR, 0o755
+    }
+    file_write_all(path, jdata, jlen);
+
+    # Store in memory
+    mutex_lock(mtx);
+    store64(c, new_reg);
+    store64(c + 8, _monotonic_secs());
+    mutex_unlock(mtx);
+
+    return new_reg;
+}
+
+fn disk_cached_invalidate(c) {
+    var mtx = load64(c + 24);
+    mutex_lock(mtx);
+    store64(c, 0);
+    store64(c + 8, 0);
+    mutex_unlock(mtx);
+    # Remove disk cache
+    var path = load64(c + 32);
+    syscall(87, path);  # SYS_UNLINK
+    return 0;
+}

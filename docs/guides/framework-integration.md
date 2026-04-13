@@ -1,5 +1,12 @@
 # Framework Integration Guide
 
+> **Note**: This guide documents integration patterns from the **Rust era**
+> (crates.io consumers). The project has since been ported to Cyrius.
+> The detection concepts and sharding logic remain the same, but the Rust API
+> examples below (using `AcceleratorRegistry::detect()`, serde, etc.) reflect
+> the former Rust library interface, not the current Cyrius codebase where
+> `registry_detect()` is the entry point and JSON is handled via `str_builder`.
+
 `ai-hwaccel` detects hardware and plans model deployment. It does **not** run
 inference or training — that's the job of your ML framework. This guide shows
 how to bridge the gap.

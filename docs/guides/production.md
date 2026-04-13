@@ -4,16 +4,16 @@ Best practices for using `ai-hwaccel` in production systems.
 
 ## Installation
 
-```toml
-[dependencies]
-ai-hwaccel = "1.2"
+Build the binary from source:
+
+```sh
+cyrius build src/main.cyr build/ai-hwaccel
 ```
 
-For minimal binary size, enable only the backends you need:
+For minimal binary size (197 KB), enable only the backends you need:
 
-```toml
-[dependencies]
-ai-hwaccel = { version = "1.2", default-features = false, features = ["cuda"] }
+```sh
+cyrius build src/main.cyr build/ai-hwaccel -DCUDA
 ```
 
 ## Detection behaviour
@@ -24,15 +24,15 @@ Detection never panics or returns errors that prevent operation. If a CLI tool
 is missing, times out, or produces unparseable output, the backend is silently
 skipped and a structured warning is recorded:
 
-```rust
-let registry = AcceleratorRegistry::detect();
+```cyr
+let registry = registry_detect();
 
 // Always at least CPU
-assert!(!registry.all_profiles().is_empty());
+assert(!registry.all_profiles().is_empty());
 
 // Check for non-fatal issues
 for w in registry.warnings() {
-    log::warn!("detection warning: {}", w);
+    log_warn("detection warning: {}", w);
 }
 ```
 
@@ -58,12 +58,9 @@ FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
 For applications that call `detect()` repeatedly (schedulers, monitoring
 loops), use `CachedRegistry` to avoid redundant subprocess calls:
 
-```rust
-use std::time::Duration;
-use ai_hwaccel::CachedRegistry;
-
+```cyr
 // Detect once, cache for 60 seconds
-let cache = CachedRegistry::new(Duration::from_secs(60));
+let cache = CachedRegistry::new(60);
 
 loop {
     let registry = cache.get(); // re-detects only after TTL expires
@@ -77,16 +74,14 @@ Call `cache.invalidate()` to force re-detection (e.g. after a GPU reset).
 
 If you know which hardware is present, skip unnecessary backends:
 
-```rust
-use ai_hwaccel::AcceleratorRegistry;
-
+```cyr
 // Only probe CUDA — skip ROCm, Vulkan, TPU, etc.
-let registry = AcceleratorRegistry::builder()
+let registry = registry_detect_builder()
     .with_cuda()
     .detect();
 ```
 
-Or disable at compile time with feature flags for faster builds and smaller
+Or disable at compile time with `-D` flags for faster builds and smaller
 binaries.
 
 ## Security considerations
@@ -112,31 +107,27 @@ All parsed values from CLI tools are validated:
 
 ### Deserialization
 
-If loading a registry from untrusted JSON (e.g. from a network API), all
-structs use `#[serde(deny_unknown_fields)]` to reject unexpected fields.
-Apply your own size limits before passing to `serde_json::from_str`.
+If loading a registry from untrusted JSON (e.g. from a network API), the
+manual JSON parser rejects unknown fields by default.
+Apply your own size limits before passing to `json_parse()`.
 
 See [docs/development/threat-model.md](../development/threat-model.md) for the
 full threat model.
 
 ## Logging
 
-The library uses `tracing` for diagnostic output. No logs are emitted unless
-you install a subscriber:
+The binary uses structured logging. Log level is controlled via environment
+variable or CLI flag:
 
-```rust
-// Production: warn-level only
-tracing_subscriber::fmt()
-    .with_env_filter("ai_hwaccel=warn")
-    .init();
+```sh
+# Production: warn-level only
+AI_HWACCEL_LOG=warn build/ai-hwaccel --table
 
-// Debugging: full detection trace
-tracing_subscriber::fmt()
-    .with_env_filter("ai_hwaccel=debug")
-    .init();
+# Debugging: full detection trace
+AI_HWACCEL_LOG=debug build/ai-hwaccel --table
 ```
 
-The CLI binary supports `RUST_LOG` and `--debug` flags.
+The CLI binary supports `AI_HWACCEL_LOG` and `--debug` flags.
 
 ## Monitoring with the CLI
 
@@ -159,13 +150,13 @@ ai-hwaccel --table --family gpu --sort mem
 ### Docker
 
 ```dockerfile
-FROM rust:1.89-slim AS builder
+FROM cyrius:3.9.0-slim AS builder
 WORKDIR /app
 COPY . .
-RUN cargo build --release --bin ai-hwaccel
+RUN cyrius build src/main.cyr build/ai-hwaccel
 
 FROM debian:bookworm-slim
-COPY --from=builder /app/target/release/ai-hwaccel /usr/local/bin/
+COPY --from=builder /app/build/ai-hwaccel /usr/local/bin/
 # Ensure nvidia-smi or other tools are available via the runtime
 CMD ["ai-hwaccel", "--table"]
 ```
@@ -192,7 +183,7 @@ The detection itself uses:
 
 ## C FFI
 
-For non-Rust applications, use the C API:
+For non-Cyrius applications, use the C API:
 
 ```c
 #include "ai_hwaccel.h"
@@ -211,8 +202,8 @@ ai_hwaccel_free(reg);
 Build with:
 
 ```sh
-cargo build --release --lib
-cc -o myapp myapp.c -L target/release -lai_hwaccel
+cyrius build src/ffi.cyr build/libai_hwaccel.so --shared
+cc -o myapp myapp.c -L build -lai_hwaccel
 ```
 
 ## Version compatibility
@@ -220,7 +211,7 @@ cc -o myapp myapp.c -L target/release -lai_hwaccel
 The `schema_version` field in serialized output (currently `1`) allows you to
 detect breaking format changes:
 
-```rust
-let reg: AcceleratorRegistry = serde_json::from_str(&json)?;
-assert_eq!(reg.schema_version(), ai_hwaccel::SCHEMA_VERSION);
+```cyr
+let reg = registry_from_json(json);
+assert(reg.schema_version() == SCHEMA_VERSION);
 ```

@@ -15,33 +15,34 @@ Five optional fields were added to `AcceleratorProfile`:
 **If you construct `AcceleratorProfile` structs directly** (not via `::cuda()`,
 `::rocm()`, etc.), you must add these fields. Set them to `None`:
 
-```rust
-AcceleratorProfile {
+```cyr
+let profile = AcceleratorProfile {
     accelerator: AcceleratorType::CudaGpu { device_id: 0 },
     available: true,
     memory_bytes: 24 * 1024 * 1024 * 1024,
-    compute_capability: Some("8.6".into()),
-    driver_version: None,
+    compute_capability: "8.6",
+    driver_version: nil,
     // New in 0.20:
-    memory_bandwidth_gbps: None,
-    memory_used_bytes: None,
-    memory_free_bytes: None,
-    pcie_bandwidth_gbps: None,
-    numa_node: None,
-}
+    memory_bandwidth_gbps: nil,
+    memory_used_bytes: nil,
+    memory_free_bytes: nil,
+    pcie_bandwidth_gbps: nil,
+    numa_node: nil,
+};
 ```
 
 The convenience constructors (`AcceleratorProfile::cuda()`, etc.) already
 include these fields, so code using them is unaffected.
 
 **JSON compatibility**: Old JSON without these fields deserializes correctly —
-the new fields use `#[serde(default)]` and are omitted from output when `None`.
+the manual JSON parser defaults missing fields to `nil` and omits them from
+output when `nil`.
 
 ### New `SystemIo` on `AcceleratorRegistry`
 
 The registry now includes system-level I/O information:
 
-```rust
+```cyr
 let sio = registry.system_io();
 // sio.interconnects — InfiniBand, RoCE, NVLink
 // sio.storage — NVMe, SSD, HDD
@@ -49,7 +50,7 @@ let sio = registry.system_io();
 ```
 
 **JSON compatibility**: Old JSON without `system_io` deserializes correctly
-(defaults to empty interconnects and storage).
+via the manual JSON parser (defaults to empty interconnects and storage).
 
 ### Schema version bumped to 2
 
@@ -60,8 +61,8 @@ constant, update accordingly.
 
 A new error variant was added:
 
-```rust
-DetectionError::Timeout { tool: String, timeout_secs: f64 }
+```cyr
+DetectionError::Timeout { tool: str, timeout_secs: f64 }
 ```
 
 Previously, timeouts were reported as `ToolFailed`. Now they are distinct,
@@ -71,7 +72,7 @@ enabling retry logic for slow tools.
 you'll need to add a `Timeout` arm. The enum is `#[non_exhaustive]`, so a
 `_` catch-all is recommended:
 
-```rust
+```cyr
 match err {
     DetectionError::ToolNotFound { .. } => { /* ... */ }
     DetectionError::Timeout { .. } => { /* ... */ }

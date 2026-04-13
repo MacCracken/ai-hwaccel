@@ -1,4 +1,4 @@
-# ADR-003: Parallel detection via std::thread::scope
+# ADR-003: Parallel detection via thread.cyr
 
 ## Status
 
@@ -14,13 +14,12 @@ all backend latencies.
 Options considered:
 
 1. **Sequential** — simple, no threading.
-2. **`std::thread::scope`** — parallel, zero extra dependencies.
-3. **`tokio`/`async-std`** — async I/O, but requires an async runtime.
-4. **`rayon`** — parallel iterators, but overkill for I/O-bound work.
+2. **`thread.cyr`** — parallel, zero extra dependencies, built into Cyrius.
+3. **External async runtime** — async I/O, but adds a dependency.
 
 ## Decision
 
-We use `std::thread::scope` (stable since Rust 1.63). Each backend spawns a
+We use `thread.cyr` (Cyrius built-in threading). Each backend spawns a
 scoped thread that returns `(Vec<Profile>, Vec<Warning>)`. Results are merged
 after all threads join.
 
@@ -30,9 +29,8 @@ after all threads join.
 
 - Total latency is the *maximum* of individual backend latencies instead of the
   sum. On a system with CUDA + Gaudi + Vulkan, detection drops from ~15s to ~5s.
-- No external dependencies.
-- Scoped threads guarantee no dangling references — the borrow checker enforces
-  lifetime safety.
+- No external dependencies — threading is built into Cyrius.
+- Scoped threads guarantee no dangling references.
 
 **Trade-offs:**
 
@@ -46,5 +44,5 @@ after all threads join.
 
 **Future:**
 
-- An async variant behind a `tokio` feature flag is planned for callers already
-  running an async runtime.
+- An async variant via `async.cyr` is available for callers that need
+  non-blocking detection (`registry_detect_threaded()`).

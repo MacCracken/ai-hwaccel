@@ -54,6 +54,8 @@ include "src/model.cyr"
 include "src/model_format.cyr"
 include "src/requirement.cyr"
 include "src/async_detect.cyr"
+include "src/cache.cyr"
+include "src/lazy.cyr"
 include "src/json_out.cyr"
 
 # --- CLI argument helpers (using lib/args.cyr) ---
