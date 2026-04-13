@@ -7,6 +7,135 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-04-13
+
+### Breaking
+
+Complete rewrite from Rust to [Cyrius](https://github.com/MacCracken/cyrius).
+The Rust crate (`ai-hwaccel` on crates.io) is superseded by a native Cyrius
+binary with zero external dependencies. API surface is equivalent but calling
+conventions have changed from Rust method syntax to Cyrius function calls.
+
+**Migration**: `AcceleratorRegistry::detect()` → `registry_detect()`.
+See `docs/benchmarks-rust-v-cyrius.md` for full API mapping.
+
+### Added
+
+- **Cyrius port** — entire codebase rewritten in Cyrius (v3.10.0). 37 source
+  modules (18 core + 19 detect), 5,602 LOC. Zero external dependencies.
+  Binary: 217 KB (was 708 KB Rust release). Compile time: 215 ms (was ~1.8s).
+- **`model_format.cyr`** — model file format detection from headers. Parses
+  SafeTensors (JSON header → param count, dtype, tensor count), GGUF (magic +
+  version + tensor count + file_type metadata), ONNX (protobuf ir_version
+  validation), and PyTorch (ZIP magic). Reads only first 16 KB. Both
+  file-path and byte-slice APIs.
+- **`requirement.cyr`** — accelerator requirement matching for scheduling
+  integration. 7 requirement types: None, GPU, TPU (with min_chips), Gaudi,
+  AwsNeuron, GpuOrTpu, AnyAccelerator. `requirement_satisfied()`,
+  `find_satisfying_profile()`, `count_satisfying()`.
+- **`async_detect.cyr`** — threaded concurrent hardware detection. CLI-based
+  backends (nvidia-smi, hl-smi, vulkaninfo, neuron-ls, xpu-smi,
+  system_profiler) run in parallel threads via `thread.cyr`. Sysfs-only
+  backends run on the main thread. Results merged after join.
+  `registry_detect_threaded()` API.
+- **`cache.cyr`** — detection result caching with configurable TTL.
+  `cached_registry_new(ttl_secs)`, `cached_get()`, `cached_invalidate()`.
+  Mutex-protected, thread-safe. `DiskCachedRegistry` variant writes JSON to
+  `~/.cache/ai-hwaccel/registry.json` with atomic write (temp + rename).
+- **`lazy.cyr`** — per-family lazy detection. Defers backend probing until a
+  specific accelerator family is queried. `lazy_new()`, `lazy_by_family()`,
+  `lazy_into_registry()`. Avoids spawning nvidia-smi when only TPU info needed.
+- **`model.cyr` extensions** — `models_by_family()` for family-based filtering,
+  `model_headroom_x100()` for spare memory percentage,
+  `compatible_with_registry()` for registry-aware compatibility.
+- **`cost.cyr` + `model.cyr` re-included** — previously excluded due to Cyrius
+  compiler fixup table overflow (4096 limit). Compiler v3.7.0 expanded limit
+  to 16384, unblocking inclusion. `--cost` CLI flag now uses real
+  `recommend_instances()` instead of a stub.
+- **`json_out.cyr`** — JSON serialization via `str_builder` (replaces serde).
+  `registry_to_json()`, `registry_to_summary_json()`, `profile_to_json()`,
+  `model_meta_to_json()`.
+- **11 test phases** — 518 assertions covering all modules. Phase 10: model
+  format detection (46 assertions). Phase 11: requirement matching (27
+  assertions).
+- **6 fuzz harnesses** — `cuda_parser.fcyr`, `model_format.fcyr`,
+  `vulkan_parser.fcyr`, `neuron_parser.fcyr`, `apple_parser.fcyr`,
+  `gaudi_parser.fcyr`. Edge cases: empty input, garbage data, truncated
+  headers, adversarial bytes.
+- **3 benchmark suites** — core (8 benchmarks: memory estimation, quantization,
+  training), parsing (5: CUDA CSV, Vulkan, Neuron JSON, SafeTensors, GGUF),
+  registry (7: queries, sharding, JSON serialization). 20 benchmarks total.
+- **`bench-history.sh`** — rewritten for Cyrius. Appends results to CSV with
+  timestamp, commit, branch.
+- **Str auto-coercion** — 61 `str_from("literal")` wrappers removed across
+  src/ and tests/ using Cyrius v3.6.0 `: Str` parameter annotations.
+- **Vendored stdlib synced** — all 26 vendored modules identical to upstream
+  Cyrius. Added: `thread.cyr`, `async.cyr`, `fnptr.cyr` (fncall3/4),
+  `freelist.cyr`. Synced: `str.cyr`, `syscalls.cyr`, `hashmap.cyr`, and 9
+  others.
+
+### Changed
+
+- **Language**: Rust → Cyrius 3.10.0. No LLVM, no cargo, no crates.io.
+- **Binary size**: 708 KB → 217 KB (**-69%**).
+- **Compile time**: ~1.8s → 215 ms (**-88%**).
+- **Source LOC**: 11,278 → 5,602 (**-50%**).
+- **Dependencies**: 131 crates → 0 (**-100%**).
+- **Detection modules consolidated**: cerebras + graphcore + groq → `cloud_asic.cyr`,
+  qualcomm + samsung + mediatek → `edge.cyr`, intel_npu + intel_oneapi → `intel.cyr`.
+- **Hardware types unified**: `hardware/mod.rs` + `hardware/*.rs` → `types.cyr`
+  (enums, classification, throughput multipliers, HBM lookups, rank — all in one file).
+- **Sharding merged**: `sharding.rs` + `plan.rs` → `plan.cyr`.
+- **Fixed-point arithmetic** throughout — `x1000` multipliers replace all
+  floating-point operations. No floats in the entire codebase.
+- **Lint limit**: 100 → 120 characters (Cyrius 3.8.0). `#skip-lint` for
+  unavoidable long strings.
+- **`--cost` mode**: now shows real cloud instance recommendations with pricing
+  (was stub directing to JSON file).
+
+### Removed
+
+- **Rust source** — `rust-old/` directory removed. Final Rust benchmarks
+  preserved in `docs/benchmarks-rust-v-cyrius.md`.
+- **FFI bindings** (`ffi.rs`) — not applicable, Cyrius is native code.
+- **Windows detection** (`detect/windows.rs`) — Cyrius doesn't target Windows
+  yet (v4.0.0 roadmap).
+- **Cargo/crates.io** — no `Cargo.toml`, `Cargo.lock`, or Rust toolchain files.
+- **serde/tokio/tracing** — replaced by manual JSON, thread.cyr, and direct
+  stderr output respectively.
+
+### Fixed
+
+- **`requirement.cyr` undefined function** — `profile_tpu_chip_count()` called
+  but function is `profile_tpu_chips()`. Would have crashed at runtime. Caught
+  by Cyrius 3.10.0 undefined function diagnostic.
+- **`async_detect.cyr` undefined functions** — `enrich_disk()` (should be
+  `detect_storage()`), `detect_interconnect()` (should be
+  `detect_interconnects()`). Same diagnostic.
+- **`lazy.cyr` undefined function** — `builder_enable()` (should be
+  `builder_with()`). Same diagnostic.
+
+### Performance
+
+All benchmarks on the same machine. Cyrius compiles to direct x86_64 without
+LLVM optimization (no jump tables, no register allocation, no LTO).
+
+| Benchmark | Rust (LLVM) | Cyrius | Ratio |
+|-----------|-------------|--------|-------|
+| estimate_memory 70B BF16 | 256 ps | 8 ns | 31x |
+| bits_per_param (5 levels) | 295 ps | 3 ns | 10x |
+| train_7B_full_gpu | 3.29 ns | 30 ns | 9x |
+| parse_cuda_output 8gpu | 5.80 µs | 18 µs | 3x |
+| parse_vulkan_2gpu | 1.85 µs | 3 µs | 1.6x |
+| best_available (13 dev) | 39.56 ns | 722 ns | 18x |
+| total_memory (13 dev) | 7.88 ns | 122 ns | 15x |
+| json_serialize (13 dev) | 4.89 µs | 27 µs | 6x |
+| detect_safetensors | — | 931 ns | new |
+| detect_gguf | — | 498 ns | new |
+
+All times sub-microsecond to microsecond. Detection dominated by 100ms+ CLI
+tool execution — per-call overhead is irrelevant to end-to-end latency.
+
 ## [1.2.0] - 2026-04-05
 
 ### Added

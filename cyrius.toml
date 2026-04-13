@@ -1,6 +1,6 @@
 [package]
 name = "ai-hwaccel"
-version = "1.2.0"
+version = "2.0.0"
 description = "Hardware accelerator detection and planning for AI workloads"
 license = "GPL-3.0-only"
 language = "cyrius"
