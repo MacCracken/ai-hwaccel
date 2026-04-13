@@ -1,7 +1,7 @@
 # cuda.cyr — NVIDIA CUDA GPU detection via nvidia-smi
 
 # nvidia-smi query args
-var _NVSMI_QUERY = "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name,temperature.gpu,power.draw,utilization.gpu,clocks.max.memory";
+var _NVSMI_QUERY = "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name,temperature.gpu,power.draw,utilization.gpu,clocks.max.memory"; #skip-lint
 var _NVSMI_FMT = "--format=csv,noheader,nounits";
 
 # Bus width lookup by compute capability (bits)

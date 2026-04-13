@@ -1,6 +1,7 @@
 # assert.cyr — test assertion library
 # Usage: include "lib/assert.cyr"
-# Requires: string.cyr, fmt.cyr
+include "lib/string.cyr"
+include "lib/fmt.cyr"
 #
 # Now that comparisons work in function arguments, assert(x == 42, "name") works.
 
@@ -49,6 +50,60 @@ fn assert_neq(a, b, name) {
 # Assert a is greater than b
 fn assert_gt(a, b, name) {
     assert(a > b, name);
+    return 0;
+}
+
+# Assert a < b
+fn assert_lt(a, b, name) {
+    assert(a < b, name);
+    return 0;
+}
+
+# Assert a >= b
+fn assert_gte(a, b, name) {
+    assert(a >= b, name);
+    return 0;
+}
+
+# Assert a <= b
+fn assert_lte(a, b, name) {
+    assert(a <= b, name);
+    return 0;
+}
+
+# Assert pointer is not null (0)
+fn assert_nonnull(p, name) {
+    _assert_total = _assert_total + 1;
+    if (p != 0) {
+        _assert_pass = _assert_pass + 1;
+    } else {
+        _assert_fail = _assert_fail + 1;
+        syscall(1, 2, "  FAIL: ", 8);
+        syscall(1, 2, name, strlen(name));
+        syscall(1, 2, " (got null)\n", 12);
+    }
+    return 0;
+}
+
+# Assert string equals expected (cstr comparison)
+fn assert_streq(a, b, name) {
+    _assert_total = _assert_total + 1;
+    if (streq(a, b) == 1) {
+        _assert_pass = _assert_pass + 1;
+    } else {
+        _assert_fail = _assert_fail + 1;
+        syscall(1, 2, "  FAIL: ", 8);
+        syscall(1, 2, name, strlen(name));
+        syscall(1, 2, " (strings differ)\n", 18);
+    }
+    return 0;
+}
+
+# Print test group header
+fn test_group(name) {
+    syscall(1, 1, "=== ", 4);
+    syscall(1, 1, name, strlen(name));
+    syscall(1, 1, " ===\n", 5);
     return 0;
 }
 

@@ -1,6 +1,6 @@
 # tagged.cyr — tagged unions (enums with data)
 # Usage: include "lib/tagged.cyr"
-# Requires: alloc.cyr
+# Requires: alloc.cyr, fmt.cyr (for option_print/result_print)
 #
 # A tagged union is a heap-allocated pair: { tag: i64, value: i64 }
 # The tag identifies which variant, the value carries the payload.

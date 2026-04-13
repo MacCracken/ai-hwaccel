@@ -72,15 +72,18 @@ fn json_parse(src) {
             }
         } else {
             # Non-string value (number, true, false, null)
+            # Note: chained if/break inside while is broken in cc3 —
+            # use flag + || instead (fixed in 3.2.6, upstream from argonaut)
             if (key != 0) {
                 var vs = ji;
-                while (ji < slen) {
+                var done = 0;
+                while (ji < slen && done == 0) {
                     var vc = load8(data + ji);
-                    if (vc == 44) { break; }
-                    if (vc == 125) { break; }
-                    if (vc == 32) { break; }
-                    if (vc == 10) { break; }
-                    ji = ji + 1;
+                    if (vc == 44 || vc == 125 || vc == 32 || vc == 10) {
+                        done = 1;
+                    } else {
+                        ji = ji + 1;
+                    }
                 }
                 val = str_new(data + vs, ji - vs);
                 vec_push(pairs, json_pair_new(key, val));

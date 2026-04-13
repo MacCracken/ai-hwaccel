@@ -32,11 +32,11 @@ fn run(cmd, arg1, arg2) {
 # Run a command and capture stdout into a buffer.
 # Returns Result(bytes_read).
 fn run_capture(cmd, arg1, arg2, buf, buflen) {
-    var pipefd[2];
+    var pipefd[16];
     var pr = sys_pipe(&pipefd);
     if (pr < 0) { return Err(0 - pr); }
-    var read_fd = load64(&pipefd);
-    var write_fd = load64(&pipefd + 8);
+    var read_fd = load32(&pipefd);
+    var write_fd = load32(&pipefd + 4);
 
     var pid = sys_fork();
     if (pid < 0) {
@@ -146,10 +146,10 @@ fn exec_capture(args, buf, buflen) {
     store64(argv + argc * 8, 0);
     var envp = alloc(8);
     store64(envp, 0);
-    var pipefd[2];
+    var pipefd[16];
     sys_pipe(&pipefd);
-    var rfd = load64(&pipefd);
-    var wfd = load64(&pipefd + 8);
+    var rfd = load32(&pipefd);
+    var wfd = load32(&pipefd + 4);
     var pid = sys_fork();
     if (pid < 0) { sys_close(rfd); sys_close(wfd); return 0 - 1; }
     if (pid == 0) {

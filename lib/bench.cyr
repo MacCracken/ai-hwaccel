@@ -2,12 +2,22 @@
 # Usage: include "lib/bench.cyr"
 # Requires: string.cyr, fmt.cyr, alloc.cyr, agnosys/syscalls.cyr
 #
-# Cyrius-native benchmark library. Measures elapsed time via clock_gettime.
-# Usage pattern:
-#   var b = bench_new("my_operation");
-#   bench_start(b);
-#   # ... code to benchmark ...
-#   bench_stop(b);
+# Overhead costs (x86_64 Linux):
+#   clock_gettime:     ~120ns per call
+#   fncall0 dispatch:  ~6ns per call (indirect call via function pointer)
+#   direct call:       ~3ns per call
+#   inline operation:  ~2ns per iteration
+#
+# For sub-1us operations, use bench_batch_start/stop with batch_size >= 1000.
+# The per-iteration bench_start/stop adds ~240ns of clock overhead per op.
+# Function pointer dispatch (bench_run_batch) adds ~6ns per op.
+#
+# BEST for hot inner loops:
+#   var b = bench_new("my_op");
+#   bench_batch_start(b);
+#   var i = 0;
+#   while (i < 10000) { my_op(); i = i + 1; }
+#   bench_batch_stop(b, 10000);
 #   bench_report(b);
 
 # clock_gettime syscall

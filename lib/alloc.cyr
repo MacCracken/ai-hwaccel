@@ -62,7 +62,7 @@ fn alloc_used() {
 #   var p1 = arena_alloc(a, 64);     # allocate from arena
 #   var p2 = arena_alloc(a, 128);    # still valid after arena_reset
 #   arena_reset(a);                   # frees p1 and p2, not global allocs
-#   arena_free(a);                    # release the arena itself
+#   (no arena_free — bump allocator, memory reclaimed on process exit)
 #
 # Layout: { base: i64, ptr: i64, end: i64 } = 24 bytes
 

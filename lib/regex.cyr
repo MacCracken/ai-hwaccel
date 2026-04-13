@@ -94,17 +94,19 @@ fn find_all(haystack, needle) {
 fn str_replace(s, old, new_str) {
     var sdata = str_data(s);
     var slen = str_len(s);
-    var olen = strlen(old);
-    var nlen = strlen(new_str);
+    var odata = str_data(old);
+    var olen = str_len(old);
+    var ndata = str_data(new_str);
+    var nlen = str_len(new_str);
     # Find old
     var fi = 0;
     while (fi <= slen - olen) {
-        if (memeq(sdata + fi, old, olen) == 1) {
+        if (memeq(sdata + fi, odata, olen) == 1) {
             # Found — build replacement
             var newlen = slen - olen + nlen;
             var buf = alloc(newlen + 1);
             memcpy(buf, sdata, fi);
-            memcpy(buf + fi, new_str, nlen);
+            memcpy(buf + fi, ndata, nlen);
             memcpy(buf + fi + nlen, sdata + fi + olen, slen - fi - olen);
             store8(buf + newlen, 0);
             return str_new(buf, newlen);

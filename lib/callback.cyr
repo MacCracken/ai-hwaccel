@@ -1,6 +1,7 @@
 # callback.cyr — closure-like patterns via function pointers
 # Usage: include "lib/callback.cyr"
-# Requires: fnptr.cyr, vec.cyr
+# Requires: fnptr.cyr, vec.cyr, syscalls.cyr
+include "lib/syscalls.cyr"
 #
 # Cyrius doesn't have closures. This library provides callback patterns
 # that replace common closure uses: for_each, filter, map, pre_exec.

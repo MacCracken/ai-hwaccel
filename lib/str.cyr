@@ -100,7 +100,7 @@ fn str_starts_with(s: Str, prefix: Str) {
     return memeq(str_data(s), str_data(prefix), plen);
 }
 
-# Check if Str ends with suffix Str
+# Check if Str ends with suffix Str (both are Str objects)
 fn str_ends_with(s: Str, suffix: Str) {
     var xlen = str_len(suffix);
     var slen = str_len(s);
@@ -170,7 +170,7 @@ fn str_trim(s) {
 }
 
 # Split Str by byte separator, return vec of Str pointers
-fn str_split(s, sep) {
+fn str_split(s: Str, sep: Str) {
     var parts = vec_new();
     var slen = str_len(s);
     var sd = str_data(s);
@@ -275,7 +275,7 @@ fn str_join(parts, sep: Str) {
 }
 
 # ================================================================
-# Extended functions (synced from upstream cyrius stdlib)
+# Extended functions (added for yukti v1.1.0 stdlib inclusion)
 # ================================================================
 
 # Create Str from raw buffer (copies data, adds null terminator)
@@ -413,11 +413,11 @@ fn Str_cat(self, other) { return str_cat(self, other); }
 fn Str_sub(self, start, len) { return str_sub(self, start, len); }
 # Deep copy of string
 fn Str_clone(self) { return str_clone(self); }
-# Check if string contains needle
+# Check if string contains needle (C string)
 fn Str_contains(self, needle) { return str_contains(self, needle); }
-# Check if string starts with prefix
+# Check if string starts with prefix (C string)
 fn Str_starts_with(self, prefix) { return str_starts_with(self, prefix); }
-# Check if string ends with suffix
+# Check if string ends with suffix (C string)
 fn Str_ends_with(self, suffix) { return str_ends_with(self, suffix); }
 # Find first occurrence of needle, return offset or -1
 fn Str_index_of(self, needle) { return str_index_of(self, needle); }

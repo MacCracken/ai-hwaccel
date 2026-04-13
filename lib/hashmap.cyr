@@ -1,6 +1,6 @@
 # hashmap.cyr — hash table with string keys and i64 values
 # Usage: include "lib/hashmap.cyr"
-# Requires: alloc.cyr, string.cyr
+# Requires: alloc.cyr, string.cyr, fnptr.cyr (for map_iter)
 #
 # Open addressing with linear probing. All keys are null-terminated strings.
 # All values are i64. Automatically grows at 70% load.
@@ -14,17 +14,10 @@
 # === 42
 #
 # Layout per entry: { key_ptr: i64, value: i64, state: i64 } = 24 bytes
-#   state: HASH_EMPTY=0, HASH_OCCUPIED=1, HASH_TOMBSTONE=2
+#   state: 0=empty, 1=occupied, 2=tombstone
 # Map header: { entries_ptr: i64, capacity: i64, count: i64 } = 24 bytes
 
-enum HashConst {
-    HASHMAP_ENTRY_SIZE = 24;
-    HASHMAP_HEADER_SIZE = 24;
-    HASHMAP_INIT_CAP = 16;
-    HASH_EMPTY = 0;
-    HASH_OCCUPIED = 1;
-    HASH_TOMBSTONE = 2;
-}
+include "lib/fnptr.cyr"
 
 # FNV-1a hash for null-terminated string
 fn hash_str(s) {
@@ -39,13 +32,12 @@ fn hash_str(s) {
     return h;
 }
 
-# Create a new hash map
+# Create a new hash map (initial capacity 16)
 fn map_new() {
-    var m = alloc(HASHMAP_HEADER_SIZE);
-    var cap = HASHMAP_INIT_CAP;
-    var entries = alloc(cap * HASHMAP_ENTRY_SIZE);
-    # Zero all entries (occupied = 0)
-    memset(entries, 0, cap * HASHMAP_ENTRY_SIZE);
+    var m = alloc(24);
+    var cap = 16;
+    var entries = alloc(cap * 24);
+    memset(entries, 0, cap * 24);
     store64(m, entries);
     store64(m + 8, cap);
     store64(m + 16, 0);
@@ -54,36 +46,29 @@ fn map_new() {
 
 # Return pointer to the entries array
 fn map_entries(m) { return load64(m); }
-# Return the current capacity of the map
+# Return the current capacity
 fn map_cap(m) { return load64(m + 8); }
-# Return the number of entries in the map
+# Return the number of occupied entries
 fn map_count(m) { return load64(m + 16); }
 
-# Find slot for key. Returns entry pointer.
-# For lookup: check state==1 at returned pointer.
-# For insert: returns first available slot (empty or tombstone).
+# Find slot for key. Returns entry pointer or 0.
 fn _map_find(m, key) {
-    var entries = map_entries(m);
-    var cap = map_cap(m);
+    var entries = load64(m);
+    var cap = load64(m + 8);
     var idx = hash_str(key) & (cap - 1);
     var probes = 0;
     var first_tomb = 0;
     while (probes < cap) {
-        var ep = entries + idx * HASHMAP_ENTRY_SIZE;
+        var ep = entries + idx * 24;
         var st = load64(ep + 16);
-        if (st == HASH_EMPTY) {
-            # Empty slot — key not in table
+        if (st == 0) {
             if (first_tomb != 0) { return first_tomb; }
             return ep;
         }
-        if (st == HASH_TOMBSTONE) {
-            # Tombstone — remember for insert, keep probing for match
+        elif (st == 2) {
             if (first_tomb == 0) { first_tomb = ep; }
         }
-        if (st == HASH_OCCUPIED) {
-            var ekey = load64(ep);
-            if (streq(ekey, key) == 1) { return ep; }
-        }
+        elif (streq(load64(ep), key) == 1) { return ep; }
         idx = (idx + 1) & (cap - 1);
         probes = probes + 1;
     }
@@ -91,22 +76,28 @@ fn _map_find(m, key) {
     return 0;
 }
 
-# Grow the map (double capacity, rehash all entries)
+# Lookup occupied entry. Returns entry pointer or 0.
+fn _map_lookup(m, key) {
+    var ep = _map_find(m, key);
+    if (ep == 0) { return 0; }
+    if (load64(ep + 16) != 1) { return 0; }
+    return ep;
+}
+
+# Grow the map (double capacity, rehash)
 fn _map_grow(m) {
-    var old_entries = map_entries(m);
-    var old_cap = map_cap(m);
+    var old_entries = load64(m);
+    var old_cap = load64(m + 8);
     var new_cap = old_cap * 2;
-    var new_entries = alloc(new_cap * HASHMAP_ENTRY_SIZE);
-    memset(new_entries, 0, new_cap * HASHMAP_ENTRY_SIZE);
-    # Rehash
+    var new_entries = alloc(new_cap * 24);
+    memset(new_entries, 0, new_cap * 24);
     store64(m, new_entries);
     store64(m + 8, new_cap);
     store64(m + 16, 0);
     var gi = 0;
     while (gi < old_cap) {
-        var oep = old_entries + gi * HASHMAP_ENTRY_SIZE;
-        if (load64(oep + 16) == HASH_OCCUPIED) {
-            # Only rehash occupied entries (skip tombstones)
+        var oep = old_entries + gi * 24;
+        if (load64(oep + 16) == 1) {
             map_set(m, load64(oep), load64(oep + 8));
         }
         gi = gi + 1;
@@ -116,103 +107,92 @@ fn _map_grow(m) {
 
 # Set key=value. Overwrites if key exists.
 fn map_set(m, key, value) {
-    # Grow at 70% load
-    var cnt = map_count(m);
-    var cap = map_cap(m);
-    if (cnt * 10 >= cap * 7) {
-        _map_grow(m);
-    }
+    if (load64(m + 16) * 10 >= load64(m + 8) * 7) { _map_grow(m); }
     var ep = _map_find(m, key);
     if (ep == 0) { return 0 - 1; }
-    var st = load64(ep + 16);
+    var was_new = load64(ep + 16) != 1;
     store64(ep, key);
     store64(ep + 8, value);
-    store64(ep + 16, HASH_OCCUPIED);
-    if (st != HASH_OCCUPIED) {
-        store64(m + 16, map_count(m) + 1);
-    }
+    store64(ep + 16, 1);
+    if (was_new == 1) { store64(m + 16, load64(m + 16) + 1); }
     return 0;
 }
 
 # Get value for key. Returns value or 0 if not found.
 fn map_get(m, key) {
-    var ep = _map_find(m, key);
+    var ep = _map_lookup(m, key);
     if (ep == 0) { return 0; }
-    if (load64(ep + 16) != HASH_OCCUPIED) { return 0; }
     return load64(ep + 8);
 }
 
+# Get value for key with default. Returns value or default_val if not found.
+fn map_get_or(m, key, default_val) {
+    var ep = _map_lookup(m, key);
+    if (ep == 0) { return default_val; }
+    return load64(ep + 8);
+}
+
+# Alias for map_count
+fn map_size(m) { return load64(m + 16); }
+
 # Check if key exists. Returns 1 or 0.
 fn map_has(m, key) {
-    var ep = _map_find(m, key);
-    if (ep == 0) { return 0; }
-    if (load64(ep + 16) != HASH_OCCUPIED) { return 0; }
-    return 1;
+    if (_map_lookup(m, key) != 0) { return 1; }
+    return 0;
 }
 
 # Delete key. Returns 1 if found, 0 if not.
-# Uses tombstone (state=2) to preserve probe chains.
 fn map_delete(m, key) {
-    var ep = _map_find(m, key);
+    var ep = _map_lookup(m, key);
     if (ep == 0) { return 0; }
-    if (load64(ep + 16) != HASH_OCCUPIED) { return 0; }
-    store64(ep + 16, HASH_TOMBSTONE);
-    store64(m + 16, map_count(m) - 1);
+    store64(ep + 16, 2);
+    store64(m + 16, load64(m + 16) - 1);
     return 1;
 }
 
-# Get all keys as a vec of string pointers
+# Get all keys as a vec
 fn map_keys(m) {
-    var keys = vec_new();
-    var entries = map_entries(m);
-    var cap = map_cap(m);
+    var result = vec_new();
+    var entries = load64(m);
+    var cap = load64(m + 8);
     var ki = 0;
     while (ki < cap) {
-        var ep = entries + ki * HASHMAP_ENTRY_SIZE;
-        if (load64(ep + 16) == HASH_OCCUPIED) {
-            vec_push(keys, load64(ep));
-        }
+        var ep = entries + ki * 24;
+        if (load64(ep + 16) == 1) { vec_push(result, load64(ep)); }
         ki = ki + 1;
     }
-    return keys;
+    return result;
 }
 
-# Get all values as a vec of i64
+# Get all values as a vec
 fn map_values(m) {
-    var vals = vec_new();
-    var entries = map_entries(m);
-    var cap = map_cap(m);
+    var result = vec_new();
+    var entries = load64(m);
+    var cap = load64(m + 8);
     var vi = 0;
     while (vi < cap) {
-        var ep = entries + vi * HASHMAP_ENTRY_SIZE;
-        if (load64(ep + 16) == HASH_OCCUPIED) {
-            vec_push(vals, load64(ep + 8));
-        }
+        var ep = entries + vi * 24;
+        if (load64(ep + 16) == 1) { vec_push(result, load64(ep + 8)); }
         vi = vi + 1;
     }
-    return vals;
+    return result;
 }
 
 # Clear all entries (reset to empty, keep capacity)
 fn map_clear(m) {
-    var entries = map_entries(m);
-    var cap = map_cap(m);
-    memset(entries, 0, cap * HASHMAP_ENTRY_SIZE);
+    memset(load64(m), 0, load64(m + 8) * 24);
     store64(m + 16, 0);
     return 0;
 }
 
-# Print map contents
-# Iterate entries without allocating. Calls fn(key, value) for each occupied entry.
+# Iterate entries. Calls fn(key, value) for each occupied entry.
 fn map_iter(m, fp) {
-    var entries = map_entries(m);
-    var cap = map_cap(m);
+    var entries = load64(m);
+    var cap = load64(m + 8);
     var ii = 0;
     while (ii < cap) {
-        var ep = entries + ii * HASHMAP_ENTRY_SIZE;
-        if (load64(ep + 16) == HASH_OCCUPIED) {
-            fncall2(fp, load64(ep), load64(ep + 8));
-        }
+        var ep = entries + ii * 24;
+        if (load64(ep + 16) == 1) { fncall2(fp, load64(ep), load64(ep + 8)); }
         ii = ii + 1;
     }
     return 0;
@@ -220,14 +200,14 @@ fn map_iter(m, fp) {
 
 # Print map contents as {key: value, ...}
 fn map_print(m) {
-    var entries = map_entries(m);
-    var cap = map_cap(m);
+    var entries = load64(m);
+    var cap = load64(m + 8);
     syscall(1, 1, "{", 1);
         var first = 1;
         var pi = 0;
         while (pi < cap) {
-            var ep = entries + pi * HASHMAP_ENTRY_SIZE;
-            if (load64(ep + 16) == HASH_OCCUPIED) {
+            var ep = entries + pi * 24;
+            if (load64(ep + 16) == 1) {
                 if (first == 0) { syscall(1, 1, ", ", 2); }
                 var pk = load64(ep);
                 syscall(1, 1, pk, strlen(pk));

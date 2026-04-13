@@ -10,6 +10,12 @@ var O_CREAT = 64;
 var O_TRUNC = 512;
 var O_APPEND = 1024;
 
+# flock modes
+var LOCK_SH = 1;
+var LOCK_EX = 2;
+var LOCK_UN = 8;
+var LOCK_NB = 4;
+
 # File descriptors
 var STDIN = 0;
 var STDOUT = 1;
@@ -62,6 +68,38 @@ fn file_write_all(path, buf, len) {
     return written;
 }
 
+# Exclusive file lock (blocking). Use for append-only logs, audit chains.
+fn file_lock(fd) {
+    return syscall(73, fd, LOCK_EX);
+}
+
+# Release file lock.
+fn file_unlock(fd) {
+    return syscall(73, fd, LOCK_UN);
+}
+
+# Non-blocking exclusive lock. Returns 0 on success, -1 if already locked.
+fn file_trylock(fd) {
+    return syscall(73, fd, LOCK_EX | LOCK_NB);
+}
+
+# Shared (read) lock. Multiple readers, no writers.
+fn file_lock_shared(fd) {
+    return syscall(73, fd, LOCK_SH);
+}
+
+# Append data to a file with exclusive lock (atomic append).
+# Opens with O_APPEND, locks, writes, unlocks, closes.
+fn file_append_locked(path, buf, len) {
+    var fd = file_open(path, O_WRONLY | O_CREAT | O_APPEND, 0x1A4);
+    if (fd < 0) { return fd; }
+    file_lock(fd);
+    var n = file_write(fd, buf, len);
+    file_unlock(fd);
+    file_close(fd);
+    return n;
+}
+
 # Check if file exists (try to open read-only)
 fn file_exists(path) {
     var fd = file_open(path, 0, 0);
@@ -93,26 +131,28 @@ fn getenv(name) {
     if (n <= 0) { return 0; }
     var nlen = strlen(name);
     var pos = 0;
+    var eq = 0;
+    var ci = 0;
     while (pos < n) {
         # Check if this entry starts with name=
-        var eq = 1;
-        var ci = 0;
+        eq = 1;
+        ci = 0;
         while (ci < nlen) {
             if (load8(&buf + pos + ci) != load8(name + ci)) { eq = 0; break; }
             ci = ci + 1;
         }
-        if (eq == 1 && load8(&buf + pos + nlen) == 61) {
-            # Found: return pointer to value (copy to heap for safety)
-            var vstart = pos + nlen + 1;
-            var vlen = 0;
-            while (vstart + vlen < n && load8(&buf + vstart + vlen) != 0) { vlen = vlen + 1; }
-            var result = alloc(vlen + 1);
-            memcpy(result, &buf + vstart, vlen);
-            store8(result + vlen, 0);
-            return result;
-        }
+        if (eq == 1) { if (load8(&buf + pos + nlen) == 61) {
+                # Found: return pointer to value (copy to heap for safety)
+                var vstart = pos + nlen + 1;
+                var vlen = 0;
+                while (vstart + vlen < n && load8(&buf + vstart + vlen) != 0) { vlen = vlen + 1; }
+                var result = alloc(vlen + 1);
+                memcpy(result, &buf + vstart, vlen);
+                store8(result + vlen, 0);
+                return result;
+            } }
         # Skip to next null terminator
-        while (pos < n && load8(&buf + pos) != 0) { pos = pos + 1; }
+        while (pos < n) { if (load8(&buf + pos) == 0) { break; } pos = pos + 1; }
         pos = pos + 1;
     }
     return 0;
