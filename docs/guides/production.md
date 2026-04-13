@@ -10,7 +10,7 @@ Build the binary from source:
 cyrius build src/main.cyr build/ai-hwaccel
 ```
 
-For minimal binary size (197 KB), enable only the backends you need:
+For minimal binary size (217 KB), enable only the backends you need:
 
 ```sh
 cyrius build src/main.cyr build/ai-hwaccel -DCUDA

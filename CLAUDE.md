@@ -2,24 +2,25 @@
 
 ## Project Identity
 
-**ai-hwaccel** (AI hardware acceleration) — Universal AI hardware accelerator detection — 13 families, quantization, sharding, training memory estimation
+**ai-hwaccel** (AI hardware acceleration) — Universal AI hardware accelerator detection — 18 families, quantization, sharding, training memory estimation
 
-- **Type**: Flat crate with binary (CLI)
+- **Type**: Cyrius binary (CLI)
 - **License**: GPL-3.0-only
-- **MSRV**: 1.89
-- **Version**: SemVer (post-1.0)
+- **Compiler**: Cyrius cc3 3.10.0
+- **Version**: SemVer 2.0.0
 
 ## Consumers
 
 hoosh, daimon, Irfan, AgnosAI, murti, tazama
 
-**Note**: Zero compile-time SDK dependencies. 847+ organic downloads on crates.io.
+**Note**: Zero dependencies. Ported from Rust (v1.2.0, 847+ crates.io downloads) to Cyrius (v2.0.0).
+
 ## Development Process
 
 ### P(-1): Scaffold Hardening (before any new features)
 
 1. Test + benchmark sweep of existing code
-2. Cleanliness check: `cargo fmt --check`, `cargo clippy --all-features --all-targets -- -D warnings`, `cargo audit`, `cargo deny check`
+2. Cleanliness check: `cyrius fmt <file> --check`, `cyrius lint <file>`
 3. Get baseline benchmarks (`./scripts/bench-history.sh`)
 4. Initial refactor + audit (performance, memory, security, edge cases)
 5. Cleanliness check — must be clean after audit
@@ -30,7 +31,7 @@ hoosh, daimon, Irfan, AgnosAI, murti, tazama
 ### Development Loop (continuous)
 
 1. Work phase — new features, roadmap items, bug fixes
-2. Cleanliness check: `cargo fmt --check`, `cargo clippy --all-features --all-targets -- -D warnings`, `cargo audit`, `cargo deny check`
+2. Cleanliness check: `cyrius fmt <file> --check`, `cyrius lint <file>`
 3. Test + benchmark additions for new code
 4. Run benchmarks (`./scripts/bench-history.sh`)
 5. Audit phase — review performance, memory, security, throughput, correctness
@@ -44,23 +45,17 @@ hoosh, daimon, Irfan, AgnosAI, murti, tazama
 ### Key Principles
 
 - **Never skip benchmarks.** Numbers don't lie. The CSV history is the proof.
-- **Tests + benchmarks are the way.** Minimum 80%+ coverage target.
-- **Own the stack.** If an AGNOS crate wraps an external lib, depend on the AGNOS crate.
+- **Tests + benchmarks are the way.** 518 assertions, 6 fuzz harnesses, 20 benchmarks.
+- **Own the stack.** Zero external dependencies.
 - **No magic.** Every operation is measurable, auditable, traceable.
-- **`#[non_exhaustive]`** on all public enums.
-- **`#[must_use]`** on all pure functions.
-- **`#[inline]`** on hot-path functions.
-- **`write!` over `format!`** — avoid temporary allocations.
-- **Cow over clone** — borrow when you can, allocate only when you must.
-- **Vec arena over HashMap** — when indices are known, direct access beats hashing.
-- **Feature-gate optional deps** — consumers pull only what they need.
-- **tracing on all operations** — structured logging for audit trail.
+- **Fixed-point arithmetic** — x1000 multipliers, no floats in the entire codebase.
+- **`str_builder` over `format!`** — avoid temporary allocations.
+- **Enum constants over global vars** — avoid the 1024 global var limit.
+- **Feature-gate optional modules** — `#ifdef` / `-D` flags for conditional compilation.
 
 ## DO NOT
 - **Do not commit or push** — the user handles all git operations (commit, push, tag)
-
 - **NEVER use `gh` CLI** — use `curl` to GitHub API only
 - Do not add unnecessary dependencies — keep it lean
-- Do not `unwrap()` or `panic!()` in library code
 - Do not skip benchmarks before claiming performance improvements
-- Do not commit `target/` or `Cargo.lock` (library crates only)
+- Do not commit `build/` directory

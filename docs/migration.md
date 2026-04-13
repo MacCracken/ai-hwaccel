@@ -1,106 +1,60 @@
 # Migration Guide
 
-## v0.19.3 → v0.20.3
+## v1.x (Rust) → v2.0.0 (Cyrius)
 
-### New fields on `AcceleratorProfile`
+v2.0.0 is a complete rewrite from Rust to Cyrius. The detection capabilities
+are equivalent but the API has changed from Rust method syntax to Cyrius
+function calls.
 
-Five optional fields were added to `AcceleratorProfile`:
+### API mapping
 
-- `memory_bandwidth_gbps: Option<f64>` — VRAM bandwidth in GB/s
-- `memory_used_bytes: Option<u64>` — current VRAM usage
-- `memory_free_bytes: Option<u64>` — current free VRAM
-- `pcie_bandwidth_gbps: Option<f64>` — PCIe link bandwidth in GB/s
-- `numa_node: Option<u32>` — NUMA node affinity
+| Rust (v1.2.0) | Cyrius (v2.0.0) |
+|----------------|-----------------|
+| `AcceleratorRegistry::detect()` | `registry_detect()` |
+| `AcceleratorRegistry::detect_async()` | `registry_detect_threaded()` |
+| `DetectBuilder::new()` | `builder_all()` |
+| `DetectBuilder::none()` | `builder_none()` |
+| `builder.with_cuda()` | `builder_with(mask, BACKEND_CUDA)` |
+| `registry.best_available()` | `reg_best_available(r)` |
+| `registry.total_memory()` | `reg_total_memory(r)` |
+| `registry.has_accelerator()` | `reg_has_accelerator(r)` |
+| `registry.plan_sharding(params, quant)` | `reg_plan_sharding(r, params, quant)` |
+| `registry.suggest_quantization(params)` | `reg_suggest_quant(r, params)` |
+| `CachedRegistry::new(ttl)` | `cached_registry_new(ttl_secs)` |
+| `cached.get()` | `cached_get(c)` |
+| `LazyRegistry::new()` | `lazy_new()` |
+| `lazy.by_family(Family::Gpu)` | `lazy_by_family(lr, FAMILY_GPU)` |
+| `AcceleratorProfile::cuda(id, mem)` | `profile_cuda(id, mem)` |
+| `profile.memory_bytes` | `profile_memory_bytes(p)` |
+| `profile.accelerator.is_gpu()` | `accel_is_gpu(profile_accel_type(p))` |
+| `can_run(model, quant, mem)` | `model_can_run(m, quant, mem)` |
+| `detect_format(path)` | `detect_model_format(path)` |
+| `detect_format_from_bytes(bytes)` | `detect_format_from_bytes(buf, len)` |
 
-**If you construct `AcceleratorProfile` structs directly** (not via `::cuda()`,
-`::rocm()`, etc.), you must add these fields. Set them to `None`:
+### Binary
 
-```cyr
-let profile = AcceleratorProfile {
-    accelerator: AcceleratorType::CudaGpu { device_id: 0 },
-    available: true,
-    memory_bytes: 24 * 1024 * 1024 * 1024,
-    compute_capability: "8.6",
-    driver_version: nil,
-    // New in 0.20:
-    memory_bandwidth_gbps: nil,
-    memory_used_bytes: nil,
-    memory_free_bytes: nil,
-    pcie_bandwidth_gbps: nil,
-    numa_node: nil,
-};
-```
+| | Rust | Cyrius |
+|--|------|--------|
+| Format | ELF (via LLVM) | ELF (direct x86_64) |
+| Size | 708 KB | 217 KB |
+| Dependencies | 131 crates | 0 |
 
-The convenience constructors (`AcceleratorProfile::cuda()`, etc.) already
-include these fields, so code using them is unaffected.
+### JSON output
 
-**JSON compatibility**: Old JSON without these fields deserializes correctly —
-the manual JSON parser defaults missing fields to `nil` and omits them from
-output when `nil`.
+The JSON schema is unchanged. v1.x and v2.0.0 produce identical JSON
+structures. `schema_version` remains `2`.
 
-### New `SystemIo` on `AcceleratorRegistry`
+### What's new in v2.0.0
 
-The registry now includes system-level I/O information:
+- `model_format.cyr` — SafeTensors/GGUF/ONNX/PyTorch header detection
+- `requirement.cyr` — accelerator requirement matching for scheduling
+- `async_detect.cyr` — threaded detection (CLI backends in parallel)
+- `cache.cyr` — TTL-based caching (memory + disk)
+- `lazy.cyr` — per-family lazy detection
 
-```cyr
-let sio = registry.system_io();
-// sio.interconnects — InfiniBand, RoCE, NVLink
-// sio.storage — NVMe, SSD, HDD
-// sio.estimate_ingestion_secs(bytes) — data loading estimate
-```
+### What's removed
 
-**JSON compatibility**: Old JSON without `system_io` deserializes correctly
-via the manual JSON parser (defaults to empty interconnects and storage).
-
-### Schema version bumped to 2
-
-`SCHEMA_VERSION` changed from `1` to `2`. If you compare or assert on this
-constant, update accordingly.
-
-### New `DetectionError::Timeout` variant
-
-A new error variant was added:
-
-```cyr
-DetectionError::Timeout { tool: str, timeout_secs: f64 }
-```
-
-Previously, timeouts were reported as `ToolFailed`. Now they are distinct,
-enabling retry logic for slow tools.
-
-**If you match exhaustively on `DetectionError`** (without a `_` wildcard),
-you'll need to add a `Timeout` arm. The enum is `#[non_exhaustive]`, so a
-`_` catch-all is recommended:
-
-```cyr
-match err {
-    DetectionError::ToolNotFound { .. } => { /* ... */ }
-    DetectionError::Timeout { .. } => { /* ... */ }
-    _ => { /* handles future variants too */ }
-}
-```
-
-**Note**: `DetectionError` now implements `PartialEq` but no longer `Eq`
-(because `timeout_secs` is `f64`). If you relied on `Eq`, use `PartialEq`
-instead.
-
-### Subprocess environment sanitization
-
-`run_tool()` now strips `LD_PRELOAD`, `LD_LIBRARY_PATH`,
-`DYLD_INSERT_LIBRARIES`, and `DYLD_LIBRARY_PATH` from child processes.
-This is a security hardening change. If a detection tool requires one of
-these variables, it will no longer receive it.
-
-### CLI changes
-
-The `--table` output now includes additional columns:
-- `Free` — current free VRAM
-- `BW` — memory bandwidth
-- `PCIe` — PCIe link bandwidth
-- `NUMA` — NUMA node
-
-New CLI flags:
-- `--columns name,mem,bw` — select specific table columns
-- `--tsv` — tab-separated output (machine-readable)
-- `--alert mem>90` — alert when VRAM usage exceeds threshold (with `--watch`)
-- `--watch` now shows memory usage deltas between refreshes
+- **Rust crate** — no longer published to crates.io
+- **C FFI** (`ffi.rs`) — Cyrius is native, no wrapper needed
+- **Windows detection** — Cyrius doesn't target Windows yet (v4.0.0)
+- **serde/tokio/tracing** — replaced by manual JSON, thread.cyr, stderr

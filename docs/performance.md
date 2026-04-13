@@ -6,8 +6,8 @@ How to minimize detection latency and binary size.
 
 ## When to use `CachedRegistry`
 
-`AcceleratorRegistry::detect()` spawns subprocesses and reads sysfs on every
-call. On a system with multiple backends, this takes 50–200ms.
+`registry_detect()` spawns subprocesses and reads sysfs on every call. On a
+system with multiple backends, this takes 50–200ms.
 
 Use `CachedRegistry` when you call detection more than once:
 
@@ -43,7 +43,7 @@ let registry = registry_detect_builder()
     .detect(); // no with_*() calls -> CPU only
 
 // Or equivalently:
-let registry = DetectBuilder::none().detect();
+var registry = registry_detect_with(builder_none());
 ```
 
 ---
@@ -99,5 +99,5 @@ backends are enabled, each gets its own scoped thread. Scoped threads are
 lightweight and are joined before `registry_detect()` returns.
 
 If you're already in a thread-constrained environment, use
-`DetectBuilder::none()` with specific `with_*()` calls to limit concurrency,
+`builder_none()` with specific `builder_with()` calls to limit concurrency,
 or call detection from a dedicated thread.

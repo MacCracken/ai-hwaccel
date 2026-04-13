@@ -6,14 +6,14 @@ results.
 ## Quick start
 
 ```sh
-cyrius test                          # run all 491 assertions (10 test phases)
+cyrius test                          # run all 518 assertions (11 test phases)
 cyrius lint src/main.cyr             # lint (zero warnings)
 cyrius fmt src/main.cyr --check      # check formatting
 ```
 
 ## Test categories
 
-Tests are organized as `.tcyr` files across 10 test phases, with 491 total
+Tests are organized as `.tcyr` files across 11 test phases, with 518 total
 assertions:
 
 | Suite | Location | What it tests |

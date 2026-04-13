@@ -19,19 +19,13 @@ main.cyr                 CLI binary (table, JSON, watch, cost, profile modes)
     rocm.cyr             AMD via sysfs (/sys/class/drm)
     apple.cyr            Metal/ANE via system_profiler + sysctl
     vulkan.cyr           Vulkan via vulkaninfo + sysfs fallback
-    windows.cyr          WMI via wmic/PowerShell
     tpu.cyr              Google TPU via sysfs (/sys/class/accel)
     gaudi.cyr            Intel Gaudi via hl-smi CSV
     neuron.cyr           AWS Neuron via neuron-ls JSON
-    intel_oneapi.cyr     Intel Arc via xpu-smi CSV
-    intel_npu.cyr        Intel NPU via sysfs
+    intel.cyr            Intel NPU (sysfs) + oneAPI/Arc (xpu-smi)
     amd_xdna.cyr         AMD XDNA via sysfs
-    qualcomm.cyr         Qualcomm AI 100 via sysfs
-    cerebras.cyr         Cerebras WSE via CLI + /dev
-    graphcore.cyr        Graphcore IPU via gc-info + /dev
-    groq.cyr             Groq LPU via /dev
-    samsung_npu.cyr      Samsung NPU via sysfs
-    mediatek_apu.cyr     MediaTek APU via sysfs
+    cloud_asic.cyr       Cerebras WSE, Graphcore IPU, Groq LPU
+    edge.cyr             Qualcomm AI 100, Samsung NPU, MediaTek APU
     bandwidth.cyr        Memory bandwidth estimation (NVIDIA clock+bus width)
     interconnect.cyr     NVLink/IB/XGMI/ICI detection
     pcie.cyr             PCIe link speed from sysfs
@@ -39,8 +33,7 @@ main.cyr                 CLI binary (table, JSON, watch, cost, profile modes)
     disk.cyr             Storage device classification
     environment.cyr      Container/cloud detection (Docker, k8s, AWS/GCP/Azure)
   quantization.cyr       QuantizationLevel (FP32/FP16/BF16/INT8/INT4)
-  plan.cyr               Sharding planner (tensor/pipeline/data parallel)
-  sharding.cyr           ShardingPlan, ModelShard, ShardingStrategy
+  plan.cyr               Sharding planner + ShardingPlan/ModelShard (merged)
   training.cyr           Training memory estimation (LoRA, QLoRA, DPO, RLHF, etc.)
   cost.cyr               Cloud instance pricing + recommendations
   requirement.cyr        AcceleratorRequirement for scheduling

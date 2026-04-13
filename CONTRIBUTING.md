@@ -12,7 +12,7 @@ started, what we expect from contributions, and how the review process works.
 ## Development workflow
 
 ```sh
-cyrius test                          # run all 491 assertions (10 test phases)
+cyrius test                          # run all 518 assertions (11 test phases)
 cyrius lint src/main.cyr             # lint (zero warnings)
 cyrius fmt src/main.cyr --check      # check formatting
 cyrius build src/main.cyr build/ai-hwaccel  # build binary

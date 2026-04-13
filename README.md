@@ -12,10 +12,10 @@ decide how to quantize and shard a model across them.
 
 | Metric | Value |
 |--------|-------|
-| Binary size | **197 KB** |
+| Binary size | **217 KB** |
 | Compile time | **215 ms** |
-| Source LOC | 5,271 |
-| Tests | 491 assertions (10 phases) |
+| Source LOC | 5,602 |
+| Tests | 518 assertions (11 phases) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** |
 | Hardware families | 18 |

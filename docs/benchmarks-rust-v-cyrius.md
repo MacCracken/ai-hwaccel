@@ -8,12 +8,12 @@ Rust source has been removed — this document preserves the final numbers.
 
 | Metric | Rust | Cyrius | Delta |
 |--------|------|--------|-------|
-| **Binary size** | 708 KB (release, stripped) | 197 KB | **-72%** |
+| **Binary size** | 708 KB (release, stripped) | 217 KB | **-69%** |
 | **Compile time** | ~1.8s (release, cached) | 215 ms | **-88%** |
-| **Source LOC** | 11,278 | 5,271 | **-53%** |
+| **Source LOC** | 11,278 | 5,602 | **-50%** |
 | **Test LOC** | 6,057 | 2,244 | — |
 | **Fuzz harnesses** | 0 (fuzz_helpers.rs only) | 6 (.fcyr) | — |
-| **Tests** | 460 `#[test]` | 491 assertions (10 phases) | +7% |
+| **Tests** | 460 `#[test]` | 518 assertions (11 phases) | +13% |
 | **Benchmarks** | 40 criterion | 3 suites (20 benchmarks) | — |
 | **Dependencies** | 131 crates (Cargo.lock) | 0 | **-100%** |
 | **Modules (src)** | 20 + 26 detect + 4 hardware = 50 | 20 + 19 detect = 39 | — |

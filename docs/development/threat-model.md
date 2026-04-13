@@ -41,16 +41,16 @@ mitigations in `ai-hwaccel`.
 
 | Threat | Mitigation |
 |---|---|
-| Unknown fields in JSON (forward-compatibility probing) | All struct types use `#[serde(deny_unknown_fields)]` — unexpected fields cause deserialization to fail rather than be silently ignored. |
-| Excessively large payloads | Callers should impose their own size limits before passing data to `serde_json::from_str`. The crate itself does not read from network or disk. |
+| Unknown fields in JSON (forward-compatibility probing) | The manual JSON parser ignores unknown fields — they are skipped rather than silently accepted into structs. |
+| Excessively large payloads | Callers should impose their own size limits before passing data to the JSON parser. Read buffers are capped (e.g., 32 KB for cloud pricing, 16 KB for model format headers). |
 
 ### Supply chain
 
 | Threat | Mitigation |
 |---|---|
-| Vulnerable dependencies | `cargo-audit` runs in CI on every push. |
-| License violations | `cargo-deny` enforces an allowlist of OSS licenses (`MIT`, `Apache-2.0`, `BSD-*`, `ISC`). |
-| Typosquatting / malicious crates | `cargo-deny` restricts to the official crates.io registry (`deny.toml` → `[sources]`). |
+| Vulnerable dependencies | Zero external dependencies — no supply chain attack surface. Vendored stdlib is synced from upstream Cyrius. |
+| License violations | Single license (GPL-3.0-only). No third-party crates or packages. |
+| Typosquatting / malicious packages | Not applicable — no package manager dependencies. |
 
 ## Out of scope
 
