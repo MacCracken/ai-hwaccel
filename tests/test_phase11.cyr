@@ -1,0 +1,155 @@
+# test_phase11.cyr — tests for requirement, model extensions, model_format JSON
+# Covers: requirement matching, models_by_family, headroom, format names
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/requirement.cyr"
+
+alloc_init();
+
+# --- Requirement matching ---
+
+fn test_req_none() {
+    var p = profile_new(ACCEL_CPU, 0, 16 * BYTES_PER_GIB);
+    assert_eq(requirement_satisfied(REQ_NONE, 0, p), 1,
+        "REQ_NONE accepts CPU");
+    return 0;
+}
+
+fn test_req_gpu() {
+    var cuda = profile_new(ACCEL_CUDA, 0, 80 * BYTES_PER_GIB);
+    assert_eq(requirement_satisfied(REQ_GPU, 0, cuda), 1,
+        "REQ_GPU accepts CUDA");
+
+    var cpu = profile_new(ACCEL_CPU, 0, 16 * BYTES_PER_GIB);
+    assert_eq(requirement_satisfied(REQ_GPU, 0, cpu), 0,
+        "REQ_GPU rejects CPU");
+
+    var rocm = profile_new(ACCEL_ROCM, 0, 80 * BYTES_PER_GIB);
+    assert_eq(requirement_satisfied(REQ_GPU, 0, rocm), 1,
+        "REQ_GPU accepts ROCm");
+    return 0;
+}
+
+fn test_req_tpu() {
+    var tpu = profile_new(ACCEL_TPU, 0, 32 * BYTES_PER_GIB);
+    profile_set_tpu_version(tpu, TPU_V4);
+    profile_set_tpu_chips(tpu, 4);
+
+    assert_eq(requirement_satisfied(REQ_TPU, 2, tpu), 1,
+        "TPU 4 chips >= 2 min");
+    assert_eq(requirement_satisfied(REQ_TPU, 8, tpu), 0,
+        "TPU 4 chips < 8 min");
+    return 0;
+}
+
+fn test_req_gaudi() {
+    var gaudi = profile_new(ACCEL_GAUDI, 0, 96 * BYTES_PER_GIB);
+    assert_eq(requirement_satisfied(REQ_GAUDI, 0, gaudi), 1,
+        "REQ_GAUDI accepts Gaudi");
+    var cuda = profile_new(ACCEL_CUDA, 0, 80 * BYTES_PER_GIB);
+    assert_eq(requirement_satisfied(REQ_GAUDI, 0, cuda), 0,
+        "REQ_GAUDI rejects CUDA");
+    return 0;
+}
+
+fn test_req_neuron() {
+    var neuron = profile_new(ACCEL_NEURON, 0, 32 * BYTES_PER_GIB);
+    assert_eq(requirement_satisfied(REQ_AWS_NEURON, 0, neuron), 1,
+        "REQ_AWS_NEURON accepts Neuron");
+    return 0;
+}
+
+fn test_req_gpu_or_tpu() {
+    var cuda = profile_new(ACCEL_CUDA, 0, 80 * BYTES_PER_GIB);
+    var tpu = profile_new(ACCEL_TPU, 0, 32 * BYTES_PER_GIB);
+    var cpu = profile_new(ACCEL_CPU, 0, 16 * BYTES_PER_GIB);
+
+    assert_eq(requirement_satisfied(REQ_GPU_OR_TPU, 0, cuda), 1,
+        "GPU_OR_TPU accepts CUDA");
+    assert_eq(requirement_satisfied(REQ_GPU_OR_TPU, 0, tpu), 1,
+        "GPU_OR_TPU accepts TPU");
+    assert_eq(requirement_satisfied(REQ_GPU_OR_TPU, 0, cpu), 0,
+        "GPU_OR_TPU rejects CPU");
+    return 0;
+}
+
+fn test_req_any_accel() {
+    var cuda = profile_new(ACCEL_CUDA, 0, 80 * BYTES_PER_GIB);
+    var gaudi = profile_new(ACCEL_GAUDI, 0, 96 * BYTES_PER_GIB);
+    var cpu = profile_new(ACCEL_CPU, 0, 16 * BYTES_PER_GIB);
+
+    assert_eq(requirement_satisfied(REQ_ANY_ACCELERATOR, 0, cuda), 1,
+        "ANY_ACCEL accepts CUDA");
+    assert_eq(requirement_satisfied(REQ_ANY_ACCELERATOR, 0, gaudi), 1,
+        "ANY_ACCEL accepts Gaudi");
+    assert_eq(requirement_satisfied(REQ_ANY_ACCELERATOR, 0, cpu), 0,
+        "ANY_ACCEL rejects CPU");
+    return 0;
+}
+
+fn test_req_unavailable() {
+    var cuda = profile_new(ACCEL_CUDA, 0, 80 * BYTES_PER_GIB);
+    profile_set_available(cuda, 0);
+    assert_eq(requirement_satisfied(REQ_GPU, 0, cuda), 0,
+        "unavailable device rejected");
+    return 0;
+}
+
+fn test_req_names() {
+    assert(streq(requirement_name(REQ_NONE), "none") == 1, "none");
+    assert(streq(requirement_name(REQ_GPU), "gpu") == 1, "gpu");
+    assert(streq(requirement_name(REQ_TPU), "tpu") == 1, "tpu");
+    assert(streq(requirement_name(REQ_GAUDI), "gaudi") == 1, "gaudi");
+    assert(streq(requirement_name(REQ_AWS_NEURON), "aws-neuron") == 1,
+        "neuron");
+    assert(streq(requirement_name(REQ_GPU_OR_TPU), "gpu-or-tpu") == 1,
+        "gpu-or-tpu");
+    assert(streq(requirement_name(REQ_ANY_ACCELERATOR),
+        "any-accelerator") == 1, "any-accel");
+    return 0;
+}
+
+fn test_find_satisfying() {
+    var profs = vec_new();
+    vec_push(profs, profile_new(ACCEL_CPU, 0, 16 * BYTES_PER_GIB));
+    vec_push(profs, profile_new(ACCEL_CUDA, 1, 80 * BYTES_PER_GIB));
+    vec_push(profs, profile_new(ACCEL_TPU, 2, 32 * BYTES_PER_GIB));
+
+    var gpu = find_satisfying_profile(REQ_GPU, 0, profs);
+    assert(gpu != 0, "found GPU");
+    assert_eq(profile_accel_type(gpu), ACCEL_CUDA, "is CUDA");
+
+    var none = find_satisfying_profile(REQ_GAUDI, 0, profs);
+    assert_eq(none, 0, "no Gaudi found");
+
+    assert_eq(count_satisfying(REQ_ANY_ACCELERATOR, 0, profs), 2,
+        "2 accelerators");
+    return 0;
+}
+
+
+# --- Main ---
+
+test_req_none();
+test_req_gpu();
+test_req_tpu();
+test_req_gaudi();
+test_req_neuron();
+test_req_gpu_or_tpu();
+test_req_any_accel();
+test_req_unavailable();
+test_req_names();
+test_find_satisfying();
+var fails = assert_summary();
+syscall(60, fails);

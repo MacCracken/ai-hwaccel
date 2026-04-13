@@ -7,19 +7,7 @@
 #   ai-hwaccel --cost 70B       # Cloud instance recommendation
 #   ai-hwaccel --version        # Print version
 
-include "lib/string.cyr"
-include "lib/alloc.cyr"
-include "lib/vec.cyr"
-include "lib/str.cyr"
-include "lib/fmt.cyr"
-include "lib/io.cyr"
-include "lib/syscalls.cyr"
-include "lib/fs.cyr"
-include "lib/tagged.cyr"
-include "lib/process.cyr"
-include "lib/args.cyr"
-include "lib/fnptr.cyr"
-include "lib/thread.cyr"
+# Stdlib auto-included via cyrius.toml
 
 include "src/units.cyr"
 include "src/error.cyr"

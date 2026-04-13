@@ -11,164 +11,89 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-
 jobs:
-  check:
-    name: Check & Lint
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Cyrius toolchain
+        run: |
+          CYRIUS_VERSION="${CYRIUS_VERSION:-$(cat .cyrius-toolchain | tr -d '[:space:]')}"
+          echo "Installing Cyrius $CYRIUS_VERSION"
+          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
+          mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
+          cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
+          cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
+          chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
+          echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
+          echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
+
+      - name: Resolve dependencies
+        run: cyrius deps
+
+      - name: Build
+        run: |
+          mkdir -p build
+          cyrius build src/main.cyr build/ai-hwaccel
+          echo "ai-hwaccel: $(wc -c < build/ai-hwaccel) bytes"
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Format check
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-      - name: Clippy (async-detect)
-        run: cargo clippy --features async-detect --all-targets -- -D warnings
-      - name: Type check (lib only, no cli)
-        run: cargo check --no-default-features --features all-backends
-      - name: Type check (all features)
-        run: cargo check --all-features
-
-  security:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-      - name: Audit
-        run: cargo audit
-
-  deny:
-    name: Supply Chain (cargo-deny)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
-
-  vet:
-    name: Supply Chain (cargo-vet)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-vet
-        run: cargo install cargo-vet
-      - name: Vet
-        run: cargo vet
+          name: build-x86_64
+          path: build/ai-hwaccel
+          retention-days: 5
 
   test:
-    name: Test (${{ matrix.os }})
-    needs: [check]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-      - name: Run unit tests
-        run: cargo test --lib
-      - name: Run integration tests
-        run: cargo test --tests
-      - name: Run doc tests
-        run: cargo test --doc
-      - name: Test async-detect feature
-        run: cargo test --features async-detect --lib
-      - name: Test lib-only (no cli feature)
-        run: cargo check --no-default-features --features all-backends
-
-  test-minimal:
-    name: Test (minimal features)
-    needs: [check]
+    name: Test (491 assertions)
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Test with no backends
-        run: cargo test --no-default-features
-      - name: Test with single backend (cuda)
-        run: cargo test --no-default-features --features cuda,cli
 
-  msrv:
-    name: MSRV (1.89)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.89"
-      - uses: Swatinem/rust-cache@v2
-      - name: Check with MSRV
-        run: cargo check
-      - name: Test with MSRV
-        run: cargo test
-
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    needs: [check]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov
-      - name: Generate coverage
-        run: cargo llvm-cov --lcov --output-path lcov.info
-      - name: Upload coverage
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: codecov/codecov-action@v4
-        with:
-          files: lcov.info
-          fail_ci_if_error: false
-
-  bench:
-    name: Benchmarks
-    runs-on: ubuntu-latest
-    needs: [check]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Run benchmarks
-        run: cargo bench --bench detect --bench plan -- --noplot
-
-  fuzz:
-    name: Fuzz (smoke)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: [check]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz
-      - name: Fuzz all targets (15s each)
+      - name: Install Cyrius toolchain
         run: |
-          for target in $(cargo +nightly fuzz list); do
-            echo "=== Fuzzing $target ==="
-            cargo +nightly fuzz run "$target" -- -max_total_time=15 -max_len=4096 || exit 1
+          CYRIUS_VERSION="${CYRIUS_VERSION:-$(cat .cyrius-toolchain | tr -d '[:space:]')}"
+          echo "Installing Cyrius $CYRIUS_VERSION"
+          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
+          CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
+          mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
+          cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
+          cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
+          chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
+          echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
+          echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
+
+      - name: Resolve dependencies
+        run: cyrius deps
+
+      - name: Run test phases
+        run: |
+          pass=0; fail=0
+          for t in tests/test_phase*.cyr; do
+            echo "test: $(basename $t)"
+            if cyrius test "$t" 2>&1 | tail -1 | grep -q "0 failed"; then
+              pass=$((pass + 1))
+            else
+              fail=$((fail + 1))
+              echo "  FAIL: $t"
+            fi
+          done
+          echo "$pass passed, $fail failed"
+          test $fail -eq 0
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required docs
+        run: |
+          for doc in README.md CHANGELOG.md VERSION LICENSE; do
+            test -f "$doc" && echo "OK: $doc" || { echo "MISSING: $doc"; exit 1; }
           done

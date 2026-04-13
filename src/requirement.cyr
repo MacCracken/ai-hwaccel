@@ -24,7 +24,7 @@ fn requirement_name(r) {
 }
 
 # Check if a profile satisfies a requirement
-# For REQ_TPU, min_chips is checked against profile_tpu_chip_count
+# For REQ_TPU, min_chips is checked against profile_tpu_chips
 fn requirement_satisfied(req, min_chips, profile) {
     if (profile_available(profile) != 1) { return 0; }
     var at = profile_accel_type(profile);
@@ -37,7 +37,7 @@ fn requirement_satisfied(req, min_chips, profile) {
 
     if (req == REQ_TPU) {
         if (at != ACCEL_TPU) { return 0; }
-        var chips = profile_tpu_chip_count(profile);
+        var chips = profile_tpu_chips(profile);
         return chips >= min_chips;
     }
 
