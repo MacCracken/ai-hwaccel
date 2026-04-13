@@ -1,0 +1,46 @@
+# Fuzz: Vulkan parser
+# Exercises _parse_vulkaninfo with valid, empty, and malformed inputs
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/vulkan.cyr"
+
+alloc_init();
+
+# Valid vulkaninfo-like output with deviceName
+var p1 = vec_new();
+var out1 = str_from("VkPhysicalDeviceProperties:\n  deviceName = NVIDIA GeForce RTX 4090\n  deviceType = DISCRETE_GPU\n");
+_parse_vulkaninfo(out1, p1);
+
+# Empty input — should not crash
+var p2 = vec_new();
+_parse_vulkaninfo(str_from(""), p2);
+if (vec_len(p2) != 0) { syscall(60, 2); }
+
+# No deviceName lines
+var p3 = vec_new();
+_parse_vulkaninfo(str_from("some random\noutput lines\n"), p3);
+
+# Multiple devices
+var p4 = vec_new();
+var out4 = str_from("deviceName = GPU-A\ndeviceName = GPU-B\n");
+_parse_vulkaninfo(out4, p4);
+
+syscall(60, 0);

@@ -1,0 +1,35 @@
+# Fuzz: Gaudi hl-smi parser
+# Exercises detect_gaudi path with mock hl-smi output patterns
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/gaudi.cyr"
+
+alloc_init();
+
+# The Gaudi detection calls hl-smi directly, so we can't easily
+# unit-test the parser without the tool. But we CAN verify that
+# detect_gaudi doesn't crash when hl-smi is not found.
+var p1 = vec_new();
+var w1 = vec_new();
+detect_gaudi(p1, w1);
+# On a non-Gaudi machine, should produce 0 profiles and possibly a warning
+
+syscall(60, 0);

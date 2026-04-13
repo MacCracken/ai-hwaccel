@@ -1,0 +1,51 @@
+# Fuzz: AWS Neuron JSON parser
+# Exercises _parse_neuron_json with valid, empty, and malformed inputs
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/neuron.cyr"
+
+alloc_init();
+
+# Valid neuron-ls JSON
+var p1 = vec_new();
+var json1 = str_from("[{\"model\":\"trn1\",\"nc_count\":2,\"memory_per_nc_mb\":32768}]");
+_parse_neuron_json(json1, p1);
+if (vec_len(p1) < 1) { syscall(60, 1); }
+
+# Inferentia
+var p2 = vec_new();
+var json2 = str_from("[{\"model\":\"inf2\",\"nc_count\":1,\"memory_per_nc_mb\":16384}]");
+_parse_neuron_json(json2, p2);
+
+# Empty input
+var p3 = vec_new();
+_parse_neuron_json(str_from(""), p3);
+if (vec_len(p3) != 0) { syscall(60, 3); }
+
+# Garbage
+var p4 = vec_new();
+_parse_neuron_json(str_from("not json at all"), p4);
+
+# Empty array
+var p5 = vec_new();
+_parse_neuron_json(str_from("[]"), p5);
+
+syscall(60, 0);

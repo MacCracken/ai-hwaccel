@@ -1,0 +1,178 @@
+# async_detect.cyr — threaded concurrent hardware detection
+# Runs CLI-based backends (nvidia-smi, hl-smi, vulkaninfo, etc.)
+# in parallel threads, then merges results into the registry.
+# Sysfs-only backends run on the main thread (fast filesystem reads).
+#
+# Usage:
+#   var r = registry_detect_threaded();
+#
+# Requires: lib/thread.cyr, lib/fnptr.cyr
+
+# Thread argument struct: { profs, warns, backend_id }
+# Each thread gets its own vec for profiles and warnings,
+# merged into the main registry after join.
+
+fn _thread_arg_new(backend_id) {
+    var ta = alloc(24);
+    store64(ta, vec_new());     # private profs
+    store64(ta + 8, vec_new()); # private warns
+    store64(ta + 16, backend_id);
+    return ta;
+}
+
+fn _ta_profs(ta) { return load64(ta); }
+fn _ta_warns(ta) { return load64(ta + 8); }
+fn _ta_backend(ta) { return load64(ta + 16); }
+
+# Thread entry: detect a single backend into private vecs
+fn _detect_thread_entry(ta) {
+    var profs = _ta_profs(ta);
+    var warns = _ta_warns(ta);
+    var bid = _ta_backend(ta);
+
+    if (bid == BACKEND_CUDA) { detect_cuda(profs, warns); }
+    elif (bid == BACKEND_GAUDI) { detect_gaudi(profs, warns); }
+    elif (bid == BACKEND_NEURON) { detect_neuron(profs, warns); }
+    elif (bid == BACKEND_VULKAN) { detect_vulkan(profs, warns); }
+    elif (bid == BACKEND_INTEL_ONEAPI) {
+        detect_intel_oneapi(profs, warns);
+    }
+    elif (bid == BACKEND_APPLE) { detect_apple(profs, warns); }
+    return 0;
+}
+
+# CLI-based backends that benefit from parallel execution
+# (they shell out to nvidia-smi, hl-smi, neuron-ls, vulkaninfo, etc.)
+fn _is_cli_backend(bid) {
+    if (bid == BACKEND_CUDA) { return 1; }
+    if (bid == BACKEND_GAUDI) { return 1; }
+    if (bid == BACKEND_NEURON) { return 1; }
+    if (bid == BACKEND_VULKAN) { return 1; }
+    if (bid == BACKEND_INTEL_ONEAPI) { return 1; }
+    if (bid == BACKEND_APPLE) { return 1; }
+    return 0;
+}
+
+# Sysfs-only backends (fast, no subprocess — run on main thread)
+fn _detect_sysfs_backends(builder_mask, profs, warns) {
+    if (builder_is_enabled(builder_mask, BACKEND_ROCM) == 1) {
+        detect_rocm(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_INTEL_NPU) == 1) {
+        detect_intel_npu(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_AMD_XDNA) == 1) {
+        detect_amd_xdna(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_TPU) == 1) {
+        detect_tpu(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_QUALCOMM) == 1) {
+        detect_qualcomm(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_CEREBRAS) == 1) {
+        detect_cerebras(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_GRAPHCORE) == 1) {
+        detect_graphcore(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_GROQ) == 1) {
+        detect_groq(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_SAMSUNG_NPU) == 1) {
+        detect_samsung_npu(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_MEDIATEK_APU) == 1) {
+        detect_mediatek_apu(profs, warns);
+    }
+    return 0;
+}
+
+# Merge thread results into main registry vecs
+fn _merge_results(main_profs, main_warns, ta) {
+    var tp = _ta_profs(ta);
+    var tw = _ta_warns(ta);
+    var np = vec_len(tp);
+    var nw = vec_len(tw);
+    var i = 0;
+    while (i < np) {
+        vec_push(main_profs, vec_get(tp, i));
+        i = i + 1;
+    }
+    i = 0;
+    while (i < nw) {
+        vec_push(main_warns, vec_get(tw, i));
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Threaded detection: CLI backends run in parallel threads
+fn registry_detect_threaded() {
+    return registry_detect_threaded_with(builder_all());
+}
+
+fn registry_detect_threaded_with(builder_mask) {
+    var r = registry_new();
+    var profs = reg_profiles(r);
+    var warns = reg_warnings(r);
+
+    # CPU profile (always)
+    var sys_mem = detect_system_memory();
+    if (sys_mem == 0) { sys_mem = 16 * BYTES_PER_GIB; }
+    reg_add_profile(r, profile_cpu(sys_mem));
+
+    # Spawn threads for CLI-based backends
+    var threads = vec_new();
+    var targs = vec_new();
+    var cli_backends = vec_new();
+    vec_push(cli_backends, BACKEND_CUDA);
+    vec_push(cli_backends, BACKEND_GAUDI);
+    vec_push(cli_backends, BACKEND_NEURON);
+    vec_push(cli_backends, BACKEND_VULKAN);
+    vec_push(cli_backends, BACKEND_INTEL_ONEAPI);
+    vec_push(cli_backends, BACKEND_APPLE);
+
+    var nb = vec_len(cli_backends);
+    var i = 0;
+    while (i < nb) {
+        var bid = vec_get(cli_backends, i);
+        if (builder_is_enabled(builder_mask, bid) == 1) {
+            var ta = _thread_arg_new(bid);
+            var t = thread_create(&_detect_thread_entry, ta);
+            if (t != 0) {
+                vec_push(threads, t);
+                vec_push(targs, ta);
+            } else {
+                # Thread creation failed — run synchronously
+                _detect_thread_entry(ta);
+                vec_push(targs, ta);
+                vec_push(threads, 0);
+            }
+        }
+        i = i + 1;
+    }
+
+    # While CLI threads run, do sysfs backends on main thread
+    _detect_sysfs_backends(builder_mask, profs, warns);
+
+    # Join all threads and merge results
+    var nt = vec_len(threads);
+    i = 0;
+    while (i < nt) {
+        var t = vec_get(threads, i);
+        if (t != 0) { thread_join(t); }
+        _merge_results(profs, warns, vec_get(targs, i));
+        i = i + 1;
+    }
+
+    # Post-passes: enrich profiles
+    enrich_bandwidth(profs);
+    enrich_pcie(profs);
+    enrich_numa(profs);
+    enrich_disk(r);
+    detect_interconnect(r);
+    detect_environment(r);
+
+    return r;
+}

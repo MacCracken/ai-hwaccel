@@ -1,5 +1,5 @@
-# agnosys/syscalls.cyr — Linux x86_64 syscall wrappers
-# Usage: include "lib/agnosys/syscalls.cyr"
+# syscalls.cyr — Linux x86_64 syscall wrappers
+# Usage: include "lib/syscalls.cyr"
 #
 # Cyrius re-implementation of agnosys syscall bindings.
 # Constants use enums to avoid gvar_toks overflow (64 slot limit).
@@ -58,6 +58,48 @@ enum SysNr {
     SYS_TIMERFD_SETTIME = 286;
     SYS_SIGNALFD4 = 289;
     SYS_EPOLL_CREATE1 = 291;
+    SYS_CLONE = 56;
+    SYS_MUNMAP = 11;
+    SYS_FUTEX = 202;
+    SYS_GETTID = 186;
+    SYS_SET_TID_ADDRESS = 218;
+    SYS_EXIT_GROUP = 231;
+}
+
+# ================================================================
+# Clone flags (for thread creation)
+# ================================================================
+enum CloneFlag {
+    CLONE_VM = 256;
+    CLONE_FS = 512;
+    CLONE_FILES = 1024;
+    CLONE_SIGHAND = 2048;
+    CLONE_THREAD = 65536;
+    CLONE_SYSVSEM = 262144;
+    CLONE_SETTLS = 524288;
+    CLONE_PARENT_SETTID = 1048576;
+    CLONE_CHILD_CLEARTID = 2097152;
+}
+
+# ================================================================
+# mmap constants
+# ================================================================
+enum MmapConst {
+    PROT_READ = 1;
+    PROT_WRITE = 2;
+    PROT_EXEC = 4;
+    MAP_PRIVATE = 2;
+    MAP_ANONYMOUS = 32;
+    MAP_STACK = 131072;
+}
+
+# ================================================================
+# Futex operations
+# ================================================================
+enum FutexOp {
+    FUTEX_WAIT = 0;
+    FUTEX_WAKE = 1;
+    FUTEX_PRIVATE_FLAG = 128;
 }
 
 # ================================================================
@@ -440,3 +482,20 @@ fn is_err(ret) {
 fn err_code(ret) {
     return 0 - ret;
 }
+
+# Inotify — file system event monitoring
+enum InotifyEvent {
+    IN_MODIFY = 2;
+    IN_CREATE = 256;
+    IN_DELETE = 512;
+    IN_MOVED_FROM = 64;
+    IN_MOVED_TO = 128;
+    IN_CLOSE_WRITE = 8;
+}
+
+# SYS_INOTIFY_INIT1 = 294, SYS_INOTIFY_ADD_WATCH = 254, SYS_INOTIFY_RM_WATCH = 255
+fn sys_inotify_init() { return syscall(294, 0); }
+# Add a watch on a path for inotify events
+fn sys_inotify_add_watch(fd, path, mask) { return syscall(254, fd, path, mask); }
+# Remove an inotify watch
+fn sys_inotify_rm_watch(fd, wd) { return syscall(255, fd, wd); }

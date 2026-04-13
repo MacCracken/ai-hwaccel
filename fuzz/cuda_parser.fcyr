@@ -1,0 +1,77 @@
+# Fuzz: CUDA nvidia-smi CSV parser
+# Exercises parse_cuda_output with valid, empty, malformed, and edge-case inputs
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/bandwidth.cyr"
+include "src/detect/cuda.cyr"
+
+alloc_init();
+
+# Valid single GPU line
+var p1 = vec_new();
+var w1 = vec_new();
+var csv1 = str_from("0, 24576, 1024, 23552, 8.9, 550.54, NVIDIA GeForce RTX 4090, 45, 120.5, 30, 1325");
+parse_cuda_output(csv1, p1, w1);
+if (vec_len(p1) != 1) { syscall(60, 1); }
+
+# Multi-GPU
+var p2 = vec_new();
+var w2 = vec_new();
+var csv2 = str_from("0, 81920, 0, 81920, 8.0, 470.82, A100-SXM4-80GB, 35, 60, 0, 1593\n1, 81920, 512, 81408, 8.0, 470.82, A100-SXM4-80GB, 36, 62, 5, 1593");
+parse_cuda_output(csv2, p2, w2);
+if (vec_len(p2) != 2) { syscall(60, 2); }
+
+# Empty input — should not crash
+var p3 = vec_new();
+var w3 = vec_new();
+parse_cuda_output(str_from(""), p3, w3);
+if (vec_len(p3) != 0) { syscall(60, 3); }
+
+# Garbage input — should not crash
+var p4 = vec_new();
+var w4 = vec_new();
+parse_cuda_output(str_from("garbage data with no commas"), p4, w4);
+
+# Newlines only
+var p5 = vec_new();
+var w5 = vec_new();
+parse_cuda_output(str_from("\n\n\n"), p5, w5);
+
+# Partial fields (fewer than expected)
+var p6 = vec_new();
+var w6 = vec_new();
+parse_cuda_output(str_from("0, 24576"), p6, w6);
+
+# Very long input
+var sb = str_builder_new();
+var li = 0;
+while (li < 100) {
+    str_builder_add_cstr(sb, "0, 8192, 0, 8192, 7.0, 450, GPU-");
+    str_builder_add_int(sb, li);
+    str_builder_add_cstr(sb, ", 40, 70, 0, 1250\n");
+    li = li + 1;
+}
+var p7 = vec_new();
+var w7 = vec_new();
+parse_cuda_output(str_builder_build(sb), p7, w7);
+if (vec_len(p7) != 100) { syscall(60, 7); }
+
+syscall(60, 0);

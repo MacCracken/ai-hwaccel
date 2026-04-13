@@ -18,6 +18,8 @@ include "lib/fs.cyr"
 include "lib/tagged.cyr"
 include "lib/process.cyr"
 include "lib/args.cyr"
+include "lib/fnptr.cyr"
+include "lib/thread.cyr"
 
 include "src/units.cyr"
 include "src/error.cyr"
@@ -51,6 +53,7 @@ include "src/cost.cyr"
 include "src/model.cyr"
 include "src/model_format.cyr"
 include "src/requirement.cyr"
+include "src/async_detect.cyr"
 include "src/json_out.cyr"
 
 # --- CLI argument helpers (using lib/args.cyr) ---

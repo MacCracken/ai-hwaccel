@@ -1,0 +1,50 @@
+# Fuzz: Apple system_profiler parser
+# Exercises _parse_apple_macos with valid, empty, and edge-case inputs
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/apple.cyr"
+
+alloc_init();
+
+# Valid M4 Pro
+var p1 = vec_new();
+var hw1 = str_from("Hardware Overview:\n  Chip: Apple M4 Pro\n  Memory: 36 GB\n  Cores: 14\n");
+_parse_apple_macos(hw1, p1);
+
+# M2
+var p2 = vec_new();
+var hw2 = str_from("  Chip: Apple M2\n  Memory: 16 GB\n");
+_parse_apple_macos(hw2, p2);
+
+# Empty — still creates default profiles (Apple Silicon assumed)
+var p3 = vec_new();
+_parse_apple_macos(str_from(""), p3);
+if (vec_len(p3) != 2) { syscall(60, 3); }
+
+# No chip line
+var p4 = vec_new();
+_parse_apple_macos(str_from("Memory: 32 GB\n"), p4);
+
+# No memory line
+var p5 = vec_new();
+_parse_apple_macos(str_from("Chip: Apple M3\n"), p5);
+
+syscall(60, 0);

@@ -1,13 +1,23 @@
 ---
 name: Rust to Cyrius port status
-description: ai-hwaccel has been fully ported from Rust to Cyrius; original Rust code preserved in rust-old/
+description: ai-hwaccel fully ported to Cyrius with 18 source modules, 19 detectors, 10 test phases, 6 fuzz harnesses
 type: project
 ---
 
-ai-hwaccel was ported from Rust to Cyrius. The original Rust implementation is preserved in `rust-old/`.
+ai-hwaccel is fully ported from Rust to Cyrius. Original Rust preserved in `rust-old/`.
 
-The Cyrius port includes 14 source modules, 19 detection modules, and 9 test phases. Two modules — `cost.cyr` and `model.cyr` — are deferred and not included in `main.cyr` due to a Cyrius compiler fixup table overflow (4096 entry limit).
+Current Cyrius implementation (2026-04-12):
+- **18 source modules**: types, units, error, quantization, profile, system_io, registry, plan, training, cost, model, model_format, requirement, async_detect, json_out + 19 detect modules
+- **10 test phases**: 491 assertions, 0 failures
+- **6 fuzz harnesses**: cuda_parser, model_format, vulkan_parser, neuron_parser, apple_parser, gaudi_parser
+- **Binary**: 188KB, 191ms compile
+- **Vendored stdlib**: str.cyr (with `: Str` annotations), fnptr.cyr, thread.cyr, async.cyr, syscalls.cyr synced from upstream Cyrius v3.7.x
 
-**Why:** Cyrius is the AGNOS ecosystem language. All first-party projects are moving to Cyrius for sovereignty — no crates.io, no external governance.
+Remaining Rust modules NOT ported (by design):
+- ffi.rs — N/A, Cyrius is native
+- cache.rs — caching layer (threading available, not yet needed)
+- lazy.rs — lazy per-family detection (could use thread.cyr)
 
-**How to apply:** When working on ai-hwaccel, all new code is Cyrius. Reference `rust-old/` for the original logic when porting or debugging. The fixup table overflow is a compiler-side blocker tracked in the Cyrius repo.
+**Why:** Cyrius is the AGNOS ecosystem language. Sovereignty — no crates.io, no external governance.
+
+**How to apply:** All new code is Cyrius. Reference `rust-old/` for original logic when debugging.

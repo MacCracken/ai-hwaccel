@@ -1,0 +1,118 @@
+# Fuzz: model format detection (SafeTensors, GGUF, ONNX, PyTorch)
+# Exercises detect_format_from_bytes with valid headers, truncated
+# headers, random bytes, and adversarial inputs.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/model_format.cyr"
+
+alloc_init();
+
+# --- SafeTensors ---
+
+# Valid minimal
+var json = "{\"w\":{\"dtype\":\"F16\",\"shape\":[4,4],\"data_offsets\":[0,32]}}";
+var jlen = strlen(json);
+var buf = alloc(8 + jlen);
+store64(buf, jlen);
+memcpy(buf + 8, json, jlen);
+var m = detect_format_from_bytes(buf, 8 + jlen);
+if (m == 0) { syscall(60, 1); }
+if (meta_format(m) != FMT_SAFETENSORS) { syscall(60, 2); }
+
+# Truncated header (partial JSON — should still identify format)
+var buf2 = alloc(16);
+store64(buf2, 1000);  # claim 1000 bytes but only 8 available
+store8(buf2 + 8, 123);  # '{'
+var m2 = detect_format_from_bytes(buf2, 16);
+if (m2 == 0) { syscall(60, 3); }
+if (meta_format(m2) != FMT_SAFETENSORS) { syscall(60, 4); }
+
+# Zero header size
+var buf3 = alloc(8);
+store64(buf3, 0);
+var m3 = detect_format_from_bytes(buf3, 8);
+# Should not match safetensors (header_size=0)
+
+# Huge header size (>100MB)
+var buf4 = alloc(8);
+store64(buf4, 200000000);
+var m4 = _parse_safetensors(buf4, 8);
+if (m4 != 0) { syscall(60, 5); }
+
+# --- GGUF ---
+
+# Valid
+var gbuf = alloc(24);
+store8(gbuf, 71);     # G
+store8(gbuf + 1, 71); # G
+store8(gbuf + 2, 85); # U
+store8(gbuf + 3, 70); # F
+store8(gbuf + 4, 3); store8(gbuf + 5, 0); store8(gbuf + 6, 0); store8(gbuf + 7, 0);
+store64(gbuf + 8, 10);
+store64(gbuf + 16, 2);
+var gm = detect_format_from_bytes(gbuf, 24);
+if (gm == 0) { syscall(60, 10); }
+if (meta_format(gm) != FMT_GGUF) { syscall(60, 11); }
+
+# Wrong magic
+var gbuf2 = alloc(24);
+memset(gbuf2, 0, 24);
+store8(gbuf2, 71); store8(gbuf2 + 1, 71); store8(gbuf2 + 2, 71); store8(gbuf2 + 3, 71);
+var gm2 = _parse_gguf(gbuf2, 24);
+if (gm2 != 0) { syscall(60, 12); }
+
+# --- ONNX ---
+
+# Valid: ir_version=7, field 2 wire type 2
+var obuf = alloc(4);
+store8(obuf, 8); store8(obuf + 1, 7); store8(obuf + 2, 18); store8(obuf + 3, 5);
+var om = detect_format_from_bytes(obuf, 4);
+if (om == 0) { syscall(60, 20); }
+if (meta_format(om) != FMT_ONNX) { syscall(60, 21); }
+
+# Invalid wire type
+var obuf2 = alloc(3);
+store8(obuf2, 8); store8(obuf2 + 1, 5); store8(obuf2 + 2, 7);
+var om2 = _parse_onnx(obuf2, 3);
+if (om2 != 0) { syscall(60, 22); }
+
+# --- PyTorch ---
+
+# Valid ZIP magic
+var pbuf = alloc(4);
+store8(pbuf, 80); store8(pbuf + 1, 75); store8(pbuf + 2, 3); store8(pbuf + 3, 4);
+var pm = detect_format_from_bytes(pbuf, 4);
+if (pm == 0) { syscall(60, 30); }
+if (meta_format(pm) != FMT_PYTORCH) { syscall(60, 31); }
+
+# --- Random / adversarial ---
+
+# All zeros
+var zbuf = alloc(64);
+memset(zbuf, 0, 64);
+var zm = detect_format_from_bytes(zbuf, 64);
+# Should return 0 (no format match)
+
+# All 0xFF
+var fbuf = alloc(64);
+memset(fbuf, 255, 64);
+var fm = detect_format_from_bytes(fbuf, 64);
+
+# 1 byte
+var tbuf = alloc(1);
+store8(tbuf, 42);
+var tm = detect_format_from_bytes(tbuf, 1);
+
+# 0 bytes
+var em = detect_format_from_bytes(zbuf, 0);
+
+syscall(60, 0);
