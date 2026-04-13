@@ -46,7 +46,7 @@ fn str_println(s) {
 }
 
 # Compare two Strs
-fn str_eq(a, b) {
+fn str_eq(a: Str, b: Str) {
     var la = load64(a + 8);
     var lb = load64(b + 8);
     if (la != lb) { return 0; }
@@ -54,7 +54,7 @@ fn str_eq(a, b) {
 }
 
 # Concatenate two Strs (allocates new)
-fn str_cat(a, b) {
+fn str_cat(a: Str, b: Str) {
     var la = load64(a + 8);
     var lb = load64(b + 8);
     var newlen = la + lb;
@@ -79,7 +79,7 @@ fn str_clone(s) {
 }
 
 # Check if Str contains needle Str
-fn str_contains(s, needle) {
+fn str_contains(s: Str, needle: Str) {
     var slen = str_len(s);
     var nlen = str_len(needle);
     if (nlen > slen) { return 0; }
@@ -93,16 +93,15 @@ fn str_contains(s, needle) {
     return 0;
 }
 
-# Check if Str starts with a C string prefix
-fn str_starts_with(s, prefix) {
-    var plen = strlen(prefix);
+# Check if Str starts with prefix Str
+fn str_starts_with(s: Str, prefix: Str) {
+    var plen = str_len(prefix);
     if (plen > str_len(s)) { return 0; }
-    return memeq(str_data(s), prefix, plen);
+    return memeq(str_data(s), str_data(prefix), plen);
 }
 
-# Check if Str ends with a C string suffix
 # Check if Str ends with suffix Str
-fn str_ends_with(s, suffix) {
+fn str_ends_with(s: Str, suffix: Str) {
     var xlen = str_len(suffix);
     var slen = str_len(s);
     if (xlen > slen) { return 0; }
@@ -216,7 +215,7 @@ fn _sb_grow(sb, n) {
 }
 
 # Append a Str to the string builder
-fn str_builder_add(sb, s) {
+fn str_builder_add(sb, s: Str) {
     var slen = str_len(s);
     _sb_grow(sb, slen);
     var buf = load64(sb);
@@ -262,17 +261,134 @@ fn str_builder_build(sb) {
 }
 
 # Join a vec of Str with separator
-fn str_join(parts, sep) {
+fn str_join(parts, sep: Str) {
     var plen = vec_len(parts);
     if (plen == 0) { return str_from(""); }
     var sb = str_builder_new();
     var ji = 0;
     while (ji < plen) {
-        if (ji > 0) { str_builder_add_cstr(sb, sep); }
+        if (ji > 0) { str_builder_add(sb, sep); }
         str_builder_add(sb, vec_get(parts, ji));
         ji = ji + 1;
     }
     return str_builder_build(sb);
+}
+
+# ================================================================
+# Extended functions (synced from upstream cyrius stdlib)
+# ================================================================
+
+# Create Str from raw buffer (copies data, adds null terminator)
+fn str_from_buf(ptr, len) {
+    var buf = alloc(len + 1);
+    memcpy(buf, ptr, len);
+    store8(buf + len, 0);
+    return str_new(buf, len);
+}
+
+# Compare Str to C string
+fn str_eq_cstr(s, cstr) {
+    var slen = str_len(s);
+    var clen = strlen(cstr);
+    if (slen != clen) { return 0; }
+    return memeq(str_data(s), cstr, slen);
+}
+
+# Get null-terminated C string from Str (copies to add null terminator)
+fn str_cstr(s) {
+    var slen = str_len(s);
+    var buf = alloc(slen + 1);
+    memcpy(buf, str_data(s), slen);
+    store8(buf + slen, 0);
+    return buf;
+}
+
+# Substring by start and end index (returns new Str, shares data)
+fn str_substr(s, start, end) {
+    if (start < 0) { start = 0; }
+    if (end > str_len(s)) { end = str_len(s); }
+    if (start >= end) { return str_from(""); }
+    return str_new(str_data(s) + start, end - start);
+}
+
+# Find last occurrence of C string needle in Str
+fn str_last_index_of(s, needle_cstr) {
+    var slen = str_len(s);
+    var nlen = strlen(needle_cstr);
+    if (nlen > slen) { return 0 - 1; }
+    var sd = str_data(s);
+    var i = slen - nlen;
+    while (i >= 0) {
+        if (memeq(sd + i, needle_cstr, nlen) == 1) { return i; }
+        i = i - 1;
+    }
+    return 0 - 1;
+}
+
+# str_builder_add_str — alias for str_builder_add (takes Str)
+fn str_builder_add_str(sb, s) {
+    return str_builder_add(sb, s);
+}
+
+# str_builder_add_byte — append a single byte
+fn str_builder_add_byte(sb, byte) {
+    _sb_grow(sb, 1);
+    var buf = load64(sb);
+    var len = load64(sb + 8);
+    store8(buf + len, byte);
+    store64(sb + 8, len + 1);
+    return 0;
+}
+
+# str_contains_cstr — check if Str contains a C string needle
+fn str_contains_cstr(s, needle_cstr) {
+    var slen = str_len(s);
+    var nlen = strlen(needle_cstr);
+    if (nlen > slen) { return 0; }
+    var sd = str_data(s);
+    var ci = 0;
+    while (ci <= slen - nlen) {
+        if (memeq(sd + ci, needle_cstr, nlen) == 1) { return 1; }
+        ci = ci + 1;
+    }
+    return 0;
+}
+
+# str_index_of_cstr — find first occurrence of C string in Str
+fn str_index_of_cstr(s, needle_cstr) {
+    var slen = str_len(s);
+    var nlen = strlen(needle_cstr);
+    if (nlen > slen) { return 0 - 1; }
+    var sd = str_data(s);
+    var fi = 0;
+    while (fi <= slen - nlen) {
+        if (memeq(sd + fi, needle_cstr, nlen) == 1) { return fi; }
+        fi = fi + 1;
+    }
+    return 0 - 1;
+}
+
+# str_split_cstr — split Str by C string separator (single char)
+fn str_split_cstr(s, sep_cstr) {
+    var sep_byte = load8(sep_cstr);
+    return str_split(s, sep_byte);
+}
+
+# str_to_hex — parse hex string to integer
+fn str_to_hex(s) {
+    var data = str_data(s);
+    var len = str_len(s);
+    var val = 0;
+    var hi = 0;
+    while (hi < len) {
+        var c = load8(data + hi);
+        val = val * 16;
+        if (c >= 48) { if (c <= 57) { val = val + (c - 48); hi = hi + 1; continue; } }
+        if (c >= 97) { if (c <= 102) { val = val + (c - 87); hi = hi + 1; continue; } }
+        if (c >= 65) { if (c <= 70) { val = val + (c - 55); hi = hi + 1; continue; } }
+        hi = hi + 1;
+    }
+    return val;
 }
 
 # ================================================================
@@ -297,11 +413,11 @@ fn Str_cat(self, other) { return str_cat(self, other); }
 fn Str_sub(self, start, len) { return str_sub(self, start, len); }
 # Deep copy of string
 fn Str_clone(self) { return str_clone(self); }
-# Check if string contains needle (C string)
+# Check if string contains needle
 fn Str_contains(self, needle) { return str_contains(self, needle); }
-# Check if string starts with prefix (C string)
+# Check if string starts with prefix
 fn Str_starts_with(self, prefix) { return str_starts_with(self, prefix); }
-# Check if string ends with suffix (C string)
+# Check if string ends with suffix
 fn Str_ends_with(self, suffix) { return str_ends_with(self, suffix); }
 # Find first occurrence of needle, return offset or -1
 fn Str_index_of(self, needle) { return str_index_of(self, needle); }

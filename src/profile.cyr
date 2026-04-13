@@ -142,7 +142,10 @@ fn profile_throughput_x1000(p) {
     var at = profile_accel_type(p);
     if (at == ACCEL_TPU) { return tpu_throughput_x1000(profile_tpu_version(p)); }
     if (at == ACCEL_GAUDI) { return gaudi_throughput_x1000(profile_gaudi_gen(p)); }
-    if (at == ACCEL_NEURON) { return neuron_throughput_x1000(profile_neuron_chip(p), profile_neuron_cores(p)); }
+    if (at == ACCEL_NEURON) {
+        return neuron_throughput_x1000(
+        profile_neuron_chip(p), profile_neuron_cores(p));
+    }
     return accel_throughput_x1000(at);
 }
 
@@ -151,7 +154,10 @@ fn profile_training_x1000(p) {
     var at = profile_accel_type(p);
     if (at == ACCEL_TPU) { return tpu_training_x1000(profile_tpu_version(p)); }
     if (at == ACCEL_GAUDI) { return gaudi_training_x1000(profile_gaudi_gen(p)); }
-    if (at == ACCEL_NEURON) { return neuron_training_x1000(profile_neuron_chip(p), profile_neuron_cores(p)); }
+    if (at == ACCEL_NEURON) {
+        return neuron_training_x1000(
+        profile_neuron_chip(p), profile_neuron_cores(p));
+    }
     return accel_training_x1000(at);
 }
 

@@ -31,9 +31,9 @@ fn detect_tpu(profiles, warnings) {
         var ver_str = sysfs_read(ver_path);
         var version = TPU_V4;
         if (ver_str != 0) {
-            if (str_contains(ver_str, str_from("v5p")) == 1) { version = TPU_V5P; }
-            elif (str_contains(ver_str, str_from("v5e")) == 1) { version = TPU_V5E; }
-            elif (str_contains(ver_str, str_from("v5litepod")) == 1) { version = TPU_V5E; }
+            if (str_contains(ver_str, "v5p") == 1) { version = TPU_V5P; }
+            elif (str_contains(ver_str, "v5e") == 1) { version = TPU_V5E; }
+            elif (str_contains(ver_str, "v5litepod") == 1) { version = TPU_V5E; }
         }
 
         # Read chip count

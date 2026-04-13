@@ -40,7 +40,7 @@ fn _detect_infiniband(sio) {
         var ll_path = sysfs_path_str("/sys/class/infiniband", name, "ports/1/link_layer");
         var ll = sysfs_read(ll_path);
         if (ll != 0) {
-            if (str_contains(ll, str_from("Ethernet")) == 1) {
+            if (str_contains(ll, "Ethernet") == 1) {
                 kind = ICK_ROCEV2;
             }
         }
@@ -97,7 +97,7 @@ fn _detect_nvlink_nvswitch(sio, warnings) {
             while (li < vec_len(lines)) {
                 var line = vec_get(lines, li);
                 li = li + 1;
-                if (str_contains(line, str_from("Link")) == 1) {
+                if (str_contains(line, "Link") == 1) {
                     link_count = link_count + 1;
                     # Parse bandwidth if available
                     var bval = parse_value_with_suffix(line);

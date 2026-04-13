@@ -13,7 +13,7 @@ fn detect_cerebras(profiles, warnings) {
             while (li < vec_len(lines)) {
                 var line = vec_get(lines, li);
                 li = li + 1;
-                if (str_contains(line, str_from("memory")) == 1) {
+                if (str_contains(line, "memory") == 1) {
                     var val = parse_value_with_suffix(line);
                     if (val > 0) { mem_gb = val; }
                 }
@@ -45,11 +45,11 @@ fn detect_graphcore(profiles, warnings) {
             while (li < vec_len(lines)) {
                 var line = vec_get(lines, li);
                 li = li + 1;
-                if (str_contains(line, str_from("memory")) == 1) {
+                if (str_contains(line, "memory") == 1) {
                     var val = parse_value_with_suffix(line);
                     if (val > 0) { mem_mb = val; }
                 }
-                elif (str_contains(line, str_from("sram")) == 1) {
+                elif (str_contains(line, "sram") == 1) {
                     var val2 = parse_value_with_suffix(line);
                     if (val2 > 0) { mem_mb = val2; }
                 }

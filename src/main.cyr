@@ -47,8 +47,8 @@ include "src/detect/environment.cyr"
 include "src/registry.cyr"
 include "src/plan.cyr"
 include "src/training.cyr"
-# cost.cyr and model.cyr deferred — fixup table overflow (4096 limit)
-# Cost mode outputs a message directing users to the JSON data files.
+include "src/cost.cyr"
+include "src/model.cyr"
 include "src/json_out.cyr"
 
 # --- CLI argument helpers (using lib/args.cyr) ---
@@ -159,7 +159,7 @@ fn _print_table(r) {
     return 0;
 }
 
-# --- Cost mode (stub — full cost module exceeds fixup table limit) ---
+# --- Cost mode ---
 
 fn _handle_cost(model_str) {
     var sb = str_builder_new();
@@ -191,7 +191,41 @@ fn _handle_cost(model_str) {
     str_builder_add_cstr(sb, "\nMemory required: ");
     str_builder_add_int(sb, needed / BYTES_PER_GIB);
     str_builder_add_cstr(sb, " GiB\n");
-    str_builder_add_cstr(sb, "\nSee data/cloud_pricing.json for instance recommendations.\n");
+
+    # Recommend cloud instances
+    var recs = recommend_instances(params, quant, 0 - 1);
+    var nr = vec_len(recs);
+    if (nr > 0) {
+        str_builder_add_cstr(sb, "\nRecommended instances (cheapest first):\n");
+        var ri = 0;
+        var limit = nr;
+        if (limit > 5) { limit = 5; }
+        while (ri < limit) {
+            var rec = vec_get(recs, ri);
+            var inst = rec_instance(rec);
+            str_builder_add_cstr(sb, "  ");
+            str_builder_add_cstr(sb, cloud_inst_name(inst));
+            str_builder_add_cstr(sb, " (");
+            str_builder_add_cstr(sb, cloud_inst_provider(inst));
+            str_builder_add_cstr(sb, ") — ");
+            str_builder_add_int(sb, cloud_inst_gpu_count(inst));
+            str_builder_add_cstr(sb, "x ");
+            str_builder_add_cstr(sb, cloud_inst_gpu(inst));
+            str_builder_add_cstr(sb, ", ");
+            str_builder_add_int(sb, cloud_inst_total_mem_gb(inst));
+            str_builder_add_cstr(sb, " GB, $");
+            str_builder_add_int(sb, cloud_inst_price_x100(inst) / 100);
+            str_builder_add_cstr(sb, ".");
+            var cents = cloud_inst_price_x100(inst) - (cloud_inst_price_x100(inst) / 100) * 100;
+            if (cents < 10) { str_builder_add_cstr(sb, "0"); }
+            str_builder_add_int(sb, cents);
+            str_builder_add_cstr(sb, "/hr\n");
+            ri = ri + 1;
+        }
+    } else {
+        str_builder_add_cstr(sb, "\nNo matching instances found. Check data/cloud_pricing.json.\n");
+    }
+
     _print_str(str_builder_build(sb));
     return 0;
 }

@@ -23,7 +23,7 @@ fn detect_intel_oneapi(profiles, warnings) {
         li = li + 1;
         if (str_len(line) == 0) { continue; }
         # Skip header lines
-        if (str_contains(line, str_from("DeviceId")) == 1) { continue; }
+        if (str_contains(line, "DeviceId") == 1) { continue; }
 
         var fields = parse_csv_line(line, 2);
         if (fields == 0) { continue; }

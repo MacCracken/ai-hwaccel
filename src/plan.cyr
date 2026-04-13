@@ -27,10 +27,13 @@ fn reg_plan_sharding(r, model_params, quant) {
     # Case 1: fits on single best device
     if (needed <= profile_memory_bytes(best)) {
         var sp = sharding_plan_new(SHARD_NONE, 1);
-        var ms = model_shard_new(0, 0, 0, profile_accel_type(best), profile_device_id(best), needed);
+        var at = profile_accel_type(best);
+        var did = profile_device_id(best);
+        var ms = model_shard_new(0, 0, 0, at, did, needed);
         plan_add_shard(sp, ms);
         plan_set_total_memory(sp, needed);
-        var tps = estimate_tps_x1000(profile_accel_type(best), profile_throughput_x1000(best), model_params, quant);
+        var tps = estimate_tps_x1000(
+        at, profile_throughput_x1000(best), model_params, quant);
         plan_set_est_tps_x1000(sp, tps);
         return sp;
     }
@@ -93,8 +96,10 @@ fn reg_plan_sharding(r, model_params, quant) {
 
         # Decide tensor vs pipeline parallel
         var use_tp = 0;
+        var tp_bw_ok = max_bw > TP_MIN_INTERCONNECT_BW * 1000;
+        var tp_devs_ok = num_devs <= TP_MAX_DEVICES_WITHOUT_NVSWITCH;
         if (has_nvsw == 1) { use_tp = 1; }
-        elif (max_bw > TP_MIN_INTERCONNECT_BW * 1000 && num_devs <= TP_MAX_DEVICES_WITHOUT_NVSWITCH) {
+        elif (tp_bw_ok == 1 && tp_devs_ok == 1) {
             use_tp = 1;
         }
 
@@ -107,7 +112,9 @@ fn reg_plan_sharding(r, model_params, quant) {
             var di = 0;
             while (di < num_devs) {
                 var gp = vec_get(gpu_devs, di);
-                var ms = model_shard_new(di, 0, 0, profile_accel_type(gp), profile_device_id(gp), per_dev);
+                var gat = profile_accel_type(gp);
+                var gdid = profile_device_id(gp);
+                var ms = model_shard_new(di, 0, 0, gat, gdid, per_dev);
                 plan_add_shard(sp, ms);
                 di = di + 1;
             }
@@ -124,7 +131,11 @@ fn reg_plan_sharding(r, model_params, quant) {
             var quant_x1000 = quant_reduction_x1000(quant);
             var ic_bonus = 1000;
             if (has_nvsw == 1) { ic_bonus = NVSWITCH_TP_BONUS_X1000; }
-            else { ic_bonus = 1000 + max_bw / TP_INTERCONNECT_BW_DIVISOR; if (ic_bonus > 1000 + MAX_NON_NVSWITCH_TP_BONUS_X1000) { ic_bonus = 1000 + MAX_NON_NVSWITCH_TP_BONUS_X1000; } }
+            else {
+                ic_bonus = 1000 + max_bw / TP_INTERCONNECT_BW_DIVISOR;
+                var ic_max = 1000 + MAX_NON_NVSWITCH_TP_BONUS_X1000;
+                if (ic_bonus > ic_max) { ic_bonus = ic_max; }
+            }
             var tps = slowest * num_devs * quant_x1000 / 1000 * ic_bonus / 1000;
             plan_set_est_tps_x1000(sp, tps);
             return sp;
@@ -148,7 +159,9 @@ fn reg_plan_sharding(r, model_params, quant) {
             var lend = lstart + layers_per - 1;
             if (si == num_stages - 1) { lend = est_layers - 1; }
             if (lend >= est_layers) { lend = est_layers - 1; }
-            var ms = model_shard_new(si, lstart, lend, profile_accel_type(gp2), profile_device_id(gp2), per_shard);
+            var pat = profile_accel_type(gp2);
+            var pdid = profile_device_id(gp2);
+            var ms = model_shard_new(si, lstart, lend, pat, pdid, per_shard);
             plan_add_shard(sp, ms);
             si = si + 1;
         }

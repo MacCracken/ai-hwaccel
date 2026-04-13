@@ -31,10 +31,10 @@ fn detect_gaudi(profiles, warnings) {
         var name_len = str_len(name_field);
         # Check for "gaudi3" or "hl-325" in name
         if (name_len >= 6) {
-            if (str_contains(name_field, str_from("gaudi3")) == 1) { gen = GAUDI3; }
-            elif (str_contains(name_field, str_from("Gaudi3")) == 1) { gen = GAUDI3; }
-            elif (str_contains(name_field, str_from("HL-325")) == 1) { gen = GAUDI3; }
-            elif (str_contains(name_field, str_from("hl-325")) == 1) { gen = GAUDI3; }
+            if (str_contains(name_field, "gaudi3") == 1) { gen = GAUDI3; }
+            elif (str_contains(name_field, "Gaudi3") == 1) { gen = GAUDI3; }
+            elif (str_contains(name_field, "HL-325") == 1) { gen = GAUDI3; }
+            elif (str_contains(name_field, "hl-325") == 1) { gen = GAUDI3; }
         }
 
         # Memory in MB

@@ -125,7 +125,11 @@ fn _parse_model_params(obj, m) {
                     vi = vi + 1;
                     while (vi < ol && frac_digits < 3) {
                         var c3 = load8(od + vi);
-                        if (c3 >= 48 && c3 <= 57) { frac = frac * 10 + c3 - 48; vi = vi + 1; frac_digits = frac_digits + 1; }
+                        if (c3 >= 48 && c3 <= 57) {
+                            frac = frac * 10 + c3 - 48;
+                            vi = vi + 1;
+                            frac_digits = frac_digits + 1;
+                        }
                         else { break; }
                     }
                     while (frac_digits < 3) { frac = frac * 10; frac_digits = frac_digits + 1; }

@@ -18,8 +18,8 @@ fn detect_neuron(profiles, warnings) {
     var chip = NEURON_INFERENTIA;
     var dmi = sysfs_read("/sys/devices/virtual/dmi/id/product_name");
     if (dmi != 0) {
-        if (str_contains(dmi, str_from("trn")) == 1) { chip = NEURON_TRAINIUM; }
-        elif (str_contains(dmi, str_from("Trn")) == 1) { chip = NEURON_TRAINIUM; }
+        if (str_contains(dmi, "trn") == 1) { chip = NEURON_TRAINIUM; }
+        elif (str_contains(dmi, "Trn") == 1) { chip = NEURON_TRAINIUM; }
     }
 
     var ni = 0;

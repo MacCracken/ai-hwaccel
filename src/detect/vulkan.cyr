@@ -27,7 +27,7 @@ fn _parse_vulkaninfo(output, profiles) {
         li = li + 1;
 
         # Look for "deviceName" lines
-        if (str_contains(line, str_from("deviceName")) != 1) { continue; }
+        if (str_contains(line, "deviceName") != 1) { continue; }
 
         # Extract device name after "= "
         var eq_pos = str_index_of(line, 61);
@@ -52,7 +52,7 @@ fn _parse_vulkaninfo(output, profiles) {
         while (mi < mem_end) {
             var mline = vec_get(lines, mi);
             mi = mi + 1;
-            if (str_contains(mline, str_from("heapSize")) == 1) {
+            if (str_contains(mline, "heapSize") == 1) {
                 # Extract number after "= "
                 var meq = str_index_of(mline, 61);
                 if (meq >= 0) {
@@ -98,12 +98,12 @@ fn _detect_vulkan_sysfs(profiles) {
         var est_vram = 4 * BYTES_PER_GIB;
 
         # NVIDIA: 0x10de
-        if (str_contains(vendor_str, str_from("0x10de")) == 1) {
+        if (str_contains(vendor_str, "0x10de") == 1) {
             is_gpu = 1;
             gpu_name = "NVIDIA GPU (Vulkan)";
         }
         # AMD: 0x1002
-        elif (str_contains(vendor_str, str_from("0x1002")) == 1) {
+        elif (str_contains(vendor_str, "0x1002") == 1) {
             is_gpu = 1;
             gpu_name = "AMD GPU (Vulkan)";
             # Try reading actual VRAM
@@ -112,7 +112,7 @@ fn _detect_vulkan_sysfs(profiles) {
             if (vram > 0) { est_vram = vram; }
         }
         # Intel: 0x8086
-        elif (str_contains(vendor_str, str_from("0x8086")) == 1) {
+        elif (str_contains(vendor_str, "0x8086") == 1) {
             is_gpu = 1;
             gpu_name = "Intel GPU (Vulkan)";
             est_vram = 2 * BYTES_PER_GIB;

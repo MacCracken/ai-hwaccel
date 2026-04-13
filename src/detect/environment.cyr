@@ -13,10 +13,10 @@ fn detect_environment(sio) {
         # Check /proc/1/cgroup for docker/containerd
         var cgroup = sysfs_read("/proc/1/cgroup");
         if (cgroup != 0) {
-            if (str_contains(cgroup, str_from("docker")) == 1) {
+            if (str_contains(cgroup, "docker") == 1) {
                 env_set_docker(env, 1);
                 detected = 1;
-            } elif (str_contains(cgroup, str_from("containerd")) == 1) {
+            } elif (str_contains(cgroup, "containerd") == 1) {
                 env_set_docker(env, 1);
                 detected = 1;
             }
@@ -59,22 +59,22 @@ fn detect_environment(sio) {
     var product = sysfs_read("/sys/class/dmi/id/product_name");
 
     if (vendor != 0) {
-        if (str_contains(vendor, str_from("Amazon")) == 1) {
+        if (str_contains(vendor, "Amazon") == 1) {
             env_set_cloud_provider(env, "aws");
             detected = 1;
-        } elif (str_contains(vendor, str_from("Google")) == 1) {
+        } elif (str_contains(vendor, "Google") == 1) {
             env_set_cloud_provider(env, "gcp");
             detected = 1;
-        } elif (str_contains(vendor, str_from("Microsoft")) == 1) {
+        } elif (str_contains(vendor, "Microsoft") == 1) {
             env_set_cloud_provider(env, "azure");
             detected = 1;
         }
     }
     if (env_cloud_provider(env) == 0 && bios != 0) {
-        if (str_contains(bios, str_from("amazon")) == 1) {
+        if (str_contains(bios, "amazon") == 1) {
             env_set_cloud_provider(env, "aws");
             detected = 1;
-        } elif (str_contains(bios, str_from("Amazon")) == 1) {
+        } elif (str_contains(bios, "Amazon") == 1) {
             env_set_cloud_provider(env, "aws");
             detected = 1;
         }

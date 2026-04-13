@@ -238,18 +238,36 @@ fn registry_detect_with(builder_mask) {
     if (builder_is_enabled(builder_mask, BACKEND_ROCM) == 1) { detect_rocm(profs, warns); }
     if (builder_is_enabled(builder_mask, BACKEND_APPLE) == 1) { detect_apple(profs, warns); }
     if (builder_is_enabled(builder_mask, BACKEND_VULKAN) == 1) { detect_vulkan(profs, warns); }
-    if (builder_is_enabled(builder_mask, BACKEND_INTEL_NPU) == 1) { detect_intel_npu(profs, warns); }
-    if (builder_is_enabled(builder_mask, BACKEND_AMD_XDNA) == 1) { detect_amd_xdna(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_INTEL_NPU) == 1) {
+        detect_intel_npu(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_AMD_XDNA) == 1) {
+        detect_amd_xdna(profs, warns);
+    }
     if (builder_is_enabled(builder_mask, BACKEND_TPU) == 1) { detect_tpu(profs, warns); }
     if (builder_is_enabled(builder_mask, BACKEND_GAUDI) == 1) { detect_gaudi(profs, warns); }
     if (builder_is_enabled(builder_mask, BACKEND_NEURON) == 1) { detect_neuron(profs, warns); }
-    if (builder_is_enabled(builder_mask, BACKEND_INTEL_ONEAPI) == 1) { detect_intel_oneapi(profs, warns); }
-    if (builder_is_enabled(builder_mask, BACKEND_QUALCOMM) == 1) { detect_qualcomm(profs, warns); }
-    if (builder_is_enabled(builder_mask, BACKEND_CEREBRAS) == 1) { detect_cerebras(profs, warns); }
-    if (builder_is_enabled(builder_mask, BACKEND_GRAPHCORE) == 1) { detect_graphcore(profs, warns); }
-    if (builder_is_enabled(builder_mask, BACKEND_GROQ) == 1) { detect_groq(profs, warns); }
-    if (builder_is_enabled(builder_mask, BACKEND_SAMSUNG_NPU) == 1) { detect_samsung_npu(profs, warns); }
-    if (builder_is_enabled(builder_mask, BACKEND_MEDIATEK_APU) == 1) { detect_mediatek_apu(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_INTEL_ONEAPI) == 1) {
+        detect_intel_oneapi(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_QUALCOMM) == 1) {
+        detect_qualcomm(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_CEREBRAS) == 1) {
+        detect_cerebras(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_GRAPHCORE) == 1) {
+        detect_graphcore(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_GROQ) == 1) {
+        detect_groq(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_SAMSUNG_NPU) == 1) {
+        detect_samsung_npu(profs, warns);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_MEDIATEK_APU) == 1) {
+        detect_mediatek_apu(profs, warns);
+    }
 
     # Post-passes: enrich profiles
     enrich_bandwidth(profs);

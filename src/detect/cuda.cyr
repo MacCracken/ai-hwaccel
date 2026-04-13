@@ -129,7 +129,7 @@ fn parse_cuda_output(output, profiles, warnings) {
                 profile_set_device_name(p, gn_cstr);
 
                 # Grace Hopper: add unified CPU+GPU memory
-                if (str_contains(gn, str_from("GH200")) == 1) {
+                if (str_contains(gn, "GH200") == 1) {
                     if (mem_bytes > 80 * BYTES_PER_GIB) {
                         if (mem_bytes < 100 * BYTES_PER_GIB) {
                             # Add 480 GB unified LPDDR5X

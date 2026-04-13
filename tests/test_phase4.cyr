@@ -125,13 +125,13 @@ fn test_gaudi_gen_detection() {
     # Gaudi3 name detection
     var gen = GAUDI2;
     var name = str_from("HL-325L");
-    if (str_contains(name, str_from("HL-325")) == 1) { gen = GAUDI3; }
+    if (str_contains(name, "HL-325") == 1) { gen = GAUDI3; }
     assert_eq(gen, GAUDI3, "HL-325 = Gaudi3");
 
     var gen2 = GAUDI2;
     var name2 = str_from("HL-225");
-    if (str_contains(name2, str_from("gaudi3")) == 1) { gen2 = GAUDI3; }
-    elif (str_contains(name2, str_from("HL-325")) == 1) { gen2 = GAUDI3; }
+    if (str_contains(name2, "gaudi3") == 1) { gen2 = GAUDI3; }
+    elif (str_contains(name2, "HL-325") == 1) { gen2 = GAUDI3; }
     assert_eq(gen2, GAUDI2, "HL-225 = Gaudi2");
     return 0;
 }

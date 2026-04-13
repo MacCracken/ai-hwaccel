@@ -5,14 +5,14 @@
 # Returns bus width in bits
 fn _amd_bus_width(dev_id_str) {
     # MI300X: 8192-bit
-    if (str_contains(dev_id_str, str_from("740c")) == 1) { return 8192; }
-    if (str_contains(dev_id_str, str_from("740f")) == 1) { return 8192; }
+    if (str_contains(dev_id_str, "740c") == 1) { return 8192; }
+    if (str_contains(dev_id_str, "740f") == 1) { return 8192; }
     # MI250X: 8192-bit
-    if (str_contains(dev_id_str, str_from("7408")) == 1) { return 8192; }
+    if (str_contains(dev_id_str, "7408") == 1) { return 8192; }
     # MI100: 4096-bit
-    if (str_contains(dev_id_str, str_from("738c")) == 1) { return 4096; }
+    if (str_contains(dev_id_str, "738c") == 1) { return 4096; }
     # RX 7900 XTX: 384-bit
-    if (str_contains(dev_id_str, str_from("744c")) == 1) { return 384; }
+    if (str_contains(dev_id_str, "744c") == 1) { return 384; }
     # Default: estimate from VRAM size
     return 0;
 }

@@ -50,20 +50,20 @@ fn _json_opt_str(sb, key, val) {
 # Serialize a profile to JSON
 fn profile_to_json(sb, p) {
     str_builder_add_cstr(sb, "{");
-    _json_str(sb, "accelerator", accel_name(profile_accel_type(p)), 0);
-    _json_int(sb, "device_id", profile_device_id(p), 1);
-    _json_bool(sb, "available", profile_available(p), 1);
-    _json_int(sb, "memory_bytes", profile_memory_bytes(p), 1);
-    _json_str(sb, "family", family_name(profile_family(p)), 1);
-    _json_opt_str(sb, "compute_capability", profile_compute_cap(p));
-    _json_opt_str(sb, "driver_version", profile_driver_version(p));
-    _json_opt_str(sb, "device_name", profile_device_name(p));
-    _json_opt_int(sb, "memory_used_bytes", profile_mem_used(p));
-    _json_opt_int(sb, "memory_free_bytes", profile_mem_free(p));
-    _json_opt_int(sb, "numa_node", profile_numa_node(p));
-    _json_opt_int(sb, "temperature_c", profile_temp_c(p));
-    _json_opt_int(sb, "gpu_utilization_percent", profile_gpu_util(p));
-    str_builder_add_cstr(sb, "}");
+        _json_str(sb, "accelerator", accel_name(profile_accel_type(p)), 0);
+        _json_int(sb, "device_id", profile_device_id(p), 1);
+        _json_bool(sb, "available", profile_available(p), 1);
+        _json_int(sb, "memory_bytes", profile_memory_bytes(p), 1);
+        _json_str(sb, "family", family_name(profile_family(p)), 1);
+        _json_opt_str(sb, "compute_capability", profile_compute_cap(p));
+        _json_opt_str(sb, "driver_version", profile_driver_version(p));
+        _json_opt_str(sb, "device_name", profile_device_name(p));
+        _json_opt_int(sb, "memory_used_bytes", profile_mem_used(p));
+        _json_opt_int(sb, "memory_free_bytes", profile_mem_free(p));
+        _json_opt_int(sb, "numa_node", profile_numa_node(p));
+        _json_opt_int(sb, "temperature_c", profile_temp_c(p));
+        _json_opt_int(sb, "gpu_utilization_percent", profile_gpu_util(p));
+        str_builder_add_cstr(sb, "}");
     return 0;
 }
 
@@ -71,38 +71,38 @@ fn profile_to_json(sb, p) {
 fn registry_to_json(r) {
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "{");
-    _json_int(sb, "schema_version", reg_schema(r), 0);
+        _json_int(sb, "schema_version", reg_schema(r), 0);
 
-    # Profiles array
-    str_builder_add_cstr(sb, ",\"profiles\":[");
-    var profs = reg_profiles(r);
-    var np = vec_len(profs);
-    var i = 0;
-    while (i < np) {
-        if (i > 0) { str_builder_add_cstr(sb, ","); }
-        profile_to_json(sb, vec_get(profs, i));
-        i = i + 1;
-    }
-    str_builder_add_cstr(sb, "]");
-
-    # Warnings array
-    var warns = reg_warnings(r);
-    var nw = vec_len(warns);
-    if (nw > 0) {
-        str_builder_add_cstr(sb, ",\"warnings\":[");
-        i = 0;
-        while (i < nw) {
+        # Profiles array
+        str_builder_add_cstr(sb, ",\"profiles\":[");
+        var profs = reg_profiles(r);
+        var np = vec_len(profs);
+        var i = 0;
+        while (i < np) {
             if (i > 0) { str_builder_add_cstr(sb, ","); }
-            var w = vec_get(warns, i);
-            str_builder_add_cstr(sb, "\"");
-            str_builder_add_cstr(sb, warning_tool(w));
-            str_builder_add_cstr(sb, "\"");
+            profile_to_json(sb, vec_get(profs, i));
             i = i + 1;
         }
         str_builder_add_cstr(sb, "]");
-    }
 
-    str_builder_add_cstr(sb, "}");
+        # Warnings array
+        var warns = reg_warnings(r);
+        var nw = vec_len(warns);
+        if (nw > 0) {
+            str_builder_add_cstr(sb, ",\"warnings\":[");
+            i = 0;
+            while (i < nw) {
+                if (i > 0) { str_builder_add_cstr(sb, ","); }
+                var w = vec_get(warns, i);
+                str_builder_add_cstr(sb, "\"");
+                str_builder_add_cstr(sb, warning_tool(w));
+                str_builder_add_cstr(sb, "\"");
+                i = i + 1;
+            }
+            str_builder_add_cstr(sb, "]");
+        }
+
+        str_builder_add_cstr(sb, "}");
     return str_builder_build(sb);
 }
 
@@ -110,14 +110,14 @@ fn registry_to_json(r) {
 fn registry_to_summary_json(r) {
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "{");
-    _json_int(sb, "device_count", reg_num_profiles(r), 0);
-    _json_bool(sb, "has_accelerator", reg_has_accelerator(r), 1);
-    _json_int(sb, "total_memory_bytes", reg_total_memory(r), 1);
-    _json_int(sb, "accelerator_memory_bytes", reg_total_accel_memory(r), 1);
-    _json_int(sb, "gpu_count", reg_count_by_family(r, FAMILY_GPU), 1);
-    _json_int(sb, "tpu_count", reg_count_by_family(r, FAMILY_TPU), 1);
-    _json_int(sb, "npu_count", reg_count_by_family(r, FAMILY_NPU), 1);
-    _json_int(sb, "warnings", reg_num_warnings(r), 1);
-    str_builder_add_cstr(sb, "}");
+        _json_int(sb, "device_count", reg_num_profiles(r), 0);
+        _json_bool(sb, "has_accelerator", reg_has_accelerator(r), 1);
+        _json_int(sb, "total_memory_bytes", reg_total_memory(r), 1);
+        _json_int(sb, "accelerator_memory_bytes", reg_total_accel_memory(r), 1);
+        _json_int(sb, "gpu_count", reg_count_by_family(r, FAMILY_GPU), 1);
+        _json_int(sb, "tpu_count", reg_count_by_family(r, FAMILY_TPU), 1);
+        _json_int(sb, "npu_count", reg_count_by_family(r, FAMILY_NPU), 1);
+        _json_int(sb, "warnings", reg_num_warnings(r), 1);
+        str_builder_add_cstr(sb, "}");
     return str_builder_build(sb);
 }

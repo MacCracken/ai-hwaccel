@@ -205,7 +205,11 @@ fn _parse_cloud_field_price(obj, ci) {
                     var dec_places = 0;
                     while (vi < ol && dec_places < 2) {
                         var c3 = load8(od + vi);
-                        if (c3 >= 48 && c3 <= 57) { cents = cents * 10 + c3 - 48; vi = vi + 1; dec_places = dec_places + 1; }
+                        if (c3 >= 48 && c3 <= 57) {
+                            cents = cents * 10 + c3 - 48;
+                            vi = vi + 1;
+                            dec_places = dec_places + 1;
+                        }
                         else { break; }
                     }
                     if (dec_places == 1) { cents = cents * 10; }

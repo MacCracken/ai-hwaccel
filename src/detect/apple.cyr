@@ -15,7 +15,7 @@ fn detect_apple(profiles, warnings) {
     # Linux Asahi fallback
     var compat = sysfs_read("/proc/device-tree/compatible");
     if (compat != 0) {
-        if (str_contains(compat, str_from("apple")) == 1) {
+        if (str_contains(compat, "apple") == 1) {
             # Detect system memory for Metal GPU
             var sys_mem = detect_system_memory();
             if (sys_mem == 0) { sys_mem = 8 * BYTES_PER_GIB; }
@@ -45,7 +45,7 @@ fn _parse_apple_macos(hw_output, profiles) {
         li = li + 1;
 
         # Chip name: "Chip: Apple M4 Pro"
-        if (str_contains(line, str_from("Chip:")) == 1) {
+        if (str_contains(line, "Chip:") == 1) {
             var col = str_index_of(line, 58);
             if (col >= 0) {
                 var cn = str_trim(str_sub(line, col + 1, str_len(line) - col - 1));
@@ -58,15 +58,15 @@ fn _parse_apple_macos(hw_output, profiles) {
                     chip_name = cnc;
 
                     # ANE memory estimate by chip generation
-                    if (str_contains(cn, str_from("M4")) == 1) { ane_mem = 8 * BYTES_PER_GIB; }
-                    elif (str_contains(cn, str_from("M3")) == 1) { ane_mem = 8 * BYTES_PER_GIB; }
-                    elif (str_contains(cn, str_from("M2")) == 1) { ane_mem = 6 * BYTES_PER_GIB; }
+                    if (str_contains(cn, "M4") == 1) { ane_mem = 8 * BYTES_PER_GIB; }
+                    elif (str_contains(cn, "M3") == 1) { ane_mem = 8 * BYTES_PER_GIB; }
+                    elif (str_contains(cn, "M2") == 1) { ane_mem = 6 * BYTES_PER_GIB; }
                 }
             }
         }
 
         # Memory: "Memory: 36 GB"
-        if (str_contains(line, str_from("Memory:")) == 1) {
+        if (str_contains(line, "Memory:") == 1) {
             var mcol = str_index_of(line, 58);
             if (mcol >= 0) {
                 var mval = str_trim(str_sub(line, mcol + 1, str_len(line) - mcol - 1));
