@@ -170,8 +170,8 @@ fn registry_detect_threaded_with(builder_mask) {
     enrich_bandwidth(profs);
     enrich_pcie(profs);
     enrich_numa(profs);
-    enrich_disk(r);
-    detect_interconnect(r);
+    detect_storage(r);
+    detect_interconnects(r, reg_profiles(r), reg_warnings(r));
     detect_environment(r);
 
     return r;

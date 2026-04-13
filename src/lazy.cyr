@@ -48,31 +48,31 @@ fn _lazy_mark_probed(lr, family) {
 fn _family_builder_mask(family) {
     var mask = 0;
     if (family == FAMILY_GPU) {
-        mask = builder_enable(mask, BACKEND_CUDA);
-        mask = builder_enable(mask, BACKEND_ROCM);
-        mask = builder_enable(mask, BACKEND_VULKAN);
-        mask = builder_enable(mask, BACKEND_APPLE);
+        mask = builder_with(mask, BACKEND_CUDA);
+        mask = builder_with(mask, BACKEND_ROCM);
+        mask = builder_with(mask, BACKEND_VULKAN);
+        mask = builder_with(mask, BACKEND_APPLE);
         return mask;
     }
     if (family == FAMILY_NPU) {
-        mask = builder_enable(mask, BACKEND_INTEL_NPU);
-        mask = builder_enable(mask, BACKEND_AMD_XDNA);
-        mask = builder_enable(mask, BACKEND_SAMSUNG_NPU);
-        mask = builder_enable(mask, BACKEND_MEDIATEK_APU);
+        mask = builder_with(mask, BACKEND_INTEL_NPU);
+        mask = builder_with(mask, BACKEND_AMD_XDNA);
+        mask = builder_with(mask, BACKEND_SAMSUNG_NPU);
+        mask = builder_with(mask, BACKEND_MEDIATEK_APU);
         return mask;
     }
     if (family == FAMILY_TPU) {
-        mask = builder_enable(mask, BACKEND_TPU);
+        mask = builder_with(mask, BACKEND_TPU);
         return mask;
     }
     if (family == FAMILY_AI_ASIC) {
-        mask = builder_enable(mask, BACKEND_GAUDI);
-        mask = builder_enable(mask, BACKEND_NEURON);
-        mask = builder_enable(mask, BACKEND_INTEL_ONEAPI);
-        mask = builder_enable(mask, BACKEND_QUALCOMM);
-        mask = builder_enable(mask, BACKEND_CEREBRAS);
-        mask = builder_enable(mask, BACKEND_GRAPHCORE);
-        mask = builder_enable(mask, BACKEND_GROQ);
+        mask = builder_with(mask, BACKEND_GAUDI);
+        mask = builder_with(mask, BACKEND_NEURON);
+        mask = builder_with(mask, BACKEND_INTEL_ONEAPI);
+        mask = builder_with(mask, BACKEND_QUALCOMM);
+        mask = builder_with(mask, BACKEND_CEREBRAS);
+        mask = builder_with(mask, BACKEND_GRAPHCORE);
+        mask = builder_with(mask, BACKEND_GROQ);
         return mask;
     }
     return mask;
@@ -155,8 +155,8 @@ fn lazy_into_registry(lr) {
     enrich_bandwidth(rp);
     enrich_pcie(rp);
     enrich_numa(rp);
-    enrich_disk(r);
-    detect_interconnect(r);
+    detect_storage(r);
+    detect_interconnects(r, reg_profiles(r), reg_warnings(r));
     detect_environment(r);
     return r;
 }
