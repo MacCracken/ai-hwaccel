@@ -1,4 +1,5 @@
-- [Rust to Cyrius port status](project_cyrius_port.md) — full port done, cost.cyr and model.cyr deferred (fixup overflow)
-- [Fixup table overflow — resolved](project_fixup_blocker.md) — resolved 2026-04-12, cost.cyr + model.cyr re-included
+- [Project state — v2.0.0](project_cyrius_port.md) — complete Rust→Cyrius port, 37 modules, 518 tests, release-ready
+- [Fixup table overflow — resolved](project_fixup_blocker.md) — resolved 2026-04-12, all modules included
 - [User profile — Robert MacCracken](user_robert.md) — AGNOS/Cyrius creator, systems developer, handles all git ops
 - [Cyrius language references](reference_cyrius_lang.md) — guide, compiler source, stdlib, vidya entries, roadmap locations
+- [Feedback — undefined symbol pain](feedback_undefined_symbol.md) — silent crash from typos, fixed in cc3 3.10.0
