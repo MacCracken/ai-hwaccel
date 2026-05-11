@@ -14,25 +14,28 @@ v5.10.x cross-host smoke testing (e.g., entry 5.10.49 debunked a PE
 exit-code propagation false-negative using `cmd /v /c "prog.exe & echo
 exit=!errorlevel!"` on cass).
 
-### Errorlevel wrapper gotcha (current 5.10.x)
+### Exit-code propagation
 
-Until cyrius 5.11.6 lands (see below), exit-code tests on cass must
-use one of these shapes:
+ai-hwaccel pinned cyrius **5.11.8** in 2.2.1, which includes the 5.11.6
+wrapper fix. Exit-code tests on cass can use plain shell shape:
 
-- ✗ `cmd /c "prog.exe & echo exit=%errorlevel%"` — expands at parse
-  time, falsely reports `exit=0` regardless of what prog.exe returned.
+```sh
+ssh cass 'ai-hwaccel.exe --version; echo exit=%errorlevel%'
+```
+
+Historical note — under the 5.10.x pin (pre-2.2.1), the wrapper had
+to be one of:
+
 - ✓ `cmd /v /c "prog.exe & echo exit=!errorlevel!"` — delayed
   expansion, reads errorlevel at exec time.
 - ✓ `.bat` indirection — write two lines to a `.bat`; newlines split
   parse passes so the second line sees the updated errorlevel.
+- ✗ `cmd /c "prog.exe & echo exit=%errorlevel%"` — expanded at parse
+  time, false-reported `exit=0`.
 
-### Upstream fix: cyrius 5.11.6 (next in line)
-
-Per Robert (2026-05-11): **the wrapper gotcha is addressed in cyrius
-5.11.6, the next release after 5.10.x.** When ai-hwaccel bumps its
-cyrius pin to 5.11.6+, the cross-host smoke can collapse to a plain
-`ssh cass 'prog.exe; echo exit=%errorlevel%'` shape. Re-evaluate this
-memory file at that pin bump.
+Cyrius 5.11.6 fixed the underlying PE exit-code propagation so the
+plain shape works again. Keep this section as a reference for any
+future 5.10.x-pinned consumer that hits the same gotcha.
 
 For ai-hwaccel:
 

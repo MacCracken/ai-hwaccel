@@ -6,7 +6,7 @@
 
 - **Type**: Cyrius binary (CLI)
 - **License**: GPL-3.0-only
-- **Compiler**: Cyrius cc5 5.10.34 (pinned in `cyrius.cyml`)
+- **Compiler**: Cyrius cc5 5.11.8 (pinned in `cyrius.cyml`)
 - **Version**: SemVer — `VERSION` file is the single source of truth; `cyrius.cyml` interpolates via `${file:VERSION}`
 
 ## Consumers

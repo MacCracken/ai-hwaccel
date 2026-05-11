@@ -183,21 +183,15 @@ target device.
 
 - [ ] **Windows: DXGI adapter enumeration** — DXGI `EnumAdapters1` →
   adapter LUID, dedicated VRAM, shared memory, driver version. Stack:
-  add `cc5_win` to the install bundle (or invoke the `cc5_win_cross`
-  artifact directly from the cyrius source build), wire
-  `src/detect/windows.cyr` behind `#ifdef CYRIUS_TARGET_WIN64`, COM
-  binding for `IDXGIFactory1`. Ship CI cross-build (best-effort,
+  wire `src/detect/windows.cyr` behind `#ifdef CYRIUS_TARGET_WIN64`,
+  COM binding for `IDXGIFactory1`, ship CI cross-build (best-effort,
   mirroring the aarch64 pattern). One slot for the skeleton + fixture
-  test; follow-up slot for the COM binding. *Next pickup target.*
-  **Real-hardware validation: `ssh cass`** — project's Windows host
-  (same `cass` referenced in cyrius's v5.10.x cross-host smoke
-  testing). Use the `.bat`-indirection or `cmd /v /c "…
-  !errorlevel!"` wrapper for exit-code propagation under the current
-  5.10.34 pin — `%errorlevel%` in `cmd /c` parses at the wrong time
-  and false-reports `exit=0`. **The wrapper gotcha is addressed in
-  cyrius 5.11.6** (next release in line); bumping the pin to 5.11.6+
-  alongside this slot collapses the cross-host smoke back to plain
-  shell. See `memory/reference_windows_host.md`.
+  test; follow-up slot for the COM binding. **Toolchain prerequisites
+  resolved in 2.2.1**: `cc5_win` is now installed at
+  `~/.cyrius/bin/cc5_win` (cyrius 5.11.8 ships it by default); PE
+  exit-code propagation gotcha fixed in 5.11.6 so cross-host smoke on
+  `ssh cass` uses plain shell. *Next pickup target.* See
+  `memory/reference_windows_host.md`.
 
 ### Hardware validation (fixture-first, hardware-second)
 

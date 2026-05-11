@@ -7,6 +7,60 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.2.1] — 2026-05-11
+
+**Cyrius toolchain bump 5.10.34 → 5.11.8.** Mechanical prerequisite
+slot — same shape as 2.0.1 (which bumped 3.10.0 → 5.10.34). Unblocks
+the Windows DXGI work queued for 2.2.x by bringing `cc5_win` into the
+standard install bundle and folding the v5.11.6 PE exit-code fix into
+the pinned toolchain.
+
+### Changed
+
+- **`cyrius.cyml`**: `cyrius = "5.10.34"` → `cyrius = "5.11.8"`.
+- **`CLAUDE.md`**: compiler reference line bumped to match.
+
+### Toolchain context
+
+- **5.10.x → 5.11.x** absorbed in one bump (the cycle ran .35 → .50 →
+  .0 → .8, 9 patches + the 5.11.0 minor open). Highlights relevant to
+  ai-hwaccel:
+  - **5.10.49** — premise-debunk: PE exit-code propagation was always
+    working; the false-negative was a chat-side wrapper bug
+    (`%errorlevel%` vs `!errorlevel!`).
+  - **5.11.6** — underlying PE exit-code path fully verified, plain
+    `cmd /c "prog.exe & echo exit=%errorlevel%"` shape works again on
+    Win64 PE binaries.
+  - **5.11.8** — `cc5_win` shipped in the default install bundle at
+    `~/.cyrius/bin/cc5_win` (612 KB). No longer needs to be invoked
+    from the cyrius source-build `cc5_win_cross` artifact.
+- **5.11.0 minor opens** with kavach P1 sandbox syscall wrappers
+  (`sys_fchmod`, `sys_setresuid` / `sys_setresgid`, `sys_prctl`,
+  `sys_seccomp`, `sys_execveat`) and the stdlib annotation arc. None
+  of these affect ai-hwaccel directly — we don't use seccomp or
+  unprivileged process management.
+
+### Verification
+
+- Clean rebuild against 5.11.8: `build/ai-hwaccel` byte-identical to
+  2.2.0 / 2.1.7 (**286,152 bytes**). The toolchain bump produces the
+  same emit for the existing source.
+- Test suite: 11 units, **518 assertions, 0 failures**.
+- fmt sweep: clean across `src/`, `tests/tcyr/`, `fuzz/`, `benches/`.
+- `cc5_win` present at `~/.cyrius/bin/cc5_win` — Windows cross-build
+  is now a `cc5_win <source> <output>` invocation away (skeleton
+  lands next slot).
+
+### Documentation
+
+- **Memory** (`reference_windows_host.md`) — wrapper-gotcha section
+  reorganised: 5.11.8 pin uses plain shell; the `cmd /v /c …
+  !errorlevel!"` variant kept as a historical note for any
+  5.10.x-pinned consumer that hits the same issue.
+- **Roadmap** — Windows DXGI entry no longer carries the "install
+  cc5_win" prerequisite; pickup target is now the source-side work
+  only.
+
 ## [2.2.0] — 2026-05-11
 
 **Test-file rename correction + README refresh.** A docs-and-renames
