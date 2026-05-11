@@ -7,6 +7,56 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.1.2] — 2026-05-11
+
+**cc5 adoption arc — verification slot.** Two roadmap items investigated;
+both close cleanly with **no source change**. Documenting the outcomes so
+future work doesn't re-tread the same ground.
+
+### Verified
+
+- **Defer-on-all-paths audit (cc4+ defer semantics)** — swept
+  `src/system_io.cyr`, `src/cache.cyr`, `src/detect/command.cyr` for
+  manual file-descriptor management on paths where an early return could
+  leak. The only `file_open` / `file_close` pair in the entire tree is
+  `cmd_getenv()` at `src/detect/command.cyr:17-48`; the `file_close` runs
+  unconditionally on line 22 before any of the subsequent returns. All
+  other I/O goes through `lib/fs.cyr`'s `file_read_all` / `file_write_all`
+  atomic wrappers, which handle open/read/close internally. **Zero leaks
+  found, no `defer` insertions needed.** Roadmap item closes; the cc4+
+  defer-on-all-paths feature stays available for future code paths.
+
+### Investigated and rejected
+
+- **`lib/chrono.cyr` adoption for cache TTL** — attempted replacing
+  `cache.cyr`'s `_monotonic_secs()` (4 syscall lines) with
+  `clock_now_ms() / 1000` via stdlib chrono. The functional change
+  works (all tests pass), but pulling in chrono adds the module to
+  `[deps].stdlib` for the sake of saving 3 lines in one helper. **Net
+  cost > net win**, so the local `syscall(228, CLOCK_MONOTONIC, &ts)`
+  pattern stays. The roadmap entry is now annotated with the trade-off
+  so the question doesn't get re-litigated.
+
+### Removed
+
+- **`build/ai-hwaccel` untracked from git.** The compiled binary had been
+  accidentally committed at an early release (`c173383 cleanup for
+  release`) and re-resurfaced as a modified file after every local build
+  because `/build/` in `.gitignore` only ignores *untracked* files. Removed
+  from the index; the directory stays gitignored.
+
+### Carried forward
+
+- **`case N: { ... }` switch blocks** — separately attempted (and
+  reverted) in a pre-2.1.2 spike. cc5 5.10.x's `PARSE_CASE` rejects
+  enum-name labels (`case FAMILY_CPU:` → `expected number, got
+  identifier`); the v5.10.48 enum-const-fold landed for
+  `PARSE_ARRAY` / `PARSE_GVAR_ARR` only. Roadmap entry documents the
+  upstream limitation; the if-chain dispatch in `accel_name` /
+  `family_name` / `format_name` / `_gguf_file_type_name` /
+  `requirement_satisfied` stays until cyrius extends the fold to
+  case labels.
+
 ## [2.1.1] — 2026-05-10
 
 **Rust-port parity verification + scaffolding cleanup.** No code changes;

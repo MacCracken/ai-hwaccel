@@ -40,7 +40,13 @@ gap, or tighten the CI gate. Each item is independent; ship in any order.
   `accel_name()`, `family_name()`, `format_name()`,
   `_gguf_file_type_name()`, `requirement_satisfied()`. Currently long
   if/else-if chains; switch blocks compile to a jump table and document
-  intent better.
+  intent better. *Attempted 2.1.2-pre; reverted*: cc5 5.10.x's
+  `PARSE_CASE` accepts numeric literals only — enum identifiers like
+  `case FAMILY_CPU:` fail with `expected number, got identifier`. The
+  v5.10.48 enum-const-fold landed for `PARSE_ARRAY` / `PARSE_GVAR_ARR`
+  only. Revisit after an upstream patch extends fold to case labels;
+  using `case 0:` with enum-name comments was rejected as too brittle
+  to enum renumbering.
 - [ ] **Defer-on-all-paths** — audit `system_io.cyr` and the file-handle
   paths in `cache.cyr` for missed close-on-error. cc4+ runs defers on
   every exit including early returns; some current code returns without
