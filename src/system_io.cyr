@@ -26,27 +26,29 @@ fn ick_name(k) {
     return "Unknown";
 }
 
-# Interconnect struct layout:
-#   0: kind (i64)       — InterconnectKind
-#   8: name (ptr)       — port/device name (null-terminated)
-#  16: bw_gbps_x1000 (i64) — bandwidth GB/s * 1000
-#  24: state (ptr)      — link state string, 0 if none
+# Interconnect — port/device + bandwidth + state descriptor.
+# Struct name `ic` matches the `ic_*` accessor convention; constructor
+# stays the descriptive `interconnect_new`. 2.1.4: hand-rolled
+# accessors replaced with #derive(accessors).
+
+#derive(accessors)
+struct ic {
+    kind;
+    name;
+    bw_x1000;
+    state;
+}
+
 var INTERCONNECT_SIZE = 32;
 
 fn interconnect_new(kind, name, bw_x1000) {
     var ic = alloc(INTERCONNECT_SIZE);
-    store64(ic, kind);
-    store64(ic + 8, name);
-    store64(ic + 16, bw_x1000);
-    store64(ic + 24, 0);
+    ic_set_kind(ic, kind);
+    ic_set_name(ic, name);
+    ic_set_bw_x1000(ic, bw_x1000);
+    ic_set_state(ic, 0);
     return ic;
 }
-
-fn ic_kind(ic) { return load64(ic); }
-fn ic_name(ic) { return load64(ic + 8); }
-fn ic_bw_x1000(ic) { return load64(ic + 16); }
-fn ic_state(ic) { return load64(ic + 24); }
-fn ic_set_state(ic, s) { store64(ic + 24, s); return 0; }
 
 # --- Storage kind ---
 
@@ -271,32 +273,33 @@ fn shard_is_valid(ms) {
     return load64(ms + 8) <= load64(ms + 16);
 }
 
-# ShardingPlan struct layout:
-#   0: shards (ptr)              — vec of ModelShard pointers
-#   8: strategy (i64)            — ShardingStrategy
-#  16: strategy_count (i64)      — num_stages/devices/replicas
-#  24: total_memory_bytes (i64)
-#  32: est_tokens_per_sec_x1000 (i64) — -1 if none
+# ShardingPlan — sharding strategy + computed memory/throughput.
+# Struct name `plan` matches the `plan_*` accessor convention;
+# constructor stays the descriptive `sharding_plan_new`. The shards
+# field carries a `vec` pointer (heterogeneous), initialised to a
+# fresh empty vec by the constructor.
+# 2.1.4: hand-rolled accessors replaced with #derive(accessors).
+
+#derive(accessors)
+struct plan {
+    shards;
+    strategy;
+    strategy_count;
+    total_memory;
+    est_tps_x1000;
+}
+
 var SHARDING_PLAN_SIZE = 40;
 
 fn sharding_plan_new(strategy, count) {
     var sp = alloc(SHARDING_PLAN_SIZE);
-    store64(sp, vec_new());
-    store64(sp + 8, strategy);
-    store64(sp + 16, count);
-    store64(sp + 24, 0);
-    store64(sp + 32, PROFILE_NONE);
+    plan_set_shards(sp, vec_new());
+    plan_set_strategy(sp, strategy);
+    plan_set_strategy_count(sp, count);
+    plan_set_total_memory(sp, 0);
+    plan_set_est_tps_x1000(sp, PROFILE_NONE);
     return sp;
 }
-
-fn plan_shards(sp) { return load64(sp); }
-fn plan_strategy(sp) { return load64(sp + 8); }
-fn plan_strategy_count(sp) { return load64(sp + 16); }
-fn plan_total_memory(sp) { return load64(sp + 24); }
-fn plan_est_tps_x1000(sp) { return load64(sp + 32); }
-
-fn plan_set_total_memory(sp, v) { store64(sp + 24, v); return 0; }
-fn plan_set_est_tps_x1000(sp, v) { store64(sp + 32, v); return 0; }
 
 fn plan_add_shard(sp, ms) {
     vec_push(load64(sp), ms);

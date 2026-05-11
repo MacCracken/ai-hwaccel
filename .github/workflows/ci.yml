@@ -68,12 +68,19 @@ jobs:
         # `store64(<param> + N, ...)` / `load64(<param>)` on it — those
         # are accessor-only surfaces. Mirrors the libro v2.6.x gate.
         #
-        # Only registers structs whose canonical param name is
-        # UNAMBIGUOUS across src/ (used as the struct's param only,
-        # never reused for a different struct's accessor — verified by
-        # `grep -rnE 'load64\(<param> \+ [0-9]+\)' src/`). Ambiguous
-        # param names get the field-count bound check instead (added
-        # when the first such struct lands).
+        # Two checks (libro pattern):
+        # (1) `check_struct`  — cross-file specific-struct guard. Only
+        #     works when the canonical param name is unambiguous across
+        #     src/ (verified by `grep -rnE 'load64\(<param> \+ [0-9]+\)'
+        #     src/`).
+        # (2) `check_offset_bound` — per-(file, param, struct, field
+        #     count). For structs whose canonical param name is shared
+        #     across files (e.g. `e` here is used by both `est` and
+        #     `runtime_env`). Validates that every raw-offset site in
+        #     the defining file stays within the registered struct's
+        #     field range (catches off-by-one after a field-count
+        #     shrink, and accidental access past the struct boundary
+        #     after another struct grows).
         run: |
           FAILED=0
           check_struct() {
@@ -88,10 +95,37 @@ jobs:
               FAILED=1
             fi
           }
-          # struct  | defining file        | canonical param (must be unambiguous)
+          check_offset_bound() {
+            local file="$1" param="$2" struct="$3" field_count="$4"
+            local max_offset=$(( (field_count - 1) * 8 ))
+            local hits
+            hits=$(grep -nE "(load64|store64)\($param[ ]*\+[ ]*[0-9]+" "$file" 2>/dev/null || true)
+            [ -z "$hits" ] && return 0
+            while IFS= read -r line; do
+              local offset
+              offset=$(echo "$line" | grep -oE "\+[ ]*[0-9]+" | head -1 | grep -oE "[0-9]+")
+              [ -z "$offset" ] && continue
+              if [ "$offset" -gt "$max_offset" ]; then
+                echo "FAIL in $file: offset +$offset on param '$param' exceeds struct '$struct' (${field_count} fields → max +$max_offset):"
+                echo "  $line"
+                echo "  → check the offset, the struct field count, or whether this should use the $struct""_* derived accessors."
+                FAILED=1
+              fi
+            done <<< "$hits"
+          }
+          # Cross-file specific-struct guards (unambiguous param names).
+          # struct  | defining file        | canonical param
           check_struct storage  src/system_io.cyr  sd
+          check_struct ic       src/system_io.cyr  ic
+          check_struct plan     src/system_io.cyr  sp
+          # Field-count bound checks (ambiguous param `e` shared between
+          # est and runtime_env; meta and model both use `m`).
+          # file                  | param | struct       | fields
+          check_offset_bound src/training.cyr  e  est           4
+          check_offset_bound src/system_io.cyr e  runtime_env   8
+          check_offset_bound src/model_format.cyr m meta          5
           if [ $FAILED -ne 0 ]; then exit 1; fi
-          echo "Raw-offset guard: clean (all sites use derived accessors)."
+          echo "Raw-offset guard: clean (all sites use derived accessors or registered raw-offset params)."
 
       - name: Format check
         # cyrius fmt <file> emits the formatted source to stdout; diff

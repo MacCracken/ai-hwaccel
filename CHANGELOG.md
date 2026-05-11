@@ -7,6 +7,57 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.1.4] — 2026-05-11
+
+**cc5 adoption arc — `#derive(accessors)` continues. Three more structs
+converted + CI raw-offset gate expanded with libro's field-count bound
+check.** Zero external call-site changes — every struct gets a name that
+matches its existing accessor prefix, so derive generates the names the
+code already imports.
+
+### Changed
+
+- **`ic` struct** (`src/system_io.cyr`, was Interconnect) — 4 fields:
+  `kind`, `name`, `bw_x1000`, `state`. Struct named `ic` to match the
+  existing `ic_*` accessor shorthand; constructor stays
+  `interconnect_new`. 16 external call sites of `ic_kind` /
+  `ic_name` / `ic_bw_x1000` / `ic_state` / `ic_set_state` unchanged.
+- **`plan` struct** (`src/system_io.cyr`, was ShardingPlan) — 5 fields:
+  `shards`, `strategy`, `strategy_count`, `total_memory`,
+  `est_tps_x1000`. Struct named `plan` to match the existing `plan_*`
+  accessor convention; constructor stays `sharding_plan_new`. The
+  pre-existing manual setters (`plan_set_total_memory`,
+  `plan_set_est_tps_x1000`) replaced by derive-generated setters; the
+  rest of the surface unchanged.
+- **`est` struct** (`src/training.cyr`, was MemoryEstimate) — 4 fields:
+  `model_x1000`, `optimizer_x1000`, `activation_x1000`, `total_x1000`.
+  Struct named `est` to match the `est_*` accessor convention;
+  constructor stays `mem_est_new`. Param `e` is shared with
+  `runtime_env` in `system_io.cyr` — see CI gate change below.
+
+### CI
+
+- **Raw-offset guard expanded with `check_offset_bound`** — libro's
+  field-count bound check for structs whose canonical param name is
+  ambiguous across files. For each `(file, param, struct, field_count)`
+  tuple, every raw `load64(<param> + N)` / `store64(<param> + N, ...)`
+  site in `<file>` must have `N ≤ (field_count − 1) * 8`. Catches
+  off-by-one after a field-count shrink, and accidental access past a
+  struct boundary after another struct grows. Currently registered:
+  - `est`   (`src/training.cyr`,   param `e`, 4 fields → max +24)
+  - `runtime_env` (`src/system_io.cyr`, param `e`, 8 fields → max +56)
+  - `meta`  (`src/model_format.cyr`, param `m`, 5 fields → max +32)
+- **Cross-file `check_struct` guards added** for the two newly-derived
+  structs with unambiguous params:
+  - `ic`   in `src/system_io.cyr`, param `ic`
+  - `plan` in `src/system_io.cyr`, param `sp`
+
+### Binary size
+
+- `build/ai-hwaccel`: **280,696 bytes** (was 279,656 at 2.1.3). +1,040
+  bytes for derive-generated `_set_*` setters across the three new
+  structs. 518 assertions, 0 failures.
+
 ## [2.1.3] — 2026-05-11
 
 **cc5 adoption arc — `#derive(accessors)` lands, first two structs

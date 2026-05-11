@@ -24,33 +24,34 @@ gap, or tighten the CI gate. Each item is independent; ship in any order.
 
 ### Language features (adopt where they earn their keep)
 
-- [~] **`#derive(accessors)` on the major struct types** — proof-of-concept
-  + first two structs shipped in 2.1.3:
-  - [x] `meta` (`src/model_format.cyr`) — 5 fields
+- [~] **`#derive(accessors)` on the major struct types** — adoption
+  in progress; each conversion ships with a CI gate update so the
+  new accessor surface is the only way in (see
+  `.github/workflows/ci.yml`'s `Raw-offset guard` step).
+  - [x] `meta` (`src/model_format.cyr`) — 5 fields. **2.1.3.**
   - [x] `storage` (`src/system_io.cyr`) — 3 fields, paired with the
-    first cross-file raw-offset CI gate (param `sd` is unambiguous).
-  - [ ] `interconnect` (`src/system_io.cyr`) — 4 fields. *Naming
-    decision needed*: current accessors are `ic_*` (shorthand) but
-    `#derive(accessors) struct interconnect` would generate
-    `interconnect_*`. Either rename the struct to `ic` or mass-update
-    call sites to the long form. Carries to 2.1.4.
+    first cross-file raw-offset CI gate (param `sd` unambiguous).
+    **2.1.3.**
+  - [x] `ic` (interconnect, `src/system_io.cyr`) — 4 fields. Struct
+    named `ic` to match the existing `ic_*` accessor shorthand;
+    constructor stays `interconnect_new`. Zero call-site changes.
+    **2.1.4.**
+  - [x] `plan` (sharding, `src/system_io.cyr`) — 5 fields. Constructor
+    stays `sharding_plan_new`. Param `sp` unambiguous. **2.1.4.**
+  - [x] `est` (MemoryEstimate, `src/training.cyr`) — 4 fields. Constructor
+    stays `mem_est_new`. Param `e` shared with `runtime_env` in
+    system_io.cyr — guarded via field-count bound check (libro
+    pattern) rather than cross-file `check_struct`. **2.1.4.**
   - [ ] `profile` (`src/profile.cyr`) — big struct (≈20 fields,
     multiple optional). The largest single conversion in the arc;
-    canonical param is `p`, which is also used as the `model` param
-    in `src/model.cyr`. Needs the field-count bound check (libro
-    pattern) alongside the cross-file guard.
+    canonical param is `p`. Needs ambiguity check before deciding
+    whether the cross-file guard or the field-count bound check
+    applies (the `p` param appears in plan/cost helpers).
   - [ ] `accelerator_registry` — `reg_*` accessors today. Param canonical
     is `r`; check ambiguity before adding the cross-file guard.
-  - [ ] `sharding_plan` (`src/system_io.cyr`).
-  - [ ] `training_method` (`src/training.cyr`).
-  - [ ] `model` (`src/model.cyr`). Note: param `m` is shared with the
-    just-derived `meta` struct, so the libro-style cross-file guard
-    can't use `check_struct meta src/model_format.cyr m`. Both go
-    onto the field-count-bound list once `model` is derived.
-
-  Each conversion ships with a CI gate update — the new accessor
-  surface should be the only way in. See `.github/workflows/ci.yml`'s
-  `Raw-offset guard` step.
+  - [ ] `model` (`src/model.cyr`). Param `m` shared with the
+    `meta` struct already shipped, so this gets the field-count
+    bound check alongside `meta`.
 - [x] **Multi-return `(value, error)` in detect/* — investigated, doesn't
   fit.** Closed in 2.1.3 review without code change. The detect/ entry
   points are `detect_<backend>(profiles, warnings)` — both vec
