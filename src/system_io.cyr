@@ -64,23 +64,25 @@ fn stk_name(k) {
     return "Unknown";
 }
 
-# StorageDevice struct layout:
-#   0: name (ptr)       — block device name (null-terminated)
-#   8: kind (i64)       — StorageKind
-#  16: bw_gbps_x1000 (i64) — bandwidth GB/s * 1000
+# StorageDevice — block device + bandwidth descriptor.
+# 2.1.3: hand-rolled load64 accessors replaced with #derive(accessors).
+
+#derive(accessors)
+struct storage {
+    name;
+    kind;
+    bw_x1000;
+}
+
 var STORAGE_SIZE = 24;
 
 fn storage_new(name, kind, bw_x1000) {
     var sd = alloc(STORAGE_SIZE);
-    store64(sd, name);
-    store64(sd + 8, kind);
-    store64(sd + 16, bw_x1000);
+    storage_set_name(sd, name);
+    storage_set_kind(sd, kind);
+    storage_set_bw_x1000(sd, bw_x1000);
     return sd;
 }
-
-fn storage_name(sd) { return load64(sd); }
-fn storage_kind(sd) { return load64(sd + 8); }
-fn storage_bw_x1000(sd) { return load64(sd + 16); }
 
 # --- Runtime environment ---
 # Layout:

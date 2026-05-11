@@ -20,28 +20,30 @@ fn format_name(f) {
     return "Unknown";
 }
 
-# --- ModelMetadata struct layout ---
-#   0: format (ModelFormat enum)
-#   8: param_count (i64, 0 = unknown)
-#  16: dtype (ptr to cstr, 0 = unknown)
-#  24: tensor_count (i64, 0 = unknown)
-#  32: format_version (i64, 0 = unknown)
+# --- ModelMetadata struct ---
+# Sentinel meaning: 0 = unknown for everything except `format`, which
+# always carries one of the FMT_* enum values.
+# 2.1.3: hand-rolled load64 accessors replaced with #derive(accessors).
+# Constructor `meta_new` stays manual (derive only generates accessors).
+
+#derive(accessors)
+struct meta {
+    format;
+    param_count;
+    dtype;
+    tensor_count;
+    format_version;
+}
 
 fn meta_new(fmt, params, dtype, tensors, version) {
     var m = alloc(40);
-    store64(m, fmt);
-    store64(m + 8, params);
-    store64(m + 16, dtype);
-    store64(m + 24, tensors);
-    store64(m + 32, version);
+    meta_set_format(m, fmt);
+    meta_set_param_count(m, params);
+    meta_set_dtype(m, dtype);
+    meta_set_tensor_count(m, tensors);
+    meta_set_format_version(m, version);
     return m;
 }
-
-fn meta_format(m) { return load64(m); }
-fn meta_param_count(m) { return load64(m + 8); }
-fn meta_dtype(m) { return load64(m + 16); }
-fn meta_tensor_count(m) { return load64(m + 24); }
-fn meta_format_version(m) { return load64(m + 32); }
 
 # Constants inlined where used to avoid global var limit
 

@@ -24,18 +24,42 @@ gap, or tighten the CI gate. Each item is independent; ship in any order.
 
 ### Language features (adopt where they earn their keep)
 
-- [ ] **`#derive(accessors)` on the major struct types** — `profile`,
-  `accelerator_registry`, `model_meta`, `sharding_plan`, `training_method`,
-  `interconnect`, `storage_device`. Drops the hand-rolled `_set_*` setter
-  zoo and the `load64(p + N)` raw-offset reads. Pair each conversion
-  with the libro-style raw-offset CI gate (per-file allowlist + per-struct
-  field-count bound) so the new accessor surface is genuinely the only
-  way in.
-- [ ] **Multi-return `(value, error)`** in the `detect/` family. Today
-  the backends return sentinel values (`-1`, empty string, `ERR_*` int)
-  and callers re-derive intent. `detect_cuda()` → `(profile, err)`,
-  `detect_rocm()` → same, etc. Cleans up `system_io.cyr` callers and
-  makes the partial-detection-with-warnings flow explicit.
+- [~] **`#derive(accessors)` on the major struct types** — proof-of-concept
+  + first two structs shipped in 2.1.3:
+  - [x] `meta` (`src/model_format.cyr`) — 5 fields
+  - [x] `storage` (`src/system_io.cyr`) — 3 fields, paired with the
+    first cross-file raw-offset CI gate (param `sd` is unambiguous).
+  - [ ] `interconnect` (`src/system_io.cyr`) — 4 fields. *Naming
+    decision needed*: current accessors are `ic_*` (shorthand) but
+    `#derive(accessors) struct interconnect` would generate
+    `interconnect_*`. Either rename the struct to `ic` or mass-update
+    call sites to the long form. Carries to 2.1.4.
+  - [ ] `profile` (`src/profile.cyr`) — big struct (≈20 fields,
+    multiple optional). The largest single conversion in the arc;
+    canonical param is `p`, which is also used as the `model` param
+    in `src/model.cyr`. Needs the field-count bound check (libro
+    pattern) alongside the cross-file guard.
+  - [ ] `accelerator_registry` — `reg_*` accessors today. Param canonical
+    is `r`; check ambiguity before adding the cross-file guard.
+  - [ ] `sharding_plan` (`src/system_io.cyr`).
+  - [ ] `training_method` (`src/training.cyr`).
+  - [ ] `model` (`src/model.cyr`). Note: param `m` is shared with the
+    just-derived `meta` struct, so the libro-style cross-file guard
+    can't use `check_struct meta src/model_format.cyr m`. Both go
+    onto the field-count-bound list once `model` is derived.
+
+  Each conversion ships with a CI gate update — the new accessor
+  surface should be the only way in. See `.github/workflows/ci.yml`'s
+  `Raw-offset guard` step.
+- [x] **Multi-return `(value, error)` in detect/* — investigated, doesn't
+  fit.** Closed in 2.1.3 review without code change. The detect/ entry
+  points are `detect_<backend>(profiles, warnings)` — both vec
+  OUT-params — that push 0..N profiles and 0..M warnings, then return
+  an unused 0. There is no single value to multi-return, and errors are
+  already accumulated into `warnings` as structured entries (not
+  collapsed to a sentinel int). The 2.1.0 entry assumed a `() →
+  profile_or_sentinel` shape that doesn't match the codebase. Keeping
+  the out-param-vec pattern as canonical.
 - [ ] **`case N: { ... }` switch blocks** for the enum dispatch tables —
   `accel_name()`, `family_name()`, `format_name()`,
   `_gguf_file_type_name()`, `requirement_satisfied()`. Currently long
@@ -91,19 +115,30 @@ gap, or tighten the CI gate. Each item is independent; ship in any order.
 
 ### New stdlib adoption (where the win is concrete)
 
-- [ ] **`lib/regex.cyr` for parser output** — `cuda.cyr`, `gaudi.cyr`,
-  `neuron.cyr`, `apple.cyr` currently hand-roll string scanning of
-  nvidia-smi / hl-smi / neuron-ls / system_profiler output. A pinned
-  set of regex patterns is more readable and survives output-format
-  drift better. Bench before/after — regex isn't free, but the parsing
-  isn't hot-path.
-- [ ] **`lib/chrono.cyr` for cache TTL** — `cache.cyr` and
-  `lazy.cyr` currently call `syscall(time)` directly. chrono wraps
-  it with monotonic-clock helpers and `time_since(t)` semantics.
+- [x] **`lib/regex.cyr` for parser output — investigated, no fit.** Closed
+  in 2.1.3 review. The detect/ parsers don't actually hand-roll
+  string scanning that regex would replace — they go `run_tool` →
+  `str_split` (lines) → `parse_csv_line` (fields) →
+  `str_contains_cstr` (single-token substring checks like `"GH200"`,
+  `"gaudi3"`). Substring checks aren't what regex is for; the CSV
+  helpers are already idiomatic. Regex would be a sledgehammer for
+  cases that are already a finishing nail.
+- [x] **`lib/chrono.cyr` for cache TTL — investigated, rejected.** Shipped
+  as a no-op in 2.1.2. The local `syscall(228, CLOCK_MONOTONIC, &ts)`
+  in `cache.cyr` is 4 lines; replacing with `clock_now_ms() / 1000`
+  adds chrono as a `[deps].stdlib` entry for a 3-line save. Cost / benefit
+  doesn't justify the dep. (Revisit if any future code wants chrono's
+  ISO-8601 / duration / sleep_ms surface — then the chrono dep pays for
+  itself and this monotonic helper rides along.)
 - [ ] **`lib/json.cyr` audit** — we already use it (stdlib dep). Verify
   the cc5-era version's API matches what `json_out.cyr` is doing; the
   `str_builder` pattern may now have a more direct
   `json_writer` surface upstream.
+- [x] **`lib/test.cyr` adoption — closed, was a misread.** Looked at in
+  2.1.2 review. `lib/test.cyr` is a `test_each` parameterised-test
+  helper, not an alternative assertion framework. The tests already
+  use stdlib `lib/assert.cyr` (the `assert`, `assert_eq`,
+  `assert_summary` surface). Nothing to migrate.
 
 ### Dist bundle (defer until consumer demand)
 

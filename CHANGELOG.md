@@ -7,6 +7,75 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.1.3] — 2026-05-11
+
+**cc5 adoption arc — `#derive(accessors)` lands, first two structs
+converted + raw-offset CI gate.** Proof-of-concept slot establishing
+the pattern (and the CI guard rail) before the bigger structs
+(`profile`, `accelerator_registry`, `model`) follow in 2.1.4+.
+
+### Changed
+
+- **`meta` struct** (`src/model_format.cyr`) — 5 hand-rolled
+  `load64(m + N)` getter functions replaced with
+  `#derive(accessors) struct meta { format; param_count; dtype;
+  tensor_count; format_version; }`. The constructor `meta_new` stays
+  manual (derive only generates accessors) but now calls the derived
+  `meta_set_*` setters internally instead of raw `store64(m + N, …)`.
+  All 21 external call sites (in `model_format.cyr` itself,
+  `tests/tcyr/model_format_test.tcyr`) use the existing `meta_*`
+  getter names unchanged — derive generates them under exactly the
+  names the code already imports.
+- **`storage` struct** (`src/system_io.cyr`) — 3 hand-rolled getters
+  replaced with `#derive(accessors) struct storage { name; kind;
+  bw_x1000; }`. Same shape as `meta`: constructor stays manual but
+  uses derived setters; external call sites
+  (`src/detect/disk.cyr:47`, `tests/tcyr/sharding_test.tcyr:147`,
+  `tests/tcyr/profile_test.tcyr:195-204`) keep their `storage_*`
+  getter names.
+
+### Added
+
+- **Raw-offset CI gate (`Raw-offset guard` step in
+  `.github/workflows/ci.yml`)** — for each `#derive(accessors)`
+  struct, no file outside its defining file may do raw
+  `load64(<param> + N)` / `store64(<param> + N, …)` /
+  `load64(<param>)` on it. Mirrors the libro v2.6.x pattern.
+  Registers `storage` (param `sd`) — unambiguous across `src/`,
+  works with the simple cross-file `check_struct` form. `meta`
+  (param `m`) is held back because `src/model.cyr` legitimately
+  uses `m` for its own (not-yet-derived) struct; that case is
+  documented to use the libro field-count bound check once `model`
+  itself moves to derive.
+
+### Binary size
+
+- `build/ai-hwaccel`: **279,656 bytes** (was 278,808 at 2.1.2).
+  +848 bytes for derive-generated `_set_*` setters across both
+  structs; setters for `meta` aren't called from outside the
+  constructor, so stricter DCE passes will reclaim those later.
+  Test suite: 518 assertions, 0 failures (unchanged).
+
+### Investigated and rejected this slot
+
+- **Multi-return `(value, error)` in detect/* (the 2.1.0-arc item) —
+  doesn't fit.** The detect entry points are
+  `detect_<backend>(profiles, warnings)`: both vec OUT-params,
+  pushing 0..N profiles and 0..M structured warnings, returning an
+  unused `0`. There is no single value to multi-return, and errors
+  are already accumulated into `warnings` as structured entries
+  rather than collapsed to a sentinel int. Closed in the roadmap;
+  the out-param-vec pattern is now noted as canonical.
+- **`lib/regex.cyr` for parser output (the 2.1.0-arc item) — no
+  fit.** The detect parsers go `run_tool` → `str_split` (lines) →
+  `parse_csv_line` (fields) → `str_contains_cstr` (single-token
+  substring checks). Substring checks aren't what regex replaces;
+  the CSV helpers are already idiomatic. Closed in the roadmap.
+- **`lib/test.cyr` adoption (the 2.1.0-arc item) — closed as a
+  misread.** `lib/test.cyr` is a `test_each` parameterised-test
+  helper, not an alternative assertion framework. The tests already
+  use stdlib `lib/assert.cyr`. Nothing to migrate.
+
 ## [2.1.2] — 2026-05-11
 
 **cc5 adoption arc — verification slot.** Two roadmap items investigated;
