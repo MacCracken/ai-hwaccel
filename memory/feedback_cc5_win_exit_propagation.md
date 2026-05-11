@@ -38,8 +38,11 @@ exit=!errorlevel!"` or `.bat` indirection to see the real exit
 code. 5.11.6's "fix" of the *wrapper* gotcha is real; the *PE
 emit* bug surfaces underneath it.
 
-**Status:** Filed against cyrius (project hosts cc5_win); ai-hwaccel
-pin stays at 5.11.8 so `cc5_win` is available for cross-build, but
-the Windows DXGI work tests via Linux-hosted **fixture parsing**
-only until exit-code propagation comes back. Real cass validation
-gates on a cc5_win patch.
+**Status:** Filed against cyrius as
+`/home/macro/Repos/cyrius/docs/development/issues/2026-05-11-ai-hwaccel-cc5-win-pe-exit-propagation.md`
+(cyrius's in-tree issue tracking convention; pending the user's
+review + commit on the cyrius side). ai-hwaccel pin stays at 5.11.8
+so `cc5_win` is available for cross-build, but the Windows DXGI
+work tests via Linux-hosted **fixture parsing** only until exit-code
+propagation comes back. Real cass validation gates on a cc5_win
+patch.

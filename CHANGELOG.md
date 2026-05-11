@@ -46,12 +46,14 @@ cross-build + cross-host smoke gate on a cc5_win patch.
     produce the same broken PE.
   - Linux build of the same source works fine.
 
-  Recorded as `memory/feedback_cc5_win_exit_propagation.md`. Action:
-  filed against cyrius; ai-hwaccel's Win64 cross-build + cass smoke
-  gate on the fix. Linux fixture-based tests for the DXGI parser
-  (2.2.3) don't depend on this — the parser logic can be exercised
-  against synthetic `dxdiag` output without needing a Win64 binary
-  to load on cass.
+  Recorded as `memory/feedback_cc5_win_exit_propagation.md` and
+  filed in the cyrius tree at
+  `docs/development/issues/2026-05-11-ai-hwaccel-cc5-win-pe-exit-propagation.md`
+  (pending user-side review + commit on cyrius). ai-hwaccel's Win64
+  cross-build + cass smoke gate on the fix. Linux fixture-based tests
+  for the DXGI parser (2.2.3) don't depend on this — the parser
+  logic can be exercised against synthetic `dxdiag` output without
+  needing a Win64 binary to load on cass.
 
 - **Full ai-hwaccel cross-build via cc5_win not yet viable.** A
   full `cc5_win src/main.cyr` invocation runs to exit 0 but emits
