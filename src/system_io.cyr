@@ -87,85 +87,82 @@ fn storage_new(name, kind, bw_x1000) {
 }
 
 # --- Runtime environment ---
-# Layout:
-#   0: is_docker (i64)
-#   8: is_kubernetes (i64)
-#  16: k8s_namespace (ptr)     — 0 if none
-#  24: cloud_provider (ptr)    — "aws"/"gcp"/"azure", 0 if none
-#  32: instance_type (ptr)     — 0 if none
-#  40: region (ptr)            — 0 if none
-#  48: k8s_gpu_count (i64)     — 0 if none
-#  56: k8s_gpu_source (ptr)    — 0 if none
+# 2.1.7: hand-rolled accessors replaced with #derive(accessors).
+# Struct name `env` matches the `env_*` accessor convention; field
+# names retain the `is_docker` / `is_k8s` semantics (sentinel: 0 for
+# i64 fields means "not detected", 0 for ptr fields means cstr-null).
+# Note: setter for `is_docker` is `env_set_is_docker` (derived from
+# the field name); the legacy pre-derive name was `env_set_docker`.
+# Same for `env_set_is_k8s` (was `env_set_k8s`). Detection code in
+# environment.cyr was updated to the new names in this slot.
+
+#derive(accessors)
+struct env {
+    is_docker;
+    is_k8s;
+    k8s_namespace;
+    cloud_provider;
+    instance_type;
+    region;
+    k8s_gpu_count;
+    k8s_gpu_source;
+}
+
 var RUNTIME_ENV_SIZE = 64;
 
 fn runtime_env_new() {
     var e = alloc(RUNTIME_ENV_SIZE);
-    store64(e, 0);
-    store64(e + 8, 0);
-    store64(e + 16, 0);
-    store64(e + 24, 0);
-    store64(e + 32, 0);
-    store64(e + 40, 0);
-    store64(e + 48, 0);
-    store64(e + 56, 0);
+    env_set_is_docker(e, 0);
+    env_set_is_k8s(e, 0);
+    env_set_k8s_namespace(e, 0);
+    env_set_cloud_provider(e, 0);
+    env_set_instance_type(e, 0);
+    env_set_region(e, 0);
+    env_set_k8s_gpu_count(e, 0);
+    env_set_k8s_gpu_source(e, 0);
     return e;
 }
 
-fn env_is_docker(e) { return load64(e); }
-fn env_is_k8s(e) { return load64(e + 8); }
-fn env_k8s_namespace(e) { return load64(e + 16); }
-fn env_cloud_provider(e) { return load64(e + 24); }
-fn env_instance_type(e) { return load64(e + 32); }
-fn env_region(e) { return load64(e + 40); }
-fn env_k8s_gpu_count(e) { return load64(e + 48); }
-fn env_k8s_gpu_source(e) { return load64(e + 56); }
-
-fn env_set_docker(e, v) { store64(e, v); return 0; }
-fn env_set_k8s(e, v) { store64(e + 8, v); return 0; }
-fn env_set_k8s_namespace(e, s) { store64(e + 16, s); return 0; }
-fn env_set_cloud_provider(e, s) { store64(e + 24, s); return 0; }
-fn env_set_instance_type(e, s) { store64(e + 32, s); return 0; }
-fn env_set_region(e, s) { store64(e + 40, s); return 0; }
-fn env_set_k8s_gpu_count(e, v) { store64(e + 48, v); return 0; }
-fn env_set_k8s_gpu_source(e, s) { store64(e + 56, s); return 0; }
-
 # --- SystemIo container ---
-# Layout:
-#   0: interconnects (ptr)  — vec of interconnect pointers
-#   8: storage (ptr)        — vec of storage device pointers
-#  16: environment (ptr)    — RuntimeEnvironment pointer, 0 if none
+# 2.1.7: hand-rolled accessors replaced with #derive(accessors).
+# Struct name `sio` matches the existing `sio_*` accessor convention.
+# Internal `load64(sio)` shortcuts in helpers below switched to the
+# derived getters for consistency.
+
+#derive(accessors)
+struct sio {
+    interconnects;
+    storage;
+    environment;
+}
+
 var SYSTEM_IO_SIZE = 24;
 
 fn system_io_new() {
     var sio = alloc(SYSTEM_IO_SIZE);
-    store64(sio, vec_new());
-    store64(sio + 8, vec_new());
-    store64(sio + 16, 0);
+    sio_set_interconnects(sio, vec_new());
+    sio_set_storage(sio, vec_new());
+    sio_set_environment(sio, 0);
     return sio;
 }
 
-fn sio_interconnects(sio) { return load64(sio); }
-fn sio_storage(sio) { return load64(sio + 8); }
-fn sio_environment(sio) { return load64(sio + 16); }
-fn sio_set_environment(sio, e) { store64(sio + 16, e); return 0; }
-
 fn sio_add_interconnect(sio, ic) {
-    vec_push(load64(sio), ic);
+    vec_push(sio_interconnects(sio), ic);
     return 0;
 }
 
 fn sio_add_storage(sio, sd) {
-    vec_push(load64(sio + 8), sd);
+    vec_push(sio_storage(sio), sd);
     return 0;
 }
 
 fn sio_has_interconnect(sio) {
-    return vec_len(load64(sio)) > 0;
+    return vec_len(sio_interconnects(sio)) > 0;
 }
 
 # Total interconnect bandwidth (x1000)
 fn sio_total_ic_bw_x1000(sio) {
-    var ics = load64(sio);
+    var ics = sio_interconnects(sio);
     var total = 0;
     var n = vec_len(ics);
     for (var i = 0; i < n; i = i + 1) {
@@ -176,7 +173,7 @@ fn sio_total_ic_bw_x1000(sio) {
 
 # Has NVSwitch?
 fn sio_has_nvswitch(sio) {
-    var ics = load64(sio);
+    var ics = sio_interconnects(sio);
     var n = vec_len(ics);
     for (var i = 0; i < n; i = i + 1) {
         if (ic_kind(vec_get(ics, i)) == ICK_NVSWITCH) { return 1; }
@@ -186,7 +183,7 @@ fn sio_has_nvswitch(sio) {
 
 # Has NVLink?
 fn sio_has_nvlink(sio) {
-    var ics = load64(sio);
+    var ics = sio_interconnects(sio);
     var n = vec_len(ics);
     for (var i = 0; i < n; i = i + 1) {
         var k = ic_kind(vec_get(ics, i));
@@ -198,7 +195,7 @@ fn sio_has_nvlink(sio) {
 
 # Has ICI (TPU interconnect)?
 fn sio_has_ici(sio) {
-    var ics = load64(sio);
+    var ics = sio_interconnects(sio);
     var n = vec_len(ics);
     for (var i = 0; i < n; i = i + 1) {
         if (ic_kind(vec_get(ics, i)) == ICK_ICI) { return 1; }
@@ -208,7 +205,7 @@ fn sio_has_ici(sio) {
 
 # Max interconnect bandwidth (x1000) — used for sharding decisions
 fn sio_max_ic_bw_x1000(sio) {
-    var ics = load64(sio);
+    var ics = sio_interconnects(sio);
     var best = 0;
     var n = vec_len(ics);
     for (var i = 0; i < n; i = i + 1) {
@@ -235,42 +232,46 @@ fn shard_strategy_name(s) {
     return "Unknown";
 }
 
-# ModelShard struct layout:
-#   0: shard_id (i64)
-#   8: layer_start (i64)
-#  16: layer_end (i64)
-#  24: device_type (i64)    — AcceleratorType
-#  32: device_id (i64)
-#  40: memory_bytes (i64)
+# --- ModelShard ---
+# 2.1.7: hand-rolled accessors replaced with #derive(accessors).
+# Struct name `shard` matches the `shard_*` accessor convention;
+# constructor stays `model_shard_new`. Field name `id` collides
+# with the `shard_id` accessor only if read as `shard_id(ms)` —
+# which is the actual accessor name we want, so the field is named
+# `id` directly. Same for `layer_start` / `layer_end` etc.
+
+#derive(accessors)
+struct shard {
+    id;
+    layer_start;
+    layer_end;
+    device_type;
+    device_id;
+    memory_bytes;
+}
+
 var MODEL_SHARD_SIZE = 48;
 
 fn model_shard_new(sid, lstart, lend, devtype, devid, membytes) {
     var ms = alloc(MODEL_SHARD_SIZE);
-    store64(ms, sid);
-    store64(ms + 8, lstart);
-    store64(ms + 16, lend);
-    store64(ms + 24, devtype);
-    store64(ms + 32, devid);
-    store64(ms + 40, membytes);
+    shard_set_id(ms, sid);
+    shard_set_layer_start(ms, lstart);
+    shard_set_layer_end(ms, lend);
+    shard_set_device_type(ms, devtype);
+    shard_set_device_id(ms, devid);
+    shard_set_memory_bytes(ms, membytes);
     return ms;
 }
 
-fn shard_id(ms) { return load64(ms); }
-fn shard_layer_start(ms) { return load64(ms + 8); }
-fn shard_layer_end(ms) { return load64(ms + 16); }
-fn shard_device_type(ms) { return load64(ms + 24); }
-fn shard_device_id(ms) { return load64(ms + 32); }
-fn shard_memory_bytes(ms) { return load64(ms + 40); }
-
 fn shard_num_layers(ms) {
-    var s = load64(ms + 8);
-    var e = load64(ms + 16);
+    var s = shard_layer_start(ms);
+    var e = shard_layer_end(ms);
     if (e >= s) { return e - s + 1; }
     return 0;
 }
 
 fn shard_is_valid(ms) {
-    return load64(ms + 8) <= load64(ms + 16);
+    return shard_layer_start(ms) <= shard_layer_end(ms);
 }
 
 # ShardingPlan — sharding strategy + computed memory/throughput.

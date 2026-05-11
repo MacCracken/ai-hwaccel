@@ -210,7 +210,7 @@ fn test_runtime_env() {
     assert_eq(env_is_docker(env), 0, "not docker");
     assert_eq(env_is_k8s(env), 0, "not k8s");
 
-    env_set_docker(env, 1);
+    env_set_is_docker(env, 1);
     env_set_cloud_provider(env, "aws");
     env_set_instance_type(env, "p4d.24xlarge");
     env_set_region(env, "us-east-1");

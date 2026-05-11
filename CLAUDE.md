@@ -54,6 +54,8 @@ hoosh, daimon, Irfan, AgnosAI, murti, tazama
 - **Feature-gate optional modules** — `#ifdef` / `-D` flags for conditional compilation.
 - **Vendored stdlib in `lib/` is gitignored** — `cyrius deps` repopulates it from the version-pinned `[deps].stdlib` snapshot in `cyrius.cyml`. Run `cyrius deps` after fresh clone or cyrius upgrade.
 - **Single version source** — bump only `VERSION`; `cyrius.cyml` reads it via `${file:VERSION}`. Use `./scripts/version-bump.sh <new>` then add the CHANGELOG section, tag, and push.
+- **All heap-allocated structs use `#derive(accessors)`** (cc5 v3.7.1+). Pattern: `#derive(accessors) struct <name> { field1; field2; … }` generates `<name>_<field>(p)` getters and `<name>_set_<field>(p, v)` setters under the existing accessor-prefix convention. Constructors stay manual (derive only generates accessors), calling the derived setters internally instead of raw `store64(p + N, v)`. The 16 derived structs at 2.1.7 are: `meta`, `storage`, `ic`, `plan`, `est`, `reg`, `model`, `profile`, `env`, `sio`, `shard`, `cloud_inst`, `rec`, `cached`, `disk_cached`, `lazy`. New structs follow the same pattern.
+- **Raw-offset access on derived structs is CI-gated** (`.github/workflows/ci.yml` → `Raw-offset guard`). Cross-file `check_struct <struct> <defining_file> <param>` catches any `load64(<param> + N)` / `store64(<param> + N, …)` outside the defining file (only valid when param is unambiguous across `src/`). Per-file `check_offset_bound <file> <param> <struct> <field_count>` catches offsets past the struct boundary for ambiguous params. New derived struct → add an entry; rename a field → no gate change (derive picks up the new accessor name).
 
 ## DO NOT
 - **Do not commit or push** — the user handles all git operations (commit, push, tag)

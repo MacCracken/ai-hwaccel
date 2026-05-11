@@ -2,29 +2,34 @@
 # Reads data/cloud_pricing.json at runtime.
 # Recommends cheapest instance that fits model memory requirements.
 
-# CloudGpuInstance struct layout:
-#   0: name (ptr)
-#   8: provider (ptr)
-#  16: gpu (ptr)
-#  24: gpu_count (i64)
-#  32: gpu_mem_gb (i64)
-#  40: total_gpu_mem_gb (i64)
-#  48: vcpus (i64)
-#  56: ram_gb (i64)
-#  64: interconnect (ptr)
-#  72: price_x100 (i64)  — cents per hour (avoid float)
-var CLOUD_INST_SIZE = 80;
+# CloudGpuInstance — pricing-driven cloud instance descriptor.
+# 2.1.7: hand-rolled accessors replaced with #derive(accessors).
+# Struct name `cloud_inst` matches the existing `cloud_inst_*`
+# accessor convention; param `ci` is unambiguous across src/.
+# Note the field-name mapping: layout had `gpu_mem_gb` and
+# `total_gpu_mem_gb`; we keep those names. `price_x100` is cents
+# per hour (x100 fixed-point) to avoid floats.
+# Construction goes through the JSON loader in `load_cloud_instances`
+# below — no public constructor, so the per-file `_parse_cloud_field_*`
+# helpers (which take an offset parameter for generic dispatch)
+# remain on raw `store64(ci + offset, …)`. Those stay inside the
+# defining file and are accepted by the cross-file CI guard.
 
-fn cloud_inst_name(ci) { return load64(ci); }
-fn cloud_inst_provider(ci) { return load64(ci + 8); }
-fn cloud_inst_gpu(ci) { return load64(ci + 16); }
-fn cloud_inst_gpu_count(ci) { return load64(ci + 24); }
-fn cloud_inst_gpu_mem_gb(ci) { return load64(ci + 32); }
-fn cloud_inst_total_mem_gb(ci) { return load64(ci + 40); }
-fn cloud_inst_vcpus(ci) { return load64(ci + 48); }
-fn cloud_inst_ram_gb(ci) { return load64(ci + 56); }
-fn cloud_inst_interconnect(ci) { return load64(ci + 64); }
-fn cloud_inst_price_x100(ci) { return load64(ci + 72); }
+#derive(accessors)
+struct cloud_inst {
+    name;
+    provider;
+    gpu;
+    gpu_count;
+    gpu_mem_gb;
+    total_mem_gb;
+    vcpus;
+    ram_gb;
+    interconnect;
+    price_x100;
+}
+
+var CLOUD_INST_SIZE = 80;
 
 # CloudProvider enum
 enum CloudProvider {
@@ -40,28 +45,32 @@ fn cloud_provider_str(p) {
     return "unknown";
 }
 
-# InstanceRecommendation struct layout:
-#   0: instance (ptr)
-#   8: mem_required_bytes (i64)
-#  16: mem_headroom_pct_x100 (i64)
+# InstanceRecommendation — paired instance + computed headroom.
+# 2.1.7: hand-rolled accessors replaced with #derive(accessors).
+# Struct name `rec` matches the existing `rec_*` accessor convention;
+# constructor stays `inst_rec_new`. Param `rec` unambiguous across src/.
+
+#derive(accessors)
+struct rec {
+    instance;
+    mem_required;
+    headroom_x100;
+}
+
 var INST_REC_SIZE = 24;
 
 fn inst_rec_new(inst, mem_req) {
     var rec = alloc(INST_REC_SIZE);
-    store64(rec, inst);
-    store64(rec + 8, mem_req);
+    rec_set_instance(rec, inst);
+    rec_set_mem_required(rec, mem_req);
     var total_mem = cloud_inst_total_mem_gb(inst) * BYTES_PER_GIB;
     var headroom = 0;
     if (mem_req > 0) {
         headroom = (total_mem - mem_req) * 10000 / mem_req;
     }
-    store64(rec + 16, headroom);
+    rec_set_headroom_x100(rec, headroom);
     return rec;
 }
-
-fn rec_instance(rec) { return load64(rec); }
-fn rec_mem_required(rec) { return load64(rec + 8); }
-fn rec_headroom_x100(rec) { return load64(rec + 16); }
 
 # Load cloud pricing from JSON file
 # Returns vec of CloudGpuInstance pointers

@@ -7,6 +7,123 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.1.7] — 2026-05-11
+
+**P(-1) scaffold hardening: 8 more structs derived, every heap struct
+in the codebase now uses `#derive(accessors)`.** Closes the 2.1.x
+minor before 2.2.0's platform-validation arc opens. Baseline +
+post-audit benchmarks captured; small perf cost documented.
+
+### Pre-audit baseline
+
+- 518 assertions, 0 failures across 11 test units
+- `cyrius lint`: clean (no warnings on any `src/` / `src/detect/` file)
+- `cyrius fmt`: clean across `src/`, `tests/tcyr/`, `fuzz/`, `benches/`
+- Binary: 281,720 bytes
+- Bench hot-paths:
+  - `total_memory_13dev`: 136 ns
+  - `has_accelerator_13dev`: 27 ns
+  - `count_family_gpu_13dev`: 288 ns
+  - `json_serialize_13dev`: 24 µs
+  - `json_summary_13dev`: 5 µs
+  - `parse_cuda_8gpu`: 22 µs
+
+### Changed
+
+Eight more structs converted to `#derive(accessors)`:
+
+- **`env` struct** (`src/system_io.cyr`, was RuntimeEnvironment) — 8
+  fields: `is_docker`, `is_k8s`, `k8s_namespace`, `cloud_provider`,
+  `instance_type`, `region`, `k8s_gpu_count`, `k8s_gpu_source`. Two
+  setters renamed (field-derived): `env_set_docker` →
+  `env_set_is_docker`, `env_set_k8s` → `env_set_is_k8s`. 5 caller
+  sites updated (4 in `src/detect/environment.cyr`, 1 in
+  `tests/tcyr/profile_test.tcyr`).
+- **`sio` struct** (`src/system_io.cyr`, was SystemIo) — 3 fields:
+  `interconnects`, `storage`, `environment`. Also cleaned up 4
+  internal `var ics = load64(sio);` shortcuts → `sio_interconnects(sio)`.
+- **`shard` struct** (`src/system_io.cyr`, was ModelShard) — 6
+  fields: `id`, `layer_start`, `layer_end`, `device_type`,
+  `device_id`, `memory_bytes`. Constructor stays `model_shard_new`.
+  Internal helpers `shard_num_layers` / `shard_is_valid` switched
+  from `load64(ms + N)` to derived getters.
+- **`cloud_inst` struct** (`src/cost.cyr`, was CloudGpuInstance) — 10
+  fields. Field name `total_gpu_mem_gb` (layout) → `total_mem_gb` to
+  match existing `cloud_inst_total_mem_gb` accessor callers in
+  `src/main.cyr:210` and `src/cost.cyr:257`. No external constructor
+  (built by `load_cloud_instances` JSON parser via
+  `_parse_cloud_field_*` helpers, which take offset as a parameter
+  and stay raw inside the defining file).
+- **`rec` struct** (`src/cost.cyr`, was InstanceRecommendation) — 3
+  fields: `instance`, `mem_required`, `headroom_x100`. Constructor
+  stays `inst_rec_new`.
+- **`cached` struct** (`src/cache.cyr`, was CachedRegistry) — 4
+  fields: `registry`, `last_detect_secs`, `ttl_secs`, `mutex`. Five
+  internal helpers (`cached_get`, `cached_invalidate`, `cached_ttl`,
+  `cached_is_valid`) switched to derived accessors.
+- **`disk_cached` struct** (`src/cache.cyr`, was DiskCachedRegistry)
+  — 5 fields adding `cache_path`. Same internal-cleanup pattern.
+- **`lazy` struct** (`src/lazy.cyr`, was LazyRegistry) — 3 fields:
+  `profiles`, `probed` (i64 bitmask), `mutex`. Seven internal raw
+  `load64(lr + N)` sites cleaned to derived getters. Bit-manipulation
+  helpers (`_lazy_is_probed`, `_lazy_mark_probed`) use
+  `lazy_probed` + `lazy_set_probed` plus inline mask compute.
+
+### CI
+
+- **Raw-offset guard at 15 entries** (10 cross-file + 5 field-count
+  bound):
+  - Cross-file `check_struct`: `storage` (sd), `ic` (ic), `plan` (sp),
+    **`shard` (ms)**, **`sio` (sio)**, `reg` (r), `profile` (p),
+    **`cloud_inst` (ci)**, **`rec` (rec)**, **`lazy` (lr)**. Five new.
+  - Field-count bound: `est` (e, 4), **`env` (e, 8)** (was `runtime_env`,
+    renamed to match the struct name), `meta` (m, 5), `model` (m, 4),
+    **`disk_cached` (c, 5)** (covers both `cached` and `disk_cached`
+    since both use param `c` in the same file; the larger bound
+    accommodates both — see roadmap rationale). Two new.
+
+### Documentation
+
+- `CLAUDE.md` now lists `#derive(accessors)` as a project principle
+  with the canonical pattern, the full 16-struct inventory, and a
+  pointer to the CI gate.
+- `docs/development/roadmap.md` marks the 2.1.x arc as **SHIPPED**
+  with a per-slot summary; 2.2.0 is the next arc.
+
+### Post-audit verification
+
+- 518 assertions, 0 failures (unchanged across the slot)
+- Binary: **286,152 bytes** (was 281,720) — **+4,432 bytes** (≈+1.6%)
+  for derive-generated setters across 8 new structs. cc5's DCE
+  inlines the truly-internal setters (constructor-only callers); the
+  net cost is from setters that have external consumers and stay as
+  callable functions.
+- Bench deltas vs baseline:
+  - `total_memory_13dev`: 136 → 145 ns (+9 ns, ≈+6.6%)
+  - `count_family_gpu_13dev`: 288 → 304 ns (+16 ns, ≈+5.6%)
+  - `has_accelerator_13dev`: 27 → 28 ns (+1 ns, within noise)
+  - `json_serialize_13dev`: 24 → 25 µs (+1 µs, ≈+4%)
+  - `json_summary_13dev`: 5 → 6 µs (+1 µs, ≈+20% but tiny absolute)
+  - `parse_cuda_8gpu`: 22 → 20 µs (improved — within noise)
+
+  The sub-µs hot paths regress slightly because derived getters are
+  thin function calls (`fn reg_profiles(r) { return load64(r); }`)
+  rather than inlined `load64(r + 0)`. The accessor surface offers
+  much stronger guarantees (CI-gated, derive-traced, no offset
+  arithmetic at call sites) — the trade is real but the absolute
+  numbers stay in the sub-microsecond range for everything but
+  `json_*`, which were already micro-second.
+
+### Arc closes
+
+- **2.1.x cc5 adoption arc complete.** Seven slots over two days.
+  Every heap-allocated struct in the codebase (16 total) now uses
+  `#derive(accessors)`. CI gate covers them all. The codebase is
+  internally consistent before 2.2.0's external-feature work begins.
+- **Next arc: 2.2.0 — Platform Validation** (Windows PE via cc5
+  Win64 backend, live cloud hardware validation, untested-backend
+  triage).
+
 ## [2.1.6] — 2026-05-11
 
 **cc5 adoption arc closes — `profile` converted, 8 structs total on

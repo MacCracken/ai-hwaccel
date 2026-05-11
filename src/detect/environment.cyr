@@ -7,17 +7,17 @@ fn detect_environment(sio) {
 
     # --- Docker detection ---
     if (path_exists("/.dockerenv") == 1) {
-        env_set_docker(env, 1);
+        env_set_is_docker(env, 1);
         detected = 1;
     } else {
         # Check /proc/1/cgroup for docker/containerd
         var cgroup = sysfs_read("/proc/1/cgroup");
         if (cgroup != 0) {
             if (str_contains_cstr(cgroup, "docker") == 1) {
-                env_set_docker(env, 1);
+                env_set_is_docker(env, 1);
                 detected = 1;
             } elif (str_contains_cstr(cgroup, "containerd") == 1) {
-                env_set_docker(env, 1);
+                env_set_is_docker(env, 1);
                 detected = 1;
             }
         }
@@ -25,7 +25,7 @@ fn detect_environment(sio) {
 
     # --- Kubernetes detection ---
     if (path_exists("/var/run/secrets/kubernetes.io") == 1) {
-        env_set_k8s(env, 1);
+        env_set_is_k8s(env, 1);
         detected = 1;
         # Read namespace
         var ns = sysfs_read("/var/run/secrets/kubernetes.io/serviceaccount/namespace");

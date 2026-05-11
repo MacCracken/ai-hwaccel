@@ -7,10 +7,21 @@
 #   var gpus = lazy_by_family(lr, FAMILY_GPU);  # probes GPU backends only
 #   var all = lazy_into_registry(lr);           # probe everything
 
-# LazyRegistry struct layout:
-#   0: profiles (vec ptr)
-#   8: probed[5] as bitmask (i64) — bit 0=CPU, 1=GPU, 2=NPU, 3=TPU, 4=ASIC
-#  16: mutex (ptr)
+# LazyRegistry — deferred per-family detection.
+# 2.1.7: hand-rolled accessors replaced with #derive(accessors).
+# Struct name `lazy` matches the existing `lazy_*` accessor
+# convention; constructor stays `lazy_new`. The `probed` field is
+# an i64 bitmask (bit 0 = CPU probed, 1 = GPU, 2 = NPU, 3 = TPU,
+# 4 = AI_ASIC) — getter returns the raw mask, bit-manipulation
+# helpers below use `lazy_probed` + `lazy_set_probed` plus a small
+# inline mask compute.
+
+#derive(accessors)
+struct lazy {
+    profiles;
+    probed;
+    mutex;
+}
 
 fn lazy_new() {
     var lr = alloc(24);
@@ -19,15 +30,15 @@ fn lazy_new() {
     var sys_mem = detect_system_memory();
     if (sys_mem == 0) { sys_mem = 16 * BYTES_PER_GIB; }
     vec_push(profs, profile_cpu(sys_mem));
-    store64(lr, profs);
-    store64(lr + 8, 1);  # bit 0 = CPU probed
-    store64(lr + 16, mutex_new());
+    lazy_set_profiles(lr, profs);
+    lazy_set_probed(lr, 1);  # bit 0 = CPU probed
+    lazy_set_mutex(lr, mutex_new());
     return lr;
 }
 
 # Check if family has been probed
 fn _lazy_is_probed(lr, family) {
-    var mask = load64(lr + 8);
+    var mask = lazy_probed(lr);
     var bit = 1;
     var i = 0;
     while (i < family) { bit = bit * 2; i = i + 1; }
@@ -36,11 +47,11 @@ fn _lazy_is_probed(lr, family) {
 
 # Mark family as probed
 fn _lazy_mark_probed(lr, family) {
-    var mask = load64(lr + 8);
+    var mask = lazy_probed(lr);
     var bit = 1;
     var i = 0;
     while (i < family) { bit = bit * 2; i = i + 1; }
-    store64(lr + 8, mask | bit);
+    lazy_set_probed(lr, mask | bit);
     return 0;
 }
 
@@ -87,7 +98,7 @@ fn _lazy_ensure(lr, family) {
     var mask = _family_builder_mask(family);
     var partial = registry_detect_with(mask);
     var partial_profs = reg_profiles(partial);
-    var main_profs = load64(lr);
+    var main_profs = lazy_profiles(lr);
     var np = vec_len(partial_profs);
     var i = 0;
     while (i < np) {
@@ -103,10 +114,10 @@ fn _lazy_ensure(lr, family) {
 
 # Query profiles by family (probes on first access)
 fn lazy_by_family(lr, family) {
-    var mtx = load64(lr + 16);
+    var mtx = lazy_mutex(lr);
     mutex_lock(mtx);
     _lazy_ensure(lr, family);
-    var profs = load64(lr);
+    var profs = lazy_profiles(lr);
     var result = vec_new();
     var np = vec_len(profs);
     var i = 0;
@@ -125,22 +136,22 @@ fn lazy_by_family(lr, family) {
 
 # Get all profiles detected so far (no new detection)
 fn lazy_probed_profiles(lr) {
-    var mtx = load64(lr + 16);
+    var mtx = lazy_mutex(lr);
     mutex_lock(mtx);
-    var profs = load64(lr);
+    var profs = lazy_profiles(lr);
     mutex_unlock(mtx);
     return profs;
 }
 
 # Probe all families and return a full registry
 fn lazy_into_registry(lr) {
-    var mtx = load64(lr + 16);
+    var mtx = lazy_mutex(lr);
     mutex_lock(mtx);
     _lazy_ensure(lr, FAMILY_GPU);
     _lazy_ensure(lr, FAMILY_NPU);
     _lazy_ensure(lr, FAMILY_TPU);
     _lazy_ensure(lr, FAMILY_AI_ASIC);
-    var profs = load64(lr);
+    var profs = lazy_profiles(lr);
     mutex_unlock(mtx);
 
     var r = registry_new();

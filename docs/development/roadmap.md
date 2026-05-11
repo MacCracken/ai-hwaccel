@@ -16,6 +16,23 @@ up everything the 2.1.0 adoption arc needs (cc5 IR, manifest interpolation,
 
 ---
 
+## 2.1.x — cc5 adoption arc (SHIPPED, 2026-05-10 → 2026-05-11)
+
+Closed at 2.1.7 (P(-1) scaffold hardening). Seven slots:
+- **2.1.0** — test reorg + CI tighten
+- **2.1.1** — Rust parity audit
+- **2.1.2** — defer audit, chrono rejected, build/ untrack
+- **2.1.3** — `#derive(accessors)` on meta + storage
+- **2.1.4** — ic + plan + est
+- **2.1.5** — reg + model
+- **2.1.6** — profile (the big one)
+- **2.1.7** — P(-1) close-out: remaining 8 structs derived (env, sio,
+  shard, cloud_inst, rec, cached, disk_cached, lazy). Every heap struct
+  in the project is now on the accessor surface. CI gate at 15 entries
+  (10 cross-file + 5 field-count bound).
+
+---
+
 ## 2.1.0 — cc5 adoption arc
 
 The toolchain bump in 2.0.1 was mechanical only — no source changed. 2.1.0

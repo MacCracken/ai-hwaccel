@@ -14,28 +14,36 @@ fn _monotonic_secs() {
     return load64(&ts);
 }
 
-# CachedRegistry struct layout:
-#   0: registry (ptr, 0 = empty)
-#   8: last_detect_secs (i64)
-#  16: ttl_secs (i64)
-#  24: mutex (ptr)
+# CachedRegistry — in-memory cache with TTL + mutex.
+# 2.1.7: hand-rolled accessors replaced with #derive(accessors).
+# Struct name `cached` matches the existing `cached_*` accessor
+# convention; constructor stays `cached_registry_new`. Param `c`
+# is unambiguous across src/.
+
+#derive(accessors)
+struct cached {
+    registry;
+    last_detect_secs;
+    ttl_secs;
+    mutex;
+}
 
 fn cached_registry_new(ttl_secs) {
     var c = alloc(32);
-    store64(c, 0);
-    store64(c + 8, 0);
-    store64(c + 16, ttl_secs);
-    store64(c + 24, mutex_new());
+    cached_set_registry(c, 0);
+    cached_set_last_detect_secs(c, 0);
+    cached_set_ttl_secs(c, ttl_secs);
+    cached_set_mutex(c, mutex_new());
     return c;
 }
 
 fn cached_get(c) {
-    var mtx = load64(c + 24);
+    var mtx = cached_mutex(c);
     mutex_lock(mtx);
 
-    var reg = load64(c);
-    var last = load64(c + 8);
-    var ttl = load64(c + 16);
+    var reg = cached_registry(c);
+    var last = cached_last_detect_secs(c);
+    var ttl = cached_ttl_secs(c);
     var now = _monotonic_secs();
 
     # Cache hit: registry exists and within TTL
@@ -51,31 +59,31 @@ fn cached_get(c) {
 
     # Store result
     mutex_lock(mtx);
-    store64(c, new_reg);
-    store64(c + 8, _monotonic_secs());
+    cached_set_registry(c, new_reg);
+    cached_set_last_detect_secs(c, _monotonic_secs());
     mutex_unlock(mtx);
 
     return new_reg;
 }
 
 fn cached_invalidate(c) {
-    var mtx = load64(c + 24);
+    var mtx = cached_mutex(c);
     mutex_lock(mtx);
-    store64(c, 0);
-    store64(c + 8, 0);
+    cached_set_registry(c, 0);
+    cached_set_last_detect_secs(c, 0);
     mutex_unlock(mtx);
     return 0;
 }
 
 fn cached_ttl(c) {
-    return load64(c + 16);
+    return cached_ttl_secs(c);
 }
 
 fn cached_is_valid(c) {
-    var reg = load64(c);
+    var reg = cached_registry(c);
     if (reg == 0) { return 0; }
-    var last = load64(c + 8);
-    var ttl = load64(c + 16);
+    var last = cached_last_detect_secs(c);
+    var ttl = cached_ttl_secs(c);
     var now = _monotonic_secs();
     return now - last < ttl;
 }
@@ -92,30 +100,40 @@ fn _disk_cache_path() {
     return str_data(str_builder_build(sb));
 }
 
-# DiskCachedRegistry struct layout:
-#   0: registry (ptr)
-#   8: last_detect_secs (i64)
-#  16: ttl_secs (i64)
-#  24: mutex (ptr)
-#  32: cache_path (ptr)
+# DiskCachedRegistry — extends CachedRegistry with disk fallback.
+# 2.1.7: hand-rolled accessors replaced with #derive(accessors).
+# Struct name `disk_cached` matches the `disk_cached_*` accessor
+# convention; constructor stays `disk_cached_new`. Param `c` is
+# shared with `cached` above — both files use it (same file here),
+# and the field-count bound check on each struct keeps offsets
+# within the registered ranges.
+
+#derive(accessors)
+struct disk_cached {
+    registry;
+    last_detect_secs;
+    ttl_secs;
+    mutex;
+    cache_path;
+}
 
 fn disk_cached_new(ttl_secs) {
     var c = alloc(40);
-    store64(c, 0);
-    store64(c + 8, 0);
-    store64(c + 16, ttl_secs);
-    store64(c + 24, mutex_new());
-    store64(c + 32, _disk_cache_path());
+    disk_cached_set_registry(c, 0);
+    disk_cached_set_last_detect_secs(c, 0);
+    disk_cached_set_ttl_secs(c, ttl_secs);
+    disk_cached_set_mutex(c, mutex_new());
+    disk_cached_set_cache_path(c, _disk_cache_path());
     return c;
 }
 
 fn disk_cached_get(c) {
-    var mtx = load64(c + 24);
+    var mtx = disk_cached_mutex(c);
     mutex_lock(mtx);
 
-    var reg = load64(c);
-    var last = load64(c + 8);
-    var ttl = load64(c + 16);
+    var reg = disk_cached_registry(c);
+    var last = disk_cached_last_detect_secs(c);
+    var ttl = disk_cached_ttl_secs(c);
     var now = _monotonic_secs();
 
     # Memory cache hit
@@ -125,7 +143,7 @@ fn disk_cached_get(c) {
     }
 
     # Try disk cache
-    var path = load64(c + 32);
+    var path = disk_cached_cache_path(c);
     var dbuf = alloc(65536);
     var dn = file_read_all(path, dbuf, 65536);
     if (dn > 0) {
@@ -159,21 +177,21 @@ fn disk_cached_get(c) {
 
     # Store in memory
     mutex_lock(mtx);
-    store64(c, new_reg);
-    store64(c + 8, _monotonic_secs());
+    disk_cached_set_registry(c, new_reg);
+    disk_cached_set_last_detect_secs(c, _monotonic_secs());
     mutex_unlock(mtx);
 
     return new_reg;
 }
 
 fn disk_cached_invalidate(c) {
-    var mtx = load64(c + 24);
+    var mtx = disk_cached_mutex(c);
     mutex_lock(mtx);
-    store64(c, 0);
-    store64(c + 8, 0);
+    disk_cached_set_registry(c, 0);
+    disk_cached_set_last_detect_secs(c, 0);
     mutex_unlock(mtx);
     # Remove disk cache
-    var path = load64(c + 32);
+    var path = disk_cached_cache_path(c);
     syscall(87, path);  # SYS_UNLINK
     return 0;
 }

@@ -114,19 +114,28 @@ jobs:
             done <<< "$hits"
           }
           # Cross-file specific-struct guards (unambiguous param names).
-          # struct  | defining file        | canonical param
-          check_struct storage  src/system_io.cyr  sd
-          check_struct ic       src/system_io.cyr  ic
-          check_struct plan     src/system_io.cyr  sp
-          check_struct reg      src/registry.cyr   r
-          check_struct profile  src/profile.cyr    p
-          # Field-count bound checks (ambiguous param `e` shared between
-          # est and runtime_env; meta and model both use `m`).
+          # struct       | defining file        | canonical param
+          check_struct storage     src/system_io.cyr  sd
+          check_struct ic          src/system_io.cyr  ic
+          check_struct plan        src/system_io.cyr  sp
+          check_struct shard       src/system_io.cyr  ms
+          check_struct sio         src/system_io.cyr  sio
+          check_struct reg         src/registry.cyr   r
+          check_struct profile     src/profile.cyr    p
+          check_struct cloud_inst  src/cost.cyr       ci
+          check_struct rec         src/cost.cyr       rec
+          check_struct lazy        src/lazy.cyr       lr
+          # Field-count bound checks (ambiguous params shared across
+          # structs within a file or across files).
           # file                  | param | struct       | fields
           check_offset_bound src/training.cyr     e  est           4
-          check_offset_bound src/system_io.cyr    e  runtime_env   8
+          check_offset_bound src/system_io.cyr    e  env           8
           check_offset_bound src/model_format.cyr m  meta          5
           check_offset_bound src/model.cyr        m  model         4
+          # cache.cyr: param `c` shared between `cached` (4 fields, max
+          # +24) and `disk_cached` (5 fields, max +32) — register the
+          # looser bound so both pass.
+          check_offset_bound src/cache.cyr        c  disk_cached   5
           if [ $FAILED -ne 0 ]; then exit 1; fi
           echo "Raw-offset guard: clean (all sites use derived accessors or registered raw-offset params)."
 
