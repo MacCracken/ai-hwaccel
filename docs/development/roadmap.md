@@ -167,34 +167,73 @@ gap, or tighten the CI gate. Each item is independent; ship in any order.
 
 ---
 
-## 2.2.0 — Platform Validation
-*(was 1.3.0 in the Rust roadmap)*
+## 2.2.x — Platform Validation
+*(was 1.3.0 in the Rust roadmap; 2.2.0 itself shipped as a test-rename /
+README refresh slot — not a real Platform Validation release. The items
+below are **open and queued for pickup**, not deferred.)*
 
-Live cloud hardware validation and remaining cross-platform gaps.
+The pattern for every item here: implement the detection / parsing path
+against a synthesized fixture first (no hardware needed — `tests/fixtures/`
+or inline test strings), then wire to real hardware as access becomes
+available. Hardware-access gating doesn't block the source-side work;
+the parser + struct construction can ship without ever booting the
+target device.
 
-### Live cloud validation
+### Cross-platform (no hardware needed for source work)
 
-- [ ] **NVIDIA H100 / A100** — capture real nvidia-smi output (AWS/GCP)
-- [ ] **NVIDIA Grace Hopper GH200** — validate unified memory on real GH200
-- [ ] **AMD MI300X** — validate CXL memory, ROCm sysfs (Azure)
-- [ ] **Google TPU v5e / v5p** — multi-host pod slice testing (GCE)
-- [ ] **AWS Neuron (trn1/inf2)** — validate on mixed instances
-- [ ] **Intel Gaudi 3** — validate on AWS DL1/DL2
+- [ ] **Windows: DXGI adapter enumeration** — DXGI `EnumAdapters1` →
+  adapter LUID, dedicated VRAM, shared memory, driver version. Stack:
+  add `cc5_win` to the install bundle (or invoke the `cc5_win_cross`
+  artifact directly from the cyrius source build), wire
+  `src/detect/windows.cyr` behind `#ifdef CYRIUS_TARGET_WIN64`, COM
+  binding for `IDXGIFactory1`. Ship CI cross-build (best-effort,
+  mirroring the aarch64 pattern). One slot for the skeleton + fixture
+  test; follow-up slot for the COM binding. *Next pickup target.*
 
-### Cross-platform
+### Hardware validation (fixture-first, hardware-second)
 
-- [ ] **Windows: DirectX adapter enumeration** — DXGI `EnumAdapters1`.
-  Returns adapter LUID, dedicated VRAM, shared memory, driver version.
-  cc5 ships a Win64 PE backend (5.10.x), so this is now reachable from
-  cyrius directly rather than via FFI.
+- [ ] **NVIDIA H100 / A100 / GH200** — capture real `nvidia-smi`
+  CSV from AWS p5 / GCP a3-high instances → `tests/fixtures/cuda/`,
+  add fixture tests that exercise `parse_cuda_output`. GH200's unified
+  memory (`mem_bytes + 480 GiB`) is already coded — fixture locks it in.
+- [ ] **AMD MI300X / MI250** — capture `/sys/class/drm/*/device/*`
+  contents → `tests/fixtures/rocm/`. CXL memory path (`mem_info_vis_vram_total`)
+  is already coded — fixture locks in the MI300X case.
+- [ ] **Google TPU v5e / v5p** — capture `/sys/class/accel/*` contents
+  on a GCE v5 slice → `tests/fixtures/tpu/`. Multi-host pod slice
+  testing carries to the second-pass slot.
+- [ ] **AWS Neuron trn1 / inf2** — capture `neuron-ls --json` from
+  trn1.32xlarge → `tests/fixtures/neuron/`. Multi-device fixture
+  covers the per-core count math.
+- [ ] **Intel Gaudi 3** — capture `hl-smi --query-aip` on Gaudi3
+  (AWS DL2) → `tests/fixtures/gaudi/`. HL-325 device-name override
+  path locks in here.
 
-### Untested backends
+### Untested backends (open — implement parser against fixture, then
+verify on hardware when access happens)
 
-- [ ] **Cerebras WSE** — needs Cerebras Cloud access
-- [ ] **Graphcore IPU** — needs Paperspace or IPU cloud access
-- [ ] **Groq LPU** — blocked on public Linux driver
-- [ ] **Samsung NPU** — needs Exynos device (Galaxy S24+)
-- [ ] **MediaTek APU** — needs Dimensity device
+- [ ] **Cerebras WSE** — `/dev/cerebras*` + sysfs. Fixture capture
+  needed (sample from Cerebras docs or contributor with access).
+- [ ] **Graphcore IPU** — `gc-info` output → fixture. Synthesizable
+  from public Graphcore SDK documentation.
+- [ ] **Groq LPU** — `/dev/groq*` sysfs. Driver isn't on public Linux
+  distros today, but the sysfs format is documented; fixture-first
+  is still viable.
+- [ ] **Samsung NPU** — `/sys/class/npu` on Galaxy S24+ (Exynos).
+  Fixture from a Samsung dev portal capture.
+- [ ] **MediaTek APU** — `/sys/class/misc/apusys` on Dimensity.
+  Fixture from MediaTek NeuroPilot docs.
+
+### Supporting infrastructure (any slot)
+
+- [ ] **`tests/fixtures/` directory** — move the inline sample tool
+  outputs in `gpu_parser_test.tcyr` / `backend_test.tcyr` into per-
+  backend fixture files. Establishes the contribution pattern for
+  every backend item above ("here's a capture of `<tool> <args>` on
+  `<hardware>` — add it to fixtures/").
+- [ ] **`cyrius vet` widened to tests/tcyr/** — currently scans only
+  `src/main.cyr`. Each test unit is its own compilation root with
+  its own include graph; vetting tests too closes a coverage gap.
 
 ---
 

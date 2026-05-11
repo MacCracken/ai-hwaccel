@@ -9,16 +9,11 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [2.2.0] — 2026-05-11
 
-**Test-file rename correction + README refresh.** Opens the 2.2.x
-arc with two concrete cleanups: fixing test names from 2.1.0 that
-didn't match content (audit found 6 of 11 misnamed), and refreshing
-the README which had been stale since 2.0.0 (eight releases of
-changes not surfaced to readers).
-
-The Windows DXGI backend item planned for 2.2.0 is deferred — cc5_win
-exists at v5.10.37 but isn't installed in the standard toolchain
-bundle, and the full COM/DXGI surface is a multi-slot scope. Carries
-to 2.3.0+.
+**Test-file rename correction + README refresh.** A docs-and-renames
+slot — accepted as a release but not a real Platform Validation
+deliverable. The 2.2.x arc's actual feature work (Windows DXGI,
+hardware-fixture coverage for the untested backends) is open and
+queued for 2.2.1+ pickup, not deferred or blocked.
 
 ### Changed
 
@@ -63,17 +58,32 @@ to 2.3.0+.
 - 11 units, 518 assertions, 0 failures (unchanged from 2.1.7 — pure
   rename slot).
 
-### Deferred
+### Carried forward — **open, queued for 2.2.1+**
 
-- **Windows PE / DXGI backend** — cc5_win exists at v5.10.37 (built
-  in `/home/macro/Repos/cyrius/build/cc5_win_cross`) but isn't shipped
-  in the standard `~/.cyrius/bin/` install. COM interface binding for
-  `IDXGIFactory1::EnumAdapters1`, `DXGI_ADAPTER_DESC1` parsing, and
-  the CYRIUS_TARGET_WIN64 conditional-compile path is multi-slot
-  scope. Re-evaluate when cc5_win is in the default toolchain bundle.
-- **Live cloud hardware validation** — access-blocked until cloud
-  account credits are available; no source change possible from a
-  Linux dev box.
+These are the real 2.2.x arc items. Reframed from "deferred / access-
+blocked" to **open work**, because the source-side path can ship
+against synthesized fixtures even before hardware access lands.
+
+- **Windows DXGI backend** — `src/detect/windows.cyr` behind
+  `#ifdef CYRIUS_TARGET_WIN64`, COM binding for `IDXGIFactory1::
+  EnumAdapters1`, `DXGI_ADAPTER_DESC1` parsing. Toolchain side:
+  install `cc5_win` into `~/.cyrius/bin/` (the cross-compiler exists
+  at v5.10.37 in cyrius's source build), wire CI cross-build behind
+  the same `if [ -x $HOME/.cyrius/bin/cc5_win ]` gate the release
+  workflow uses for aarch64. Next pickup target.
+- **Hardware-fixture coverage** — move inline sample tool outputs
+  in `gpu_parser_test.tcyr` / `backend_test.tcyr` to per-backend
+  files under `tests/fixtures/`. Establishes the drop-zone for
+  contributor captures from real H100 / MI300X / TPU v5 / Trn1 /
+  Gaudi 3 hardware. The parser tests run against fixtures, so the
+  source-side work doesn't gate on cloud access.
+- **Untested-backend parsers** — Cerebras / Graphcore / Groq /
+  Samsung NPU / MediaTek APU. Each one has a documented sysfs or
+  CLI output format; the parser can ship against a synthesized
+  fixture from vendor docs and graduate to a real-hardware fixture
+  as captures come in.
+
+See `docs/development/roadmap.md` § 2.2.x for the per-item plan.
 
 ## [2.1.7] — 2026-05-11
 
