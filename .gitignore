@@ -1,8 +1,11 @@
 # Build artifacts
-target/
-*.so
-*.dylib
-*.dll
+/build/
+
+# Vendored stdlib — repopulated by `cyrius deps` from the
+# version-pinned snapshot in cyrius.cyml [deps] stdlib. Keeping
+# this out of the repo prevents stale stubs from a prior cyrius
+# version sitting in tree (matches agnosys/libro/patra convention).
+/lib/
 
 # Old Rust crate (archived, not tracked)
 rust-old/
@@ -15,23 +18,28 @@ rust-old/
 .vscode/
 *.iml
 
-# OS files
+# OS
 .DS_Store
 Thumbs.db
 
-# Debugging
+# Debug
 *.pdb
+*.so
+*.dylib
+*.dll
 core
 core.*
+qemu_*.core
 
 # Coverage
 lcov.info
 tarpaulin-report.html
 coverage/
-
-# Benchmark output (generated, not tracked)
 criterion/
 
-# Environment / secrets
+# Secrets / environment
 .env
 .env.*
+
+# Claude Code
+.claude/

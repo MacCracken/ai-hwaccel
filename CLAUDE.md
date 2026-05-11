@@ -6,8 +6,8 @@
 
 - **Type**: Cyrius binary (CLI)
 - **License**: GPL-3.0-only
-- **Compiler**: Cyrius cc3 3.10.0
-- **Version**: SemVer 2.0.0
+- **Compiler**: Cyrius cc5 5.10.34 (pinned in `cyrius.cyml`)
+- **Version**: SemVer — `VERSION` file is the single source of truth; `cyrius.cyml` interpolates via `${file:VERSION}`
 
 ## Consumers
 
@@ -52,6 +52,8 @@ hoosh, daimon, Irfan, AgnosAI, murti, tazama
 - **`str_builder` over `format!`** — avoid temporary allocations.
 - **Enum constants over global vars** — avoid the 1024 global var limit.
 - **Feature-gate optional modules** — `#ifdef` / `-D` flags for conditional compilation.
+- **Vendored stdlib in `lib/` is gitignored** — `cyrius deps` repopulates it from the version-pinned `[deps].stdlib` snapshot in `cyrius.cyml`. Run `cyrius deps` after fresh clone or cyrius upgrade.
+- **Single version source** — bump only `VERSION`; `cyrius.cyml` reads it via `${file:VERSION}`. Use `./scripts/version-bump.sh <new>` then add the CHANGELOG section, tag, and push.
 
 ## DO NOT
 - **Do not commit or push** — the user handles all git operations (commit, push, tag)

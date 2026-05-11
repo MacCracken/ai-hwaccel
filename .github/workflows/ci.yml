@@ -13,79 +13,127 @@ concurrency:
 
 jobs:
   build:
-    name: Build
+    name: Build & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Cyrius toolchain
         run: |
-          CYRIUS_VERSION="${CYRIUS_VERSION:-$(cat .cyrius-toolchain | tr -d '[:space:]')}"
+          # Use the canonical installer so the layout matches what
+          # `cyrius deps` and `cyriusly` expect: a per-version tree
+          # under ~/.cyrius/versions/$VER/{bin,lib}/, plus
+          # ~/.cyrius/current + the ~/.cyrius/{bin,lib} → versions/$VER
+          # symlinks. cyrius deps reads stdlib from ~/.cyrius/lib;
+          # without the symlinks the stdlib copy fails with
+          # "cannot read ./lib/<name>.cyr" for every [deps].stdlib entry.
+          CYRIUS_VERSION="${CYRIUS_VERSION:-$(grep -E '^cyrius[[:space:]]*=' cyrius.cyml | sed -E 's/^cyrius[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')}"
           echo "Installing Cyrius $CYRIUS_VERSION"
-          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
-          mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
-          cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
-          cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
-          chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
+          curl -sSf "https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh" \
+            | CYRIUS_VERSION="$CYRIUS_VERSION" sh
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
+      - name: Verify toolchain
+        run: cyrius --version
+
       - name: Resolve dependencies
+        # `./lib/` is gitignored — `cyrius deps` populates it from the
+        # version-pinned stdlib snapshot. Must run before any compile
+        # step. Matches agnosys/libro/patra convention.
         run: cyrius deps
 
-      - name: Build
+      - name: Verify dep hashes
+        # `cyrius.lock` records the hash of each resolved dep; on
+        # second-and-later runs `--verify` asserts the bytes on disk
+        # match. First push of a fresh dep precedes the lockfile by
+        # one commit, so we soft-skip if missing.
+        run: |
+          if [ -f cyrius.lock ]; then
+            cyrius deps --verify
+          else
+            echo "::warning::cyrius.lock not committed — skipping hash verification"
+          fi
+
+      - name: Format check
+        # cyrius fmt <file> emits the formatted source to stdout; diff
+        # against the committed file to enforce no drift.
+        run: |
+          fail=0
+          for f in src/*.cyr src/detect/*.cyr tests/*.cyr fuzz/*.fcyr benches/*.bcyr; do
+            [ -f "$f" ] || continue
+            if ! diff -q <(cyrius fmt "$f" 2>/dev/null) "$f" > /dev/null; then
+              echo "needs fmt: $f"
+              fail=1
+            fi
+          done
+          [ $fail -eq 0 ] || { echo "fmt: drift detected"; exit 1; }
+
+      - name: Lint
+        run: |
+          for f in src/*.cyr src/detect/*.cyr; do
+            [ -f "$f" ] || continue
+            cyrius lint "$f" || true
+          done
+
+      - name: Build (DCE)
         run: |
           mkdir -p build
-          cyrius build src/main.cyr build/ai-hwaccel
+          CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel
           echo "ai-hwaccel: $(wc -c < build/ai-hwaccel) bytes"
 
-      - name: Upload build
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-x86_64
-          path: build/ai-hwaccel
-          retention-days: 5
+      - name: Verify ELF
+        run: xxd -l 4 build/ai-hwaccel | grep -q "7f45 4c46"
 
-  test:
-    name: Test (491 assertions)
-    needs: [build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Cyrius toolchain
-        run: |
-          CYRIUS_VERSION="${CYRIUS_VERSION:-$(cat .cyrius-toolchain | tr -d '[:space:]')}"
-          echo "Installing Cyrius $CYRIUS_VERSION"
-          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
-          mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
-          cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
-          cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
-          chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
-          echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
-          echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
-
-      - name: Resolve dependencies
-        run: cyrius deps
-
-      - name: Run test phases
+      - name: Test suite
         run: |
           pass=0; fail=0
           for t in tests/test_phase*.cyr; do
-            echo "test: $(basename $t)"
-            if cyrius test "$t" 2>&1 | tail -1 | grep -q "0 failed"; then
+            [ -f "$t" ] || continue
+            name=$(basename "$t" .cyr)
+            echo "=== $name ==="
+            CYRIUS_DCE=1 cyrius build "$t" "/tmp/ci_$name"
+            if "/tmp/ci_$name" 2>&1 | tee "/tmp/${name}_out" | tail -1 | grep -q "0 failed"; then
               pass=$((pass + 1))
             else
               fail=$((fail + 1))
-              echo "  FAIL: $t"
+              echo "FAIL: $t"
             fi
+            rm -f "/tmp/ci_$name"
           done
           echo "$pass passed, $fail failed"
           test $fail -eq 0
+
+      - name: Fuzz
+        run: |
+          for f in fuzz/*.fcyr; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f" .fcyr)
+            CYRIUS_DCE=1 cyrius build "$f" "build/$name"
+            timeout 10 "build/$name" || { echo "FUZZ CRASH: $name"; exit 1; }
+            echo "  $name: ok"
+          done
+
+      - name: Benchmarks
+        env:
+          AI_HWACCEL_BENCH_HISTORY: ${{ github.workspace }}/bench-history.csv
+          AI_HWACCEL_BENCH_TAG: ${{ github.sha }}
+        run: |
+          for f in benches/*.bcyr; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f" .bcyr)
+            CYRIUS_DCE=1 cyrius build "$f" "build/$name"
+            "build/$name"
+          done
+
+      - name: Upload bench history
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-history-${{ github.sha }}
+          path: bench-history.csv
+          if-no-files-found: ignore
+          retention-days: 90
 
   docs:
     name: Documentation
@@ -94,6 +142,21 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check required docs
         run: |
-          for doc in README.md CHANGELOG.md VERSION LICENSE; do
-            test -f "$doc" && echo "OK: $doc" || { echo "MISSING: $doc"; exit 1; }
+          MISSING=0
+          for doc in README.md CHANGELOG.md CLAUDE.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md LICENSE VERSION cyrius.cyml; do
+            if [ -f "$doc" ]; then echo "  OK: $doc"; else echo "  MISSING: $doc"; MISSING=1; fi
           done
+          exit $MISSING
+
+      - name: Verify version consistency
+        run: |
+          # cyrius.cyml uses ${file:VERSION} interpolation, so VERSION
+          # is the single source of truth. Assert the interpolation
+          # literal is present (so cyrius resolves it correctly) and
+          # the VERSION value appears in CHANGELOG.
+          FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
+          grep -q '^version = "\${file:VERSION}"' cyrius.cyml || {
+            echo "FAIL: cyrius.cyml version must be \${file:VERSION}"; exit 1; }
+          grep -q "\[$FILE_VERSION\]" CHANGELOG.md || {
+            echo "FAIL: version $FILE_VERSION not in CHANGELOG.md"; exit 1; }
+          echo "Version consistent: $FILE_VERSION (VERSION → cyrius.cyml via \${file:VERSION})"

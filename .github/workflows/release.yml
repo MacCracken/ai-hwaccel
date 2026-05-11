@@ -2,7 +2,11 @@ name: Release
 
 on:
   push:
-    tags: ['[0-9]*']
+    # Accept both `v1.2.3` and `1.2.3` tag styles. The version-verify
+    # step below enforces semver shape + match against VERSION file.
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+'
 
 permissions:
   contents: write
@@ -12,8 +16,8 @@ jobs:
     name: CI Gate
     uses: ./.github/workflows/ci.yml
 
-  release:
-    name: Build & Release
+  build:
+    name: Build Release
     needs: [ci]
     runs-on: ubuntu-latest
     steps:
@@ -21,33 +25,110 @@ jobs:
 
       - name: Verify version
         run: |
+          # cyrius.cyml uses ${file:VERSION} interpolation, so VERSION
+          # is the single source of truth. Assert tag == VERSION and
+          # the manifest carries the interpolation literal.
           FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
-          TAG_VERSION="${GITHUB_REF_NAME}"
-          test "$FILE_VERSION" = "$TAG_VERSION" || { echo "VERSION ($FILE_VERSION) != tag ($TAG_VERSION)"; exit 1; }
+          TAG="${GITHUB_REF_NAME#v}"   # strip optional leading 'v' so v1.0.1 == 1.0.1
+          echo "$TAG" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "tag ($TAG) is not semver x.y.z"; exit 1; }
+          [ "$FILE_VERSION" = "$TAG" ] || {
+            echo "VERSION ($FILE_VERSION) != tag ($TAG)"; exit 1; }
+          grep -q '^version = "\${file:VERSION}"' cyrius.cyml || {
+            echo "cyrius.cyml version must be \${file:VERSION}"; exit 1; }
+          echo "Version verified: $TAG (cyrius.cyml pulls from VERSION via \${file:VERSION})"
 
       - name: Install Cyrius toolchain
         run: |
-          CYRIUS_VERSION="${CYRIUS_VERSION:-$(cat .cyrius-toolchain | tr -d '[:space:]')}"
+          # Canonical installer (see ci.yml for rationale).
+          CYRIUS_VERSION="${CYRIUS_VERSION:-$(grep -E '^cyrius[[:space:]]*=' cyrius.cyml | sed -E 's/^cyrius[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')}"
           echo "Installing Cyrius $CYRIUS_VERSION"
-          curl -sLO "https://github.com/MacCracken/cyrius/releases/download/$CYRIUS_VERSION/cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          tar xzf "cyrius-$CYRIUS_VERSION-x86_64-linux.tar.gz"
-          CYRIUS_DIR="cyrius-$CYRIUS_VERSION-x86_64-linux"
-          mkdir -p "$HOME/.cyrius/bin" "$HOME/.cyrius/lib"
-          cp "$CYRIUS_DIR/bin/"* "$HOME/.cyrius/bin/" 2>/dev/null || true
-          cp -r "$CYRIUS_DIR/lib/"* "$HOME/.cyrius/lib/" 2>/dev/null || true
-          chmod +x "$HOME/.cyrius/bin/"* 2>/dev/null || true
+          curl -sSf "https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh" \
+            | CYRIUS_VERSION="$CYRIUS_VERSION" sh
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
-      - name: Build
+      - name: Verify toolchain
+        run: cyrius --version
+
+      - name: Resolve deps
+        run: cyrius deps
+
+      - name: Verify dep hashes
         run: |
-          cyrius deps
+          if [ -f cyrius.lock ]; then
+            cyrius deps --verify
+          else
+            echo "::warning::cyrius.lock not committed — skipping hash verification"
+          fi
+
+      - name: Build (DCE)
+        run: |
           mkdir -p build
-          cyrius build src/main.cyr build/ai-hwaccel
+          CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel
           echo "ai-hwaccel: $(wc -c < build/ai-hwaccel) bytes"
 
-      - name: Create release
-        uses: softprops/action-gh-release@v2
+      - name: Cross-build aarch64 (best-effort)
+        # Produces build/ai-hwaccel-aarch64 when the toolchain bundle
+        # includes cc5_aarch64. Archive step ships both x86 + aarch64
+        # binaries when present.
+        run: |
+          if [ -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
+            CYRIUS_DCE=1 cyrius build --aarch64 src/main.cyr build/ai-hwaccel-aarch64
+            echo "ai-hwaccel-aarch64: $(wc -c < build/ai-hwaccel-aarch64) bytes"
+          else
+            echo "::warning::cc5_aarch64 not in toolchain — aarch64 binary skipped in release"
+          fi
+
+      - name: Smoke test
+        run: |
+          ./build/ai-hwaccel --version || true
+          ./build/ai-hwaccel --help > /dev/null || true
+
+      - name: Clean toolchain artifacts
+        run: rm -f cyrius-*.tar.gz
+
+      - name: Archive
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="ai-hwaccel-${TAG}/" -o "ai-hwaccel-${TAG}-src.tar.gz" HEAD
+          if [ -f build/ai-hwaccel ]; then
+            cp build/ai-hwaccel "ai-hwaccel-${TAG}-x86_64-linux"
+          fi
+          if [ -f build/ai-hwaccel-aarch64 ]; then
+            cp build/ai-hwaccel-aarch64 "ai-hwaccel-${TAG}-aarch64-linux"
+          fi
+          sha256sum ai-hwaccel-*.tar.gz ai-hwaccel-*-linux 2>/dev/null > SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
         with:
-          generate_release_notes: true
-          files: build/ai-hwaccel
+          name: release-artifacts
+          path: |
+            ai-hwaccel-*.tar.gz
+            ai-hwaccel-*-linux
+            cyrius.lock
+            SHA256SUMS
+
+  release:
+    name: Create GitHub Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+      - name: Changelog
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          awk "/^## \\[${TAG}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md > /tmp/body.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: "ai-hwaccel ${{ github.ref_name }}"
+          body_path: /tmp/body.md
+          prerelease: ${{ startsWith(github.ref_name, '0.') || startsWith(github.ref_name, 'v0.') }}
+          files: |
+            ai-hwaccel-*.tar.gz
+            ai-hwaccel-*-linux
+            cyrius.lock
+            SHA256SUMS
