@@ -192,9 +192,12 @@ target device.
   **Real-hardware validation: `ssh cass`** — project's Windows host
   (same `cass` referenced in cyrius's v5.10.x cross-host smoke
   testing). Use the `.bat`-indirection or `cmd /v /c "…
-  !errorlevel!"` wrapper for exit-code propagation — `%errorlevel%`
-  in `cmd /c` parses at the wrong time and false-reports `exit=0`.
-  See `memory/reference_windows_host.md`.
+  !errorlevel!"` wrapper for exit-code propagation under the current
+  5.10.34 pin — `%errorlevel%` in `cmd /c` parses at the wrong time
+  and false-reports `exit=0`. **The wrapper gotcha is addressed in
+  cyrius 5.11.6** (next release in line); bumping the pin to 5.11.6+
+  alongside this slot collapses the cross-host smoke back to plain
+  shell. See `memory/reference_windows_host.md`.
 
 ### Hardware validation (fixture-first, hardware-second)
 

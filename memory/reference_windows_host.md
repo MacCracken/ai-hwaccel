@@ -12,7 +12,12 @@ when the Windows DXGI backend slot lands.
 This is the same `cass` referenced throughout the cyrius CHANGELOG's
 v5.10.x cross-host smoke testing (e.g., entry 5.10.49 debunked a PE
 exit-code propagation false-negative using `cmd /v /c "prog.exe & echo
-exit=!errorlevel!"` on cass). The wrapper note is load-bearing:
+exit=!errorlevel!"` on cass).
+
+### Errorlevel wrapper gotcha (current 5.10.x)
+
+Until cyrius 5.11.6 lands (see below), exit-code tests on cass must
+use one of these shapes:
 
 - ✗ `cmd /c "prog.exe & echo exit=%errorlevel%"` — expands at parse
   time, falsely reports `exit=0` regardless of what prog.exe returned.
@@ -20,6 +25,14 @@ exit=!errorlevel!"` on cass). The wrapper note is load-bearing:
   expansion, reads errorlevel at exec time.
 - ✓ `.bat` indirection — write two lines to a `.bat`; newlines split
   parse passes so the second line sees the updated errorlevel.
+
+### Upstream fix: cyrius 5.11.6 (next in line)
+
+Per Robert (2026-05-11): **the wrapper gotcha is addressed in cyrius
+5.11.6, the next release after 5.10.x.** When ai-hwaccel bumps its
+cyrius pin to 5.11.6+, the cross-host smoke can collapse to a plain
+`ssh cass 'prog.exe; echo exit=%errorlevel%'` shape. Re-evaluate this
+memory file at that pin bump.
 
 For ai-hwaccel:
 
