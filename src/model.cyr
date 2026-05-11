@@ -1,17 +1,22 @@
 # model.cyr — model compatibility database
 # Reads data/models.json at runtime for model profiles.
 
-# ModelProfile struct layout:
-#   0: name (ptr)
-#   8: family (ptr)
-#  16: params_billions_x1000 (i64)  — e.g., 70000 for 70B
-#  24: default_dtype (ptr)
-var MODEL_PROFILE_SIZE = 32;
+# ModelProfile — name + family + params_billions (x1000 fixed-point,
+# e.g. 70000 = 70B) + default dtype string.
+# 2.1.5: hand-rolled accessors replaced with #derive(accessors). Param
+# `m` is shared with the `meta` struct in model_format.cyr — both go
+# through the field-count bound check in CI rather than the cross-file
+# specific-struct guard.
 
-fn model_name(m) { return load64(m); }
-fn model_family(m) { return load64(m + 8); }
-fn model_params_b_x1000(m) { return load64(m + 16); }
-fn model_dtype(m) { return load64(m + 24); }
+#derive(accessors)
+struct model {
+    name;
+    family;
+    params_b_x1000;
+    dtype;
+}
+
+var MODEL_PROFILE_SIZE = 32;
 
 # Total parameter count (not billions)
 fn model_param_count(m) {
@@ -134,7 +139,7 @@ fn _parse_model_params(obj, m) {
                     }
                     while (frac_digits < 3) { frac = frac * 10; frac_digits = frac_digits + 1; }
                 }
-                store64(m + 16, whole * 1000 + frac);
+                model_set_params_b_x1000(m, whole * 1000 + frac);
                 return 0;
             }
         }

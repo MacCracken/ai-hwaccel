@@ -1,48 +1,53 @@
 # registry.cyr — accelerator registry: detect, query, plan
 #
-# Registry layout:
-#   0: profiles (ptr)      — vec of profile pointers
-#   8: warnings (ptr)      — vec of warning pointers
-#  16: system_io (ptr)     — SystemIo pointer
-#  24: schema_version (i64)
+# Registry — profiles + warnings + system_io + schema_version.
+# Struct named `reg` to match the `reg_*` accessor convention;
+# constructor stays `registry_new`. 2.1.5: hand-rolled accessors
+# replaced with #derive(accessors); the internal `load64(r)` /
+# `load64(r + N)` shortcuts in helpers below switched to the
+# derived `reg_*` getters for consistency with the rest of the file.
+
+#derive(accessors)
+struct reg {
+    profiles;
+    warnings;
+    system_io;
+    schema;
+}
+
 var REGISTRY_SIZE = 32;
 
 fn registry_new() {
     var r = alloc(REGISTRY_SIZE);
-    store64(r, vec_new());
-    store64(r + 8, vec_new());
-    store64(r + 16, system_io_new());
-    store64(r + 24, SCHEMA_VERSION);
+    reg_set_profiles(r, vec_new());
+    reg_set_warnings(r, vec_new());
+    reg_set_system_io(r, system_io_new());
+    reg_set_schema(r, SCHEMA_VERSION);
     return r;
 }
 
-fn reg_profiles(r) { return load64(r); }
-fn reg_warnings(r) { return load64(r + 8); }
-fn reg_system_io(r) { return load64(r + 16); }
-fn reg_schema(r) { return load64(r + 24); }
-
 fn reg_add_profile(r, p) {
-    vec_push(load64(r), p);
+    vec_push(reg_profiles(r), p);
     return 0;
 }
 
 # --- Query methods ---
 
 fn reg_num_profiles(r) {
-    return vec_len(load64(r));
+    return vec_len(reg_profiles(r));
 }
 
 fn reg_get_profile(r, idx) {
-    return vec_get(load64(r), idx);
+    return vec_get(reg_profiles(r), idx);
 }
 
 fn reg_num_warnings(r) {
-    return vec_len(load64(r + 8));
+    return vec_len(reg_warnings(r));
 }
 
 # Total memory across all available devices
 fn reg_total_memory(r) {
-    var profs = load64(r);
+    var profs = reg_profiles(r);
     var total = 0;
     var n = vec_len(profs);
     var i = 0;
@@ -58,7 +63,7 @@ fn reg_total_memory(r) {
 
 # Total accelerator memory (excludes CPU)
 fn reg_total_accel_memory(r) {
-    var profs = load64(r);
+    var profs = reg_profiles(r);
     var total = 0;
     var n = vec_len(profs);
     var i = 0;
@@ -74,7 +79,7 @@ fn reg_total_accel_memory(r) {
 
 # Whether any non-CPU accelerator is available
 fn reg_has_accelerator(r) {
-    var profs = load64(r);
+    var profs = reg_profiles(r);
     var n = vec_len(profs);
     var i = 0;
     while (i < n) {
@@ -88,7 +93,7 @@ fn reg_has_accelerator(r) {
 
 # Best available device (highest rank)
 fn reg_best_available(r) {
-    var profs = load64(r);
+    var profs = reg_profiles(r);
     var n = vec_len(profs);
     var best = 0;
     var best_rank = 0;
@@ -108,7 +113,7 @@ fn reg_best_available(r) {
 
 # Count profiles by family
 fn reg_count_by_family(r, family) {
-    var profs = load64(r);
+    var profs = reg_profiles(r);
     var count = 0;
     var n = vec_len(profs);
     var i = 0;
@@ -123,7 +128,7 @@ fn reg_count_by_family(r, family) {
 
 # Collect available profiles by family into a vec
 fn reg_by_family(r, family) {
-    var profs = load64(r);
+    var profs = reg_profiles(r);
     var result = vec_new();
     var n = vec_len(profs);
     var i = 0;
@@ -149,7 +154,7 @@ fn reg_suggest_quant(r, model_params) {
     var best_npu = 0;
     var best_cpu = 0;
 
-    var profs = load64(r);
+    var profs = reg_profiles(r);
     var n = vec_len(profs);
     var i = 0;
     while (i < n) {

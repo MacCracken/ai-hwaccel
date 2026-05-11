@@ -42,16 +42,20 @@ gap, or tighten the CI gate. Each item is independent; ship in any order.
     stays `mem_est_new`. Param `e` shared with `runtime_env` in
     system_io.cyr — guarded via field-count bound check (libro
     pattern) rather than cross-file `check_struct`. **2.1.4.**
+  - [x] `reg` (accelerator_registry, `src/registry.cyr`) — 4 fields,
+    cross-file `check_struct` (param `r` unambiguous). Also cleaned up
+    9 internal `var profs = load64(r);` shortcuts → `reg_profiles(r)`.
+    **2.1.5.**
+  - [x] `model` (`src/model.cyr`) — 4 fields. Param `m` shared with
+    `meta` — both go through field-count bound check (libro pattern).
+    Also converted one in-place mutation `store64(m + 16, …)` →
+    `model_set_params_b_x1000(m, …)`. **2.1.5.**
   - [ ] `profile` (`src/profile.cyr`) — big struct (≈20 fields,
     multiple optional). The largest single conversion in the arc;
     canonical param is `p`. Needs ambiguity check before deciding
     whether the cross-file guard or the field-count bound check
-    applies (the `p` param appears in plan/cost helpers).
-  - [ ] `accelerator_registry` — `reg_*` accessors today. Param canonical
-    is `r`; check ambiguity before adding the cross-file guard.
-  - [ ] `model` (`src/model.cyr`). Param `m` shared with the
-    `meta` struct already shipped, so this gets the field-count
-    bound check alongside `meta`.
+    applies (the `p` param appears in plan/cost helpers). Last item
+    in the arc.
 - [x] **Multi-return `(value, error)` in detect/* — investigated, doesn't
   fit.** Closed in 2.1.3 review without code change. The detect/ entry
   points are `detect_<backend>(profiles, warnings)` — both vec

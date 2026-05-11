@@ -7,6 +7,46 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.1.5] — 2026-05-11
+
+**cc5 adoption arc — `#derive(accessors)` continues. Two more structs
+converted (`reg` + `model`), CI gate expanded.** Bundled because both
+were medium-complexity and shared the same review surface (registry
+internals, model dispatch). Zero external call-site changes.
+
+### Changed
+
+- **`reg` struct** (`src/registry.cyr`, was accelerator_registry) —
+  4 fields: `profiles`, `warnings`, `system_io`, `schema`. Struct named
+  `reg` to match the existing `reg_*` accessor convention; constructor
+  stays `registry_new`. Also cleaned up 9 internal `var profs =
+  load64(r);` shortcuts in helpers (`reg_total_memory`,
+  `reg_total_accel_memory`, `reg_has_accelerator`, `reg_best_available`,
+  `reg_count_by_family`, `reg_by_family`, `reg_suggest_quant`) →
+  `var profs = reg_profiles(r);` so the file is internally consistent
+  with the new accessor surface.
+- **`model` struct** (`src/model.cyr`, was ModelProfile) — 4 fields:
+  `name`, `family`, `params_b_x1000`, `dtype`. Param `m` is shared with
+  `meta` in `model_format.cyr` — both rely on the libro field-count
+  bound CI check rather than a cross-file specific-struct guard. One
+  in-place mutation in `_parse_models` line 137 — `store64(m + 16,
+  whole * 1000 + frac)` — converted to the derived setter
+  `model_set_params_b_x1000(m, …)`.
+
+### CI
+
+- **Raw-offset guard registry expanded** to 8 entries total:
+  - Cross-file `check_struct`: `storage` (sd), `ic` (ic), `plan` (sp),
+    **`reg` (r)** (new).
+  - Field-count bound: `est` (e, 4), `runtime_env` (e, 8), `meta` (m, 5),
+    **`model` (m, 4)** (new).
+
+### Binary size
+
+- `build/ai-hwaccel`: **281,592 bytes** (was 280,696 at 2.1.4). +896
+  bytes for derive-generated setters across `reg` + `model`. 518
+  assertions, 0 failures.
+
 ## [2.1.4] — 2026-05-11
 
 **cc5 adoption arc — `#derive(accessors)` continues. Three more structs
