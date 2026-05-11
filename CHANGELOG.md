@@ -7,6 +7,62 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-05-10
+
+**Slot 1 of the cc5 adoption arc — test reorg + CI tighten.** Pure
+structural work; no source-code feature changes, no API surface changes
+for consumers. Sets up cleaner ground for the `#derive(accessors)` /
+multi-return / switch-block refactors planned later in the arc.
+
+### Changed
+
+- **Tests renamed to descriptive names + relocated under `tests/tcyr/`.**
+  Phase numbers (`test_phase1.cyr` … `test_phase11.cyr`) mapped to no
+  concept readable from the source; replaced with mission-named units:
+  - `foundation_test.tcyr`     (errors, accel types, units, quantization)
+  - `profile_test.tcyr`        (profile construction + setters)
+  - `registry_test.tcyr`       (registry assembly)
+  - `detect_gaudi_test.tcyr`   (Gaudi detection)
+  - `detect_neuron_test.tcyr`  (Neuron detection)
+  - `sharding_test.tcyr`       (plan / training)
+  - `system_io_test.tcyr`      (sysfs / proc reading)
+  - `cost_model_test.tcyr`     (cost / recommend)
+  - `json_output_test.tcyr`    (JSON serialization)
+  - `model_format_test.tcyr`   (SafeTensors / GGUF / ONNX / PyTorch)
+  - `requirement_test.tcyr`    (requirement matching)
+
+  Extension change `.cyr` → `.tcyr` matches the agnosys / libro /
+  cyrius-internal convention for standalone test units. Content is
+  byte-identical to the 2.0.1 phase files — git tracks them as pure
+  renames. All 518 assertions still pass.
+
+### CI
+
+- **`cyrius vet` step added** — walks every `include` from `src/main.cyr`
+  and reports `<N> deps, <untrusted>, <missing>`. Today: `36 deps, 0
+  untrusted, 0 missing`. Catches drift between the in-tree include
+  graph and the manifest snapshot the moment a new module lands without
+  being wired into main.cyr (and vice versa).
+- **Test loop iterates `tests/tcyr/*.tcyr`** instead of the
+  `test_phase*.cyr` glob.
+- **fmt drift sweep widened** to cover `tests/tcyr/*.tcyr`,
+  `fuzz/*.fcyr`, `benches/*.bcyr` alongside `src/`.
+- **`cyrius.lock` step reworded** — was misleadingly called "soft-skip".
+  cyrius only writes a lockfile for `[deps.<git>]` entries, and
+  ai-hwaccel is stdlib-only, so there is nothing to verify until a git
+  dep gets added. The step stays in place so verification engages
+  automatically the day that happens.
+
+### Not yet adopted (carried in roadmap)
+
+- `cyrius capacity --check` — stalled on toolchain. cc5 5.10.x's
+  capacity doesn't honour the manifest `[deps].stdlib` auto-prepend,
+  so it warns on every stdlib symbol against `src/main.cyr`. Revisit
+  when the warning floor is 0.
+- `lib/test.cyr` adoption — current local `assert` helpers work; the
+  `"N passed, M failed"` summary line is what CI greps for. Pure
+  cleanup, not unblocking anything.
+
 ## [2.0.1] — 2026-05-10
 
 **Toolchain bump — pure mechanical slot.** No source-code feature changes,
