@@ -246,9 +246,9 @@ fn test_gguf_dtype_names() {
 fn test_model_meta_json() {
     var m = meta_new(FMT_GGUF, 0, "Q4_K_M", 42, 3);
     var json = model_meta_to_json(m);
-    assert(str_contains(json, "GGUF") == 1, "json has GGUF");
-    assert(str_contains(json, "Q4_K_M") == 1, "json has dtype");
-    assert(str_contains(json, "42") == 1, "json has tensor count");
+    assert(str_contains_cstr(json, "GGUF") == 1, "json has GGUF");
+    assert(str_contains_cstr(json, "Q4_K_M") == 1, "json has dtype");
+    assert(str_contains_cstr(json, "42") == 1, "json has tensor count");
     return 0;
 }
 

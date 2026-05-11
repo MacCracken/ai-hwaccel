@@ -62,11 +62,26 @@ gap, or tighten the CI gate. Each item is independent; ship in any order.
 
 ### Test infrastructure
 
-- [ ] **Migrate `tests/test_phase*.cyr` → `tests/tcyr/*.tcyr`** — matches
-  the agnosys / libro / cyrius-internal convention. Each `.tcyr` is a
-  standalone compilation unit `cyrius build` recognizes and CI can
-  iterate over uniformly. Lets us drop the per-file `include "lib/*"`
-  preamble (cyrius auto-prepends from manifest deps for `.tcyr`).
+- [ ] **Rename `tests/test_phase{1..11}.cyr` to descriptive names** —
+  phase numbers map to no concept readers can recover from the source.
+  Proposed mapping:
+  - `test_phase1.cyr`  → `tests/foundation_test.cyr` (errors, accel types, units, quantization)
+  - `test_phase2.cyr`  → `tests/profile_test.cyr` (profile construction + setters)
+  - `test_phase3.cyr`  → `tests/registry_test.cyr` (registry assembly)
+  - `test_phase4.cyr`  → `tests/detect_gaudi_test.cyr` (gaudi detection)
+  - `test_phase5.cyr`  → `tests/detect_neuron_test.cyr` (neuron detection)
+  - `test_phase6.cyr`  → `tests/sharding_test.cyr` (plan / training)
+  - `test_phase7.cyr`  → `tests/system_io_test.cyr` (sysfs / proc reading)
+  - `test_phase8.cyr`  → `tests/cost_model_test.cyr` (cost / recommend)
+  - `test_phase9.cyr`  → `tests/json_output_test.cyr` (JSON serialization)
+  - `test_phase10.cyr` → `tests/model_format_test.cyr` (SafeTensors / GGUF / ONNX / PyTorch)
+  - `test_phase11.cyr` → `tests/requirement_test.cyr` (requirement matching)
+- [ ] **Migrate to `tests/tcyr/*.tcyr`** — once renamed, move under
+  `tests/tcyr/` and rename `.cyr` → `.tcyr` so `cyrius build` recognizes
+  them as test units and CI can iterate uniformly (matches
+  agnosys / libro / cyrius-internal convention). Lets us drop the
+  per-file `include "lib/*"` preamble (cyrius auto-prepends from
+  manifest deps for `.tcyr`).
 - [ ] **Adopt `lib/test.cyr`** stdlib module — drops the local `assert`
   helpers in favor of the toolchain-tracked surface. Test summary
   format ("0 failed") is what CI greps for; `lib/test` already emits it.

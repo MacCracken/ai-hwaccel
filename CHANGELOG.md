@@ -77,6 +77,27 @@ generation; sets up the scaffolding 2.1.0's adoption arc needs.
   had assertion-message continuations indented under the call's arg
   list instead of aligned to the argument column. All four re-formatted
   in place; entire `src/` / `tests/` / `fuzz/` / `benches/` swept clean.
+- **`str_contains` API migration** — cc5's `lib/str.cyr` changed the
+  second argument from cstr to `Str` (v5.10.25 generalize pass). The
+  cstr-needle behavior moved to `str_contains_cstr`. Migrated 14 files
+  (11 detection backends + 3 test phases) — every site passing a cstr
+  literal as the needle. `src/model.cyr:172` already passed a `Str` and
+  was left unchanged. The old call sites compiled silently against
+  3.10.0 because the type system didn't catch the i64 vs Str mismatch;
+  the new stdlib still doesn't reject it but treats the cstr pointer
+  as a `Str` struct address, reading garbage as length — every detect
+  branch that gated on `str_contains(...)` was effectively a no-op
+  until this fix.
+- **`str_from(str_data(json))` round-trip removed in test_phase9** — cc5
+  registers `str_from_int` as `str_from`'s `_int` overload, so
+  `str_from(str_data(...))` (where `str_data` returns `i64`) routes to
+  `str_from_int` and produces a `Str` containing the decimal string of
+  the pointer value (e.g. `"727597728"`) instead of wrapping the data.
+  The round-trip was always semantically pointless — `str_builder_build`
+  already returns a `Str`. Six call sites in test_phase9 collapsed to
+  use the builder result directly; restored 17 previously-passing
+  assertions across `test_profile_json` / `test_registry_json` /
+  `test_summary_json` / `test_json_with_warnings`.
 
 ## [2.0.0] - 2026-04-13
 

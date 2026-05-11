@@ -59,16 +59,15 @@ fn test_profile_json() {
     var sb = str_builder_new();
     profile_to_json(sb, p);
     var json = str_builder_build(sb);
-    var js = str_from(str_data(json));
 
     # Should contain key fields
-    assert(str_contains(js, "accelerator") == 1, "has accelerator");
-    assert(str_contains(js, "CUDA GPU") == 1, "has CUDA GPU");
-    assert(str_contains(js, "available") == 1, "has available");
-    assert(str_contains(js, "true") == 1, "available true");
-    assert(str_contains(js, "memory_bytes") == 1, "has memory");
-    assert(str_contains(js, "RTX 4090") == 1, "has device name");
-    assert(str_contains(js, "8.9") == 1, "has CC");
+    assert(str_contains_cstr(json, "accelerator") == 1, "has accelerator");
+    assert(str_contains_cstr(json, "CUDA GPU") == 1, "has CUDA GPU");
+    assert(str_contains_cstr(json, "available") == 1, "has available");
+    assert(str_contains_cstr(json, "true") == 1, "available true");
+    assert(str_contains_cstr(json, "memory_bytes") == 1, "has memory");
+    assert(str_contains_cstr(json, "RTX 4090") == 1, "has device name");
+    assert(str_contains_cstr(json, "8.9") == 1, "has CC");
     return 0;
 }
 
@@ -79,12 +78,11 @@ fn test_registry_json() {
     var r = registry_from_profiles(profiles);
 
     var json = registry_to_json(r);
-    var js = str_from(str_data(json));
 
-    assert(str_contains(js, "schema_version") == 1, "has schema");
-    assert(str_contains(js, "profiles") == 1, "has profiles");
-    assert(str_contains(js, "CPU") == 1, "has CPU");
-    assert(str_contains(js, "CUDA GPU") == 1, "has CUDA");
+    assert(str_contains_cstr(json, "schema_version") == 1, "has schema");
+    assert(str_contains_cstr(json, "profiles") == 1, "has profiles");
+    assert(str_contains_cstr(json, "CPU") == 1, "has CPU");
+    assert(str_contains_cstr(json, "CUDA GPU") == 1, "has CUDA");
     return 0;
 }
 
@@ -96,12 +94,11 @@ fn test_summary_json() {
     var r = registry_from_profiles(profiles);
 
     var json = registry_to_summary_json(r);
-    var js = str_from(str_data(json));
 
-    assert(str_contains(js, "device_count") == 1, "has device_count");
-    assert(str_contains(js, "has_accelerator") == 1, "has has_accel");
-    assert(str_contains(js, "true") == 1, "accel true");
-    assert(str_contains(js, "gpu_count") == 1, "has gpu_count");
+    assert(str_contains_cstr(json, "device_count") == 1, "has device_count");
+    assert(str_contains_cstr(json, "has_accelerator") == 1, "has has_accel");
+    assert(str_contains_cstr(json, "true") == 1, "accel true");
+    assert(str_contains_cstr(json, "gpu_count") == 1, "has gpu_count");
     return 0;
 }
 
@@ -111,12 +108,11 @@ fn test_json_optional_fields() {
     var sb = str_builder_new();
     profile_to_json(sb, p);
     var json = str_builder_build(sb);
-    var js = str_from(str_data(json));
 
     # Should NOT contain optional fields
-    assert(str_contains(js, "device_name") == 0, "no device_name for CPU");
-    assert(str_contains(js, "temperature_c") == 0, "no temp for CPU");
-    assert(str_contains(js, "numa_node") == 0, "no numa for CPU");
+    assert(str_contains_cstr(json, "device_name") == 0, "no device_name for CPU");
+    assert(str_contains_cstr(json, "temperature_c") == 0, "no temp for CPU");
+    assert(str_contains_cstr(json, "numa_node") == 0, "no numa for CPU");
     return 0;
 }
 
@@ -130,10 +126,9 @@ fn test_json_with_warnings() {
     vec_push(warns, warning_tool_not_found("nvidia-smi"));
 
     var json = registry_to_json(r);
-    var js = str_from(str_data(json));
 
-    assert(str_contains(js, "warnings") == 1, "has warnings");
-    assert(str_contains(js, "nvidia-smi") == 1, "warning content");
+    assert(str_contains_cstr(json, "warnings") == 1, "has warnings");
+    assert(str_contains_cstr(json, "nvidia-smi") == 1, "warning content");
     return 0;
 }
 
