@@ -7,6 +7,44 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.1.1] — 2026-05-10
+
+**Rust-port parity verification + scaffolding cleanup.** No code changes;
+documents the audit and removes stale defensive lines.
+
+### Verified
+
+- **Parity audit against the 1.x Rust crate** — every public API in
+  `docs/migration.md`'s Rust↔Cyrius mapping table (21 entries) has a
+  matching `fn` in `src/`. Spot-checked: `registry_detect`,
+  `registry_detect_threaded`, `builder_all`/`builder_none`/`builder_with`,
+  `reg_best_available` / `reg_total_memory` / `reg_has_accelerator`,
+  `reg_plan_sharding` / `reg_suggest_quant`, `cached_registry_new` /
+  `cached_get`, `lazy_new` / `lazy_by_family`, `profile_cuda` /
+  `profile_memory_bytes` / `profile_accel_type`, `accel_is_gpu`,
+  `model_can_run`, `detect_model_format` / `detect_format_from_bytes`.
+  No drift since the 2.0.0 mapping was authored.
+- **JSON `schema_version` still `2`** — wire-compatible with v1.x
+  Rust output.
+- **Cyrius-only additions confirmed live**: `requirement.cyr` (scheduling
+  integration), `async_detect.cyr` (threaded backends), `cache.cyr` (TTL
+  + disk variant), `lazy.cyr` (per-family deferred detection),
+  `model_format.cyr` (SafeTensors/GGUF/ONNX/PyTorch).
+- **Documented intentional gaps stay accurate**: Windows detection is
+  the only post-Rust feature gap; reachable now that cc5 5.10.x ships
+  a Win64 PE backend, tracked in the roadmap's 2.2.0 slot.
+
+### Removed
+
+- **`.gitignore`: `rust-old/` line** — `rust-old/` was deleted from the
+  tree at the 2.0.0 release (see [2.0.0] § Removed). The defensive
+  ignore line has been a no-op for the project's entire Cyrius
+  lifetime; removed now that the parity audit confirms nothing depends
+  on the historical directory.
+- **`.gitignore`: `tarpaulin-report.html`, `criterion/`** — Rust-era
+  coverage / benchmark artifacts. No Rust toolchain runs against this
+  tree anymore.
+
 ## [2.1.0] — 2026-05-10
 
 **Slot 1 of the cc5 adoption arc — test reorg + CI tighten.** Pure

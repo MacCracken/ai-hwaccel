@@ -7,9 +7,6 @@
 # version sitting in tree (matches agnosys/libro/patra convention).
 /lib/
 
-# Old Rust crate (archived, not tracked)
-rust-old/
-
 # Editor / IDE
 *.swp
 *.swo
@@ -33,9 +30,7 @@ qemu_*.core
 
 # Coverage
 lcov.info
-tarpaulin-report.html
 coverage/
-criterion/
 
 # Secrets / environment
 .env
