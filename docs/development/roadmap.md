@@ -181,17 +181,19 @@ target device.
 
 ### Cross-platform (no hardware needed for source work)
 
-- [ ] **Windows: DXGI adapter enumeration** — DXGI `EnumAdapters1` →
-  adapter LUID, dedicated VRAM, shared memory, driver version. Stack:
-  wire `src/detect/windows.cyr` behind `#ifdef CYRIUS_TARGET_WIN64`,
-  COM binding for `IDXGIFactory1`, ship CI cross-build (best-effort,
-  mirroring the aarch64 pattern). One slot for the skeleton + fixture
-  test; follow-up slot for the COM binding. **Toolchain prerequisites
-  resolved in 2.2.1**: `cc5_win` is now installed at
-  `~/.cyrius/bin/cc5_win` (cyrius 5.11.8 ships it by default); PE
-  exit-code propagation gotcha fixed in 5.11.6 so cross-host smoke on
-  `ssh cass` uses plain shell. *Next pickup target.* See
-  `memory/reference_windows_host.md`.
+- [~] **Windows: DXGI adapter enumeration** — DXGI `EnumAdapters1` →
+  adapter LUID, dedicated VRAM, shared memory, driver version. *In
+  progress*:
+  - [x] **2.2.2** — `src/detect/windows.cyr` skeleton behind
+    `#ifdef CYRIUS_TARGET_WIN`, wired into main.cyr include graph,
+    Linux build byte-identical.
+  - [ ] **2.2.3** — DXGI COM binding + `DXGI_ADAPTER_DESC1` parser,
+    Linux-side fixture tests under `tests/fixtures/windows/`.
+  - [ ] **CI cross-build + cass smoke** — **upstream-blocked**
+    on cc5_win 5.11.5 PE emit regression. End-to-end validation
+    gates on a cyrius-side patch; see
+    `memory/feedback_cc5_win_exit_propagation.md`. Linux-hosted
+    fixture tests in 2.2.3 don't depend on this.
 
 ### Hardware validation (fixture-first, hardware-second)
 

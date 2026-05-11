@@ -7,6 +7,81 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.2.2] — 2026-05-11
+
+**Windows backend — source-side skeleton.** `src/detect/windows.cyr`
+exists, wired into the include graph behind `#ifdef CYRIUS_TARGET_WIN`,
+ready to receive the DXGI binding. **Real Win64 cross-build is not
+viable yet** — cc5_win 5.11.5 has a PE emit regression (documented
+below) that prevents end-to-end validation. Source structure ships;
+cross-build + cross-host smoke gate on a cc5_win patch.
+
+### Added
+
+- **`src/detect/windows.cyr`** — single-file skeleton behind
+  `#ifdef CYRIUS_TARGET_WIN`. Stubs `detect_windows(profiles,
+  warnings)` matching the `detect_<backend>(profiles, warnings)`
+  convention used by the other detectors. Records a
+  `warning_tool_not_found("dxgi-binding-pending")` warning so the
+  runtime makes the stub state obvious at JSON level. Header
+  comments document the planned scope (COM binding, DXGI_ADAPTER_DESC1
+  parsing, ACCEL_DXGI / BACKEND_WIN_DXGI additions) for 2.2.3.
+- **`src/main.cyr` include**: `include "src/detect/windows.cyr"`
+  added between environment.cyr and registry.cyr. On Linux / macOS
+  builds the entire file preprocesses out — `build/ai-hwaccel`
+  stays **byte-identical at 286,152 bytes**.
+
+### Investigated and recorded as upstream blocker
+
+- **cc5_win 5.11.5 PE emit broken on cass**. Probed end-to-end this
+  slot:
+  - `syscall(60, 42); ` source → cc5_win builds a 1536-byte PE.
+  - PE loads on cass (Win11 26200), process starts.
+  - Exit code under `cmd /v /c "exe & echo exit=!errorlevel!"` is
+    **0x40001000** (1073745920), not 42.
+  - WriteFile output ("hello\n" from `syscall(1, 1, "hello\n", 6);`)
+    never reaches stdout.
+  - Same byte-identical emit from `cc5_win` (install) and
+    `cc5_win_cross` (cyrius source build, v5.10.37) — both versions
+    produce the same broken PE.
+  - Linux build of the same source works fine.
+
+  Recorded as `memory/feedback_cc5_win_exit_propagation.md`. Action:
+  filed against cyrius; ai-hwaccel's Win64 cross-build + cass smoke
+  gate on the fix. Linux fixture-based tests for the DXGI parser
+  (2.2.3) don't depend on this — the parser logic can be exercised
+  against synthetic `dxdiag` output without needing a Win64 binary
+  to load on cass.
+
+- **Full ai-hwaccel cross-build via cc5_win not yet viable.** A
+  full `cc5_win src/main.cyr` invocation runs to exit 0 but emits
+  a 1,536-byte stub PE rather than a real binary — cc5_win silently
+  fails on something deeper in the transitive include tree (likely
+  one of the Linux-only stdlib paths that the PE backend doesn't
+  yet reroute). Cyrius's own 5.11.6 release notes call out this
+  shape as "compile-path quirk." Skipping the CI cross-build step
+  until cc5_win can handle the full tree.
+
+### Verification
+
+- Linux build: **286,152 bytes** (byte-identical to 2.2.1 — the
+  windows.cyr include adds zero on non-Win targets).
+- 11 test units, **518 assertions, 0 failures**.
+- fmt sweep clean.
+- `cyrius vet src/main.cyr`: 37 deps (was 36 — `+1` for
+  `src/detect/windows.cyr`), 0 untrusted, 0 missing.
+
+### Next slot — 2.2.3
+
+Either:
+- **Wait for cc5_win patch** (cyrius-side) and resume cross-build +
+  COM binding in one go.
+- **Or proceed Linux-side**: implement the DXGI parser against
+  synthesized `dxdiag` text fixtures under `tests/fixtures/windows/`.
+  Parser logic ships and ride along once the cross-build is viable.
+
+The user can redirect.
+
 ## [2.2.1] — 2026-05-11
 
 **Cyrius toolchain bump 5.10.34 → 5.11.8.** Mechanical prerequisite

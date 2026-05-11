@@ -1,0 +1,47 @@
+# windows.cyr — Windows-side accelerator detection (skeleton).
+#
+# Compiled in only when the target is Win64 PE (CYRIUS_TARGET_WIN is
+# predefined by cc5_win — see cyrius src/main_win.cyr v5.5.0). On Linux
+# / macOS builds this entire file is preprocessed out, so the function
+# `detect_windows` doesn't exist in those builds and registry_detect_with
+# can't call it. Adding the call goes alongside the DXGI binding work in
+# a follow-up slot.
+#
+# Skeleton scope (this slot):
+#   - File exists, compiles clean under cc5_win
+#   - Single no-op entry point matching the detect_<backend>(profiles,
+#     warnings) convention used by the other detectors
+#   - Records a "DXGI not yet bound" warning so the runtime makes it
+#     obvious we shipped a stub
+#
+# Follow-up scope (next slot — 2.2.3):
+#   - COM binding for IDXGIFactory1 + EnumAdapters1 via kernel32 IAT
+#     (or whatever the cyrius PE backend exposes for COM interop)
+#   - DXGI_ADAPTER_DESC1 parsing → profile fields:
+#       Description  → profile_set_device_name
+#       VendorId     → profile_set_compute_cap (vendor hex string)
+#       DedicatedVideoMemory → profile_set_memory_bytes
+#       AdapterLuid  → kept as device_id (low 32 bits)
+#   - New ACCEL_DXGI enum entry in types.cyr
+#   - New BACKEND_WIN_DXGI bit in registry.cyr's builder mask
+#   - Fixture-based test under tests/tcyr/windows_dxgi_test.tcyr
+#
+# Cross-host validation note: cc5_win 5.11.5 currently has a PE emit
+# bug where ExitProcess(N) and WriteFile() don't reach userspace cleanly
+# on cass (Win11 26200) — PE binaries crash with exit 0x40001000.
+# See memory/feedback_cc5_win_exit_propagation.md. Tests gate on a
+# Linux-hosted fixture rather than ssh-cass smoke until cc5_win is
+# patched.
+
+#ifdef CYRIUS_TARGET_WIN
+
+# Detect Windows-visible accelerators via DXGI.
+# Skeleton: emits a single warning that DXGI binding is pending.
+fn detect_windows(profiles, warnings) {
+    if (warnings != 0) {
+        vec_push(warnings, warning_tool_not_found("dxgi-binding-pending"));
+    }
+    return 0;
+}
+
+#endif

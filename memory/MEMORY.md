@@ -4,3 +4,4 @@
 - [Cyrius language references](reference_cyrius_lang.md) — guide, compiler source, stdlib, vidya entries, roadmap locations
 - [Feedback — undefined symbol pain](feedback_undefined_symbol.md) — silent crash from typos, fixed in cc3 3.10.0
 - [Windows test host — cass](reference_windows_host.md) — `ssh cass` for Win64 PE validation; errorlevel wrapper gotcha documented
+- [cc5_win 5.11.5 exit-code propagation broken](feedback_cc5_win_exit_propagation.md) — PE binaries crash with 0x40001000 on cass; cross-host smoke must use stdout match, not exit code
