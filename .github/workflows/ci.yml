@@ -44,23 +44,30 @@ jobs:
         run: cyrius deps
 
       - name: Verify dep hashes
-        # `cyrius.lock` records the hash of each resolved dep; on
-        # second-and-later runs `--verify` asserts the bytes on disk
-        # match. First push of a fresh dep precedes the lockfile by
-        # one commit, so we soft-skip if missing.
+        # `cyrius.lock` records the hash of each [deps.<git>] entry —
+        # ai-hwaccel is stdlib-only (no external git deps), so cyrius
+        # deps emits no lockfile and there is nothing to verify. The
+        # check stays in place so it engages automatically the day a
+        # git dep gets added.
         run: |
           if [ -f cyrius.lock ]; then
             cyrius deps --verify
           else
-            echo "::warning::cyrius.lock not committed — skipping hash verification"
+            echo "no cyrius.lock (stdlib-only project) — nothing to verify"
           fi
+
+      - name: Include-graph audit
+        # `cyrius vet` walks every `include` from src/main.cyr and
+        # reports untrusted / missing entries. Catches drift between
+        # the in-tree includes and the manifest [deps] stdlib snapshot.
+        run: cyrius vet src/main.cyr
 
       - name: Format check
         # cyrius fmt <file> emits the formatted source to stdout; diff
         # against the committed file to enforce no drift.
         run: |
           fail=0
-          for f in src/*.cyr src/detect/*.cyr tests/*.cyr fuzz/*.fcyr benches/*.bcyr; do
+          for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do
             [ -f "$f" ] || continue
             if ! diff -q <(cyrius fmt "$f" 2>/dev/null) "$f" > /dev/null; then
               echo "needs fmt: $f"
@@ -86,11 +93,13 @@ jobs:
         run: xxd -l 4 build/ai-hwaccel | grep -q "7f45 4c46"
 
       - name: Test suite
+        # `tests/tcyr/*.tcyr` — descriptive-named test units. Each
+        # `.tcyr` is a standalone compilation unit (see 2.1.0 arc).
         run: |
           pass=0; fail=0
-          for t in tests/test_phase*.cyr; do
+          for t in tests/tcyr/*.tcyr; do
             [ -f "$t" ] || continue
-            name=$(basename "$t" .cyr)
+            name=$(basename "$t" .tcyr)
             echo "=== $name ==="
             CYRIUS_DCE=1 cyrius build "$t" "/tmp/ci_$name"
             if "/tmp/ci_$name" 2>&1 | tee "/tmp/${name}_out" | tail -1 | grep -q "0 failed"; then

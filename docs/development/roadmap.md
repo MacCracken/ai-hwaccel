@@ -48,40 +48,37 @@ gap, or tighten the CI gate. Each item is independent; ship in any order.
 
 ### CI / tooling tighten-up
 
-- [ ] **`cyrius vet`** — include-graph audit. Catches the `include "src/X.cyr"`
-  ↔ `src/main.cyr` drift that's currently invisible (no [lib] section
-  to validate against). Add as a workflow step.
-- [ ] **`cyrius capacity --check`** — global-var ceiling gate. The
-  CLAUDE.md "1024 global var limit" principle becomes machine-checked
-  rather than reviewer-checked.
+- [x] **`cyrius vet`** — include-graph audit. Added as CI step in slot 1
+  (reports `36 deps, 0 untrusted, 0 missing` for the current tree).
+- [ ] **`cyrius capacity --check`** — global-var ceiling gate. *Stalled on
+  toolchain*: cc5 5.10.x's `cyrius capacity` doesn't honour the manifest
+  `[deps].stdlib` auto-prepend, so it warns on every stdlib symbol when
+  src/main.cyr relies on the implicit include path. Reach out upstream
+  or re-evaluate after a cc5 patch; revisit when the warning floor is 0.
 - [ ] **`cyrius.lock` committed + `cyrius deps --verify` enforced** —
-  drop the soft-skip in the CI workflow once the lockfile lands.
-- [ ] **fmt drift gate** — already in place from 2.0.1, but expand to
-  cover `tests/` and `fuzz/` (currently only `src/`-level files in
-  some sweeps).
+  *not applicable while stdlib-only*: cyrius only writes a lockfile for
+  `[deps.<git>]` entries. The CI step stays in place so it engages the
+  moment a git dep gets added (e.g. an agnosys / libro pin for some
+  future feature). The "soft-skip" wording was renamed to
+  "no cyrius.lock (stdlib-only project) — nothing to verify".
+- [x] **fmt drift gate** — expanded to cover `tests/tcyr/*.tcyr`,
+  `fuzz/*.fcyr`, `benches/*.bcyr` in slot 1.
 
 ### Test infrastructure
 
-- [ ] **Rename `tests/test_phase{1..11}.cyr` to descriptive names** —
-  phase numbers map to no concept readers can recover from the source.
-  Proposed mapping:
-  - `test_phase1.cyr`  → `tests/foundation_test.cyr` (errors, accel types, units, quantization)
-  - `test_phase2.cyr`  → `tests/profile_test.cyr` (profile construction + setters)
-  - `test_phase3.cyr`  → `tests/registry_test.cyr` (registry assembly)
-  - `test_phase4.cyr`  → `tests/detect_gaudi_test.cyr` (gaudi detection)
-  - `test_phase5.cyr`  → `tests/detect_neuron_test.cyr` (neuron detection)
-  - `test_phase6.cyr`  → `tests/sharding_test.cyr` (plan / training)
-  - `test_phase7.cyr`  → `tests/system_io_test.cyr` (sysfs / proc reading)
-  - `test_phase8.cyr`  → `tests/cost_model_test.cyr` (cost / recommend)
-  - `test_phase9.cyr`  → `tests/json_output_test.cyr` (JSON serialization)
-  - `test_phase10.cyr` → `tests/model_format_test.cyr` (SafeTensors / GGUF / ONNX / PyTorch)
-  - `test_phase11.cyr` → `tests/requirement_test.cyr` (requirement matching)
-- [ ] **Migrate to `tests/tcyr/*.tcyr`** — once renamed, move under
-  `tests/tcyr/` and rename `.cyr` → `.tcyr` so `cyrius build` recognizes
-  them as test units and CI can iterate uniformly (matches
-  agnosys / libro / cyrius-internal convention). Lets us drop the
-  per-file `include "lib/*"` preamble (cyrius auto-prepends from
-  manifest deps for `.tcyr`).
+- [x] **`tests/test_phase{1..11}.cyr` → `tests/tcyr/<descriptive>_test.tcyr`**
+  — shipped in slot 1. Final mapping:
+  - `foundation_test.tcyr`     (errors, accel types, units, quantization)
+  - `profile_test.tcyr`         (profile construction + setters)
+  - `registry_test.tcyr`        (registry assembly)
+  - `detect_gaudi_test.tcyr`    (Gaudi detection)
+  - `detect_neuron_test.tcyr`   (Neuron detection)
+  - `sharding_test.tcyr`        (plan / training)
+  - `system_io_test.tcyr`       (sysfs / proc reading)
+  - `cost_model_test.tcyr`      (cost / recommend)
+  - `json_output_test.tcyr`     (JSON serialization)
+  - `model_format_test.tcyr`    (SafeTensors / GGUF / ONNX / PyTorch)
+  - `requirement_test.tcyr`     (requirement matching)
 - [ ] **Adopt `lib/test.cyr`** stdlib module — drops the local `assert`
   helpers in favor of the toolchain-tracked surface. Test summary
   format ("0 failed") is what CI greps for; `lib/test` already emits it.
