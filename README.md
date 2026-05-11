@@ -12,13 +12,13 @@ decide how to quantize and shard a model across them.
 
 | Metric | Value |
 |--------|-------|
-| Binary size | **217 KB** |
-| Compile time | **215 ms** |
-| Source LOC | 5,602 |
-| Tests | 518 assertions (11 phases) |
+| Binary size | **286 KB** |
+| Compiler | Cyrius cc5 5.10.34 |
+| Tests | 518 assertions (11 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** |
 | Hardware families | 18 |
+| Derived structs | 16 (every heap struct uses `#derive(accessors)`) |
 
 ## Supported Hardware
 
@@ -141,11 +141,55 @@ If a tool or sysfs path is absent the accelerator simply isn't registered — no
 ## Development
 
 ```sh
-cyrius build src/main.cyr build/ai-hwaccel    # Build
-cyrius test                                    # Run all test phases
+cyrius deps                                    # Repopulate lib/ from version-pinned stdlib
+cyrius build src/main.cyr build/ai-hwaccel    # Build (≈286 KB ELF, x86_64)
+cyrius vet src/main.cyr                        # Include-graph audit
 cyrius lint src/main.cyr                       # Static analysis
-cyrius fmt src/main.cyr --check                # Format check
-./scripts/bench-history.sh                     # Run benchmarks
+cyrius fmt src/main.cyr                        # Format check (diff against committed)
+
+# Test suite — 11 units under tests/tcyr/, 518 assertions total
+for t in tests/tcyr/*.tcyr; do
+    cyrius build "$t" "/tmp/$(basename $t .tcyr)"
+    "/tmp/$(basename $t .tcyr)"
+done
+
+./scripts/bench-history.sh                     # Run benchmarks, append to CSV
+```
+
+### Test units (`tests/tcyr/`)
+
+| Unit | Subject |
+|------|---------|
+| `foundation_test.tcyr` | error codes, accel types, family classification |
+| `profile_test.tcyr` | profile struct construction, throughput, rank |
+| `registry_test.tcyr` | registry + detection builder + suggest_quant |
+| `requirement_test.tcyr` | accelerator requirement matching |
+| `gpu_parser_test.tcyr` | CUDA / Gaudi / Neuron output parsing |
+| `backend_test.tcyr` | Apple / Intel / AMD XDNA / cloud ASIC / edge |
+| `io_test.tcyr` | `which`, `run_tool`, CSV / sysfs / path helpers |
+| `topology_test.tcyr` | interconnect / bandwidth / PCIe / storage / NVSwitch |
+| `planning_test.tcyr` | sharding plans + training memory + model checks |
+| `model_format_test.tcyr` | SafeTensors / GGUF / ONNX / PyTorch headers |
+| `json_output_test.tcyr` | JSON serialization (registry, summary, profile) |
+
+### Pattern: derived struct accessors
+
+Every heap-allocated struct in the project uses `#derive(accessors)`. CI
+gates raw `load64(<param> + N)` / `store64(<param> + N, …)` on these
+structs outside their defining file. See `.github/workflows/ci.yml`'s
+`Raw-offset guard` step.
+
+```cyrius
+#derive(accessors)
+struct profile {
+    accel_type; device_id; available; memory_bytes;
+    compute_cap; driver_version; device_name;
+    // ... 13 more fields
+}
+
+// Generated automatically:
+//   profile_accel_type(p)         getter
+//   profile_set_accel_type(p, v)  setter
 ```
 
 ## Documentation

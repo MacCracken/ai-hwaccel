@@ -107,18 +107,20 @@ gap, or tighten the CI gate. Each item is independent; ship in any order.
 ### Test infrastructure
 
 - [x] **`tests/test_phase{1..11}.cyr` → `tests/tcyr/<descriptive>_test.tcyr`**
-  — shipped in slot 1. Final mapping:
+  — shipped in 2.1.0; **6 of 11 names corrected in 2.2.0** after audit
+  revealed the original rename assumed phase numbers mapped 1:1 to
+  subjects, which several didn't. Corrected mapping:
   - `foundation_test.tcyr`     (errors, accel types, units, quantization)
-  - `profile_test.tcyr`         (profile construction + setters)
-  - `registry_test.tcyr`        (registry assembly)
-  - `detect_gaudi_test.tcyr`    (Gaudi detection)
-  - `detect_neuron_test.tcyr`   (Neuron detection)
-  - `sharding_test.tcyr`        (plan / training)
-  - `system_io_test.tcyr`       (sysfs / proc reading)
-  - `cost_model_test.tcyr`      (cost / recommend)
-  - `json_output_test.tcyr`     (JSON serialization)
-  - `model_format_test.tcyr`    (SafeTensors / GGUF / ONNX / PyTorch)
-  - `requirement_test.tcyr`     (requirement matching)
+  - `profile_test.tcyr`        (profile construction + accessors + throughput)
+  - `requirement_test.tcyr`    (accelerator requirement matching)
+  - `json_output_test.tcyr`    (JSON serialization)
+  - `model_format_test.tcyr`   (SafeTensors / GGUF / ONNX / PyTorch)
+  - `registry_test.tcyr`       (registry + builder + suggest_quant — *was system_io_test*)
+  - `io_test.tcyr`             (which / run_tool / CSV / sysfs — *was registry_test*)
+  - `gpu_parser_test.tcyr`     (CUDA + Gaudi + Neuron parsing — *was detect_gaudi_test*)
+  - `backend_test.tcyr`        (Apple + Intel + AMD XDNA + cloud ASIC — *was detect_neuron_test*)
+  - `topology_test.tcyr`       (interconnect / bandwidth / PCIe / storage — *was sharding_test*)
+  - `planning_test.tcyr`       (sharding plans + training memory + model — *was cost_model_test*)
 - [ ] **Adopt `lib/test.cyr`** stdlib module — drops the local `assert`
   helpers in favor of the toolchain-tracked surface. Test summary
   format ("0 failed") is what CI greps for; `lib/test` already emits it.

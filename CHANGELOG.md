@@ -7,6 +7,74 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-05-11
+
+**Test-file rename correction + README refresh.** Opens the 2.2.x
+arc with two concrete cleanups: fixing test names from 2.1.0 that
+didn't match content (audit found 6 of 11 misnamed), and refreshing
+the README which had been stale since 2.0.0 (eight releases of
+changes not surfaced to readers).
+
+The Windows DXGI backend item planned for 2.2.0 is deferred — cc5_win
+exists at v5.10.37 but isn't installed in the standard toolchain
+bundle, and the full COM/DXGI surface is a multi-slot scope. Carries
+to 2.3.0+.
+
+### Changed
+
+- **6 test files renamed** to match actual content (audit revealed
+  the 2.1.0 rename assumed phase numbers → subject 1:1, which several
+  didn't):
+
+  | 2.1.0 name (misleading) | Actual content | 2.2.0 name |
+  |---|---|---|
+  | `cost_model_test.tcyr` | sharding plans + training memory + model | `planning_test.tcyr` |
+  | `detect_gaudi_test.tcyr` | CUDA + Gaudi + Neuron parsing | `gpu_parser_test.tcyr` |
+  | `detect_neuron_test.tcyr` | Apple + Intel + AMD XDNA + cloud ASIC | `backend_test.tcyr` |
+  | `registry_test.tcyr` | which + run_tool + CSV + sysfs | `io_test.tcyr` |
+  | `sharding_test.tcyr` | interconnect + bandwidth + PCIe + storage | `topology_test.tcyr` |
+  | `system_io_test.tcyr` | registry + builder + suggest_quant | `registry_test.tcyr` |
+
+  The remaining 5 names (`foundation_test`, `profile_test`,
+  `requirement_test`, `json_output_test`, `model_format_test`) were
+  already accurate and stay unchanged. Git tracks all 6 as renames —
+  content byte-identical, all 518 assertions still pass.
+
+- **`README.md` refreshed**:
+  - Binary size: 217 KB → 286 KB (cc5 stdlib growth + derived setter
+    surface; documented in 2.0.1 / 2.1.x CHANGELOG entries).
+  - Compiler line: Cyrius cc5 5.10.34 (was implicit).
+  - Test-units table (the 11 `.tcyr` files with one-line descriptions)
+    replaces the stale "11 phases" reference.
+  - New section: "Pattern: derived struct accessors" with the
+    `#derive(accessors)` shape + CI gate pointer.
+  - Removed: Compile time + Source LOC rows (out of date and not
+    load-bearing; binary size + assertion count carry the same
+    signal).
+  - Development workflow snippet: now includes `cyrius deps` and the
+    `tests/tcyr/*.tcyr` test-loop pattern that matches CI.
+
+- **`docs/development/roadmap.md`**: the 2.1.0 test-rename entry now
+  carries the corrected mapping (was misleading documentation
+  alongside the bad names).
+
+### Test suite
+
+- 11 units, 518 assertions, 0 failures (unchanged from 2.1.7 — pure
+  rename slot).
+
+### Deferred
+
+- **Windows PE / DXGI backend** — cc5_win exists at v5.10.37 (built
+  in `/home/macro/Repos/cyrius/build/cc5_win_cross`) but isn't shipped
+  in the standard `~/.cyrius/bin/` install. COM interface binding for
+  `IDXGIFactory1::EnumAdapters1`, `DXGI_ADAPTER_DESC1` parsing, and
+  the CYRIUS_TARGET_WIN64 conditional-compile path is multi-slot
+  scope. Re-evaluate when cc5_win is in the default toolchain bundle.
+- **Live cloud hardware validation** — access-blocked until cloud
+  account credits are available; no source change possible from a
+  Linux dev box.
+
 ## [2.1.7] — 2026-05-11
 
 **P(-1) scaffold hardening: 8 more structs derived, every heap struct
