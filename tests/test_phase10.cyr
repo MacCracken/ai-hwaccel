@@ -217,13 +217,13 @@ fn test_unknown_format() {
 
 fn test_format_name() {
     assert(streq(format_name(FMT_SAFETENSORS), "SafeTensors") == 1,
-        "SafeTensors name");
+    "SafeTensors name");
     assert(streq(format_name(FMT_GGUF), "GGUF") == 1,
-        "GGUF name");
+    "GGUF name");
     assert(streq(format_name(FMT_ONNX), "ONNX") == 1,
-        "ONNX name");
+    "ONNX name");
     assert(streq(format_name(FMT_PYTORCH), "PyTorch") == 1,
-        "PyTorch name");
+    "PyTorch name");
     return 0;
 }
 
@@ -237,7 +237,7 @@ fn test_gguf_dtype_names() {
     assert(streq(_gguf_file_type_name(15), "Q4_K_M") == 1, "Q4_K_M");
     assert(streq(_gguf_file_type_name(18), "Q6_K") == 1, "Q6_K");
     assert(streq(_gguf_file_type_name(999), "unknown") == 1,
-        "unknown type");
+    "unknown type");
     return 0;
 }
 

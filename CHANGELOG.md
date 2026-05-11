@@ -7,6 +7,77 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-05-10
+
+**Toolchain bump — pure mechanical slot.** No source-code feature changes,
+no API surface changes for consumers. Compiles clean against the cc5
+generation; sets up the scaffolding 2.1.0's adoption arc needs.
+
+### Changed
+
+- **Cyrius pin: 3.10.0 → 5.10.34.** Two majors (3 → 4 → 5) and ten minors
+  absorbed in one bump. Highlights of what landed upstream during that
+  window (none adopted yet — see 2.1.0 roadmap):
+  - **4.0.0** (2026-04-13): `#derive(accessors)`, native multi-return
+    (`return (a, b)` / `var x, y = fn()`), `case N: { ... }` switch
+    blocks with scoped vars, defer-on-all-paths.
+  - **5.0.0** (2026-04-15): cc5 generation — basic-block IR + CFG +
+    LASE between parse and emit (transparent today, optimization-ready).
+    `cyrius.cyml` becomes the first-class manifest.
+  - **5.1 → 5.10.34**: `${file:VERSION}` interpolation, `cyrius.lock`
+    hash verification, `cyrius vet` / `cyrius capacity` / `cyrius audit`,
+    stricter `cyrius fmt`, 20+ new stdlib modules
+    (regex, toml, sandhi, net, audit_walk, test, …).
+- **Manifest: `cyrius.toml` → `cyrius.cyml`** with `version = "${file:VERSION}"`
+  interpolation. `VERSION` is now the single source of truth — no more
+  multi-file sed in `scripts/version-bump.sh`. Adds `repository` field.
+- **`lib/` vendored stdlib removed from tree** and `/lib/` gitignored.
+  `cyrius deps` repopulates it from the version-pinned `[deps].stdlib`
+  snapshot in `cyrius.cyml`. Matches agnosys / libro / patra / yukti
+  convention. Run `cyrius deps` after a fresh clone or cyrius upgrade.
+- **`.cyrius-toolchain` retired.** CI now reads the pin directly from
+  `cyrius.cyml`'s `cyrius = "X.Y.Z"` line — one source of truth, no
+  drift between manifest and toolchain file.
+- **`scripts/version-bump.sh` simplified to a one-liner.** Writes only
+  `VERSION`; the manifest auto-tracks via `${file:VERSION}`. Reminder
+  to add the CHANGELOG section before tagging.
+- **`CLAUDE.md`** — compiler reference updated to cc5 5.10.34. New
+  principles documented: vendored stdlib in `lib/` is gitignored;
+  bump only `VERSION`.
+
+### CI / Release workflows
+
+- **Canonical installer** — `.github/workflows/{ci,release}.yml` now
+  install Cyrius via `https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh`
+  rather than ad-hoc tarball fetch. Lays out `~/.cyrius/{bin,lib,versions}`
+  with the symlinks `cyrius deps` expects (without those, stdlib
+  resolution fails with `cannot read ./lib/<name>.cyr`).
+- **`cyrius deps` step** added before any compile, with `cyrius deps --verify`
+  gating against `cyrius.lock` (soft-skips on first push that introduces
+  a new dep before the lockfile lands).
+- **fmt drift gate** — `cyrius fmt <file>` emits to stdout and CI diffs
+  against the committed file. Catches over-indented blocks the older
+  fmt tolerated.
+- **Version consistency gate** — asserts `cyrius.cyml` carries the
+  `${file:VERSION}` literal and the `VERSION` value appears in
+  `CHANGELOG.md`. Release workflow additionally enforces tag ↔ VERSION
+  match (accepts both `vX.Y.Z` and `X.Y.Z` tag styles).
+- **Multi-arch release** — best-effort aarch64 cross-build when
+  `cc5_aarch64` is in the toolchain bundle. Releases ship src tarball
+  + per-arch binaries + SHA256SUMS, with the `## [x.y.z]` CHANGELOG
+  section auto-extracted as the release body.
+
+### Fixed
+
+- **`cyrius fmt` drift in 4 files** — `src/json_out.cyr`,
+  `src/model_format.cyr`, `tests/test_phase10.cyr`,
+  `tests/test_phase11.cyr` had inner blocks over-indented by 4 spaces
+  past their opening brace (a pattern the older 3.x fmt tolerated;
+  cc5 `cyrius fmt` enforces strict 4-space-per-scope). Test files also
+  had assertion-message continuations indented under the call's arg
+  list instead of aligned to the argument column. All four re-formatted
+  in place; entire `src/` / `tests/` / `fuzz/` / `benches/` swept clean.
+
 ## [2.0.0] - 2026-04-13
 
 ### Breaking
