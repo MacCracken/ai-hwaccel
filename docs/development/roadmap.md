@@ -189,6 +189,12 @@ target device.
   binding for `IDXGIFactory1`. Ship CI cross-build (best-effort,
   mirroring the aarch64 pattern). One slot for the skeleton + fixture
   test; follow-up slot for the COM binding. *Next pickup target.*
+  **Real-hardware validation: `ssh cass`** — project's Windows host
+  (same `cass` referenced in cyrius's v5.10.x cross-host smoke
+  testing). Use the `.bat`-indirection or `cmd /v /c "…
+  !errorlevel!"` wrapper for exit-code propagation — `%errorlevel%`
+  in `cmd /c` parses at the wrong time and false-reports `exit=0`.
+  See `memory/reference_windows_host.md`.
 
 ### Hardware validation (fixture-first, hardware-second)
 

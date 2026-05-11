@@ -3,3 +3,4 @@
 - [User profile — Robert MacCracken](user_robert.md) — AGNOS/Cyrius creator, systems developer, handles all git ops
 - [Cyrius language references](reference_cyrius_lang.md) — guide, compiler source, stdlib, vidya entries, roadmap locations
 - [Feedback — undefined symbol pain](feedback_undefined_symbol.md) — silent crash from typos, fixed in cc3 3.10.0
+- [Windows test host — cass](reference_windows_host.md) — `ssh cass` for Win64 PE validation; errorlevel wrapper gotcha documented
