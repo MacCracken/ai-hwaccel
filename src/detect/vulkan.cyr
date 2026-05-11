@@ -59,7 +59,7 @@ fn _parse_vulkaninfo(output, profiles) {
                     var mval = str_trim(str_sub(mline, meq + 1, str_len(mline) - meq - 1));
                     var mem_bytes = str_to_int(mval);
                     if (mem_bytes > 0) {
-                        store64(p + 24, mem_bytes);
+                        profile_set_memory_bytes(p, mem_bytes);
                         break;
                     }
                 }

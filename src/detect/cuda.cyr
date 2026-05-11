@@ -133,7 +133,7 @@ fn parse_cuda_output(output, profiles, warnings) {
                     if (mem_bytes > 80 * BYTES_PER_GIB) {
                         if (mem_bytes < 100 * BYTES_PER_GIB) {
                             # Add 480 GB unified LPDDR5X
-                            store64(p + 24, mem_bytes + 480 * BYTES_PER_GIB);
+                            profile_set_memory_bytes(p, mem_bytes + 480 * BYTES_PER_GIB);
                         }
                     }
                 }

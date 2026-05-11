@@ -119,6 +119,7 @@ jobs:
           check_struct ic       src/system_io.cyr  ic
           check_struct plan     src/system_io.cyr  sp
           check_struct reg      src/registry.cyr   r
+          check_struct profile  src/profile.cyr    p
           # Field-count bound checks (ambiguous param `e` shared between
           # est and runtime_env; meta and model both use `m`).
           # file                  | param | struct       | fields

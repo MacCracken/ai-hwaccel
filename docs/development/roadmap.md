@@ -24,38 +24,26 @@ gap, or tighten the CI gate. Each item is independent; ship in any order.
 
 ### Language features (adopt where they earn their keep)
 
-- [~] **`#derive(accessors)` on the major struct types** — adoption
-  in progress; each conversion ships with a CI gate update so the
-  new accessor surface is the only way in (see
-  `.github/workflows/ci.yml`'s `Raw-offset guard` step).
+- [x] **`#derive(accessors)` on the major struct types — DONE in 2.1.6.**
+  All 8 derivable structs are now on the accessor surface; the CI gate
+  registers 5 cross-file `check_struct` guards and 4 field-count bound
+  checks. See `.github/workflows/ci.yml`'s `Raw-offset guard` step.
   - [x] `meta` (`src/model_format.cyr`) — 5 fields. **2.1.3.**
-  - [x] `storage` (`src/system_io.cyr`) — 3 fields, paired with the
-    first cross-file raw-offset CI gate (param `sd` unambiguous).
-    **2.1.3.**
-  - [x] `ic` (interconnect, `src/system_io.cyr`) — 4 fields. Struct
-    named `ic` to match the existing `ic_*` accessor shorthand;
-    constructor stays `interconnect_new`. Zero call-site changes.
-    **2.1.4.**
-  - [x] `plan` (sharding, `src/system_io.cyr`) — 5 fields. Constructor
-    stays `sharding_plan_new`. Param `sp` unambiguous. **2.1.4.**
-  - [x] `est` (MemoryEstimate, `src/training.cyr`) — 4 fields. Constructor
-    stays `mem_est_new`. Param `e` shared with `runtime_env` in
-    system_io.cyr — guarded via field-count bound check (libro
-    pattern) rather than cross-file `check_struct`. **2.1.4.**
-  - [x] `reg` (accelerator_registry, `src/registry.cyr`) — 4 fields,
-    cross-file `check_struct` (param `r` unambiguous). Also cleaned up
-    9 internal `var profs = load64(r);` shortcuts → `reg_profiles(r)`.
-    **2.1.5.**
-  - [x] `model` (`src/model.cyr`) — 4 fields. Param `m` shared with
-    `meta` — both go through field-count bound check (libro pattern).
-    Also converted one in-place mutation `store64(m + 16, …)` →
-    `model_set_params_b_x1000(m, …)`. **2.1.5.**
-  - [ ] `profile` (`src/profile.cyr`) — big struct (≈20 fields,
-    multiple optional). The largest single conversion in the arc;
-    canonical param is `p`. Needs ambiguity check before deciding
-    whether the cross-file guard or the field-count bound check
-    applies (the `p` param appears in plan/cost helpers). Last item
-    in the arc.
+  - [x] `storage` (`src/system_io.cyr`) — 3 fields, first cross-file
+    raw-offset CI gate (param `sd` unambiguous). **2.1.3.**
+  - [x] `ic` (interconnect, `src/system_io.cyr`) — 4 fields. **2.1.4.**
+  - [x] `plan` (sharding, `src/system_io.cyr`) — 5 fields. **2.1.4.**
+  - [x] `est` (MemoryEstimate, `src/training.cyr`) — 4 fields, field-count
+    bound (param `e` shared with `runtime_env`). **2.1.4.**
+  - [x] `reg` (accelerator_registry, `src/registry.cyr`) — 4 fields.
+    Cleaned up 9 internal `load64(r)` shortcuts. **2.1.5.**
+  - [x] `model` (`src/model.cyr`) — 4 fields, field-count bound (param
+    `m` shared with `meta`). **2.1.5.**
+  - [x] `profile` (`src/profile.cyr`) — **20 fields**, biggest struct
+    in the codebase. Param `p` unambiguous — cross-file `check_struct`.
+    Converted 4 cross-file raw `store64(p + 24, …)` writes (cuda /
+    rocm / vulkan / gaudi memory_bytes overrides) to
+    `profile_set_memory_bytes(p, …)`. **2.1.6.**
 - [x] **Multi-return `(value, error)` in detect/* — investigated, doesn't
   fit.** Closed in 2.1.3 review without code change. The detect/ entry
   points are `detect_<backend>(profiles, warnings)` — both vec

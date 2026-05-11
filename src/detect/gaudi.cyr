@@ -43,7 +43,7 @@ fn detect_gaudi(profiles, warnings) {
 
         var p = profile_gaudi(dev_id, gen);
         # Override memory from hl-smi if available
-        store64(p + 24, mem_mb * 1024 * 1024);
+        profile_set_memory_bytes(p, mem_mb * 1024 * 1024);
 
         vec_push(profiles, p);
     }

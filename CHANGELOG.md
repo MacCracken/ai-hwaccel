@@ -7,6 +7,72 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.1.6] — 2026-05-11
+
+**cc5 adoption arc closes — `profile` converted, 8 structs total on
+`#derive(accessors)`.** The biggest struct in the codebase (20 fields,
+160 bytes, most-called accessor surface) now uses derived getters and
+setters. The cc5 adoption arc that opened with 2.1.0's mechanical
+test/CI reorg ends here.
+
+### Changed
+
+- **`profile` struct** (`src/profile.cyr`, was AcceleratorProfile) —
+  20 fields: `accel_type`, `device_id`, `available`, `memory_bytes`,
+  `compute_cap`, `driver_version`, `device_name`, `mem_bw_x1000`,
+  `mem_used`, `mem_free`, `pcie_bw_x1000`, `numa_node`, `temp_c`,
+  `power_x1000`, `gpu_util`, `tpu_version`, `tpu_chips`, `gaudi_gen`,
+  `neuron_chip`, `neuron_cores`. The 20 hand-rolled getters and 17
+  hand-rolled setters are gone; the constructor `profile_new` calls
+  the derived `profile_set_*` setters to initialise all 20 slots.
+  Struct name `profile` matches the existing `profile_*` accessor
+  convention — zero callsite changes for the dozens of detect/* /
+  registry / json_out / sharding / training / cost helpers that
+  consume the surface.
+- **4 cross-file raw `store64(p + 24, …)` writes** (all setting
+  `profile.memory_bytes` after hardware-specific detection adjusts the
+  value) converted to `profile_set_memory_bytes(p, …)`:
+  - `src/detect/gaudi.cyr:46` — hl-smi memory override
+  - `src/detect/vulkan.cyr:62` — vulkaninfo heapSize parsing
+  - `src/detect/cuda.cyr:136` — GH200 unified memory adjustment
+    (`+ 480 GiB`)
+  - `src/detect/rocm.cyr:100` — ROCm CXL visible-VRAM total
+
+### CI
+
+- **Raw-offset guard** now registers 9 entries (5 cross-file + 4
+  field-count bound):
+  - Cross-file `check_struct`: `storage` (sd), `ic` (ic), `plan` (sp),
+    `reg` (r), **`profile` (p)** (new).
+  - Field-count bound: `est` (e, 4), `runtime_env` (e, 8),
+    `meta` (m, 5), `model` (m, 4).
+
+### Binary size
+
+- `build/ai-hwaccel`: **281,720 bytes** (was 281,592 at 2.1.5). +128
+  bytes — `profile` had hand-rolled setters already, so the derive
+  output mostly replaced existing code rather than adding fresh setter
+  bodies. 518 assertions, 0 failures.
+
+### Arc closes
+
+- **2.1.x cc5 adoption arc complete.** Six slots over two days:
+  - 2.1.0 — test reorg + CI tighten
+  - 2.1.1 — Rust parity audit + gitignore cleanup
+  - 2.1.2 — defer audit (clean), chrono investigated and rejected,
+    build/ untracked
+  - 2.1.3 — `#derive(accessors)` proof of concept (meta + storage),
+    first raw-offset CI gate
+  - 2.1.4 — three more structs (ic + plan + est), CI gate gains
+    libro field-count bound check
+  - 2.1.5 — two more structs (reg + model), gate at 8 entries
+  - 2.1.6 — `profile` (this slot), gate at 9 entries
+- **Next arc: 2.2.0 — Platform Validation.** Live cloud hardware
+  validation (NVIDIA H100/A100/GH200, AMD MI300X, Google TPU v5,
+  AWS Neuron, Intel Gaudi 3), Windows PE backend (now reachable
+  via cc5 5.10.x), and the untested-backend list (Cerebras WSE,
+  Graphcore IPU, Groq, Samsung NPU, MediaTek APU).
+
 ## [2.1.5] — 2026-05-11
 
 **cc5 adoption arc — `#derive(accessors)` continues. Two more structs

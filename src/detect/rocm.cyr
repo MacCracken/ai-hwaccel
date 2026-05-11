@@ -97,7 +97,7 @@ fn detect_rocm(profiles, warnings) {
         var vis_total = sysfs_read_int(vis_path);
         if (vis_total > mem_total) {
             # CXL memory detected — add to total
-            store64(p + 24, vis_total);
+            profile_set_memory_bytes(p, vis_total);
         }
 
         vec_push(profiles, p);
