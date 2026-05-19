@@ -152,13 +152,14 @@ gap, or tighten the CI gate. Each item is independent; ship in any order.
   use stdlib `lib/assert.cyr` (the `assert`, `assert_eq`,
   `assert_summary` surface). Nothing to migrate.
 
-### Dist bundle (defer until consumer demand)
+### Dist bundle — promoted to 2.2.4
 
-- [ ] **`[lib]` section + `cyrius distlib`?** Pattern-match against
-  agnosys/libro: a single bundled `dist/ai-hwaccel.cyr` lets consumers
-  `include "lib/ai_hwaccel.cyr"` from their own manifest. Today the
-  consumer list is hoosh / daimon / Irfan / AgnosAI / murti / tazama —
-  all consume the binary, not a library. Hold until a consumer asks.
+- [x] **`[lib]` section + `cyrius distlib`** — promoted to its own
+  release slot at **2.2.4** (2026-05-19) after `mihi` arrived as the
+  first library-shaped consumer: mihi's no-exec rule forbids shelling
+  out to the binary, so the GPU surface mihi needs (M3 in mihi's own
+  roadmap) is gated on this reshape. See 2.2.4 below for the
+  acceptance criteria.
 
 ### Out of scope (kept for 2.2+)
 
@@ -196,6 +197,42 @@ target device.
     closed by the 6.0.0 toolchain; smoke probe required before
     declaring this unblocked. Linux-hosted fixture tests in 2.2.3
     don't depend on this either way.
+
+### 2.2.4 — `[lib]` reshape (mihi unblock)
+
+Promoted out of the 2.1.0 "Dist bundle (defer until consumer demand)"
+slot now that a real library consumer landed. `mihi` v0.3.0 (released
+2026-05-19) needs the GPU primitives via `include`, not `exec` — its
+CLAUDE.md forbids spawning processes from probes. This release adds
+the `[lib].modules` surface and the `cyrius distlib` output so mihi
+(and any future library consumer) can pin against ai-hwaccel from
+their own `cyrius.cyml`.
+
+- [ ] **`[lib].modules` declared in `cyrius.cyml`** — bundle order
+  follows the include graph of `src/main.cyr` minus the CLI-only
+  modules. Candidates: `src/types.cyr`, `src/error.cyr`,
+  `src/units.cyr`, `src/quantization.cyr`, `src/profile.cyr`,
+  `src/registry.cyr`, plus the relevant `src/detect/*.cyr`. Excluded:
+  `src/main.cyr` (CLI argv parsing), `src/json_out.cyr` (binary
+  output formatting — consumers do their own).
+- [ ] **`cyrius distlib` produces deterministic `dist/ai-hwaccel.cyr`**
+  — byte-identical across runs. Mirrors the mihi pattern.
+- [ ] **Consumer-facing entry shim** — a small `lib/ai_hwaccel.cyr`
+  re-export plus a `[deps.ai-hwaccel]` manifest example in the README
+  so library consumers have a copy-pasteable starting point.
+- [ ] **No CLI regression** — `build/ai-hwaccel` still builds from
+  `src/main.cyr` and all 518 assertions pass.
+- [ ] **Determinism guard in CI** — `cyrius distlib` runs twice,
+  `sha256sum` matches.
+- [ ] **`mihi-side smoke**` — after 2.2.4 publishes, mihi M3 lands
+  `mihi_gpu_vendor` / `mihi_gpu_model` against the new `[lib]`
+  surface; smoke on archaemenid (Ryzen 7 5800H with Radeon Graphics)
+  prints non-null GPU lines.
+
+**Acceptance**: a consumer manifest with
+`[deps.ai-hwaccel] = "2.2.4"` resolves via `cyrius deps`, the
+consumer can `include "lib/ai_hwaccel.cyr"`, and the detection entry
+points are callable without invoking the CLI binary.
 
 ### Hardware validation (fixture-first, hardware-second)
 
