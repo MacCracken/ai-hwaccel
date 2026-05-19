@@ -27,6 +27,13 @@ fn detect_neuron(profiles, warnings) {
     while (ni < nids) {
         var dev_id = vec_get(ids, ni);
         var p = profile_neuron(dev_id, chip, 2);
+        # Device name: "AWS Inferentia" / "AWS Trainium" via the
+        # chip-enum → string helper. 2.2.5 left this null.
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "AWS ");
+        str_builder_add_cstr(sb, neuron_chip_name(chip));
+        var nnm = str_builder_build(sb);
+        profile_set_device_name(p, str_data(nnm));
         vec_push(profiles, p);
         ni = ni + 1;
     }
@@ -96,6 +103,13 @@ fn _parse_neuron_json(output, profiles) {
 
         var dev_id = vec_len(profiles);
         var p = profile_neuron(dev_id, chip, cores);
+        # Device name: "AWS Inferentia" / "AWS Trainium" — same shape
+        # as the sysfs-fallback path. 2.2.5 left this null too.
+        var jnm_sb = str_builder_new();
+        str_builder_add_cstr(jnm_sb, "AWS ");
+        str_builder_add_cstr(jnm_sb, neuron_chip_name(chip));
+        var jnm = str_builder_build(jnm_sb);
+        profile_set_device_name(p, str_data(jnm));
         vec_push(profiles, p);
 
         pos = pos + 10;

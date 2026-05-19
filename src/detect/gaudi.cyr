@@ -45,6 +45,27 @@ fn detect_gaudi(profiles, warnings) {
         # Override memory from hl-smi if available
         profile_set_memory_bytes(p, mem_mb * 1024 * 1024);
 
+        # Device name: prefer the hl-smi CSV "name" field (e.g.
+        # "HL-225" / "HL-325") when present; otherwise synthesize
+        # "Intel Gaudi2" / "Intel Gaudi3" from the generation enum.
+        # name_field is a str_split slice (not guaranteed null-
+        # terminated), so copy out via alloc+memcpy+NUL — same
+        # pattern apple.cyr uses for its parsed chip_name.
+        if (str_len(name_field) > 0) {
+            var nfd = str_data(name_field);
+            var nfl = str_len(name_field);
+            var nfc = alloc(nfl + 1);
+            memcpy(nfc, nfd, nfl);
+            store8(nfc + nfl, 0);
+            profile_set_device_name(p, nfc);
+        } else {
+            var sb = str_builder_new();
+            str_builder_add_cstr(sb, "Intel ");
+            str_builder_add_cstr(sb, gaudi_gen_name(gen));
+            var gnm = str_builder_build(sb);
+            profile_set_device_name(p, str_data(gnm));
+        }
+
         vec_push(profiles, p);
     }
     return 0;

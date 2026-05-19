@@ -35,6 +35,43 @@ fn detect_rocm(profiles, warnings) {
 
         var p = profile_rocm(dev_id, mem_total);
 
+        # Device name: prefer the kernel-exposed product_name (newer
+        # amdgpu drivers populate it for discrete cards); otherwise
+        # build a synthesized "AMD Radeon (PCI vendor:device)" string
+        # from the sysfs vendor + device files, which always exist.
+        # Worst case (both missing) we fall through to "AMD Radeon".
+        # This closes the 2.2.5 gap where ROCm GPUs reported a null
+        # device name (mihi 0.4.0 smoke showed "(unnamed)").
+        var prod_path = sysfs_path_str("/sys/class/drm", name, "device/product_name");
+        var prod = sysfs_read(prod_path);
+        if (prod != 0 && str_len(prod) > 0) {
+            var pd = str_data(prod);
+            var pl = str_len(prod);
+            var pc = alloc(pl + 1);
+            memcpy(pc, pd, pl);
+            store8(pc + pl, 0);
+            profile_set_device_name(p, pc);
+        } else {
+            var vendor_path = sysfs_path_str("/sys/class/drm", name, "device/vendor");
+            var device_path = sysfs_path_str("/sys/class/drm", name, "device/device");
+            var vendor_s = sysfs_read(vendor_path);
+            var device_s = sysfs_read(device_path);
+            if (vendor_s != 0 && device_s != 0) {
+                # Build "AMD Radeon (PCI 0x1002:0x1638)" — vendor + device
+                # files come prefixed with "0x" already.
+                var sb = str_builder_new();
+                str_builder_add_cstr(sb, "AMD Radeon (PCI ");
+                str_builder_add(sb, vendor_s);
+                str_builder_add_cstr(sb, ":");
+                str_builder_add(sb, device_s);
+                str_builder_add_cstr(sb, ")");
+                var nm = str_builder_build(sb);
+                profile_set_device_name(p, str_data(nm));
+            } else {
+                profile_set_device_name(p, "AMD Radeon");
+            }
+        }
+
         if (mem_used > 0) {
             profile_set_mem_used(p, mem_used);
             profile_set_mem_free(p, mem_total - mem_used);

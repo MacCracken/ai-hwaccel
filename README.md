@@ -63,17 +63,17 @@ ai-hwaccel --version        # Print version
 `cyrius distlib` bundles every non-CLI module into `dist/ai-hwaccel.cyr`,
 a single self-contained file consumers pull via `cyrius deps`. Bundle
 includes all 18 detection backends, the registry/profile surface, the
-sharding planner, the cost model, the training memory estimator, and
-the model-format header parser. Excluded: `src/main.cyr` (CLI argv) and
-`src/json_out.cyr` (CLI output formatting — library consumers serialize
-on their own terms).
+sharding planner, the cost model, the training memory estimator, the
+model-format header parser, and (since 2.2.6) the JSON serializer.
+Only `src/main.cyr` (CLI argv parsing) is excluded. Library consumers
+that don't need JSON output get the serializer DCE'd for free.
 
 Wire it from a consumer's `cyrius.cyml`:
 
 ```toml
 [deps.ai-hwaccel]
 git = "https://github.com/MacCracken/ai-hwaccel.git"
-tag = "2.2.5"
+tag = "2.2.6"
 modules = ["dist/ai-hwaccel.cyr"]
 ```
 

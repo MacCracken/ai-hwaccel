@@ -42,6 +42,13 @@ fn detect_tpu(profiles, warnings) {
         if (chip_count <= 0) { chip_count = 1; }
 
         var p = profile_tpu(dev_id, chip_count, version);
+        # Device name: "Google TPU v4" / "v5e" / "v5p" via the
+        # version-enum → string helper. 2.2.5 left this null.
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "Google TPU ");
+        str_builder_add_cstr(sb, tpu_version_name(version));
+        var tnm = str_builder_build(sb);
+        profile_set_device_name(p, str_data(tnm));
         vec_push(profiles, p);
     }
     return 0;

@@ -14,11 +14,17 @@ output = "ai-hwaccel"
 # `[lib]` exists so `cyrius distlib` knows what to concatenate into
 # dist/ai-hwaccel.cyr — the single-file bundle library consumers
 # (mihi first; see docs/development/roadmap.md 2.2.4) pull via a
-# `[deps.ai-hwaccel]` block. The bundle excludes src/main.cyr (CLI
-# argv parsing) and src/json_out.cyr (CLI output formatting — library
-# consumers build their own serialization). Module order mirrors the
-# include order in src/main.cyr — critical for Cyrius's single-pass
-# forward-reference resolution.
+# `[deps.ai-hwaccel]` block. Excludes src/main.cyr only (CLI argv
+# parsing). Module order mirrors the include order in src/main.cyr —
+# critical for Cyrius's single-pass forward-reference resolution.
+#
+# 2.2.6 note: json_out.cyr is now included. 2.2.4–2.2.5 excluded it
+# because the rationale was "library consumers build their own
+# serialization" — but cache.cyr's disk-cache write path calls
+# registry_to_json unconditionally, leaving the bundle with a
+# dangling reference. Easier and cleaner to ship the serializer than
+# to feature-gate the disk-write path. Library consumers (mihi) DCE
+# everything they don't call; binary size is unchanged.
 [lib]
 modules = [
     "src/units.cyr",
@@ -57,6 +63,7 @@ modules = [
     "src/async_detect.cyr",
     "src/cache.cyr",
     "src/lazy.cyr",
+    "src/json_out.cyr",
 ]
 
 [deps]
