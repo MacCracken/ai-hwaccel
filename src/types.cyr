@@ -353,3 +353,22 @@ fn backend_name(b) {
     if (b == BACKEND_MEDIATEK_APU) { return "mediatek-apu"; }
     return "unknown";
 }
+
+# Classifies whether a backend's detector spawns a subprocess
+# (vendor CLI: nvidia-smi, hl-smi, neuron-ls, xpu-smi, system_profiler,
+# vulkaninfo, cerebras_cli, gc-info). Library consumers with a no-exec
+# contract (e.g. mihi's probe surface) use builder_no_exec() / the
+# registry_detect_no_exec() entry point, which honors this predicate.
+# Source-of-truth grep: any detect_<backend> that calls run_tool* in
+# src/detect/<backend>.cyr is EXEC; everything else is sysfs/syscall.
+fn backend_uses_exec(b) {
+    if (b == BACKEND_CUDA) { return 1; }
+    if (b == BACKEND_APPLE) { return 1; }
+    if (b == BACKEND_VULKAN) { return 1; }
+    if (b == BACKEND_GAUDI) { return 1; }
+    if (b == BACKEND_NEURON) { return 1; }
+    if (b == BACKEND_INTEL_ONEAPI) { return 1; }
+    if (b == BACKEND_CEREBRAS) { return 1; }
+    if (b == BACKEND_GRAPHCORE) { return 1; }
+    return 0;
+}

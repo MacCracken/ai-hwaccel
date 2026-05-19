@@ -135,6 +135,67 @@ fn test_builder_selective() {
     return 0;
 }
 
+# --- 2.2.5: no-exec contract ---
+
+fn test_backend_uses_exec() {
+    # Eight backends shell out to vendor CLIs
+    assert_eq(backend_uses_exec(BACKEND_CUDA), 1, "cuda exec");
+    assert_eq(backend_uses_exec(BACKEND_APPLE), 1, "apple exec");
+    assert_eq(backend_uses_exec(BACKEND_VULKAN), 1, "vulkan exec");
+    assert_eq(backend_uses_exec(BACKEND_GAUDI), 1, "gaudi exec");
+    assert_eq(backend_uses_exec(BACKEND_NEURON), 1, "neuron exec");
+    assert_eq(backend_uses_exec(BACKEND_INTEL_ONEAPI), 1, "intel-oneapi exec");
+    assert_eq(backend_uses_exec(BACKEND_CEREBRAS), 1, "cerebras exec");
+    assert_eq(backend_uses_exec(BACKEND_GRAPHCORE), 1, "graphcore exec");
+
+    # Eight backends are pure sysfs/syscall
+    assert_eq(backend_uses_exec(BACKEND_ROCM), 0, "rocm sysfs");
+    assert_eq(backend_uses_exec(BACKEND_INTEL_NPU), 0, "intel-npu sysfs");
+    assert_eq(backend_uses_exec(BACKEND_AMD_XDNA), 0, "xdna sysfs");
+    assert_eq(backend_uses_exec(BACKEND_TPU), 0, "tpu sysfs");
+    assert_eq(backend_uses_exec(BACKEND_QUALCOMM), 0, "qualcomm sysfs");
+    assert_eq(backend_uses_exec(BACKEND_GROQ), 0, "groq sysfs");
+    assert_eq(backend_uses_exec(BACKEND_SAMSUNG_NPU), 0, "samsung sysfs");
+    assert_eq(backend_uses_exec(BACKEND_MEDIATEK_APU), 0, "mediatek sysfs");
+    return 0;
+}
+
+fn test_builder_no_exec_mask() {
+    var mask = builder_no_exec();
+
+    # Every sysfs backend present
+    assert_eq(builder_is_enabled(mask, BACKEND_ROCM), 1, "rocm in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_INTEL_NPU), 1, "npu in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_AMD_XDNA), 1, "xdna in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_TPU), 1, "tpu in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_QUALCOMM), 1, "qualcomm in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_GROQ), 1, "groq in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_SAMSUNG_NPU), 1, "samsung in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_MEDIATEK_APU), 1, "mediatek in mask");
+
+    # Every exec backend absent
+    assert_eq(builder_is_enabled(mask, BACKEND_CUDA), 0, "cuda excluded");
+    assert_eq(builder_is_enabled(mask, BACKEND_APPLE), 0, "apple excluded");
+    assert_eq(builder_is_enabled(mask, BACKEND_VULKAN), 0, "vulkan excluded");
+    assert_eq(builder_is_enabled(mask, BACKEND_GAUDI), 0, "gaudi excluded");
+    assert_eq(builder_is_enabled(mask, BACKEND_NEURON), 0, "neuron excluded");
+    assert_eq(builder_is_enabled(mask, BACKEND_INTEL_ONEAPI), 0, "oneapi excluded");
+    assert_eq(builder_is_enabled(mask, BACKEND_CEREBRAS), 0, "cerebras excluded");
+    assert_eq(builder_is_enabled(mask, BACKEND_GRAPHCORE), 0, "graphcore excluded");
+    return 0;
+}
+
+# Defense-in-depth: even when the caller forces an EXEC bit on,
+# registry_detect_with_opts(mask, 0) must strip it before dispatch.
+fn test_no_exec_strips_exec_bits() {
+    var poisoned = builder_no_exec() | (1 << BACKEND_CUDA) | (1 << BACKEND_NEURON);
+    var stripped = poisoned & builder_no_exec();
+    assert_eq(builder_is_enabled(stripped, BACKEND_CUDA), 0, "cuda forced off");
+    assert_eq(builder_is_enabled(stripped, BACKEND_NEURON), 0, "neuron forced off");
+    assert_eq(builder_is_enabled(stripped, BACKEND_ROCM), 1, "rocm preserved");
+    return 0;
+}
+
 # --- Suggest quantization ---
 
 fn test_suggest_quant_gpu_small() {
@@ -217,6 +278,9 @@ test_registry_by_family();
 test_builder_all();
 test_builder_none();
 test_builder_selective();
+test_backend_uses_exec();
+test_builder_no_exec_mask();
+test_no_exec_strips_exec_bits();
 test_suggest_quant_gpu_small();
 test_suggest_quant_gpu_large();
 test_suggest_quant_tpu();

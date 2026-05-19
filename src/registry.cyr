@@ -221,13 +221,49 @@ fn builder_with(mask, backend) { return mask | (1 << backend); }
 fn builder_without(mask, backend) { return mask & (~(1 << backend)); }
 fn builder_is_enabled(mask, backend) { return (mask >> backend) & 1; }
 
+# Mask of backends whose detectors are pure sysfs/syscall reads — no
+# subprocess spawning. Library consumers with a no-exec contract
+# (mihi's probe surface) call this then registry_detect_with(builder_no_exec()),
+# or use the convenience registry_detect_no_exec() entry point.
+fn builder_no_exec() {
+    var mask = 0;
+    var b = 0;
+    while (b < BACKEND_COUNT) {
+        if (backend_uses_exec(b) == 0) {
+            mask = mask | (1 << b);
+        }
+        b = b + 1;
+    }
+    return mask;
+}
+
 # --- Full detection orchestration ---
 
 fn registry_detect() {
-    return registry_detect_with(builder_all());
+    return registry_detect_with_opts(builder_all(), 1);
 }
 
 fn registry_detect_with(builder_mask) {
+    return registry_detect_with_opts(builder_mask, 1);
+}
+
+# No-subprocess detection — masks off exec-shelling backends (defense
+# in depth: even if the caller's mask had them set) and skips the only
+# exec-shaped post-pass (detect_interconnects, which calls ibstat /
+# nvidia-smi for fabric topology). Safe to call from contexts that
+# forbid process spawning, e.g. mihi probes. See backend_uses_exec()
+# in types.cyr for the per-backend classification.
+fn registry_detect_no_exec() {
+    return registry_detect_with_opts(builder_no_exec(), 0);
+}
+
+fn registry_detect_with_opts(builder_mask, allow_exec) {
+    # When exec is forbidden, force-strip any exec backends the caller
+    # may have enabled. backend_uses_exec() is the source of truth.
+    if (allow_exec == 0) {
+        builder_mask = builder_mask & builder_no_exec();
+    }
+
     var r = registry_new();
     var profs = reg_profiles(r);
     var warns = reg_warnings(r);
@@ -274,13 +310,16 @@ fn registry_detect_with(builder_mask) {
         detect_mediatek_apu(profs, warns);
     }
 
-    # Post-passes: enrich profiles
+    # Post-passes: enrich profiles (sysfs only — always run)
     enrich_bandwidth(profs);
     enrich_pcie(profs);
     enrich_numa(profs);
 
-    # Detect system I/O
-    detect_interconnects(sio, profs, warns);
+    # Detect system I/O — detect_interconnects shells out to ibstat /
+    # nvidia-smi topo; gate it on allow_exec.
+    if (allow_exec == 1) {
+        detect_interconnects(sio, profs, warns);
+    }
     detect_storage(sio);
     detect_environment(sio);
 

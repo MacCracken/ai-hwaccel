@@ -73,7 +73,7 @@ Wire it from a consumer's `cyrius.cyml`:
 ```toml
 [deps.ai-hwaccel]
 git = "https://github.com/MacCracken/ai-hwaccel.git"
-tag = "2.2.4"
+tag = "2.2.5"
 modules = ["dist/ai-hwaccel.cyr"]
 ```
 
@@ -83,14 +83,40 @@ consumer's `lib/`. Include it like any other dep:
 ```cyrius
 include "lib/ai-hwaccel.cyr"
 
-# Call the detection surface directly — no exec, no subprocess.
+# Full detection — sysfs probes plus vendor CLIs (nvidia-smi,
+# system_profiler, vulkaninfo, hl-smi, neuron-ls, xpu-smi,
+# cerebras_cli, gc-info) for the eight EXEC backends, and ibstat /
+# nvidia-smi topo for the interconnect post-pass.
 var r = registry_detect();
 # ... reg_profiles(r), reg_count(r), ...
 ```
 
-Library consumers today: `mihi` v0.4.0 (M3 GPU probe). All consumers
-are listed in [Consumers](#consumers); historically every entry has
-been a binary consumer — library use begins with mihi.
+#### No-exec entry point (since 2.2.5)
+
+Consumers with a no-subprocess contract — `mihi`'s probe surface, any
+read-only system-info library — call `registry_detect_no_exec()`
+instead. It masks off the eight exec-shelling backends (CUDA, Apple,
+Vulkan, Gaudi, Neuron, Intel oneAPI, Cerebras, Graphcore) and skips
+the `detect_interconnects` post-pass. The remaining eight backends —
+ROCm, Intel NPU, AMD XDNA, TPU, Qualcomm, Groq, Samsung NPU, MediaTek
+APU — plus the sysfs post-passes still run.
+
+```cyrius
+include "lib/ai-hwaccel.cyr"
+
+# Pure sysfs/syscall reads — safe to call from probe contexts that
+# forbid spawning processes (e.g. mihi).
+var r = registry_detect_no_exec();
+```
+
+The classification lives in `backend_uses_exec(b)` in `src/types.cyr`;
+`builder_no_exec()` is exposed if you want to compose your own mask
+(e.g. `builder_no_exec() & builder_without(builder_no_exec(), BACKEND_GROQ)`).
+
+Library consumers today: `mihi` v0.4.0 (M3 GPU probe, pending —
+drives the 2.2.5 no-exec contract). All consumers are listed in
+[Consumers](#consumers); historically every entry has been a binary
+consumer — library use begins with mihi.
 
 ## Architecture
 
