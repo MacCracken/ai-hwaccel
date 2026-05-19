@@ -21,12 +21,13 @@ jobs:
       - name: Install Cyrius toolchain
         run: |
           # Use the canonical installer so the layout matches what
-          # `cyrius deps` and `cyriusly` expect: a per-version tree
-          # under ~/.cyrius/versions/$VER/{bin,lib}/, plus
-          # ~/.cyrius/current + the ~/.cyrius/{bin,lib} → versions/$VER
-          # symlinks. cyrius deps reads stdlib from ~/.cyrius/lib;
-          # without the symlinks the stdlib copy fails with
-          # "cannot read ./lib/<name>.cyr" for every [deps].stdlib entry.
+          # `cyrius lib sync`, `cyrius deps`, and `cyriusly` expect:
+          # a per-version tree under ~/.cyrius/versions/$VER/{bin,lib}/,
+          # plus ~/.cyrius/current + the ~/.cyrius/{bin,lib} →
+          # versions/$VER symlinks. `cyrius lib sync` (cyrius 6.0.0+)
+          # copies the stdlib snapshot at ~/.cyrius/versions/$VER/lib/
+          # into ./lib/. `cyrius deps` resolves only non-stdlib
+          # [deps.*] git entries from 6.0.0 onward.
           CYRIUS_VERSION="${CYRIUS_VERSION:-$(grep -E '^cyrius[[:space:]]*=' cyrius.cyml | sed -E 's/^cyrius[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')}"
           echo "Installing Cyrius $CYRIUS_VERSION"
           curl -sSf "https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh" \
@@ -37,11 +38,19 @@ jobs:
       - name: Verify toolchain
         run: cyrius --version
 
-      - name: Resolve dependencies
-        # `./lib/` is gitignored — `cyrius deps` populates it from the
-        # version-pinned stdlib snapshot. Must run before any compile
-        # step. Matches agnosys/libro/patra convention.
-        run: cyrius deps
+      - name: Sync stdlib into ./lib/
+        # `./lib/` is gitignored — `cyrius lib sync` (cyrius 6.0.0+)
+        # copies the pinned stdlib snapshot from
+        # ~/.cyrius/versions/$VER/lib/ into ./lib/. Must run before any
+        # compile step. (Pre-6.0.0 this was `cyrius deps`; the stdlib
+        # responsibility split out of `deps` in 6.0.0.)
+        run: cyrius lib sync
+
+      - name: Resolve non-stdlib deps
+        # `cyrius deps` resolves any `[deps.<name>]` git entries (none
+        # today — ai-hwaccel is stdlib-only). Kept in place so the gate
+        # engages automatically the day a git dep is added.
+        run: cyrius deps || echo "no non-stdlib deps to resolve"
 
       - name: Verify dep hashes
         # `cyrius.lock` records the hash of each [deps.<git>] entry —

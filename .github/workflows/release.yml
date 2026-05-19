@@ -51,8 +51,13 @@ jobs:
       - name: Verify toolchain
         run: cyrius --version
 
-      - name: Resolve deps
-        run: cyrius deps
+      - name: Sync stdlib into ./lib/
+        # cyrius 6.0.0+: stdlib copy split out of `cyrius deps` into
+        # `cyrius lib sync`. Pulls from ~/.cyrius/versions/$VER/lib/.
+        run: cyrius lib sync
+
+      - name: Resolve non-stdlib deps
+        run: cyrius deps || echo "no non-stdlib deps to resolve"
 
       - name: Verify dep hashes
         run: |

@@ -7,9 +7,10 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
-### 2.2.3 — toolchain rename slot (cycc canonical)
+## [2.2.3] — 2026-05-19
 
-**Push back DXGI feature work; absorb the cyrius 6.0.0 compiler
+**Toolchain rename slot — `cycc` canonical, `cc5` only as a legacy
+symlink. Push back DXGI feature work; absorb the cyrius 6.0.0 compiler
 rename as the 2.2.3 slot.** Cyrius 6.0.0 renames the compiler binary
 from `cc5` to `cycc` (with `cc5_aarch64` → `cycc_aarch64`, `cc5_win`
 → `cycc_win`). The legacy `cc5*` names ship as symlinks for now, so
@@ -42,6 +43,15 @@ toolchain.
 - **`memory/reference_windows_host.md`** forward guidance — `cc5_win`
   / `cc5_win_cross` → `cycc_win` / `cycc_win_cross`.
 - **`memory/MEMORY.md`** index entry phrasing updated.
+- **CI stdlib resolution (`.github/workflows/ci.yml`,
+  `.github/workflows/release.yml`)**: insert a "Sync stdlib into
+  `./lib/`" step that runs `cyrius lib sync` before the existing
+  "Resolve non-stdlib deps" (`cyrius deps`) step. Pre-6.0.0 the
+  single `cyrius deps` invocation handled both; in 6.0.0 the
+  responsibilities split, so CI now mirrors the local workflow.
+  Without this change, CI fails with 18 × "cannot read
+  ./lib/<name>.cyr" because `cyrius deps` no longer fills the
+  stdlib subset.
 
 #### Not changed (intentional)
 
