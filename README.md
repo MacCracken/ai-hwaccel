@@ -13,7 +13,7 @@ decide how to quantize and shard a model across them.
 | Metric | Value |
 |--------|-------|
 | Binary size | **286 KB** |
-| Compiler | Cyrius cc5 5.10.34 |
+| Compiler | Cyrius cycc 6.0.0 |
 | Tests | 518 assertions (11 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** |

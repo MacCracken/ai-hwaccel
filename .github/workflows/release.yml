@@ -70,14 +70,15 @@ jobs:
 
       - name: Cross-build aarch64 (best-effort)
         # Produces build/ai-hwaccel-aarch64 when the toolchain bundle
-        # includes cc5_aarch64. Archive step ships both x86 + aarch64
-        # binaries when present.
+        # includes cycc_aarch64 (legacy name cc5_aarch64; kept as a
+        # symlink under cyrius 6.0.0). Archive step ships both x86 +
+        # aarch64 binaries when present.
         run: |
-          if [ -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
+          if [ -x "$HOME/.cyrius/bin/cycc_aarch64" ] || [ -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
             CYRIUS_DCE=1 cyrius build --aarch64 src/main.cyr build/ai-hwaccel-aarch64
             echo "ai-hwaccel-aarch64: $(wc -c < build/ai-hwaccel-aarch64) bytes"
           else
-            echo "::warning::cc5_aarch64 not in toolchain — aarch64 binary skipped in release"
+            echo "::warning::cycc_aarch64 not in toolchain — aarch64 binary skipped in release"
           fi
 
       - name: Smoke test

@@ -189,11 +189,13 @@ target device.
     Linux build byte-identical.
   - [ ] **2.2.3** — DXGI COM binding + `DXGI_ADAPTER_DESC1` parser,
     Linux-side fixture tests under `tests/fixtures/windows/`.
-  - [ ] **CI cross-build + cass smoke** — **upstream-blocked**
-    on cc5_win 5.11.5 PE emit regression. End-to-end validation
-    gates on a cyrius-side patch; see
-    `memory/feedback_cc5_win_exit_propagation.md`. Linux-hosted
-    fixture tests in 2.2.3 don't depend on this.
+  - [ ] **CI cross-build + cass smoke** — re-verify against
+    `cycc_win` 6.0.0 (legacy name `cc5_win`). The 5.11.5-era PE
+    emit regression documented in
+    `memory/feedback_cc5_win_exit_propagation.md` may already be
+    closed by the 6.0.0 toolchain; smoke probe required before
+    declaring this unblocked. Linux-hosted fixture tests in 2.2.3
+    don't depend on this either way.
 
 ### Hardware validation (fixture-first, hardware-second)
 
@@ -252,7 +254,7 @@ Bindings and packaging.
 - [ ] **Complete API surface** — `AcceleratorProfile`, `SystemIo`,
   `Interconnect`, `StorageDevice`, `ShardingPlan`, `TrainingMethod`
 - [ ] **`pip install ai-hwaccel`** — wheels for Linux (manylinux),
-  macOS (universal2), Windows (x86_64). cyrius cc5 emits ELF/Mach-O/PE,
+  macOS (universal2), Windows (x86_64). cyrius cycc emits ELF/Mach-O/PE,
   so the wheel build is `cyrius build` per-target rather than maturin
 - [ ] **Python-native ergonomics** — dict-like objects, JSON
   serialization, pandas DataFrame export
@@ -277,7 +279,7 @@ Bindings and packaging.
 ### Hot-plug support
 
 - [ ] **`udev` watcher (Linux)** — `registry_watch()` returns
-  `DeviceEvent::Added` / `DeviceEvent::Removed` stream. cc5's defer
+  `DeviceEvent::Added` / `DeviceEvent::Removed` stream. cycc's defer
   + `lib/thread.cyr` make this cleaner than the Rust plan assumed.
 - [ ] **Dynamic registry updates** — `CachedRegistry` auto-invalidates
   on hot-plug events

@@ -5,9 +5,11 @@ type: reference
 ---
 
 `ssh cass` connects to the project's Windows host. Use it to verify
-cc5_win-produced PE binaries (Win64 target) actually run end-to-end, and
-to capture real DXGI / WMI / `dxdiag` output for `tests/fixtures/windows/`
-when the Windows DXGI backend slot lands.
+cycc_win-produced PE binaries (Win64 target) actually run end-to-end,
+and to capture real DXGI / WMI / `dxdiag` output for
+`tests/fixtures/windows/` when the Windows DXGI backend slot lands.
+(The `cc5_win` name is now a legacy symlink under cyrius 6.0.0; the
+canonical binary is `cycc_win`.)
 
 This is the same `cass` referenced throughout the cyrius CHANGELOG's
 v5.10.x cross-host smoke testing (e.g., entry 5.10.49 debunked a PE
@@ -16,8 +18,9 @@ exit=!errorlevel!"` on cass).
 
 ### Exit-code propagation
 
-ai-hwaccel pinned cyrius **5.11.8** in 2.2.1, which includes the 5.11.6
-wrapper fix. Exit-code tests on cass can use plain shell shape:
+ai-hwaccel pinned cyrius **6.0.0** in 2.2.3 (was **5.11.8** in 2.2.1),
+which includes the 5.11.6 wrapper fix. Exit-code tests on cass can use
+plain shell shape:
 
 ```sh
 ssh cass 'ai-hwaccel.exe --version; echo exit=%errorlevel%'
@@ -39,9 +42,10 @@ future 5.10.x-pinned consumer that hits the same gotcha.
 
 For ai-hwaccel:
 
-- **Cross-host smoke** — after `cc5_win_cross src/main.cyr build/ai-hwaccel.exe`,
-  `scp build/ai-hwaccel.exe cass:` then
-  `ssh cass 'cmd /v /c "ai-hwaccel.exe --version & echo exit=!errorlevel!"'`.
+- **Cross-host smoke** — after `cycc_win src/main.cyr build/ai-hwaccel.exe`
+  (or `cc5_win` via the legacy symlink), `scp build/ai-hwaccel.exe cass:`
+  then `ssh cass 'ai-hwaccel.exe --version & echo exit=%errorlevel%'`
+  with the 6.0.0 toolchain.
 - **DXGI fixture capture** — once `src/detect/windows.cyr` lands,
   `ssh cass 'dxdiag /t %TEMP%\dxdiag.txt && type %TEMP%\dxdiag.txt'`
   captures the human-readable adapter list; the COM/DXGI binding's

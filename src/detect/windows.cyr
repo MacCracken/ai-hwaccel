@@ -1,14 +1,15 @@
 # windows.cyr — Windows-side accelerator detection (skeleton).
 #
 # Compiled in only when the target is Win64 PE (CYRIUS_TARGET_WIN is
-# predefined by cc5_win — see cyrius src/main_win.cyr v5.5.0). On Linux
-# / macOS builds this entire file is preprocessed out, so the function
-# `detect_windows` doesn't exist in those builds and registry_detect_with
-# can't call it. Adding the call goes alongside the DXGI binding work in
-# a follow-up slot.
+# predefined by cycc_win — see cyrius src/main_win.cyr v5.5.0; `cc5_win`
+# is a legacy symlink to the same binary). On Linux / macOS builds this
+# entire file is preprocessed out, so the function `detect_windows`
+# doesn't exist in those builds and registry_detect_with can't call it.
+# Adding the call goes alongside the DXGI binding work in a follow-up
+# slot.
 #
 # Skeleton scope (this slot):
-#   - File exists, compiles clean under cc5_win
+#   - File exists, compiles clean under cycc_win
 #   - Single no-op entry point matching the detect_<backend>(profiles,
 #     warnings) convention used by the other detectors
 #   - Records a "DXGI not yet bound" warning so the runtime makes it
@@ -26,12 +27,12 @@
 #   - New BACKEND_WIN_DXGI bit in registry.cyr's builder mask
 #   - Fixture-based test under tests/tcyr/windows_dxgi_test.tcyr
 #
-# Cross-host validation note: cc5_win 5.11.5 currently has a PE emit
-# bug where ExitProcess(N) and WriteFile() don't reach userspace cleanly
-# on cass (Win11 26200) — PE binaries crash with exit 0x40001000.
-# See memory/feedback_cc5_win_exit_propagation.md. Tests gate on a
-# Linux-hosted fixture rather than ssh-cass smoke until cc5_win is
-# patched.
+# Cross-host validation note: cycc_win 5.11.5 (then named cc5_win)
+# had a PE emit bug where ExitProcess(N) and WriteFile() didn't reach
+# userspace cleanly on cass (Win11 26200) — PE binaries crashed with
+# exit 0x40001000. See memory/feedback_cc5_win_exit_propagation.md.
+# Status with the 6.0.0 toolchain unconfirmed; tests still gate on a
+# Linux-hosted fixture rather than ssh-cass smoke until re-verified.
 
 #ifdef CYRIUS_TARGET_WIN
 

@@ -7,6 +7,78 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+### 2.2.3 — toolchain rename slot (cycc canonical)
+
+**Push back DXGI feature work; absorb the cyrius 6.0.0 compiler
+rename as the 2.2.3 slot.** Cyrius 6.0.0 renames the compiler binary
+from `cc5` to `cycc` (with `cc5_aarch64` → `cycc_aarch64`, `cc5_win`
+→ `cycc_win`). The legacy `cc5*` names ship as symlinks for now, so
+nothing breaks immediately — but every live, forward-looking reference
+moves to the canonical name so the codebase stops drifting behind the
+toolchain.
+
+#### Changed
+
+- **`cyrius.cyml`**: `cyrius = "5.11.8"` → `cyrius = "6.0.0"`.
+- **`VERSION`**: 2.2.2 → 2.2.3.
+- **`CLAUDE.md`**:
+  - Compiler line: "Cyrius cc5 5.11.8" → "Cyrius cycc 6.0.0", with
+    a note that `cc5` remains as a legacy symlink in `~/.cyrius/bin/`.
+  - `#derive(accessors)` version note: `cc5 v3.7.1+` → `cycc v3.7.1+`.
+- **`README.md`** Key Numbers row: `Cyrius cc5 5.10.34` → `Cyrius cycc 6.0.0`.
+- **`src/detect/windows.cyr`** header comments: forward-looking
+  references to `cc5_win` → `cycc_win` (with the legacy-symlink note
+  inline). The 5.11.5 PE emit blocker note is preserved as a status
+  question against 6.0.0 rather than as a hard block.
+- **`docs/development/roadmap.md`**:
+  - 2.2.3 CI cross-build entry — reframed from "upstream-blocked on
+    cc5_win 5.11.5" to "re-verify against `cycc_win` 6.0.0; smoke
+    probe required before declaring it unblocked."
+  - 2.3.0 Python-bindings entry: "cyrius cc5 emits ELF/Mach-O/PE" →
+    "cyrius cycc emits ELF/Mach-O/PE."
+  - 2.4.0 hot-plug entry: "cc5's defer" → "cycc's defer."
+- **`.github/workflows/release.yml`**: aarch64 gate uses
+  `~/.cyrius/bin/cycc_aarch64` (warning text updated to match).
+- **`memory/reference_windows_host.md`** forward guidance — `cc5_win`
+  / `cc5_win_cross` → `cycc_win` / `cycc_win_cross`.
+- **`memory/MEMORY.md`** index entry phrasing updated.
+
+#### Not changed (intentional)
+
+- Shipped CHANGELOG entries (`cc5 adoption arc`, all 2.1.x sections,
+  the 2.2.1 toolchain-bump entry, the 2.2.2 cc5_win 5.11.5 blocker
+  filing) — historical record using the names in use at the time.
+- `memory/feedback_cc5_win_exit_propagation.md` filename — preserved
+  to keep cross-refs from the cyrius issue tree intact.
+- Source files outside `src/detect/windows.cyr` — no other source
+  references the compiler name; nothing to update.
+
+#### Pushed to 2.2.4
+
+- **DXGI COM binding + `DXGI_ADAPTER_DESC1` parser** (was 2.2.3 plan).
+- **Linux-hosted fixture tests under `tests/fixtures/windows/`**.
+
+#### Verification
+
+- Linux build (`CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel`)
+  against cycc 6.0.0: **287,096 bytes** (was 286,152 at 2.2.2, +944 bytes).
+  The size change comes from the 6.0.0 stdlib snapshot, not project source —
+  the stdlib added new modules (`atomic`, `async`, `mmap`, per-arch
+  `syscalls_*_linux`, …) that the include graph now pulls in. 638
+  unreachable fns NOPed by DCE (was 629 at 2.2.2).
+- Test suite: 11 units, **520 assertions, 0 failures** (was 518 at 2.2.2;
+  +2 from the new stdlib).
+- fmt sweep: clean across `src/`, `tests/tcyr/`, `fuzz/`, `benches/`.
+
+#### Stdlib repopulation note (workflow change)
+
+- **`cyrius deps` no longer repopulates the stdlib in 6.0.0.** Use
+  `cyrius lib sync` instead — it copies the snapshot at
+  `~/.cyrius/versions/<pin>/lib/*.cyr` into `./lib/`. After fresh
+  clone or cyrius upgrade, run `cyrius lib sync` then `cyrius deps`
+  (the latter still resolves non-stdlib `[deps.*]` entries).
+  CLAUDE.md updated to reflect this.
+
 ## [2.2.2] — 2026-05-11
 
 **Windows backend — source-side skeleton.** `src/detect/windows.cyr`

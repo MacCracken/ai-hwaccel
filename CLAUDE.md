@@ -6,7 +6,7 @@
 
 - **Type**: Cyrius binary (CLI)
 - **License**: GPL-3.0-only
-- **Compiler**: Cyrius cc5 5.11.8 (pinned in `cyrius.cyml`)
+- **Compiler**: Cyrius cycc 6.0.0 (pinned in `cyrius.cyml`; the legacy `cc5` name is still a symlink in `~/.cyrius/bin/` but the binary is `cycc`)
 - **Version**: SemVer — `VERSION` file is the single source of truth; `cyrius.cyml` interpolates via `${file:VERSION}`
 
 ## Consumers
@@ -52,9 +52,9 @@ hoosh, daimon, Irfan, AgnosAI, murti, tazama
 - **`str_builder` over `format!`** — avoid temporary allocations.
 - **Enum constants over global vars** — avoid the 1024 global var limit.
 - **Feature-gate optional modules** — `#ifdef` / `-D` flags for conditional compilation.
-- **Vendored stdlib in `lib/` is gitignored** — `cyrius deps` repopulates it from the version-pinned `[deps].stdlib` snapshot in `cyrius.cyml`. Run `cyrius deps` after fresh clone or cyrius upgrade.
+- **Vendored stdlib in `lib/` is gitignored** — under cyrius 6.0.0, run `cyrius lib sync` to copy the pinned stdlib snapshot (`~/.cyrius/versions/<pin>/lib/*.cyr`) into `./lib/`. Run after fresh clone or cyrius upgrade. (`cyrius deps` handles non-stdlib `[deps.*]` entries only; the legacy "stdlib via deps" behaviour was retired in 6.0.0.)
 - **Single version source** — bump only `VERSION`; `cyrius.cyml` reads it via `${file:VERSION}`. Use `./scripts/version-bump.sh <new>` then add the CHANGELOG section, tag, and push.
-- **All heap-allocated structs use `#derive(accessors)`** (cc5 v3.7.1+). Pattern: `#derive(accessors) struct <name> { field1; field2; … }` generates `<name>_<field>(p)` getters and `<name>_set_<field>(p, v)` setters under the existing accessor-prefix convention. Constructors stay manual (derive only generates accessors), calling the derived setters internally instead of raw `store64(p + N, v)`. The 16 derived structs at 2.1.7 are: `meta`, `storage`, `ic`, `plan`, `est`, `reg`, `model`, `profile`, `env`, `sio`, `shard`, `cloud_inst`, `rec`, `cached`, `disk_cached`, `lazy`. New structs follow the same pattern.
+- **All heap-allocated structs use `#derive(accessors)`** (cycc v3.7.1+, shipped under the legacy `cc5` name). Pattern: `#derive(accessors) struct <name> { field1; field2; … }` generates `<name>_<field>(p)` getters and `<name>_set_<field>(p, v)` setters under the existing accessor-prefix convention. Constructors stay manual (derive only generates accessors), calling the derived setters internally instead of raw `store64(p + N, v)`. The 16 derived structs at 2.1.7 are: `meta`, `storage`, `ic`, `plan`, `est`, `reg`, `model`, `profile`, `env`, `sio`, `shard`, `cloud_inst`, `rec`, `cached`, `disk_cached`, `lazy`. New structs follow the same pattern.
 - **Raw-offset access on derived structs is CI-gated** (`.github/workflows/ci.yml` → `Raw-offset guard`). Cross-file `check_struct <struct> <defining_file> <param>` catches any `load64(<param> + N)` / `store64(<param> + N, …)` outside the defining file (only valid when param is unambiguous across `src/`). Per-file `check_offset_bound <file> <param> <struct> <field_count>` catches offsets past the struct boundary for ambiguous params. New derived struct → add an entry; rename a field → no gate change (derive picks up the new accessor name).
 
 ## DO NOT
