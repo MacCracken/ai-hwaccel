@@ -169,6 +169,31 @@ jobs:
             cyrius lint "$f" || true
           done
 
+      - name: distlib drift + determinism
+        # `cyrius distlib` reads [lib].modules and emits
+        # dist/ai-hwaccel.cyr — the single-file bundle library
+        # consumers (mihi v0.4.0 first; see roadmap 2.2.4) pull via
+        # `[deps.ai-hwaccel]`. Two invariants enforced:
+        #   1. Drift: regenerate and diff against the committed
+        #      bundle. Drift means src/ changed but the dist artifact
+        #      wasn't refreshed — consumers would ship stale code.
+        #   2. Determinism: re-run distlib and sha256-compare. Any
+        #      non-determinism (timestamps, dict ordering, …) breaks
+        #      the reproducible-build contract.
+        # Mirrors the libro / mihi / yukti gates.
+        run: |
+          test -f dist/ai-hwaccel.cyr || { echo "FAIL: dist/ai-hwaccel.cyr missing — run 'cyrius distlib' and commit."; exit 1; }
+          cp dist/ai-hwaccel.cyr /tmp/dist-checked-in.cyr
+          cyrius distlib > /dev/null
+          diff -q /tmp/dist-checked-in.cyr dist/ai-hwaccel.cyr \
+            || { echo "FAIL: dist/ai-hwaccel.cyr is stale. Run 'cyrius distlib' and commit."; exit 1; }
+          sha256sum dist/ai-hwaccel.cyr > /tmp/dist_a.sha
+          cyrius distlib > /dev/null
+          sha256sum dist/ai-hwaccel.cyr > /tmp/dist_b.sha
+          diff -q /tmp/dist_a.sha /tmp/dist_b.sha \
+            || { echo "FAIL: cyrius distlib output not deterministic across runs."; cat /tmp/dist_a.sha /tmp/dist_b.sha; exit 1; }
+          echo "distlib: bundle fresh + deterministic ($(wc -l < dist/ai-hwaccel.cyr) lines)"
+
       - name: Build (DCE)
         run: |
           mkdir -p build

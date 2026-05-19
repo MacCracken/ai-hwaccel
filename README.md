@@ -58,6 +58,40 @@ ai-hwaccel --cost 70B       # Cloud instance recommendation
 ai-hwaccel --version        # Print version
 ```
 
+### Using as a library
+
+`cyrius distlib` bundles every non-CLI module into `dist/ai-hwaccel.cyr`,
+a single self-contained file consumers pull via `cyrius deps`. Bundle
+includes all 18 detection backends, the registry/profile surface, the
+sharding planner, the cost model, the training memory estimator, and
+the model-format header parser. Excluded: `src/main.cyr` (CLI argv) and
+`src/json_out.cyr` (CLI output formatting — library consumers serialize
+on their own terms).
+
+Wire it from a consumer's `cyrius.cyml`:
+
+```toml
+[deps.ai-hwaccel]
+git = "https://github.com/MacCracken/ai-hwaccel.git"
+tag = "2.2.4"
+modules = ["dist/ai-hwaccel.cyr"]
+```
+
+`cyrius deps` clones at the tag and drops the bundle into the
+consumer's `lib/`. Include it like any other dep:
+
+```cyrius
+include "lib/ai-hwaccel.cyr"
+
+# Call the detection surface directly — no exec, no subprocess.
+var r = registry_detect();
+# ... reg_profiles(r), reg_count(r), ...
+```
+
+Library consumers today: `mihi` v0.4.0 (M3 GPU probe). All consumers
+are listed in [Consumers](#consumers); historically every entry has
+been a binary consumer — library use begins with mihi.
+
 ## Architecture
 
 ```

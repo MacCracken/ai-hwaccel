@@ -198,7 +198,7 @@ target device.
     declaring this unblocked. Linux-hosted fixture tests in 2.2.3
     don't depend on this either way.
 
-### 2.2.4 — `[lib]` reshape (mihi unblock)
+### 2.2.4 — `[lib]` reshape (mihi unblock) — SHIPPED 2026-05-19
 
 Promoted out of the 2.1.0 "Dist bundle (defer until consumer demand)"
 slot now that a real library consumer landed. `mihi` v0.3.0 (released
@@ -208,31 +208,39 @@ the `[lib].modules` surface and the `cyrius distlib` output so mihi
 (and any future library consumer) can pin against ai-hwaccel from
 their own `cyrius.cyml`.
 
-- [ ] **`[lib].modules` declared in `cyrius.cyml`** — bundle order
-  follows the include graph of `src/main.cyr` minus the CLI-only
-  modules. Candidates: `src/types.cyr`, `src/error.cyr`,
-  `src/units.cyr`, `src/quantization.cyr`, `src/profile.cyr`,
-  `src/registry.cyr`, plus the relevant `src/detect/*.cyr`. Excluded:
-  `src/main.cyr` (CLI argv parsing), `src/json_out.cyr` (binary
-  output formatting — consumers do their own).
-- [ ] **`cyrius distlib` produces deterministic `dist/ai-hwaccel.cyr`**
-  — byte-identical across runs. Mirrors the mihi pattern.
-- [ ] **Consumer-facing entry shim** — a small `lib/ai_hwaccel.cyr`
-  re-export plus a `[deps.ai-hwaccel]` manifest example in the README
-  so library consumers have a copy-pasteable starting point.
-- [ ] **No CLI regression** — `build/ai-hwaccel` still builds from
-  `src/main.cyr` and all 518 assertions pass.
-- [ ] **Determinism guard in CI** — `cyrius distlib` runs twice,
-  `sha256sum` matches.
-- [ ] **`mihi-side smoke**` — after 2.2.4 publishes, mihi M3 lands
+- [x] **`[lib].modules` declared in `cyrius.cyml`** — 35 modules in
+  `src/main.cyr` include order. Excluded: `src/main.cyr` (CLI argv
+  parsing), `src/json_out.cyr` (binary output formatting — consumers
+  do their own). Every detection backend, registry/profile/plan
+  surface, the cost / training / model-format / requirement /
+  async / cache / lazy modules all ride along.
+- [x] **`cyrius distlib` produces deterministic `dist/ai-hwaccel.cyr`**
+  — 5392 lines / 168 KiB at 2.2.4. Two sequential invocations sha256
+  to the same digest. Bundle is committed at the tag so consumer
+  `cyrius deps` resolves at git-archive-fetch.
+- [x] **Consumer-facing entry shim + README example** —
+  `[deps.ai-hwaccel]` block plus an `include "lib/ai-hwaccel.cyr"`
+  call site in the README "Using as a library" subsection. `cyrius
+  deps` lands the bundle at `lib/ai-hwaccel.cyr` (filename verified
+  empirically against the cyrius 6.0.0 toolchain).
+- [x] **No CLI regression** — `build/ai-hwaccel` rebuilds to 287096
+  bytes (byte-identical to 2.2.3); all 11 test units pass with 518
+  assertions clean post-`[lib]` addition.
+- [x] **Determinism + freshness guard in CI** — new `distlib drift +
+  determinism` step regenerates the bundle, diffs against the
+  committed copy, then re-runs and sha256-compares. Sits between
+  `Lint` and `Build (DCE)`. Mirrors the libro / mihi / yukti gates.
+- [ ] **`mihi-side smoke`** — after 2.2.4 publishes, mihi M3 lands
   `mihi_gpu_vendor` / `mihi_gpu_model` against the new `[lib]`
   surface; smoke on archaemenid (Ryzen 7 5800H with Radeon Graphics)
-  prints non-null GPU lines.
+  prints non-null GPU lines. *External — tracked in mihi's roadmap.*
 
 **Acceptance**: a consumer manifest with
-`[deps.ai-hwaccel] = "2.2.4"` resolves via `cyrius deps`, the
-consumer can `include "lib/ai_hwaccel.cyr"`, and the detection entry
-points are callable without invoking the CLI binary.
+`[deps.ai-hwaccel] tag = "2.2.4" modules = ["dist/ai-hwaccel.cyr"]`
+resolves via `cyrius deps`, the consumer can
+`include "lib/ai-hwaccel.cyr"`, and the detection entry points are
+callable without invoking the CLI binary. **Met for the in-repo
+deliverables; mihi-side verification queues for v0.4.0.**
 
 ### Hardware validation (fixture-first, hardware-second)
 

@@ -11,5 +11,53 @@ repository = "https://github.com/MacCracken/ai-hwaccel"
 entry = "src/main.cyr"
 output = "ai-hwaccel"
 
+# `[lib]` exists so `cyrius distlib` knows what to concatenate into
+# dist/ai-hwaccel.cyr — the single-file bundle library consumers
+# (mihi first; see docs/development/roadmap.md 2.2.4) pull via a
+# `[deps.ai-hwaccel]` block. The bundle excludes src/main.cyr (CLI
+# argv parsing) and src/json_out.cyr (CLI output formatting — library
+# consumers build their own serialization). Module order mirrors the
+# include order in src/main.cyr — critical for Cyrius's single-pass
+# forward-reference resolution.
+[lib]
+modules = [
+    "src/units.cyr",
+    "src/error.cyr",
+    "src/types.cyr",
+    "src/quantization.cyr",
+    "src/profile.cyr",
+    "src/system_io.cyr",
+    "src/detect/platform.cyr",
+    "src/detect/command.cyr",
+    "src/detect/cuda.cyr",
+    "src/detect/rocm.cyr",
+    "src/detect/tpu.cyr",
+    "src/detect/gaudi.cyr",
+    "src/detect/neuron.cyr",
+    "src/detect/vulkan.cyr",
+    "src/detect/apple.cyr",
+    "src/detect/intel.cyr",
+    "src/detect/amd_xdna.cyr",
+    "src/detect/edge.cyr",
+    "src/detect/cloud_asic.cyr",
+    "src/detect/bandwidth.cyr",
+    "src/detect/pcie.cyr",
+    "src/detect/numa.cyr",
+    "src/detect/interconnect.cyr",
+    "src/detect/disk.cyr",
+    "src/detect/environment.cyr",
+    "src/detect/windows.cyr",
+    "src/registry.cyr",
+    "src/plan.cyr",
+    "src/training.cyr",
+    "src/cost.cyr",
+    "src/model.cyr",
+    "src/model_format.cyr",
+    "src/requirement.cyr",
+    "src/async_detect.cyr",
+    "src/cache.cyr",
+    "src/lazy.cyr",
+]
+
 [deps]
 stdlib = ["string", "alloc", "vec", "str", "fmt", "io", "syscalls", "fs", "tagged", "process", "args", "fnptr", "thread", "assert", "bench", "freelist", "hashmap", "json"]

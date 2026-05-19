@@ -7,6 +7,65 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.2.4] — 2026-05-19
+
+**`[lib]` reshape — first library-shaped consumer (`mihi`) unblocked.**
+ai-hwaccel has been binary-only since v1.0.0; every consumer to date
+(hoosh, daimon, Irfan, AgnosAI, murti, tazama) calls the CLI and parses
+JSON. `mihi` v0.4.0 (M3 — GPU probe) cannot: its CLAUDE.md forbids
+spawning processes from probes, so the GPU detection surface it needs
+has to be reachable via `include`, not `exec`. This release adds the
+`[lib].modules` surface and the `cyrius distlib`-produced
+`dist/ai-hwaccel.cyr` bundle so mihi (and any future library consumer)
+can pin against ai-hwaccel from their own `cyrius.cyml`. Mirrors the
+agnosys / libro / patra / yukti / mihi pattern.
+
+#### Added
+
+- **`[lib].modules` in `cyrius.cyml`** — 35 modules listed in
+  `src/main.cyr` include order. Excluded: `src/main.cyr` (CLI argv
+  parsing) and `src/json_out.cyr` (CLI output formatting — library
+  consumers serialize on their own terms). Every detection backend,
+  the registry/profile surface, the sharding planner, the cost model,
+  the training memory estimator, the model-format header parser, and
+  the async/cache/lazy registry wrappers all ride along.
+- **`dist/ai-hwaccel.cyr`** — single-file bundle produced by
+  `cyrius distlib`. 5392 lines, 168 KiB at 2.2.4. Byte-deterministic
+  across runs (verified — same SHA-256 from two sequential invocations).
+  Consumers pull via `[deps.ai-hwaccel] modules = ["dist/ai-hwaccel.cyr"]`;
+  `cyrius deps` drops it as `lib/ai-hwaccel.cyr` for `include`.
+- **README "Using as a library" subsection** — copy-pasteable
+  `[deps.ai-hwaccel]` block + `include` example. Documents the
+  bundle-included surface and the CLI-only exclusions.
+- **CI: `distlib drift + determinism` step** — runs `cyrius distlib`,
+  diffs against the committed bundle (drift = consumers shipping stale
+  code), then re-runs and SHA-256-compares (non-determinism = breaks
+  the reproducible-build contract). Mirrors the libro / mihi / yukti
+  gates. Sits between `Lint` and `Build (DCE)` in the workflow.
+
+#### Changed
+
+- **`VERSION`**: 2.2.3 → 2.2.4.
+- **`docs/development/roadmap.md`** — 2.2.4 deliverable checkboxes
+  marked complete for the in-repo work (manifest, bundle, README,
+  no-regression, determinism guard); the `mihi-side smoke` remains
+  unchecked pending external mihi M3 work.
+
+#### Compatibility
+
+- **CLI binary**: no change. `cyrius build src/main.cyr build/ai-hwaccel`
+  still produces a 287 KiB ELF; all 11 test units (518 assertions) pass;
+  output byte-identical to 2.2.3.
+- **Existing binary consumers**: zero impact. They pin to the binary
+  release artifacts and invoke `ai-hwaccel` as a subprocess, which is
+  untouched.
+- **New library consumers**: `[deps.ai-hwaccel] tag = "2.2.4"` resolves
+  via `cyrius deps`, then `include "lib/ai-hwaccel.cyr"` exposes the
+  detection entry points (`registry_detect`, `registry_detect_async`,
+  the family-specific `detect_<backend>` calls, the profile / plan /
+  cost / training APIs) directly — no subprocess, no JSON parsing,
+  no environment leakage.
+
 ## [2.2.3] — 2026-05-19
 
 **Toolchain rename slot — `cycc` canonical, `cc5` only as a legacy
