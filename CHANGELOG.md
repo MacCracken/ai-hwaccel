@@ -55,10 +55,25 @@ surface touched). Multi-platform wheels are 2.3.3.
 #### Changed
 
 - **`VERSION`**: 2.3.1 → 2.3.2 (Python package version tracks it).
+- **`dist/ai-hwaccel.cyr`** regenerated so its embedded `# Version:`
+  header matches 2.3.2 (content otherwise unchanged from 2.3.1).
+
+#### Fixed
+
+- **CI "distlib drift" gate on version bumps.** The dist bundle embeds
+  the project version in its header, so a `VERSION` bump alone makes it
+  stale even with no `.cyr` change — CI regenerates with the new version
+  and the diff fails. `scripts/version-bump.sh` now **auto-regenerates
+  `dist/ai-hwaccel.cyr`** using the *pinned* toolchain
+  (`~/.cyrius/versions/<pin>/bin/cyrius`, matching what CI installs)
+  after writing `VERSION`. Confirmed distlib output is byte-identical
+  across cyrius 6.0.25/6.0.27, so the local wrapper drift is not a
+  factor — only the missing regen was.
 
 #### Compatibility
 
-- **cyrius core / CLI**: unchanged (no `.cyr` edits).
+- **cyrius core / CLI**: unchanged (no `.cyr` edits; the regenerated
+  bundle differs from 2.3.1 only in the version header line).
 - **Next**: 2.3.3 — multi-platform wheels (manylinux x86_64/aarch64,
   macOS universal2, Windows), bundling the per-target binary + data
   files; CI matrix.
