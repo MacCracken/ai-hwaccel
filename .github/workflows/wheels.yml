@@ -1,0 +1,100 @@
+name: Wheels
+
+# Build the per-platform Python wheels (bindings/python). Each wheel
+# bundles a prebuilt, statically-linked ai-hwaccel binary + VERSION +
+# data/cloud_pricing.json under ai_hwaccel/_bin/ (subprocess + JSON; no
+# FFI). The binary is built per-target with the pinned cyrius:
+#   - linux x86_64 / aarch64 : one ubuntu runner (aarch64 cross-built)
+#   - macOS arm64            : macos-14 (Apple-silicon) runner, native
+#   - windows x86_64         : windows runner, native
+# Tag the wheels py3-none-<platform> via AIH_WHEEL_PLAT (see setup.py).
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["*"]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  linux:
+    name: linux wheels (x86_64 + aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cyrius (pinned)
+        run: |
+          CYRIUS_VERSION="$(grep -E '^cyrius[[:space:]]*=' cyrius.cyml | sed -E 's/.*"([^"]+)".*/\1/')"
+          curl -sSf "https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh" \
+            | CYRIUS_VERSION="$CYRIUS_VERSION" sh
+          echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.x" }
+      - run: python -m pip install build
+      - name: x86_64
+        run: |
+          bindings/python/scripts/stage_binary.sh
+          bindings/python/scripts/build_wheel.sh manylinux2014_x86_64 python
+      - name: aarch64 (cross)
+        run: |
+          bindings/python/scripts/stage_binary.sh --aarch64
+          bindings/python/scripts/build_wheel.sh manylinux2014_aarch64 python
+      - uses: actions/upload-artifact@v4
+        with: { name: wheels-linux, path: bindings/python/dist/*.whl }
+
+  macos:
+    name: macOS wheel (arm64)
+    runs-on: macos-14
+    # GATED: the cyrius installer rejects Darwin ("Cyrius targets Linux
+    # only") — no Mach-O toolchain yet. Flip to `true` once cyrius ships
+    # macOS support (tracked: language agent). Scaffold validated; only
+    # the toolchain bootstrap is missing.
+    if: ${{ false }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cyrius (pinned)
+        run: |
+          CYRIUS_VERSION="$(grep -E '^cyrius[[:space:]]*=' cyrius.cyml | sed -E 's/.*"([^"]+)".*/\1/')"
+          curl -sSf "https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh" \
+            | CYRIUS_VERSION="$CYRIUS_VERSION" sh
+          echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.x" }
+      - run: python -m pip install build
+      - run: |
+          bindings/python/scripts/stage_binary.sh
+          bindings/python/scripts/build_wheel.sh macosx_11_0_arm64 python
+      - uses: actions/upload-artifact@v4
+        with: { name: wheels-macos, path: bindings/python/dist/*.whl }
+
+  windows:
+    name: windows wheel (x86_64)
+    runs-on: windows-latest
+    # GATED: the PE cross-compiler (cycc_win) is frozen at cc5_win
+    # 5.11.69 — mismatched with the 6.0.x source, and the project's own
+    # history flags 5.11.x PE-emit regressions. No `cyrius build --win`
+    # wrapper target either. Flip to `true` once the PE backend catches
+    # up to 6.0.x (tracked: language agent).
+    if: ${{ false }}
+    steps:
+      - uses: actions/checkout@v4
+      # NOTE: cyrius's Windows install path may differ from the sh
+      # installer; adjust this step once the Windows toolchain bootstrap
+      # is confirmed (tracked with the cass build). git-bash provides the
+      # bash shell the stage/build scripts use.
+      - name: Install cyrius (pinned)
+        run: |
+          CYRIUS_VERSION="$(grep -E '^cyrius[[:space:]]*=' cyrius.cyml | sed -E 's/.*"([^"]+)".*/\1/')"
+          curl -sSf "https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh" \
+            | CYRIUS_VERSION="$CYRIUS_VERSION" sh
+          echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.x" }
+      - run: python -m pip install build
+      - run: |
+          bindings/python/scripts/stage_binary.sh
+          bindings/python/scripts/build_wheel.sh win_amd64 python
+      - uses: actions/upload-artifact@v4
+        with: { name: wheels-windows, path: bindings/python/dist/*.whl }

@@ -7,6 +7,64 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.3.4] — 2026-06-01
+
+**Linux wheels + the wheel-build machinery.** `bindings/python` can now
+produce platform-tagged wheels that bundle a prebuilt, statically-linked
+`ai-hwaccel` binary (+ `VERSION` + `data/`), so `pip install` gives a
+self-contained package (subprocess + JSON; no FFI). Linux x86_64 +
+aarch64 ship and are validated. **macOS and Windows are deferred to 2.3.5,
+gated on cyrius toolchain support** (see below) — no `.cyr` changed, so
+the core binary is identical to 2.3.3.
+
+#### Added
+
+- **Wheel machinery** (`bindings/python/`):
+  - `setup.py` — `BinaryDistribution` + a `bdist_wheel` override that
+    emits a `py3-none-<platform>` wheel (python-agnostic, platform-
+    specific) with the tag overridable via `AIH_WHEEL_PLAT`.
+  - `scripts/build_wheel.sh <plat-tag>` — package the staged `_bin/`.
+  - `scripts/build_remote.sh <host> <plat-tag>` — ship source to an SSH
+    host, `lib sync` + build there, retrieve the binary (for platforms
+    with no local cross-compiler, e.g. macOS once supported).
+  - `pyproject` package-data now bundles `_bin/{ai-hwaccel[.exe],
+    VERSION, data/*}`.
+- **`.github/workflows/wheels.yml`** — CI matrix (workflow_dispatch +
+  tag): linux (x86_64 + aarch64) active; macOS / Windows jobs scaffolded
+  but **gated `if: false`** pending toolchain support.
+
+#### Shipped wheels
+
+- `ai_hwaccel-2.3.4-py3-none-manylinux2014_x86_64.whl` — built,
+  installed in a clean venv, and run from an unrelated cwd:
+  `version`/`detect`/`cost` all work, bundled binary preserved `+x`
+  (0o755), data resolved via `AI_HWACCEL_DATA_DIR`.
+- `ai_hwaccel-2.3.4-py3-none-manylinux2014_aarch64.whl` — cross-built
+  (static ARM binary) and packaged (run-validated in CI/on-device only).
+
+#### Deferred (2.3.5 — gated on cyrius toolchain)
+
+- **macOS arm64 wheel** — the cyrius installer rejects Darwin ("Cyrius
+  targets Linux only"); no Mach-O toolchain yet.
+- **Windows x86_64 wheel** — the PE cross-compiler (`cycc_win`) is frozen
+  at `cc5_win 5.11.69`, mismatched with 6.0.x, and there is no
+  `cyrius build --win` wrapper target. Building with it would yield an
+  untrustworthy artifact, so it's not shipped.
+  Both CI jobs are scaffolded and flip on with a one-line `if:` change
+  once the toolchain lands. Same "gate on upstream readiness" posture as
+  the WASM/JS roadmap item.
+
+#### Changed
+
+- **`VERSION`**: 2.3.3 → 2.3.4; Python package + `__version__` track it.
+- **`dist/ai-hwaccel.cyr`** regenerated (embeds 2.3.4); no `.cyr` source
+  changed, so the binary is otherwise identical to 2.3.3.
+
+#### Compatibility
+
+- **cyrius core / CLI**: unchanged. No benchmarked path touched (no
+  `.cyr` edits) — bench policy satisfied trivially.
+
 ## [2.3.3] — 2026-06-01
 
 **Working-directory-independent data files.** Closes the 2.3.2 known

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-hwaccel"
-version = "2.3.3"
+version = "2.3.4"
 description = "Universal AI hardware accelerator detection — Python bindings"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -31,6 +31,7 @@ Repository = "https://github.com/MacCracken/ai-hwaccel"
 where = ["src"]
 
 [tool.setuptools.package-data]
-# Per-platform binary is bundled here from 2.3.3 (wheels). Empty in the
-# pure-source/sdist install — the runner falls back to PATH / AI_HWACCEL_BIN.
-ai_hwaccel = ["_bin/*"]
+# Per-platform binary + its data files, staged by scripts/stage_binary.sh
+# and bundled into the platform wheel (2.3.4). Empty in the pure-source
+# install — the runner falls back to PATH / AI_HWACCEL_BIN.
+ai_hwaccel = ["_bin/ai-hwaccel", "_bin/ai-hwaccel.exe", "_bin/VERSION", "_bin/data/*"]

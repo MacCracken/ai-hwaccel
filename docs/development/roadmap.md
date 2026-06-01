@@ -363,15 +363,23 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
   `_bin/{binary, VERSION, data/}`; `version-bump.sh` made dist-aware.
   Closes the 2.3.2 known limitation.
 
-### Packaging / wheels (2.3.4)
+### 2.3.4 — Linux wheels + machinery (SHIPPED, 2026-06-01)
 
-- [ ] **`pip install ai-hwaccel`** — wheels for Linux (manylinux),
-  macOS (universal2), Windows (x86_64). cyrius cycc emits ELF/Mach-O/PE,
-  so the wheel bundles a per-target `cyrius build` binary (subprocess +
-  JSON; no FFI — the toolchain emits executables only) via
-  `scripts/stage_binary.sh`. GitHub Actions matrix; Linux x86_64
-  validatable locally, macOS/Windows in CI. The per-target matrix is
-  extensible to an **agnos-kernel** target down the line.
+- [x] **`pip install ai-hwaccel` (Linux)** — platform wheels bundling a
+  static `ai-hwaccel` binary + data (subprocess + JSON; no FFI).
+  `manylinux2014_x86_64` (built + venv-validated) and
+  `manylinux2014_aarch64` (cross-built). `setup.py` tags
+  `py3-none-<plat>`; `scripts/{stage_binary,build_wheel,build_remote}.sh`;
+  CI `wheels.yml` matrix. Extensible to an **agnos-kernel** target.
+
+### 2.3.5 — macOS + Windows wheels (gated on cyrius toolchain)
+
+- [ ] **macOS arm64 wheel** — blocked: cyrius installer is Linux-only
+  (no Darwin/Mach-O toolchain yet). CI job scaffolded (`if: false`).
+- [ ] **Windows x86_64 wheel** — blocked: PE backend (`cycc_win`) frozen
+  at `cc5_win 5.11.69`, mismatched with 6.0.x; no `cyrius build --win`.
+  CI job scaffolded (`if: false`). Flip both on once the toolchain
+  supports those targets (build workers: `ecb` macOS, `cass` Windows).
 
 ### WASM / JS
 
