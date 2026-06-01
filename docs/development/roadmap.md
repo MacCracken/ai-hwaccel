@@ -338,14 +338,21 @@ The data layer every binding consumes. Schema bumped v3 → v4.
   + `cost_to_json` in `src/cost.cyr`. 36 JSON assertions; ns-resolution
   benches for each new serializer.
 
-### Python bindings (2.3.2)
+### 2.3.2 — Python bindings (SHIPPED, 2026-06-01)
 
-- [~] **Complete API surface** — `AcceleratorProfile`, `SystemIo`,
-  `Interconnect`, `StorageDevice`, `ShardingPlan`, `TrainingMethod`.
-  *Data layer shipped in 2.3.1 (schema v4); the Python dataclass/enum
-  model over it is 2.3.2.*
-- [ ] **Python-native ergonomics** — dict-like objects, JSON
-  serialization, pandas DataFrame export
+`bindings/python/` — a thin, dependency-free wrapper over the binary +
+schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
+
+- [x] **Complete API surface** — typed dataclasses for `Registry`,
+  `AcceleratorProfile`, `SystemIo`, `Interconnect`, `StorageDevice`,
+  `RuntimeEnvironment`, `ShardingPlan`, `ModelShard`, `TrainingMemory`,
+  `CostReport`. API: `detect / summary / plan / training_memory / cost /
+  version`. Binary discovery via arg / `AI_HWACCEL_BIN` / bundled / PATH.
+- [x] **Python-native ergonomics** — dataclasses, fixed-point
+  convenience properties, optional pandas `to_dataframe()`. 15-test
+  `unittest` suite (9 model + 6 e2e).
+- Known limitation tracked for 2.3.3: binary reads `VERSION` /
+  `data/cloud_pricing.json` cwd-relative.
 
 ### Packaging / wheels (2.3.3)
 
@@ -354,6 +361,9 @@ The data layer every binding consumes. Schema bumped v3 → v4.
   so the wheel bundles a per-target `cyrius build` binary (subprocess +
   JSON; no FFI — the toolchain emits executables only). The per-target
   matrix is extensible to an **agnos-kernel** target down the line.
+- [ ] **Resolve binary data files relative to the executable** — bundle
+  `VERSION` + `data/cloud_pricing.json` next to the binary so `version()`
+  and `cost()` work regardless of cwd (the 2.3.2 known limitation).
 
 ### WASM / JS
 

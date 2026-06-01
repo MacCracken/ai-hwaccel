@@ -7,6 +7,62 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.3.2] — 2026-06-01
+
+**Python bindings (`bindings/python/`).** A thin, dependency-free Python
+package over the compiled binary + schema-v4 JSON contract from 2.3.1.
+There is no FFI (the cyrius toolchain emits executables only); each call
+shells out to the binary and parses its JSON into typed dataclasses.
+**No cyrius source changed** — the binary is byte-identical to 2.3.1, so
+the core benchmarks are unaffected (verified by rebuild; the
+mandatory-benchmark policy is satisfied trivially with no core perf
+surface touched). Multi-platform wheels are 2.3.3.
+
+#### Added
+
+- **`bindings/python/` package** (`ai_hwaccel`, GPL-3.0-only,
+  zero runtime deps, Python ≥ 3.8):
+  - **Typed model** (`models.py`) for the full schema-v4 surface:
+    `Registry`, `AcceleratorProfile`, `SystemIo`, `Interconnect`,
+    `StorageDevice`, `RuntimeEnvironment`, `ShardingPlan`, `ModelShard`,
+    `TrainingMemory`, `CostReport`, `CostRecommendation`. Lossless field
+    mapping; fixed-point `*_x1000` values surfaced via convenience
+    properties (`est_tokens_per_sec`, `total_gib`, `price_per_hour_usd`).
+  - **API**: `detect()`, `summary()`, `plan()`, `training_memory()`,
+    `cost()`, `version()` — each accepts `binary=` and `timeout=`.
+  - **Binary discovery** (`_runner.py`): explicit arg → `AI_HWACCEL_BIN`
+    → bundled `_bin/` (2.3.3) → `PATH`. Clear `BinaryNotFoundError` /
+    `CommandError`.
+  - **Optional pandas export**: `Registry.to_dataframe()` (extra
+    `ai-hwaccel[pandas]`); clean `ImportError` when pandas is absent.
+  - **`pyproject.toml`** (setuptools, src layout; `pandas` + `test`
+    extras), package **README**, and a **`unittest`** suite: 9
+    fixture-based model tests + 6 e2e tests against the real binary
+    (15 total, all passing locally).
+- **`.gitignore`**: Python artifacts (`__pycache__/`, `*.pyc`,
+  `*.egg-info/`, `bindings/python/{dist,build}/`, the build-time
+  `_bin/`).
+
+#### Known limitations (tracked for 2.3.3)
+
+- The binary reads `VERSION` and `data/cloud_pricing.json` **relative to
+  the current working directory**. Run from outside the repo root,
+  `version()` returns `"unknown"` and `cost()` yields no recommendations;
+  detection is unaffected. The 2.3.3 packaging work bundles these next to
+  the binary and resolves them relative to the executable.
+  `ai_hwaccel.__version__` always reflects the package version.
+
+#### Changed
+
+- **`VERSION`**: 2.3.1 → 2.3.2 (Python package version tracks it).
+
+#### Compatibility
+
+- **cyrius core / CLI**: unchanged (no `.cyr` edits).
+- **Next**: 2.3.3 — multi-platform wheels (manylinux x86_64/aarch64,
+  macOS universal2, Windows), bundling the per-target binary + data
+  files; CI matrix.
+
 ## [2.3.1] — 2026-06-01
 
 **JSON surface extension — the data layer for language bindings.** The

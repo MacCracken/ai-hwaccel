@@ -32,6 +32,17 @@ qemu_*.core
 lcov.info
 coverage/
 
+# Python bindings (bindings/python/)
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+bindings/python/dist/
+bindings/python/build/
+# Per-platform binary is injected into the wheel at build time (2.3.3),
+# not committed.
+bindings/python/src/ai_hwaccel/_bin/
+
 # Secrets / environment
 .env
 .env.*

@@ -1,0 +1,1 @@
+{"model":"70B","quantization":"BF16","memory_required_bytes":168000000000,"recommendations":[{"instance":"p5.48xlarge","provider":"aws","gpu":"H100 SXM","gpu_count":8,"total_memory_gb":640,"price_per_hour_usd_x100":9832}]}

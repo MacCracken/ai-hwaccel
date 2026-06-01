@@ -1,0 +1,1 @@
+{"strategy":"None","strategy_count":1,"total_memory_bytes":168000000000,"est_tokens_per_sec_x1000":28,"shards":[{"id":0,"layer_start":0,"layer_end":0,"device":"CPU","device_id":0,"memory_bytes":168000000000}]}
