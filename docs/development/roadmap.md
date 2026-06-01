@@ -35,10 +35,10 @@ Closed at 2.1.7 (P(-1) scaffold hardening). Seven slots:
 
 ## 2.3.0 — Toolchain 6.0.25 + serialization/dedup audit (SHIPPED, 2026-06-01)
 
-A toolchain-modernization + audit point release, in the same vein as
-2.0.1 and the 2.1.x arc — it took the `2.3.0` SemVer slot ahead of the
-planned "Ecosystem" scope (Python/WASM bindings), which re-shelves to a
-later minor (see the deferred section below). Contents:
+A toolchain-modernization + audit release, in the same vein as 2.0.1 and
+the 2.1.x arc. The "Ecosystem" scope (Python/WASM bindings) that the
+Rust roadmap had penciled in for this slot moves to 2.3.1 (below) — it's
+a separate effort and ships after this release. Contents:
 
 - **Pin: cyrius 6.0.0 → 6.0.25**, stdlib re-synced into `./lib/`,
   drift warning gone.
@@ -318,11 +318,11 @@ verify on hardware when access happens)
 
 ---
 
-## Ecosystem (deferred — was the planned 2.3.0)
-*(was 1.4.0 in the Rust roadmap; the 2.3.0 slot shipped as the toolchain
-6.0.25 + serialization/dedup audit release on 2026-06-01 — see the
-SHIPPED section above. This Bindings/packaging scope re-shelves to a
-future minor; scope is preserved, numbering is not.)*
+## 2.3.1 — Ecosystem
+*(was 1.4.0 in the Rust roadmap, penciled in as 2.3.0; bumped to 2.3.1
+because the 2.3.0 slot shipped as the toolchain 6.0.25 +
+serialization/dedup audit on 2026-06-01 — see the SHIPPED section above.
+This is the next feature release after 2.3.0.)*
 
 Bindings and packaging.
 
