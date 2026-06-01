@@ -372,14 +372,22 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
   `py3-none-<plat>`; `scripts/{stage_binary,build_wheel,build_remote}.sh`;
   CI `wheels.yml` matrix. Extensible to an **agnos-kernel** target.
 
-### 2.3.5 — macOS + Windows wheels (gated on cyrius toolchain)
+### 2.3.5 — macOS wheel (near-term, gated on installer fix)
 
-- [ ] **macOS arm64 wheel** — blocked: cyrius installer is Linux-only
-  (no Darwin/Mach-O toolchain yet). CI job scaffolded (`if: false`).
-- [ ] **Windows x86_64 wheel** — blocked: PE backend (`cycc_win`) frozen
-  at `cc5_win 5.11.69`, mismatched with 6.0.x; no `cyrius build --win`.
-  CI job scaffolded (`if: false`). Flip both on once the toolchain
-  supports those targets (build workers: `ecb` macOS, `cass` Windows).
+- [ ] **macOS arm64 wheel** — the Darwin binaries are built but not yet
+  wired into `install.sh` (it still rejects darwin). Unblocks as soon as
+  the installer integration lands; then `build_remote.sh ecb
+  macosx_11_0_arm64` + flip the gated CI job. Build worker: `ecb`
+  (Apple-silicon → `macosx_11_0_arm64`; universal2 only if the backend
+  also emits x86_64 Mach-O).
+
+### 2.3.6 — Windows wheel (later in 6.0.x)
+
+- [ ] **Windows x86_64 wheel** — deferred: needs a full PowerShell
+  (`.ps1`) build flow; the current PE backend (`cycc_win`) is frozen at
+  `cc5_win 5.11.69` and there's no `cyrius build --win` target. Targeted
+  to land before the 6.0.x line closes. CI job scaffolded (`if: false`);
+  build worker: `cass`.
 
 ### WASM / JS
 

@@ -42,17 +42,17 @@ the core binary is identical to 2.3.3.
 - `ai_hwaccel-2.3.4-py3-none-manylinux2014_aarch64.whl` — cross-built
   (static ARM binary) and packaged (run-validated in CI/on-device only).
 
-#### Deferred (2.3.5 — gated on cyrius toolchain)
+#### Deferred (gated on cyrius toolchain)
 
-- **macOS arm64 wheel** — the cyrius installer rejects Darwin ("Cyrius
-  targets Linux only"); no Mach-O toolchain yet.
-- **Windows x86_64 wheel** — the PE cross-compiler (`cycc_win`) is frozen
-  at `cc5_win 5.11.69`, mismatched with 6.0.x, and there is no
-  `cyrius build --win` wrapper target. Building with it would yield an
-  untrustworthy artifact, so it's not shipped.
+- **macOS arm64 wheel (2.3.5, near-term)** — the Darwin binaries are
+  built but not yet integrated into `install.sh` (it still rejects
+  darwin). Unblocks the moment the installer fix lands.
+- **Windows x86_64 wheel (2.3.6, later in 6.0.x)** — needs a full
+  PowerShell (`.ps1`) build flow; the PE backend (`cycc_win`) is frozen
+  at `cc5_win 5.11.69` and there's no `cyrius build --win` target.
   Both CI jobs are scaffolded and flip on with a one-line `if:` change
-  once the toolchain lands. Same "gate on upstream readiness" posture as
-  the WASM/JS roadmap item.
+  when their toolchain support lands — same "gate on upstream readiness"
+  posture as the WASM/JS roadmap item.
 
 #### Changed
 

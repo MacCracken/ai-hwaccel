@@ -47,10 +47,9 @@ jobs:
   macos:
     name: macOS wheel (arm64)
     runs-on: macos-14
-    # GATED: the cyrius installer rejects Darwin ("Cyrius targets Linux
-    # only") — no Mach-O toolchain yet. Flip to `true` once cyrius ships
-    # macOS support (tracked: language agent). Scaffold validated; only
-    # the toolchain bootstrap is missing.
+    # GATED (2.3.5, near-term): the Darwin binaries are built but not yet
+    # integrated into install.sh (it still rejects darwin). Flip to `true`
+    # once the installer fix lands (tracked: language agent; worker: ecb).
     if: ${{ false }}
     steps:
       - uses: actions/checkout@v4
@@ -72,11 +71,10 @@ jobs:
   windows:
     name: windows wheel (x86_64)
     runs-on: windows-latest
-    # GATED: the PE cross-compiler (cycc_win) is frozen at cc5_win
-    # 5.11.69 — mismatched with the 6.0.x source, and the project's own
-    # history flags 5.11.x PE-emit regressions. No `cyrius build --win`
-    # wrapper target either. Flip to `true` once the PE backend catches
-    # up to 6.0.x (tracked: language agent).
+    # GATED (2.3.6, later in 6.0.x): needs a full PowerShell (.ps1) build
+    # flow; the PE cross-compiler (cycc_win) is frozen at cc5_win 5.11.69
+    # with no `cyrius build --win` target. Flip to `true` once the
+    # Windows build flow lands (tracked: language agent; worker: cass).
     if: ${{ false }}
     steps:
       - uses: actions/checkout@v4
