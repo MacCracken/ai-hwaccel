@@ -39,3 +39,15 @@ timestamp,commit,branch,suite,benchmark,avg_ns,min_ns,max_ns,iters
 2026-04-13T09:47:30Z,5e7672d,main,registry,count_family_gpu_13dev,276,276,276,100000
 2026-04-13T09:47:30Z,5e7672d,main,registry,json_serialize_13dev,27000,25000,37000,100
 2026-04-13T09:47:30Z,5e7672d,main,registry,json_summary_13dev,4000,4000,9000,100
+2026-06-01T20:45:36Z,b9af260,main,parsing,parse_cuda_8gpu,21000,17000,43000,100
+2026-06-01T20:45:36Z,b9af260,main,parsing,parse_vulkan_2gpu,4000,2000,15000,100
+2026-06-01T20:45:36Z,b9af260,main,parsing,parse_neuron_2dev,3000,1000,7000,100
+2026-06-01T20:45:36Z,b9af260,main,parsing,detect_safetensors,2000,488,17000,1000
+2026-06-01T20:45:36Z,b9af260,main,parsing,detect_gguf,1000,907,7000,1000
+2026-06-01T20:45:36Z,b9af260,main,registry,best_available_13dev,1000,488,22000,1000
+2026-06-01T20:45:36Z,b9af260,main,registry,total_memory_13dev,158,158,158,100000
+2026-06-01T20:45:36Z,b9af260,main,registry,has_accelerator_13dev,33,33,33,100000
+2026-06-01T20:45:36Z,b9af260,main,registry,plan_70B_bf16_4gpu,3000,2000,15000,1000
+2026-06-01T20:45:36Z,b9af260,main,registry,count_family_gpu_13dev,345,345,345,100000
+2026-06-01T20:45:36Z,b9af260,main,registry,json_serialize_13dev,30000,21000,231000,2000
+2026-06-01T20:45:36Z,b9af260,main,registry,json_summary_13dev,6000,3000,49000,2000

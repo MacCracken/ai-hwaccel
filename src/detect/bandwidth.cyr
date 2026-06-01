@@ -46,11 +46,7 @@ fn enrich_bandwidth(profiles) {
             str_builder_add_int(sb, dev_id);
             str_builder_add_cstr(sb, "/device");
             var dev_path = str_builder_build(sb);
-            var dpd = str_data(dev_path);
-            var dpl = str_len(dev_path);
-            var dp_cstr = alloc(dpl + 1);
-            memcpy(dp_cstr, dpd, dpl);
-            store8(dp_cstr + dpl, 0);
+            var dp_cstr = str_cstr(dev_path);
 
             # Read max memory clock from pp_dpm_mclk
             var mclk_path = sysfs_path(dp_cstr, 0, "pp_dpm_mclk");

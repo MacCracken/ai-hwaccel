@@ -30,12 +30,7 @@ fn detect_environment(sio) {
         # Read namespace
         var ns = sysfs_read("/var/run/secrets/kubernetes.io/serviceaccount/namespace");
         if (ns != 0) {
-            var nsd = str_data(ns);
-            var nsl = str_len(ns);
-            var nsc = alloc(nsl + 1);
-            memcpy(nsc, nsd, nsl);
-            store8(nsc + nsl, 0);
-            env_set_k8s_namespace(env, nsc);
+            env_set_k8s_namespace(env, str_cstr(ns));
         }
 
         # GPU count from env vars
@@ -84,12 +79,7 @@ fn detect_environment(sio) {
     if (product != 0) {
         if (env_cloud_provider(env) != 0) {
             if (streq(env_cloud_provider(env), "aws") == 1) {
-                var pd = str_data(product);
-                var pl = str_len(product);
-                var pc = alloc(pl + 1);
-                memcpy(pc, pd, pl);
-                store8(pc + pl, 0);
-                env_set_instance_type(env, pc);
+                env_set_instance_type(env, str_cstr(product));
             }
         }
     }

@@ -77,12 +77,7 @@ fn parse_cuda_output(output, profiles, warnings) {
         if (vec_len(fields) > 4) {
             var cc = vec_get(fields, 4);
             if (str_len(cc) > 0) {
-                var ccdata = str_data(cc);
-                var cclen = str_len(cc);
-                var cc_cstr = alloc(cclen + 1);
-                memcpy(cc_cstr, ccdata, cclen);
-                store8(cc_cstr + cclen, 0);
-                profile_set_compute_cap(p, cc_cstr);
+                profile_set_compute_cap(p, str_cstr(cc));
 
                 # Calculate memory bandwidth from clock + bus width
                 if (vec_len(fields) > 10) {
@@ -108,12 +103,7 @@ fn parse_cuda_output(output, profiles, warnings) {
         if (vec_len(fields) > 5) {
             var dv = vec_get(fields, 5);
             if (str_len(dv) > 0) {
-                var dvdata = str_data(dv);
-                var dvlen = str_len(dv);
-                var dv_cstr = alloc(dvlen + 1);
-                memcpy(dv_cstr, dvdata, dvlen);
-                store8(dv_cstr + dvlen, 0);
-                profile_set_driver_version(p, dv_cstr);
+                profile_set_driver_version(p, str_cstr(dv));
             }
         }
 
@@ -121,12 +111,7 @@ fn parse_cuda_output(output, profiles, warnings) {
         if (vec_len(fields) > 6) {
             var gn = vec_get(fields, 6);
             if (str_len(gn) > 0) {
-                var gndata = str_data(gn);
-                var gnlen = str_len(gn);
-                var gn_cstr = alloc(gnlen + 1);
-                memcpy(gn_cstr, gndata, gnlen);
-                store8(gn_cstr + gnlen, 0);
-                profile_set_device_name(p, gn_cstr);
+                profile_set_device_name(p, str_cstr(gn));
 
                 # Grace Hopper: add unified CPU+GPU memory
                 if (str_contains_cstr(gn, "GH200") == 1) {

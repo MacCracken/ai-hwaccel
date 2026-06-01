@@ -50,12 +50,7 @@ fn _parse_apple_macos(hw_output, profiles) {
             if (col >= 0) {
                 var cn = str_trim(str_sub(line, col + 1, str_len(line) - col - 1));
                 if (str_len(cn) > 0) {
-                    var cnd = str_data(cn);
-                    var cnl = str_len(cn);
-                    var cnc = alloc(cnl + 1);
-                    memcpy(cnc, cnd, cnl);
-                    store8(cnc + cnl, 0);
-                    chip_name = cnc;
+                    chip_name = str_cstr(cn);
 
                     # ANE memory estimate by chip generation
                     if (str_contains_cstr(cn, "M4") == 1) { ane_mem = 8 * BYTES_PER_GIB; }

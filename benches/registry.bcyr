@@ -174,27 +174,36 @@ bench_report(b5);
 
 # --- JSON serialization ---
 # Rust: serialize (13 devices) = 4.89 µs
+# 2.3.0: 2000 iters + explicit avg_ns line — the str_builder_putc
+# hot-path change moves the average by ~1-2us, below the us-truncated
+# bench_report resolution, so print the raw nanosecond average too.
 
 var b6 = bench_new("json_serialize_13dev");
 ri = 0;
-while (ri < 100) {
+while (ri < 2000) {
     bench_start(b6);
     registry_to_json(mock);
     bench_stop(b6);
     ri = ri + 1;
 }
 bench_report(b6);
+print("    avg_ns=", 10);
+fmt_int(bench_avg_ns(b6));
+print("\n", 1);
 
 # --- JSON summary ---
 
 var b7 = bench_new("json_summary_13dev");
 ri = 0;
-while (ri < 100) {
+while (ri < 2000) {
     bench_start(b7);
     registry_to_summary_json(mock);
     bench_stop(b7);
     ri = ri + 1;
 }
 bench_report(b7);
+print("    avg_ns=", 10);
+fmt_int(bench_avg_ns(b7));
+print("\n", 1);
 
 syscall(60, 0);

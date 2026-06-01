@@ -33,6 +33,35 @@ Closed at 2.1.7 (P(-1) scaffold hardening). Seven slots:
 
 ---
 
+## 2.3.0 — Toolchain 6.0.25 + serialization/dedup audit (SHIPPED, 2026-06-01)
+
+A toolchain-modernization + audit point release, in the same vein as
+2.0.1 and the 2.1.x arc — it took the `2.3.0` SemVer slot ahead of the
+planned "Ecosystem" scope (Python/WASM bindings), which re-shelves to a
+later minor (see the deferred section below). Contents:
+
+- **Pin: cyrius 6.0.0 → 6.0.25**, stdlib re-synced into `./lib/`,
+  drift warning gone.
+- **JSON serializer hot path** — single-byte structural punctuation
+  moved from `str_builder_add_cstr` to `str_builder_putc`.
+  `json_serialize_13dev` **−8.7%** (26946 → 24602 ns, min-of-6 @ 2000
+  iters); `json_summary_13dev` flat (within noise — too few single-byte
+  appends to move). Byte-identical output.
+- **`Str` → owned cstr dedup** — the hand-inlined
+  `alloc + memcpy + NUL` idiom consolidated onto stdlib `str_cstr`
+  across 11 detectors / 16 sites. DCE binary −1592 bytes, dist bundle
+  −76 lines, perf-neutral on parsing benches.
+- **Bench harness** — `registry.bcyr` JSON benches now print
+  nanosecond averages (the µs-truncated `bench_report` hid the delta).
+- All gates green: 11 test units / 518 assertions, 6 fuzz harnesses,
+  `vet`, raw-offset guard, distlib determinism.
+
+Per the (now mandatory — see CLAUDE.md) benchmarking policy, the
+before/after deltas are recorded in `bench-history.csv` and the
+CHANGELOG 2.3.0 table.
+
+---
+
 ## 2.1.0 — cc5 adoption arc
 
 The toolchain bump in 2.0.1 was mechanical only — no source changed. 2.1.0
@@ -289,8 +318,11 @@ verify on hardware when access happens)
 
 ---
 
-## 2.3.0 — Ecosystem
-*(was 1.4.0 in the Rust roadmap)*
+## Ecosystem (deferred — was the planned 2.3.0)
+*(was 1.4.0 in the Rust roadmap; the 2.3.0 slot shipped as the toolchain
+6.0.25 + serialization/dedup audit release on 2026-06-01 — see the
+SHIPPED section above. This Bindings/packaging scope re-shelves to a
+future minor; scope is preserved, numbering is not.)*
 
 Bindings and packaging.
 

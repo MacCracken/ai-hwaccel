@@ -72,12 +72,7 @@ fn _find_pci_addr(accel_type, dev_id) {
             str_builder_add_cstr(sb, "/sys/bus/pci/devices/");
             str_builder_add(sb, name);
             var result = str_builder_build(sb);
-            var rd = str_data(result);
-            var rl = str_len(result);
-            var rc = alloc(rl + 1);
-            memcpy(rc, rd, rl);
-            store8(rc + rl, 0);
-            return rc;
+            return str_cstr(result);
         }
         idx = idx + 1;
     }

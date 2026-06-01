@@ -1,33 +1,43 @@
 # json_out.cyr — JSON serialization for registry output
 # Manual JSON building via str_builder (no serde)
+#
+# Structural punctuation (`{`, `}`, `[`, `]`, `,`, `"`, `:`) is emitted
+# with str_builder_putc — a single store8, no strlen + memcpy round-trip
+# that str_builder_add_cstr pays per call. Variable-length pieces (keys,
+# values, multi-byte literals like "true") stay on add_cstr. 2.3.0
+# hot-path optimization; see benches/registry.bcyr json_serialize_13dev.
 
 # Write a JSON string field: "key": "value"
 fn _json_str(sb, key, val, comma) {
-    if (comma == 1) { str_builder_add_cstr(sb, ","); }
-    str_builder_add_cstr(sb, "\"");
+    if (comma == 1) { str_builder_putc(sb, ','); }
+    str_builder_putc(sb, '"');
     str_builder_add_cstr(sb, key);
-    str_builder_add_cstr(sb, "\":\"");
+    str_builder_putc(sb, '"');
+    str_builder_putc(sb, ':');
+    str_builder_putc(sb, '"');
     if (val != 0) { str_builder_add_cstr(sb, val); }
-    str_builder_add_cstr(sb, "\"");
+    str_builder_putc(sb, '"');
     return 0;
 }
 
 # Write a JSON integer field: "key": value
 fn _json_int(sb, key, val, comma) {
-    if (comma == 1) { str_builder_add_cstr(sb, ","); }
-    str_builder_add_cstr(sb, "\"");
+    if (comma == 1) { str_builder_putc(sb, ','); }
+    str_builder_putc(sb, '"');
     str_builder_add_cstr(sb, key);
-    str_builder_add_cstr(sb, "\":");
+    str_builder_putc(sb, '"');
+    str_builder_putc(sb, ':');
     str_builder_add_int(sb, val);
     return 0;
 }
 
 # Write a JSON bool field: "key": true/false
 fn _json_bool(sb, key, val, comma) {
-    if (comma == 1) { str_builder_add_cstr(sb, ","); }
-    str_builder_add_cstr(sb, "\"");
+    if (comma == 1) { str_builder_putc(sb, ','); }
+    str_builder_putc(sb, '"');
     str_builder_add_cstr(sb, key);
-    str_builder_add_cstr(sb, "\":");
+    str_builder_putc(sb, '"');
+    str_builder_putc(sb, ':');
     if (val == 1) { str_builder_add_cstr(sb, "true"); }
     else { str_builder_add_cstr(sb, "false"); }
     return 0;
@@ -49,7 +59,7 @@ fn _json_opt_str(sb, key, val) {
 
 # Serialize a profile to JSON
 fn profile_to_json(sb, p) {
-    str_builder_add_cstr(sb, "{");
+    str_builder_putc(sb, '{');
     _json_str(sb, "accelerator", accel_name(profile_accel_type(p)), 0);
     _json_int(sb, "device_id", profile_device_id(p), 1);
     _json_bool(sb, "available", profile_available(p), 1);
@@ -63,14 +73,14 @@ fn profile_to_json(sb, p) {
     _json_opt_int(sb, "numa_node", profile_numa_node(p));
     _json_opt_int(sb, "temperature_c", profile_temp_c(p));
     _json_opt_int(sb, "gpu_utilization_percent", profile_gpu_util(p));
-    str_builder_add_cstr(sb, "}");
+    str_builder_putc(sb, '}');
     return 0;
 }
 
 # Serialize full registry to JSON
 fn registry_to_json(r) {
     var sb = str_builder_new();
-    str_builder_add_cstr(sb, "{");
+    str_builder_putc(sb, '{');
     _json_int(sb, "schema_version", reg_schema(r), 0);
 
     # Profiles array
@@ -79,11 +89,11 @@ fn registry_to_json(r) {
     var np = vec_len(profs);
     var i = 0;
     while (i < np) {
-        if (i > 0) { str_builder_add_cstr(sb, ","); }
+        if (i > 0) { str_builder_putc(sb, ','); }
         profile_to_json(sb, vec_get(profs, i));
         i = i + 1;
     }
-    str_builder_add_cstr(sb, "]");
+    str_builder_putc(sb, ']');
 
     # Warnings array
     var warns = reg_warnings(r);
@@ -92,24 +102,24 @@ fn registry_to_json(r) {
         str_builder_add_cstr(sb, ",\"warnings\":[");
         i = 0;
         while (i < nw) {
-            if (i > 0) { str_builder_add_cstr(sb, ","); }
+            if (i > 0) { str_builder_putc(sb, ','); }
             var w = vec_get(warns, i);
-            str_builder_add_cstr(sb, "\"");
+            str_builder_putc(sb, '"');
             str_builder_add_cstr(sb, warning_tool(w));
-            str_builder_add_cstr(sb, "\"");
+            str_builder_putc(sb, '"');
             i = i + 1;
         }
-        str_builder_add_cstr(sb, "]");
+        str_builder_putc(sb, ']');
     }
 
-    str_builder_add_cstr(sb, "}");
+    str_builder_putc(sb, '}');
     return str_builder_build(sb);
 }
 
 # Summary JSON (compact overview)
 fn registry_to_summary_json(r) {
     var sb = str_builder_new();
-    str_builder_add_cstr(sb, "{");
+    str_builder_putc(sb, '{');
     _json_int(sb, "device_count", reg_num_profiles(r), 0);
     _json_bool(sb, "has_accelerator", reg_has_accelerator(r), 1);
     _json_int(sb, "total_memory_bytes", reg_total_memory(r), 1);
@@ -118,6 +128,6 @@ fn registry_to_summary_json(r) {
     _json_int(sb, "tpu_count", reg_count_by_family(r, FAMILY_TPU), 1);
     _json_int(sb, "npu_count", reg_count_by_family(r, FAMILY_NPU), 1);
     _json_int(sb, "warnings", reg_num_warnings(r), 1);
-    str_builder_add_cstr(sb, "}");
+    str_builder_putc(sb, '}');
     return str_builder_build(sb);
 }

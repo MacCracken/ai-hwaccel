@@ -44,12 +44,7 @@ fn detect_intel_oneapi(profiles, warnings) {
         if (vec_len(fields) > 1) {
             var nm = vec_get(fields, 1);
             if (str_len(nm) > 0) {
-                var nd = str_data(nm);
-                var nl = str_len(nm);
-                var nc = alloc(nl + 1);
-                memcpy(nc, nd, nl);
-                store8(nc + nl, 0);
-                profile_set_device_name(p, nc);
+                profile_set_device_name(p, str_cstr(nm));
             }
         }
 

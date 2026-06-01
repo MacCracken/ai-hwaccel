@@ -45,12 +45,7 @@ fn detect_rocm(profiles, warnings) {
         var prod_path = sysfs_path_str("/sys/class/drm", name, "device/product_name");
         var prod = sysfs_read(prod_path);
         if (prod != 0 && str_len(prod) > 0) {
-            var pd = str_data(prod);
-            var pl = str_len(prod);
-            var pc = alloc(pl + 1);
-            memcpy(pc, pd, pl);
-            store8(pc + pl, 0);
-            profile_set_device_name(p, pc);
+            profile_set_device_name(p, str_cstr(prod));
         } else {
             var vendor_path = sysfs_path_str("/sys/class/drm", name, "device/vendor");
             var device_path = sysfs_path_str("/sys/class/drm", name, "device/device");
@@ -106,12 +101,7 @@ fn detect_rocm(profiles, warnings) {
         var vbios = sysfs_read(vbios_path);
         if (vbios != 0) {
             if (str_len(vbios) > 0) {
-                var vd = str_data(vbios);
-                var vl = str_len(vbios);
-                var vc = alloc(vl + 1);
-                memcpy(vc, vd, vl);
-                store8(vc + vl, 0);
-                profile_set_driver_version(p, vc);
+                profile_set_driver_version(p, str_cstr(vbios));
             }
         }
 
@@ -120,12 +110,7 @@ fn detect_rocm(profiles, warnings) {
         var rev = sysfs_read(rev_path);
         if (rev != 0) {
             if (str_len(rev) > 0) {
-                var rd = str_data(rev);
-                var rl = str_len(rev);
-                var rc = alloc(rl + 1);
-                memcpy(rc, rd, rl);
-                store8(rc + rl, 0);
-                profile_set_compute_cap(p, rc);
+                profile_set_compute_cap(p, str_cstr(rev));
             }
         }
 

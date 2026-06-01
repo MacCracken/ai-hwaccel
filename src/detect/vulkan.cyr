@@ -38,12 +38,7 @@ fn _parse_vulkaninfo(output, profiles) {
         # Create profile with estimated VRAM
         var p = profile_new(ACCEL_VULKAN, dev_id, 4 * BYTES_PER_GIB);
 
-        var nd = str_data(name_part);
-        var nl = str_len(name_part);
-        var nc = alloc(nl + 1);
-        memcpy(nc, nd, nl);
-        store8(nc + nl, 0);
-        profile_set_device_name(p, nc);
+        profile_set_device_name(p, str_cstr(name_part));
 
         # Look for memory size in nearby lines
         var mi = li;

@@ -49,15 +49,10 @@ fn detect_gaudi(profiles, warnings) {
         # "HL-225" / "HL-325") when present; otherwise synthesize
         # "Intel Gaudi2" / "Intel Gaudi3" from the generation enum.
         # name_field is a str_split slice (not guaranteed null-
-        # terminated), so copy out via alloc+memcpy+NUL — same
-        # pattern apple.cyr uses for its parsed chip_name.
+        # terminated), so str_cstr copies out an owned NUL-terminated
+        # buffer.
         if (str_len(name_field) > 0) {
-            var nfd = str_data(name_field);
-            var nfl = str_len(name_field);
-            var nfc = alloc(nfl + 1);
-            memcpy(nfc, nfd, nfl);
-            store8(nfc + nfl, 0);
-            profile_set_device_name(p, nfc);
+            profile_set_device_name(p, str_cstr(name_field));
         } else {
             var sb = str_builder_new();
             str_builder_add_cstr(sb, "Intel ");
