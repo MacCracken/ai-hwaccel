@@ -76,7 +76,7 @@ fn inst_rec_new(inst, mem_req) {
 # Returns vec of CloudGpuInstance pointers
 fn load_cloud_instances() {
     var buf = alloc(32768);
-    var n = file_read_all("data/cloud_pricing.json", buf, 32768);
+    var n = file_read_all(data_file_path("data/cloud_pricing.json"), buf, 32768);
     if (n <= 0) { return vec_new(); }
     store8(buf + n, 0);
 

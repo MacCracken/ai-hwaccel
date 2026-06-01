@@ -354,16 +354,24 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
 - Known limitation tracked for 2.3.3: binary reads `VERSION` /
   `data/cloud_pricing.json` cwd-relative.
 
-### Packaging / wheels (2.3.3)
+### 2.3.3 — Working-dir-independent data files (SHIPPED, 2026-06-01)
+
+- [x] **`AI_HWACCEL_DATA_DIR` resolution** — binary locates `VERSION` +
+  `data/cloud_pricing.json` via the env var (cwd fallback preserved);
+  the Python wrapper sets it for the bundled binary. `version()` /
+  `cost()` now work regardless of cwd. `scripts/stage_binary.sh` stages
+  `_bin/{binary, VERSION, data/}`; `version-bump.sh` made dist-aware.
+  Closes the 2.3.2 known limitation.
+
+### Packaging / wheels (2.3.4)
 
 - [ ] **`pip install ai-hwaccel`** — wheels for Linux (manylinux),
   macOS (universal2), Windows (x86_64). cyrius cycc emits ELF/Mach-O/PE,
   so the wheel bundles a per-target `cyrius build` binary (subprocess +
-  JSON; no FFI — the toolchain emits executables only). The per-target
-  matrix is extensible to an **agnos-kernel** target down the line.
-- [ ] **Resolve binary data files relative to the executable** — bundle
-  `VERSION` + `data/cloud_pricing.json` next to the binary so `version()`
-  and `cost()` work regardless of cwd (the 2.3.2 known limitation).
+  JSON; no FFI — the toolchain emits executables only) via
+  `scripts/stage_binary.sh`. GitHub Actions matrix; Linux x86_64
+  validatable locally, macOS/Windows in CI. The per-target matrix is
+  extensible to an **agnos-kernel** target down the line.
 
 ### WASM / JS
 

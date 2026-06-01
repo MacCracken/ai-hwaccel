@@ -287,7 +287,7 @@ fn _handle_plan(registry, model_str) {
 
 fn _print_version() {
     var buf = alloc(64);
-    var n = file_read_all("VERSION", buf, 63);
+    var n = file_read_all(data_file_path("VERSION"), buf, 63);
     if (n > 0) {
         store8(buf + n, 0);
         # Trim newline

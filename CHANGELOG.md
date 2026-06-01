@@ -7,6 +7,61 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.3.3] — 2026-06-01
+
+**Working-directory-independent data files.** Closes the 2.3.2 known
+limitation: the binary read `VERSION` (`--version`) and
+`data/cloud_pricing.json` (`--cost`) relative to the current working
+directory, so a binary invoked from elsewhere (a pip-installed wheel)
+returned `"unknown"` / no cost recommendations. The binary now honors an
+`AI_HWACCEL_DATA_DIR` env var to locate them, and the Python wrapper sets
+it automatically for the bundled binary. Cross-platform and
+language-neutral — any consumer (agnos later) sets one env var.
+Multi-platform wheel CI is 2.3.4.
+
+#### Added
+
+- **`AI_HWACCEL_DATA_DIR` resolution** (`src/detect/command.cyr`
+  `data_file_path`). When set, `VERSION` and `data/cloud_pricing.json`
+  resolve under it (`<dir>/<rel>`); unset → cwd-relative (unchanged
+  fallback). Used by `_print_version` (`src/main.cyr`) and
+  `load_cloud_instances` (`src/cost.cyr`).
+- **`bindings/python` wheel-bundling prep**:
+  - `_runner._run` sets `AI_HWACCEL_DATA_DIR` to the bundled `_bin/` dir
+    when the bundled binary is used (never overriding a caller's value;
+    PATH/explicit binaries are left to the caller's environment).
+  - `scripts/stage_binary.sh` — builds the binary with the pinned
+    toolchain and stages `_bin/{ai-hwaccel, VERSION, data/cloud_pricing.json}`
+    (`--aarch64` supported). Foundation for the 2.3.4 wheel build.
+  - `tests/test_bundled.py` — 3 tests proving `version()` / `cost()` work
+    from a foreign cwd via the bundled binary (skip if not staged).
+    Python suite now 18 tests.
+
+#### Fixed
+
+- `version()` / `cost()` no longer depend on the caller's working
+  directory when using the bundled binary (the 2.3.2 known limitation).
+
+#### Changed
+
+- **`VERSION`**: 2.3.2 → 2.3.3; Python package + `__version__` track it.
+- **`dist/ai-hwaccel.cyr`** regenerated (embeds 2.3.3) by the now
+  dist-aware `scripts/version-bump.sh`.
+
+#### Performance
+
+- No benchmarked path touched — `data_file_path` is on the
+  `--version` / `--cost` startup paths only, not the JSON/parse hot
+  paths. `json_serialize_13dev` 25433 → 24520 ns (within noise),
+  confirming no regression (min-of-5 @ 2000 iters).
+
+#### Compatibility
+
+- **CLI**: additive. With `AI_HWACCEL_DATA_DIR` unset, behavior is
+  byte-identical to 2.3.2 (cwd-relative). New env var is opt-in.
+- **Next**: 2.3.4 — multi-platform wheel CI (manylinux x86_64/aarch64,
+  macOS universal2, Windows) using `stage_binary.sh` per target.
+
 ## [2.3.2] — 2026-06-01
 
 **Python bindings (`bindings/python/`).** A thin, dependency-free Python

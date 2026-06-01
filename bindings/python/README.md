@@ -62,18 +62,22 @@ df = reg.to_dataframe()          # requires ai-hwaccel[pandas]
 
 All accept `binary=<path>` and `timeout=<seconds>`.
 
-## Known limitations (tracked for 2.3.3)
+## Data files & working directory
 
-The binary reads two files **relative to the current working directory**:
-`VERSION` (for `--version`) and `data/cloud_pricing.json` (for `cost()`).
-Run from outside the project root, `version()` returns `"unknown"` and
-`cost()` returns no recommendations. Detection (`detect`, `summary`,
-`plan`, `training_memory`) is unaffected. The 2.3.3 packaging work
-bundles these data files next to the binary and resolves them relative to
-the executable.
+`--version` reads `VERSION` and `cost()` reads `data/cloud_pricing.json`.
+The binary honors the **`AI_HWACCEL_DATA_DIR`** environment variable to
+locate them (falling back to cwd-relative if unset):
 
-The package's own version is always available as
-`ai_hwaccel.__version__`.
+- **Bundled wheel binary**: the wrapper sets `AI_HWACCEL_DATA_DIR`
+  automatically to the bundled directory, so `version()` and `cost()`
+  work from any working directory (2.3.3+).
+- **A binary you supply** (via `binary=`, `AI_HWACCEL_BIN`, or `PATH`):
+  set `AI_HWACCEL_DATA_DIR` to a directory containing `VERSION` and
+  `data/cloud_pricing.json`, or run from a directory that has them.
+  Detection (`detect`, `summary`, `plan`, `training_memory`) never needs
+  this — only `version()` and `cost()` do.
+
+The package's own version is always available as `ai_hwaccel.__version__`.
 
 ## License
 

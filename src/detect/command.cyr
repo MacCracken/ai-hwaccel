@@ -47,6 +47,25 @@ fn cmd_getenv(name) {
     return 0;
 }
 
+# Resolve a data-file path against AI_HWACCEL_DATA_DIR.
+#
+# The binary reads VERSION (--version) and data/cloud_pricing.json
+# (--cost) at runtime. Historically those were cwd-relative, so a binary
+# invoked from outside the project root (e.g. a pip-installed wheel)
+# couldn't find them. If AI_HWACCEL_DATA_DIR is set, paths resolve under
+# it ("<dir>/<rel>"); otherwise <rel> is returned unchanged (the
+# cwd-relative fallback). Any consumer — Python now, agnos later — sets
+# the one env var; the contract stays language-neutral. See roadmap 2.3.3.
+fn data_file_path(rel) {
+    var dir = cmd_getenv("AI_HWACCEL_DATA_DIR");
+    if (dir == 0) { return rel; }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, dir);
+    str_builder_putc(sb, '/');
+    str_builder_add_cstr(sb, rel);
+    return str_data(str_builder_build(sb));
+}
+
 # Resolve tool name to absolute path by searching $PATH.
 # Returns heap-allocated path string, or 0 if not found.
 fn which(name) {

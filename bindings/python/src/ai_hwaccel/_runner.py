@@ -59,13 +59,34 @@ def find_binary(explicit: Optional[str] = None) -> str:
     )
 
 
+def _data_dir_for(exe: str) -> Optional[str]:
+    """If ``exe`` is the wheel-bundled binary, return the dir holding its
+    bundled ``VERSION`` + ``data/`` (so the binary's --version / --cost
+    work regardless of cwd via AI_HWACCEL_DATA_DIR). Otherwise None."""
+    try:
+        if Path(exe).resolve() == _bundled_path().resolve():
+            return str(_bundled_path().parent)
+    except OSError:
+        pass
+    return None
+
+
 def _run(args: list, binary: Optional[str], timeout: float) -> str:
     exe = find_binary(binary)
+    env = os.environ.copy()
+    # Point the bundled binary at its bundled data files. Never override a
+    # value the caller already set, and leave PATH/explicit binaries to
+    # the caller's environment (their data files, if any, are their own).
+    if "AI_HWACCEL_DATA_DIR" not in env:
+        data_dir = _data_dir_for(exe)
+        if data_dir is not None:
+            env["AI_HWACCEL_DATA_DIR"] = data_dir
     proc = subprocess.run(
         [exe, *args],
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=env,
     )
     if proc.returncode != 0:
         raise CommandError(
