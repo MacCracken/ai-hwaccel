@@ -19,6 +19,7 @@ include "src/types.cyr"
 include "src/quantization.cyr"
 include "src/profile.cyr"
 include "src/system_io.cyr"
+include "src/training.cyr"
 
 # Stubs for modules not needed
 fn detect_cuda(p, w) { return 0; }
@@ -139,6 +140,67 @@ fn test_binary_size() {
     return 0;
 }
 
+# --- schema v4 surface (2.3.1) ---
+
+fn test_system_io_json() {
+    var profiles = vec_new();
+    vec_push(profiles, profile_cuda(0, 80 * BYTES_PER_GIB));
+    var r = registry_from_profiles(profiles);
+    var sio = reg_system_io(r);
+    sio_add_interconnect(sio, interconnect_new(ICK_NVLINK, str_cstr(str_from("nvlink0")), 50000));
+    sio_add_storage(sio, storage_new(str_cstr(str_from("nvme0n1")), STK_NVME, 3500));
+    var env = runtime_env_new();
+    env_set_is_docker(env, 1);
+    sio_set_environment(sio, env);
+
+    var json = registry_to_json(r);
+    assert(str_contains_cstr(json, "system_io") == 1, "has system_io");
+    assert(str_contains_cstr(json, "interconnects") == 1, "has interconnects");
+    assert(str_contains_cstr(json, "NVLink") == 1, "has NVLink kind");
+    assert(str_contains_cstr(json, "bandwidth_bytes_per_sec") == 1, "has bw");
+    assert(str_contains_cstr(json, "NVMe") == 1, "has NVMe storage");
+    assert(str_contains_cstr(json, "is_docker") == 1, "has env is_docker");
+    return 0;
+}
+
+fn test_system_io_null_env() {
+    # registry_new initializes environment to 0 (null) — must serialize.
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(16 * BYTES_PER_GIB));
+    var r = registry_from_profiles(profiles);
+    var json = registry_to_json(r);
+    assert(str_contains_cstr(json, "\"environment\":null") == 1, "null env serialized");
+    return 0;
+}
+
+fn test_plan_json() {
+    var sp = sharding_plan_new(SHARD_TENSOR, 2);
+    plan_set_total_memory(sp, 168 * BYTES_PER_GIB);
+    plan_add_shard(sp, model_shard_new(0, 0, 39, ACCEL_CUDA, 0, 84 * BYTES_PER_GIB));
+    plan_add_shard(sp, model_shard_new(1, 40, 79, ACCEL_CUDA, 1, 84 * BYTES_PER_GIB));
+
+    var sb = str_builder_new();
+    plan_to_json(sb, sp);
+    var json = str_builder_build(sb);
+    assert(str_contains_cstr(json, "Tensor Parallel") == 1, "has strategy");
+    assert(str_contains_cstr(json, "strategy_count") == 1, "has count");
+    assert(str_contains_cstr(json, "shards") == 1, "has shards");
+    assert(str_contains_cstr(json, "CUDA GPU") == 1, "shard device name");
+    assert(str_contains_cstr(json, "layer_end") == 1, "has layer_end");
+    return 0;
+}
+
+fn test_training_json() {
+    var est = estimate_training_memory(7000, TRAIN_LORA, TARGET_GPU);
+    var sb = str_builder_new();
+    training_to_json(sb, est);
+    var json = str_builder_build(sb);
+    assert(str_contains_cstr(json, "model_bytes") == 1, "has model_bytes");
+    assert(str_contains_cstr(json, "total_bytes") == 1, "has total_bytes");
+    assert(str_contains_cstr(json, "total_gib_x1000") == 1, "has fixed-point");
+    return 0;
+}
+
 # --- Run all tests ---
 
 alloc_init();
@@ -149,6 +211,10 @@ test_summary_json();
 test_json_optional_fields();
 test_json_with_warnings();
 test_binary_size();
+test_system_io_json();
+test_system_io_null_env();
+test_plan_json();
+test_training_json();
 
 var fails = assert_summary();
 syscall(60, fails);

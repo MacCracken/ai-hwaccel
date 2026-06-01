@@ -112,6 +112,11 @@ fn registry_to_json(r) {
         str_builder_putc(sb, ']');
     }
 
+    # System I/O topology (interconnects, storage, runtime env). Added
+    # in schema v4 (2.3.1) so language bindings see the full surface.
+    str_builder_add_cstr(sb, ",\"system_io\":");
+    system_io_to_json(sb, reg_system_io(r));
+
     str_builder_putc(sb, '}');
     return str_builder_build(sb);
 }
@@ -130,4 +135,131 @@ fn registry_to_summary_json(r) {
     _json_int(sb, "warnings", reg_num_warnings(r), 1);
     str_builder_putc(sb, '}');
     return str_builder_build(sb);
+}
+
+# --- System I/O topology (schema v4, 2.3.1) ---
+#
+# Bandwidth is exposed uniformly as bytes/sec. Internally interconnects
+# store GB/s x1000 and storage stores MB/s; both convert to bytes/sec
+# via x1_000_000 (GB/s x1000 -> /1000 *1e9 = x1e6; MB/s -> *1e6).
+
+fn _ic_to_json(sb, ic) {
+    str_builder_putc(sb, '{');
+    _json_str(sb, "kind", ick_name(ic_kind(ic)), 0);
+    _json_str(sb, "name", ic_name(ic), 1);
+    _json_int(sb, "bandwidth_bytes_per_sec", ic_bw_x1000(ic) * 1000000, 1);
+    _json_int(sb, "state", ic_state(ic), 1);
+    str_builder_putc(sb, '}');
+    return 0;
+}
+
+fn _storage_to_json(sb, sd) {
+    str_builder_putc(sb, '{');
+    _json_str(sb, "name", storage_name(sd), 0);
+    _json_str(sb, "kind", stk_name(storage_kind(sd)), 1);
+    _json_int(sb, "bandwidth_bytes_per_sec", storage_bw_x1000(sd) * 1000000, 1);
+    str_builder_putc(sb, '}');
+    return 0;
+}
+
+fn _env_to_json(sb, env) {
+    if (env == 0) {
+        str_builder_add_cstr(sb, "null");
+        return 0;
+    }
+    str_builder_putc(sb, '{');
+    _json_bool(sb, "is_docker", env_is_docker(env), 0);
+    _json_bool(sb, "is_k8s", env_is_k8s(env), 1);
+    _json_opt_str(sb, "k8s_namespace", env_k8s_namespace(env));
+    _json_opt_str(sb, "cloud_provider", env_cloud_provider(env));
+    _json_opt_str(sb, "instance_type", env_instance_type(env));
+    _json_opt_str(sb, "region", env_region(env));
+    _json_opt_int(sb, "k8s_gpu_count", env_k8s_gpu_count(env));
+    _json_opt_str(sb, "k8s_gpu_source", env_k8s_gpu_source(env));
+    str_builder_putc(sb, '}');
+    return 0;
+}
+
+fn system_io_to_json(sb, sio) {
+    if (sio == 0) {
+        str_builder_add_cstr(sb, "null");
+        return 0;
+    }
+    str_builder_add_cstr(sb, "{\"interconnects\":[");
+    var ics = sio_interconnects(sio);
+    var ni = vec_len(ics);
+    var i = 0;
+    while (i < ni) {
+        if (i > 0) { str_builder_putc(sb, ','); }
+        _ic_to_json(sb, vec_get(ics, i));
+        i = i + 1;
+    }
+    str_builder_add_cstr(sb, "],\"storage\":[");
+    var sds = sio_storage(sio);
+    var ns = vec_len(sds);
+    i = 0;
+    while (i < ns) {
+        if (i > 0) { str_builder_putc(sb, ','); }
+        _storage_to_json(sb, vec_get(sds, i));
+        i = i + 1;
+    }
+    str_builder_add_cstr(sb, "],\"environment\":");
+    _env_to_json(sb, sio_environment(sio));
+    str_builder_putc(sb, '}');
+    return 0;
+}
+
+# --- Sharding plan (schema v4, 2.3.1) ---
+
+fn _shard_to_json(sb, ms) {
+    str_builder_putc(sb, '{');
+    _json_int(sb, "id", shard_id(ms), 0);
+    _json_int(sb, "layer_start", shard_layer_start(ms), 1);
+    _json_int(sb, "layer_end", shard_layer_end(ms), 1);
+    _json_str(sb, "device", accel_name(shard_device_type(ms)), 1);
+    _json_int(sb, "device_id", shard_device_id(ms), 1);
+    _json_int(sb, "memory_bytes", shard_memory_bytes(ms), 1);
+    str_builder_putc(sb, '}');
+    return 0;
+}
+
+fn plan_to_json(sb, sp) {
+    str_builder_putc(sb, '{');
+    _json_str(sb, "strategy", shard_strategy_name(plan_strategy(sp)), 0);
+    _json_int(sb, "strategy_count", plan_strategy_count(sp), 1);
+    _json_int(sb, "total_memory_bytes", plan_total_memory(sp), 1);
+    _json_opt_int(sb, "est_tokens_per_sec_x1000", plan_est_tps_x1000(sp));
+    str_builder_add_cstr(sb, ",\"shards\":[");
+    var shards = plan_shards(sp);
+    var n = vec_len(shards);
+    var i = 0;
+    while (i < n) {
+        if (i > 0) { str_builder_putc(sb, ','); }
+        _shard_to_json(sb, vec_get(shards, i));
+        i = i + 1;
+    }
+    str_builder_add_cstr(sb, "]}");
+    return 0;
+}
+
+# --- Training memory estimate (schema v4, 2.3.1) ---
+#
+# Internal values are GiB x1000 fixed-point. Emit both the byte count
+# (val_x1000 * BYTES_PER_GIB / 1000) for ergonomics and the raw
+# fixed-point for losslessness.
+
+fn _est_field(sb, key_bytes, key_gib, val_x1000, comma) {
+    _json_int(sb, key_bytes, val_x1000 * BYTES_PER_GIB / 1000, comma);
+    _json_int(sb, key_gib, val_x1000, 1);
+    return 0;
+}
+
+fn training_to_json(sb, e) {
+    str_builder_putc(sb, '{');
+    _est_field(sb, "model_bytes", "model_gib_x1000", est_model_x1000(e), 0);
+    _est_field(sb, "optimizer_bytes", "optimizer_gib_x1000", est_optimizer_x1000(e), 1);
+    _est_field(sb, "activation_bytes", "activation_gib_x1000", est_activation_x1000(e), 1);
+    _est_field(sb, "total_bytes", "total_gib_x1000", est_total_x1000(e), 1);
+    str_builder_putc(sb, '}');
+    return 0;
 }

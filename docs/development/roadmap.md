@@ -318,23 +318,42 @@ verify on hardware when access happens)
 
 ---
 
-## 2.3.1 — Ecosystem
-*(was 1.4.0 in the Rust roadmap, penciled in as 2.3.0; bumped to 2.3.1
-because the 2.3.0 slot shipped as the toolchain 6.0.25 +
-serialization/dedup audit on 2026-06-01 — see the SHIPPED section above.
-This is the next feature release after 2.3.0.)*
+## 2.3.x — Ecosystem
+*(was 1.4.0 in the Rust roadmap, penciled in as 2.3.0; bumped because the
+2.3.0 slot shipped as the toolchain 6.0.25 + serialization/dedup audit on
+2026-06-01 — see the SHIPPED section above. Sequenced across patches: the
+compiled binary + its JSON contract is the language-neutral substrate;
+Python is the first binding, an AgnosAI / agnos-kernel target follows.)*
 
 Bindings and packaging.
 
-### Python bindings
+### 2.3.1 — JSON surface extension (SHIPPED, 2026-06-01)
 
-- [ ] **Complete API surface** — `AcceleratorProfile`, `SystemIo`,
-  `Interconnect`, `StorageDevice`, `ShardingPlan`, `TrainingMethod`
-- [ ] **`pip install ai-hwaccel`** — wheels for Linux (manylinux),
-  macOS (universal2), Windows (x86_64). cyrius cycc emits ELF/Mach-O/PE,
-  so the wheel build is `cyrius build` per-target rather than maturin
+The data layer every binding consumes. Schema bumped v3 → v4.
+
+- [x] **Full detection surface reachable as JSON** — `system_io`
+  (interconnects / storage / runtime environment) added to the default
+  registry JSON; new `--plan` (ShardingPlan), `--train` (training
+  memory), and `--cost --json` modes. Serializers in `src/json_out.cyr`
+  + `cost_to_json` in `src/cost.cyr`. 36 JSON assertions; ns-resolution
+  benches for each new serializer.
+
+### Python bindings (2.3.2)
+
+- [~] **Complete API surface** — `AcceleratorProfile`, `SystemIo`,
+  `Interconnect`, `StorageDevice`, `ShardingPlan`, `TrainingMethod`.
+  *Data layer shipped in 2.3.1 (schema v4); the Python dataclass/enum
+  model over it is 2.3.2.*
 - [ ] **Python-native ergonomics** — dict-like objects, JSON
   serialization, pandas DataFrame export
+
+### Packaging / wheels (2.3.3)
+
+- [ ] **`pip install ai-hwaccel`** — wheels for Linux (manylinux),
+  macOS (universal2), Windows (x86_64). cyrius cycc emits ELF/Mach-O/PE,
+  so the wheel bundles a per-target `cyrius build` binary (subprocess +
+  JSON; no FFI — the toolchain emits executables only). The per-target
+  matrix is extensible to an **agnos-kernel** target down the line.
 
 ### WASM / JS
 

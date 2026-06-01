@@ -226,6 +226,63 @@ fn _handle_cost(model_str) {
     return 0;
 }
 
+# --- Shared CLI parse helpers ---
+
+# Resolve the --quant arg to a Quantization enum (default BF16).
+fn _quant_arg() {
+    var quant = QUANT_BF16;
+    var qs = _get_val("--quant");
+    if (qs != 0) {
+        var q = quant_from_str(qs);
+        if (q >= 0) { quant = q; }
+    }
+    return quant;
+}
+
+# Parse a "<N>B" model size string to its billions count (e.g. "70B"
+# -> 70). Digits are read until a 'B'/'b' or end of string.
+fn _parse_model_b(model_str) {
+    var num = 0;
+    var pi = 0;
+    while (load8(model_str + pi) != 0) {
+        var c = load8(model_str + pi);
+        if (c >= 48 && c <= 57) { num = num * 10 + c - 48; }
+        elif (c == 66 || c == 98) { break; }
+        pi = pi + 1;
+    }
+    return num;
+}
+
+# --- Training memory mode (--train) ---
+
+fn _handle_train(model_str) {
+    var method = TRAIN_FULL;
+    var ms = _get_val("--method");
+    if (ms != 0) {
+        var m = training_method_from_str(ms);
+        if (m >= 0) { method = m; }
+    }
+    var params_m = _parse_model_b(model_str) * 1000;
+    var est = estimate_training_memory(params_m, method, TARGET_GPU);
+    var sb = str_builder_new();
+    training_to_json(sb, est);
+    _print_str(str_builder_build(sb));
+    syscall(1, 1, "\n", 1);
+    return 0;
+}
+
+# --- Sharding plan mode (--plan) ---
+
+fn _handle_plan(registry, model_str) {
+    var params = _parse_model_b(model_str) * 1000000000;
+    var plan = reg_plan_sharding(registry, params, _quant_arg());
+    var sb = str_builder_new();
+    plan_to_json(sb, plan);
+    _print_str(str_builder_build(sb));
+    syscall(1, 1, "\n", 1);
+    return 0;
+}
+
 # --- Version ---
 
 fn _print_version() {
@@ -260,19 +317,41 @@ if (_has_flag("--help") == 1) {
     _println_cstr("  ai-hwaccel              Full registry JSON");
     _println_cstr("  ai-hwaccel --summary    Compact summary JSON");
     _println_cstr("  ai-hwaccel --table      Human-readable table");
-    _println_cstr("  ai-hwaccel --cost 70B   Cloud instance recommendation");
+    _println_cstr("  ai-hwaccel --cost 70B   Cloud instance recommendation (text)");
+    _println_cstr("  ai-hwaccel --cost 70B --json   Same, as JSON");
+    _println_cstr("  ai-hwaccel --plan 70B   Sharding plan JSON");
+    _println_cstr("  ai-hwaccel --train 70B [--method lora]   Training memory JSON");
     _println_cstr("  ai-hwaccel --version    Print version");
+    _println_cstr("");
+    _println_cstr("Options: --quant <fp16|bf16|int8|int4>  --method <full|lora|qlora-4bit|...>");
     syscall(60, 0);
 }
 
 var cost_val = _get_val("--cost");
 if (cost_val != 0) {
-    _handle_cost(cost_val);
+    if (_has_flag("--json") == 1) {
+        _print_str(cost_to_json(cost_val, _quant_arg()));
+        syscall(1, 1, "\n", 1);
+    } else {
+        _handle_cost(cost_val);
+    }
+    syscall(60, 0);
+}
+
+var train_val = _get_val("--train");
+if (train_val != 0) {
+    _handle_train(train_val);
     syscall(60, 0);
 }
 
 # Detect hardware
 var registry = registry_detect();
+
+var plan_val = _get_val("--plan");
+if (plan_val != 0) {
+    _handle_plan(registry, plan_val);
+    syscall(60, 0);
+}
 
 if (_has_flag("--table") == 1) {
     _print_table(registry);

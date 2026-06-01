@@ -281,3 +281,48 @@ fn recommend_instances(model_params, quant, provider_filter) {
 
     return recs;
 }
+
+# Serialize a cost recommendation to JSON (schema v4, 2.3.1).
+# Mirrors the --cost text path in main.cyr (_handle_cost): parses the
+# "<N>B" model string, computes the memory requirement, and lists the
+# cheapest matching instances (capped at 5, like the text output).
+fn cost_to_json(model_str, quant) {
+    var num = 0;
+    var pi = 0;
+    while (load8(model_str + pi) != 0) {
+        var c = load8(model_str + pi);
+        if (c >= 48 && c <= 57) { num = num * 10 + c - 48; }
+        elif (c == 66 || c == 98) { break; }
+        pi = pi + 1;
+    }
+    var params = num * 1000000000;
+    var needed = quant_model_bytes_with_overhead(params, quant);
+
+    var sb = str_builder_new();
+    str_builder_putc(sb, '{');
+    _json_str(sb, "model", model_str, 0);
+    _json_str(sb, "quantization", quant_name(quant), 1);
+    _json_int(sb, "memory_required_bytes", needed, 1);
+    str_builder_add_cstr(sb, ",\"recommendations\":[");
+
+    var recs = recommend_instances(params, quant, 0 - 1);
+    var nr = vec_len(recs);
+    var limit = nr;
+    if (limit > 5) { limit = 5; }
+    var ri = 0;
+    while (ri < limit) {
+        if (ri > 0) { str_builder_putc(sb, ','); }
+        var inst = rec_instance(vec_get(recs, ri));
+        str_builder_putc(sb, '{');
+        _json_str(sb, "instance", cloud_inst_name(inst), 0);
+        _json_str(sb, "provider", cloud_inst_provider(inst), 1);
+        _json_str(sb, "gpu", cloud_inst_gpu(inst), 1);
+        _json_int(sb, "gpu_count", cloud_inst_gpu_count(inst), 1);
+        _json_int(sb, "total_memory_gb", cloud_inst_total_mem_gb(inst), 1);
+        _json_int(sb, "price_per_hour_usd_x100", cloud_inst_price_x100(inst), 1);
+        str_builder_putc(sb, '}');
+        ri = ri + 1;
+    }
+    str_builder_add_cstr(sb, "]}");
+    return str_builder_build(sb);
+}

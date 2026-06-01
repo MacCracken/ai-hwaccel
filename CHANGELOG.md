@@ -7,6 +7,96 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.3.1] — 2026-06-01
+
+**JSON surface extension — the data layer for language bindings.** The
+roadmap's "Ecosystem" work (Python bindings + packaging) needs the full
+detection surface reachable as JSON; today only `AcceleratorProfile`s
+were serialized. This release bumps the JSON schema to **v4** and makes
+`SystemIo`, `Interconnect`, `StorageDevice`, runtime environment,
+`ShardingPlan`, and the training-memory estimate reachable as JSON, plus
+new CLI modes to emit them. The compiled binary + this JSON contract is
+the **language-neutral substrate** the Python package (2.3.2) and a
+later AgnosAI/agnos-kernel target consume — no consumer-specific logic
+in the core. CLI text output is unchanged and backward-compatible.
+
+Per the mandatory benchmarking policy, the before/after deltas are in
+the table below and `bench-history.csv`.
+
+#### Added
+
+- **`system_io` in the default registry JSON (schema v3 → v4).**
+  `registry_to_json` now appends a `"system_io"` object:
+  `interconnects[]` ({kind, name, bandwidth_bytes_per_sec, state}),
+  `storage[]` ({name, kind, bandwidth_bytes_per_sec}), and
+  `environment` ({is_docker, is_k8s, k8s_namespace, cloud_provider,
+  instance_type, region, k8s_gpu_count, k8s_gpu_source} or `null`).
+  Bandwidth is normalized to bytes/sec uniformly (interconnects store
+  GB/s×1000, storage stores MB/s; both → bytes/sec via ×1e6).
+  Serializers: `system_io_to_json` + `_ic_to_json` / `_storage_to_json`
+  / `_env_to_json` in `src/json_out.cyr`.
+- **`--plan <model>`** → `plan_to_json` of `reg_plan_sharding`:
+  {strategy, strategy_count, total_memory_bytes,
+  est_tokens_per_sec_x1000 (optional), shards[] {id, layer_start,
+  layer_end, device, device_id, memory_bytes}}.
+- **`--train <model> [--method <m>]`** → `training_to_json` of
+  `estimate_training_memory`: model/optimizer/activation/total emitted
+  as both `*_bytes` and the lossless `*_gib_x1000` fixed-point. Default
+  method `full`, target GPU. New `training_method_from_str` in
+  `src/training.cyr`.
+- **`--cost <model> --json`** → `cost_to_json` (`src/cost.cyr`):
+  {model, quantization, memory_required_bytes, recommendations[]
+  {instance, provider, gpu, gpu_count, total_memory_gb,
+  price_per_hour_usd_x100}}. Without `--json`, `--cost` prints the same
+  text as before.
+- **CLI help** updated for the new flags; shared `_quant_arg` /
+  `_parse_model_b` helpers in `src/main.cyr`.
+- **Tests**: `tests/tcyr/json_output_test.tcyr` +4 cases (system_io
+  populated + null-env, plan, training) — 21 → 36 assertions.
+- **Benchmarks**: `benches/registry.bcyr` gains `json_system_io`,
+  `json_plan`, `json_training` (ns-resolution, 2000 iters).
+
+#### Performance
+
+Mandatory before/after (min-of-7 @ 2000 iters, ns resolution):
+
+| benchmark              | 2.3.0     | 2.3.1     | delta |
+| ---------------------- | --------: | --------: | ----- |
+| `json_serialize_13dev` | 24265 ns  | 25433 ns  | +4.8% — inherent cost of the always-present (empty) `system_io` object, not a regression |
+| `json_summary_13dev`   |  4947 ns  |  4985 ns  | flat (noise) — summary JSON unchanged |
+| `json_system_io` (new) |     —     |  7167 ns  | populated: 2 interconnects + 2 storage + env |
+| `json_plan` (new)      |     —     | 21299 ns  | mock 70B sharding plan |
+| `json_training` (new)  |     —     |  4069 ns  | 70B full-train estimate |
+
+The `json_serialize_13dev` increase is the new feature's payload
+(`system_io` is now always serialized), measured and documented rather
+than hidden. All other registry/parsing benches untouched.
+
+#### Changed
+
+- **`VERSION`**: 2.3.0 → 2.3.1.
+- **`SCHEMA_VERSION`**: 3 → 4 (`src/units.cyr`); `foundation_test`
+  assertion updated.
+- **`dist/ai-hwaccel.cyr`** — regenerated (json_out/cost/training in the
+  bundle); deterministic.
+
+#### Compatibility
+
+- **CLI binary**: additive. Default JSON gains `system_io` +
+  `schema_version: 4`; existing keys unchanged. `--cost` text output is
+  byte-identical without `--json`. New flags are opt-in.
+- **Library consumers**: the bundle exposes the new serializers; unused
+  ones DCE away. Bump `[deps.ai-hwaccel] tag = "2.3.1"`, re-run
+  `cyrius lib sync` + `cyrius deps`.
+- **Next**: 2.3.2 Python package (`bindings/python/`), 2.3.3
+  multi-platform wheels.
+
+#### Aside
+
+- Toolchain pin drift: `cyrius.cyml` pins 6.0.25, wrapper is now 6.0.26.
+  Per policy that's its own bench-gated point release; left at 6.0.25
+  here (builds run with `CYRIUS_NO_WARN_PIN_DRIFT=1`).
+
 ## [2.3.0] — 2026-06-01
 
 **Toolchain modernization + serialization hot-path + a codebase-wide

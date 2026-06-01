@@ -25,6 +25,20 @@ fn training_method_name(m) {
     return "unknown";
 }
 
+# Parse a training method name (the --method CLI arg) to its enum.
+# Returns -1 on an unrecognized name so callers can fall back.
+fn training_method_from_str(s) {
+    if (streq(s, "full") == 1) { return TRAIN_FULL; }
+    if (streq(s, "lora") == 1) { return TRAIN_LORA; }
+    if (streq(s, "qlora-4bit") == 1) { return TRAIN_QLORA_4; }
+    if (streq(s, "qlora-8bit") == 1) { return TRAIN_QLORA_8; }
+    if (streq(s, "prefix") == 1) { return TRAIN_PREFIX; }
+    if (streq(s, "dpo") == 1) { return TRAIN_DPO; }
+    if (streq(s, "rlhf") == 1) { return TRAIN_RLHF; }
+    if (streq(s, "distillation") == 1) { return TRAIN_DISTILL; }
+    return 0 - 1;
+}
+
 enum TrainingTarget {
     TARGET_GPU = 0;
     TARGET_TPU = 1;

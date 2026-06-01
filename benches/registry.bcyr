@@ -206,4 +206,69 @@ print("    avg_ns=", 10);
 fmt_int(bench_avg_ns(b7));
 print("\n", 1);
 
+# --- system_io serialization (schema v4, 2.3.1) ---
+# Populated separately so the json_serialize_13dev bench above keeps an
+# empty system_io (apples-to-apples vs the pre-2.3.1 baseline).
+
+var sio_b = system_io_new();
+sio_add_interconnect(sio_b, interconnect_new(ICK_NVLINK, "nvlink0", 50000));
+sio_add_interconnect(sio_b, interconnect_new(ICK_INFINIBAND, "ib0", 25000));
+sio_add_storage(sio_b, storage_new("nvme0n1", STK_NVME, 3500));
+sio_add_storage(sio_b, storage_new("sda", STK_SATA_SSD, 550));
+var env_b = runtime_env_new();
+env_set_is_docker(env_b, 1);
+env_set_cloud_provider(env_b, "aws");
+sio_set_environment(sio_b, env_b);
+
+var b8 = bench_new("json_system_io");
+ri = 0;
+while (ri < 2000) {
+    bench_start(b8);
+    var sb8 = str_builder_new();
+    system_io_to_json(sb8, sio_b);
+    str_builder_build(sb8);
+    bench_stop(b8);
+    ri = ri + 1;
+}
+bench_report(b8);
+print("    avg_ns=", 10);
+fmt_int(bench_avg_ns(b8));
+print("\n", 1);
+
+# --- sharding plan serialization (schema v4, 2.3.1) ---
+
+var plan_b = reg_plan_sharding(mock, 70000000000, QUANT_BF16);
+var b9 = bench_new("json_plan");
+ri = 0;
+while (ri < 2000) {
+    bench_start(b9);
+    var sb9 = str_builder_new();
+    plan_to_json(sb9, plan_b);
+    str_builder_build(sb9);
+    bench_stop(b9);
+    ri = ri + 1;
+}
+bench_report(b9);
+print("    avg_ns=", 10);
+fmt_int(bench_avg_ns(b9));
+print("\n", 1);
+
+# --- training memory serialization (schema v4, 2.3.1) ---
+
+var est_b = estimate_training_memory(70000, TRAIN_FULL, TARGET_GPU);
+var b10 = bench_new("json_training");
+ri = 0;
+while (ri < 2000) {
+    bench_start(b10);
+    var sb10 = str_builder_new();
+    training_to_json(sb10, est_b);
+    str_builder_build(sb10);
+    bench_stop(b10);
+    ri = ri + 1;
+}
+bench_report(b10);
+print("    avg_ns=", 10);
+fmt_int(bench_avg_ns(b10));
+print("\n", 1);
+
 syscall(60, 0);
