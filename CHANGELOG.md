@@ -7,6 +7,40 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+### Toolchain pin 6.0.30 → 6.0.38 (folds into 2.3.6)
+
+**macOS toolchain now delivered.** 6.0.38 ships the Darwin
+`cyrius`/`cycc` compiler binaries that the 6.0.30 installer was still
+missing — the exact blocker called out in the 2.3.5 notes and the
+roadmap 2.3.6 gate. This change lands the pin and re-syncs the stdlib;
+the macOS arm64 wheel build itself follows as the body of 2.3.6.
+
+#### Changed
+
+- **`cyrius.cyml`**: pin 6.0.30 → 6.0.38. Stdlib re-synced into `./lib/`
+  (82 files from the 6.0.38 snapshot); build drift warning gone. Lib
+  modules that changed vs the 6.0.30 snapshot: `syscalls`,
+  `syscalls_macos`, `syscalls_aarch64_linux`, `bigint`, `alloc_macos`,
+  `tls_native`, plus a new `unicode/` subdir (not pulled by the build).
+- **`CLAUDE.md`**: pinned-version notes 6.0.0/6.0.30 → 6.0.38.
+
+#### Performance
+
+No `.cyr` source changed; any delta is codegen-only, via the re-synced
+stdlib. Built on 6.0.38 vs the prior 6.0.30 lib snapshot, same machine
+and iteration counts. The deterministic ns rows drift run-to-run on
+this box (`total_memory_13dev` 148–158 ns, `count_family_gpu_13dev`
+312–406 ns, `has_accelerator_13dev` 28–32 ns) and the 6.0.30 baseline
+(147 / 329 / 29 ns) sits inside that band — **neutral, within noise, no
+regression.** The µs-level JSON paths are likewise flat within jitter.
+
+#### Compatibility
+
+- 11/11 test units green on 6.0.38. Pin-drift warning resolved
+  (`manifest-pin: 6.0.38`, no drift).
+- No VERSION bump and no `dist/` regen here — this folds into the 2.3.6
+  macOS-wheel release.
+
 ## [2.3.5] — 2026-06-01
 
 **Toolchain pin 6.0.25 → 6.0.30.** Resolves the long-standing wrapper

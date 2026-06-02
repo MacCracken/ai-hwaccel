@@ -379,14 +379,14 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
   (`json_serialize_13dev` 25535 → 25245 ns, noise). All gates green on
   6.0.30.
 
-### 2.3.6 — macOS wheel (gated: Darwin compiler not yet in installer)
+### 2.3.6 — macOS wheel (UNBLOCKED: Darwin compiler shipped in 6.0.38)
 
-- [ ] **macOS arm64 wheel** — at 6.0.30 the installer accepts Darwin and
-  lays out the version tree + `cyriusly`, but does NOT yet deliver the
-  `cyrius`/`cycc` compiler binaries (only `cyriusly` lands in
-  `~/.cyrius/versions/6.0.30/bin/` on `ecb`). Unblocks once the compiler
-  binaries are integrated into the macOS install; then `build_remote.sh
-  ecb macosx_11_0_arm64` + flip the gated CI job. Build worker: `ecb`
+- [ ] **macOS arm64 wheel** — the 6.0.30 installer accepted Darwin and
+  laid out the version tree + `cyriusly` but did NOT deliver the
+  `cyrius`/`cycc` compiler binaries. **6.0.38 now ships them** (verified
+  installing on `ecb`); the pin is bumped 6.0.30 → 6.0.38 (see
+  CHANGELOG `[Unreleased]`). Remaining: `build_remote.sh ecb
+  macosx_11_0_arm64` + flip the gated CI job. Build worker: `ecb`
   (Apple-silicon → `macosx_11_0_arm64`; universal2 only if the backend
   also emits x86_64 Mach-O).
 
