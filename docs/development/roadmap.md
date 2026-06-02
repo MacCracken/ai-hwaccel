@@ -372,16 +372,25 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
   `py3-none-<plat>`; `scripts/{stage_binary,build_wheel,build_remote}.sh`;
   CI `wheels.yml` matrix. Extensible to an **agnos-kernel** target.
 
-### 2.3.5 — macOS wheel (near-term, gated on installer fix)
+### 2.3.5 — Toolchain pin 6.0.25 → 6.0.30 (SHIPPED, 2026-06-01)
 
-- [ ] **macOS arm64 wheel** — the Darwin binaries are built but not yet
-  wired into `install.sh` (it still rejects darwin). Unblocks as soon as
-  the installer integration lands; then `build_remote.sh ecb
-  macosx_11_0_arm64` + flip the gated CI job. Build worker: `ecb`
+- [x] **Pin bump** — resolves the wrapper drift; stdlib re-synced from
+  the 6.0.30 snapshot. No `.cyr` changed. Benches confirm no regression
+  (`json_serialize_13dev` 25535 → 25245 ns, noise). All gates green on
+  6.0.30.
+
+### 2.3.6 — macOS wheel (gated: Darwin compiler not yet in installer)
+
+- [ ] **macOS arm64 wheel** — at 6.0.30 the installer accepts Darwin and
+  lays out the version tree + `cyriusly`, but does NOT yet deliver the
+  `cyrius`/`cycc` compiler binaries (only `cyriusly` lands in
+  `~/.cyrius/versions/6.0.30/bin/` on `ecb`). Unblocks once the compiler
+  binaries are integrated into the macOS install; then `build_remote.sh
+  ecb macosx_11_0_arm64` + flip the gated CI job. Build worker: `ecb`
   (Apple-silicon → `macosx_11_0_arm64`; universal2 only if the backend
   also emits x86_64 Mach-O).
 
-### 2.3.6 — Windows wheel (later in 6.0.x)
+### 2.3.7 — Windows wheel (later in 6.0.x)
 
 - [ ] **Windows x86_64 wheel** — deferred: needs a full PowerShell
   (`.ps1`) build flow; the current PE backend (`cycc_win`) is frozen at

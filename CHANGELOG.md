@@ -7,6 +7,46 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.3.5] — 2026-06-01
+
+**Toolchain pin 6.0.25 → 6.0.30.** Resolves the long-standing wrapper
+drift (the local toolchain had auto-advanced well past the pin). Pure
+toolchain bump — no `.cyr` source changed. Per the mandatory-benchmark
+policy, before/after deltas confirm no regression.
+
+#### Changed
+
+- **`cyrius.cyml`**: pin 6.0.25 → 6.0.30. Stdlib re-synced into `./lib/`
+  (82 files from the 6.0.30 snapshot). Build drift warning gone.
+- **`VERSION`**: 2.3.4 → 2.3.5.
+- **`dist/ai-hwaccel.cyr`** regenerated (embeds 2.3.5).
+- **`CLAUDE.md`**: pinned-version note 6.0.25 → 6.0.30.
+
+#### Performance
+
+Before/after (min-of-6 @ 2000 iters, ns; built with the respective
+pinned toolchain):
+
+| benchmark              | 6.0.25    | 6.0.30    | delta |
+| ---------------------- | --------: | --------: | ----- |
+| `json_serialize_13dev` | 25535 ns  | 25245 ns  | −1.1% (noise) |
+| `json_summary_13dev`   |  5051 ns  |  5025 ns  | flat (noise) |
+| `parse_cuda_8gpu` (min)|    18 µs  |    17 µs  | flat (noise) |
+
+No regression; all within run-to-run noise. The compiled binary is
+functionally unchanged.
+
+#### Compatibility
+
+- **Gates** (on 6.0.30): 11 test units, 6 fuzz harnesses, `vet` (37
+  deps, 0 untrusted), fmt, lint, raw-offset guard, distlib
+  drift+determinism — all green.
+- **Note**: macOS toolchain still incomplete — the 6.0.30 installer
+  sets up the version layout + `cyriusly` on Darwin but does not yet
+  deliver the `cyrius`/`cycc` compiler binaries, so the macOS wheel
+  (2.3.6) remains blocked. Windows wheel (2.3.7) still pending the
+  PowerShell build flow.
+
 ## [2.3.4] — 2026-06-01
 
 **Linux wheels + the wheel-build machinery.** `bindings/python` can now
