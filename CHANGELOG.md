@@ -7,6 +7,16 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+### Toolchain pin 6.0.43 → 6.0.47
+
+Stdlib re-synced into `./lib/` (83 files). No `.cyr` source changed;
+delta is codegen-only via the snapshot. 6.0.47 vs 6.0.43 baseline, same
+box/iters: deterministic ns rows within run-to-run noise
+(`total_memory_13dev` 140 vs 138, `count_family_gpu_13dev` 308 vs 292,
+`has_accelerator_13dev` 27 vs 29) — **neutral, no regression.** 11/11
+test units green; drift warning resolved. `CLAUDE.md` pin note → 6.0.47.
+Folds into the next release (2.3.7).
+
 ## [2.3.6] — 2026-06-02
 
 **macOS arm64 wheel ships — `pip install ai-hwaccel` now self-contained

@@ -75,10 +75,18 @@ jobs:
   windows:
     name: windows wheel (x86_64)
     runs-on: windows-latest
-    # GATED (2.3.7, later in 6.0.x): needs a full PowerShell (.ps1) build
-    # flow; the PE cross-compiler (cycc_win) is frozen at cc5_win 5.11.69
-    # with no `cyrius build --win` target. Flip to `true` once the
-    # Windows build flow lands (tracked: language agent; worker: cass).
+    # GATED (2.3.7): BLOCKED on the cyrius Windows PE surface (assessed
+    # 2026-06-03 on 6.0.47 — cyrius issue
+    # 2026-06-03-windows-pe-syscall-surface-blocks-detection.md):
+    #   1. PE routes only ~10 syscalls — no fork/execve, so spawn-based
+    #      detection faults (STATUS_ILLEGAL_INSTRUCTION).
+    #   2. cycc_win frozen at cc5_win 5.11.69 vs 6.0.47 stdlib — bundle
+    #      won't cross-compile (PROT_READ).
+    #   3. our src/detect/windows.cyr DXGI is still a stub.
+    # NOTE: this windows-latest + git-bash + stage_binary.sh shape is also
+    # likely wrong — the viable path is a *Linux* cross-build via cycc_win
+    # (no Windows runner needed for the build; cass only for runtime smoke).
+    # Rework this job when the surface lands. Flip to `true` then.
     if: ${{ false }}
     steps:
       - uses: actions/checkout@v4

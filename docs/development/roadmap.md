@@ -394,13 +394,33 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
   build` resolves `[deps] stdlib` directly. universal2 deferred until the
   backend also emits x86_64 Mach-O (see the sibling x86 issue).
 
-### 2.3.7 — Windows wheel (later in 6.0.x)
+### 2.3.7 — Windows wheel (BLOCKED on cyrius PE surface — assessed 2026-06-03)
 
-- [ ] **Windows x86_64 wheel** — deferred: needs a full PowerShell
-  (`.ps1`) build flow; the current PE backend (`cycc_win`) is frozen at
-  `cc5_win 5.11.69` and there's no `cyrius build --win` target. Targeted
-  to land before the 6.0.x line closes. CI job scaffolded (`if: false`);
-  build worker: `cass`.
+- [ ] **Windows x86_64 wheel** — feasibility assessed on cyrius 6.0.47.
+  Findings (filed upstream:
+  `cyrius/docs/development/issues/2026-06-03-windows-pe-syscall-surface-blocks-detection.md`):
+  - **Build path exists, no `cass` needed:** `cycc_win` is a *Linux-hosted*
+    cross-compiler emitting valid `PE32+` (verified — trivial programs
+    build). So the eventual flow is a Linux cross-build (pipe the stdlib
+    bundle + `src/main.cyr` → `cycc_win`), not a remote PowerShell build.
+  - **Blocker 1 (cyrius):** Windows PE routes only ~10 syscalls
+    (`0,1,2,3,8,9,60,83,87,228`) — **no `fork`/`execve`**. Detection
+    spawns probes via `sys_fork`+`sys_execve` (`lib/process.cyr`), so any
+    detection faults with `STATUS_ILLEGAL_INSTRUCTION`.
+  - **Blocker 2 (cyrius):** PE frontend frozen at `cc5_win 5.11.69` vs the
+    6.0.47 stdlib → the full bundle won't cross-compile
+    (`lib/atomic.cyr:98 undefined PROT_READ`; `cycc_win` wants its own
+    5.11.69 snapshot).
+  - **Blocker 3 (ours):** `src/detect/windows.cyr` is a DXGI **stub** — a
+    running Windows binary would detect only CPU until that's implemented.
+  - `builder_no_exec()` exists (masks spawn detectors) but doesn't rescue
+    this: bundle still won't build on the frozen frontend, and a no-exec
+    binary detects nothing useful while the DXGI stub stands.
+  - **Unblocks on:** the first 6.0.x whose `cycc_win` cross-builds the
+    current stdlib AND routes Win32 process creation, verified on `cass`.
+    Then: implement `windows.cyr` DXGI detection (our side), wire the
+    Linux cross-build into `wheels.yml`, flip the gate. CI job stays
+    `if: false`; build worker for runtime smoke: `cass`.
 
 ### WASM / JS
 
