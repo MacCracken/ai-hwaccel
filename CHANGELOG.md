@@ -7,39 +7,74 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
-### Toolchain pin 6.0.30 → 6.0.38 (folds into 2.3.6)
+## [2.3.6] — 2026-06-02
 
-**macOS toolchain now delivered.** 6.0.38 ships the Darwin
-`cyrius`/`cycc` compiler binaries that the 6.0.30 installer was still
-missing — the exact blocker called out in the 2.3.5 notes and the
-roadmap 2.3.6 gate. This change lands the pin and re-syncs the stdlib;
-the macOS arm64 wheel build itself follows as the body of 2.3.6.
+**macOS arm64 wheel ships — `pip install ai-hwaccel` now self-contained
+on Apple silicon.** This closes the roadmap 2.3.6 gate. Two things had
+to land together: the toolchain pin moves to **6.0.43**, and the Darwin
+build bug that blocked the wheel on 6.0.38 is fixed upstream.
+
+The 2.3.5 notes left macOS gated on "no compiler in the installer."
+6.0.38 delivered the arm64 Darwin compiler but surfaced a *new* blocker:
+`cyrius build` false-negatived its own install check on a manifest with
+`cyrius = "<pin>"` + a `[deps] stdlib` block (our exact shape), claiming
+the present snapshot lib was "not installed." Filed as cyrius issue
+`2026-06-02-macos-arm64-deps-stdlib-pin-check.md` (three stacked
+Darwin-ABI defects: an `is_dir` install-probe false-negative, a getcwd
+SIGSYS, and a wrong Darwin `st_size` offset truncating the include
+scan). **Fixed across cyrius 6.0.40–6.0.43**; verified end-to-end on
+`ecb` (real Apple silicon): the arm64 Mach-O builds, the resolved stdlib
+executes, and every ai-hwaccel subcommand runs.
+
+#### Added
+
+- **macOS arm64 wheel** (`ai_hwaccel-2.3.6-py3-none-macosx_11_0_arm64`).
+  Built on `ecb` via `bindings/python/scripts/build_remote.sh ecb
+  macosx_11_0_arm64`, bundling the Mach-O arm64 binary + `VERSION` +
+  `data/cloud_pricing.json` under `ai_hwaccel/_bin/` (subprocess + JSON,
+  no FFI — same model as the Linux wheels). Verified: `--version`,
+  `--json`, `--summary`, `--cost`, `--plan` all run on Darwin arm64.
+- CI `wheels.yml` `macos` job **enabled** (`if: true`) — the `macos-14`
+  runner installs pinned 6.0.43 and builds natively.
 
 #### Changed
 
-- **`cyrius.cyml`**: pin 6.0.30 → 6.0.38. Stdlib re-synced into `./lib/`
-  (82 files from the 6.0.38 snapshot); build drift warning gone. Lib
-  modules that changed vs the 6.0.30 snapshot: `syscalls`,
-  `syscalls_macos`, `syscalls_aarch64_linux`, `bigint`, `alloc_macos`,
-  `tls_native`, plus a new `unicode/` subdir (not pulled by the build).
-- **`CLAUDE.md`**: pinned-version notes 6.0.0/6.0.30 → 6.0.38.
+- **`cyrius.cyml`**: pin 6.0.30 → **6.0.43**. Stdlib re-synced into
+  `./lib/` (82 files from the 6.0.43 snapshot); drift warning gone.
+- **`bindings/python/scripts/build_remote.sh`**: `cyrius lib sync` is now
+  best-effort. It false-negatives on Darwin (the directory-listing /
+  `getdents64` surface is still unported there — a separate, still-open
+  item in the same cyrius issue), and it is unnecessary: `cyrius build`
+  resolves `[deps] stdlib` into `./lib` by name (the path fixed in
+  6.0.40+). The build populates its own lib.
+- **`bindings/python/pyproject.toml`**: 2.3.4 → 2.3.6.
+- **`CLAUDE.md`**: pinned-version notes 6.0.0/6.0.30 → 6.0.43.
+- **`VERSION`**: 2.3.5 → 2.3.6; **`dist/ai-hwaccel.cyr`** regenerated
+  (embeds 2.3.6).
 
 #### Performance
 
-No `.cyr` source changed; any delta is codegen-only, via the re-synced
-stdlib. Built on 6.0.38 vs the prior 6.0.30 lib snapshot, same machine
-and iteration counts. The deterministic ns rows drift run-to-run on
-this box (`total_memory_13dev` 148–158 ns, `count_family_gpu_13dev`
-312–406 ns, `has_accelerator_13dev` 28–32 ns) and the 6.0.30 baseline
-(147 / 329 / 29 ns) sits inside that band — **neutral, within noise, no
-regression.** The µs-level JSON paths are likewise flat within jitter.
+No `.cyr` source changed; any delta is codegen-only via the re-synced
+stdlib. Built on 6.0.43 vs the 6.0.38 lib snapshot, same machine and
+iteration counts. The deterministic ns rows drift run-to-run on this box
+(`total_memory_13dev` 145–163 ns, `count_family_gpu_13dev` 303–354 ns,
+`has_accelerator_13dev` 30–42 ns) and the 6.0.38 baseline (159 / 354 /
+33 ns) sits inside that band — **neutral, within noise, no regression.**
+µs-level JSON/parse paths flat within jitter. (This subsumes the
+unreleased 6.0.30 → 6.0.38 pin step, which was also neutral.)
 
 #### Compatibility
 
-- 11/11 test units green on 6.0.38. Pin-drift warning resolved
-  (`manifest-pin: 6.0.38`, no drift).
-- No VERSION bump and no `dist/` regen here — this folds into the 2.3.6
-  macOS-wheel release.
+- 11/11 test units green on 6.0.43 (Linux). macOS arm64 verified by
+  running the staged binary on `ecb`.
+- **Known cosmetic warning (macOS only):** the Darwin `[deps]` build
+  emits `duplicate fn 'arena_new' (last definition wins)` because both
+  `lib/alloc.cyr` and `lib/alloc_macos.cyr` define it and Darwin pulls
+  both layers. "Last definition wins" selects the macOS variant —
+  correct behavior; the binary is verified working. Minor upstream
+  follow-up (stdlib layering), not a consumer blocker.
+- **Still pending:** Windows wheel (2.3.7) — needs the PowerShell build
+  flow + a PE `cyrius build` target.
 
 ## [2.3.5] — 2026-06-01
 

@@ -379,16 +379,20 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
   (`json_serialize_13dev` 25535 → 25245 ns, noise). All gates green on
   6.0.30.
 
-### 2.3.6 — macOS wheel (UNBLOCKED: Darwin compiler shipped in 6.0.38)
+### 2.3.6 — macOS wheel (SHIPPED, 2026-06-02)
 
-- [ ] **macOS arm64 wheel** — the 6.0.30 installer accepted Darwin and
-  laid out the version tree + `cyriusly` but did NOT deliver the
-  `cyrius`/`cycc` compiler binaries. **6.0.38 now ships them** (verified
-  installing on `ecb`); the pin is bumped 6.0.30 → 6.0.38 (see
-  CHANGELOG `[Unreleased]`). Remaining: `build_remote.sh ecb
-  macosx_11_0_arm64` + flip the gated CI job. Build worker: `ecb`
-  (Apple-silicon → `macosx_11_0_arm64`; universal2 only if the backend
-  also emits x86_64 Mach-O).
+- [x] **macOS arm64 wheel** — `ai_hwaccel-2.3.6-py3-none-macosx_11_0_arm64`.
+  Arc: 6.0.30 shipped no Darwin compiler; 6.0.38 shipped the arm64
+  compiler but surfaced a new blocker (`cyrius build` false-negatived the
+  install check on `cyrius = "<pin>"` + `[deps] stdlib`); **cyrius
+  6.0.40–6.0.43 fixed it** (three stacked Darwin-ABI defects — see cyrius
+  issue `2026-06-02-macos-arm64-deps-stdlib-pin-check.md`, RESOLVED). Pin
+  bumped 6.0.30 → 6.0.43. Built on `ecb` via `build_remote.sh ecb
+  macosx_11_0_arm64`; verified end-to-end (Mach-O arm64, stdlib executes,
+  all subcommands run). CI `wheels.yml` `macos` job enabled. `lib sync`
+  on Darwin is bypassed (still-unported getdents64 surface) — `cyrius
+  build` resolves `[deps] stdlib` directly. universal2 deferred until the
+  backend also emits x86_64 Mach-O (see the sibling x86 issue).
 
 ### 2.3.7 — Windows wheel (later in 6.0.x)
 

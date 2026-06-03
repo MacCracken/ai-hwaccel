@@ -47,11 +47,14 @@ jobs:
   macos:
     name: macOS wheel (arm64)
     runs-on: macos-14
-    # GATED (2.3.6): at cyrius 6.0.30 the macOS installer lays out the
-    # version tree + cyriusly but does NOT yet deliver the cyrius/cycc
-    # compiler binaries. Flip to `true` once the Darwin compiler is in the
-    # install (tracked: language agent; worker: ecb).
-    if: ${{ false }}
+    # ENABLED (2.3.6): cyrius 6.0.43 fixes the Darwin `[deps] stdlib`
+    # install-check + getcwd/stat ABI bugs that blocked 6.0.38 (cyrius
+    # issue 2026-06-02-macos-arm64-deps-stdlib-pin-check.md, RESOLVED).
+    # Verified end-to-end on ecb: arm64 Mach-O builds, stdlib executes,
+    # all subcommands run. stage_binary.sh resolves [deps] into ./lib
+    # directly (no `cyrius lib sync` — that surface is still unported on
+    # Darwin but isn't needed for the build).
+    if: ${{ true }}
     steps:
       - uses: actions/checkout@v4
       - name: Install cyrius (pinned)

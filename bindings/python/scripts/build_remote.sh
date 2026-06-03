@@ -34,9 +34,18 @@ rm -f "$TARBALL"
 
 echo ">> building on $HOST"
 # Non-login ssh may not have cyrius on PATH; add the canonical location.
+#
+# `cyrius lib sync` is best-effort: on macOS (Darwin) it false-negatives
+# the snapshot dir (the directory-listing / getdents64 surface is still
+# unported there — tracked in cyrius issue
+# 2026-06-02-macos-arm64-deps-stdlib-pin-check.md, "separate, still-open"
+# note). It is not required: `cyrius build` resolves `[deps] stdlib` into
+# ./lib by name (the path fixed in cyrius v6.0.40–.43), so the build
+# populates its own lib. Keep the sync where it works, tolerate it where
+# it doesn't.
 ssh "$HOST" "cd $REMOTE_DIR && tar xzf src.tar.gz && \
     export PATH=\"\$HOME/.cyrius/bin:\$PATH\" && \
-    cyrius lib sync && \
+    { cyrius lib sync || echo '>> lib sync unsupported here; [deps] resolution will populate ./lib'; } && \
     CYRIUS_DCE=1 cyrius build src/main.cyr $EXE && \
     file $EXE"
 
