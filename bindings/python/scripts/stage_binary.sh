@@ -31,7 +31,12 @@ case "${EXTRA_ARGS[*]:-}" in *--aarch64*) TAG="aarch64";; *) TAG="native";; esac
 
 echo "Staging ai-hwaccel ($TAG) with $CYBIN into $BIN_DIR"
 mkdir -p "$BIN_DIR/data"
-( cd "$REPO_ROOT" && CYRIUS_DCE=1 "$CYBIN" build "${EXTRA_ARGS[@]}" src/main.cyr "$BIN_DIR/$EXE_NAME" )
+# `${arr[@]+"${arr[@]}"}` expands to nothing on an EMPTY array without
+# tripping `set -u` — the bare `"${arr[@]}"` is an "unbound variable"
+# error on the macOS runner's bash 3.2 (native staging passes no flag, so
+# EXTRA_ARGS is empty). Do NOT use `"${arr[@]:-}"` here: that injects an
+# empty-string argv into `cyrius build`.
+( cd "$REPO_ROOT" && CYRIUS_DCE=1 "$CYBIN" build ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} src/main.cyr "$BIN_DIR/$EXE_NAME" )
 chmod +x "$BIN_DIR/$EXE_NAME"
 cp "$REPO_ROOT/VERSION" "$BIN_DIR/VERSION"
 cp "$REPO_ROOT/data/cloud_pricing.json" "$BIN_DIR/data/cloud_pricing.json"

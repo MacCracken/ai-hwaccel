@@ -47,6 +47,13 @@ executes, and every ai-hwaccel subcommand runs.
   item in the same cyrius issue), and it is unnecessary: `cyrius build`
   resolves `[deps] stdlib` into `./lib` by name (the path fixed in
   6.0.40+). The build populates its own lib.
+- **`bindings/python/scripts/stage_binary.sh`**: fixed an "unbound
+  variable" crash on the `macos-14` CI runner — the native staging path
+  leaves `EXTRA_ARGS` empty, and bare `"${EXTRA_ARGS[@]}"` is a `set -u`
+  error under the runner's bash 3.2. Switched to
+  `${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}` (expands to nothing on an empty
+  array, no spurious empty argv). Verified both the native and
+  `--aarch64` paths.
 - **`bindings/python/pyproject.toml`**: 2.3.4 → 2.3.6.
 - **`CLAUDE.md`**: pinned-version notes 6.0.0/6.0.30 → 6.0.43.
 - **`VERSION`**: 2.3.5 → 2.3.6; **`dist/ai-hwaccel.cyr`** regenerated
@@ -71,8 +78,9 @@ unreleased 6.0.30 → 6.0.38 pin step, which was also neutral.)
   emits `duplicate fn 'arena_new' (last definition wins)` because both
   `lib/alloc.cyr` and `lib/alloc_macos.cyr` define it and Darwin pulls
   both layers. "Last definition wins" selects the macOS variant —
-  correct behavior; the binary is verified working. Minor upstream
-  follow-up (stdlib layering), not a consumer blocker.
+  correct behavior; the binary is verified working. Filed upstream (P4)
+  at `cyrius/docs/development/issues/2026-06-02-macos-alloc-arena-duplicate-fns.md`;
+  not a consumer blocker.
 - **Still pending:** Windows wheel (2.3.7) — needs the PowerShell build
   flow + a PE `cyrius build` target.
 
