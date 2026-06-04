@@ -1322,7 +1322,7 @@ fn win_parse_total_memory(out) {
 # via CreateProcessW spawn. Else: /proc/meminfo. Returns 0 on failure
 # (caller substitutes a default).
 fn detect_system_memory() {
-#ifdef CYRIUS_TARGET_WIN
+    #ifdef CYRIUS_TARGET_WIN
     var wargs = vec_new();
     vec_push(wargs, "wmic");
     vec_push(wargs, "computersystem");
@@ -1336,7 +1336,7 @@ fn detect_system_memory() {
         return win_parse_total_memory(str_new(wbuf, wn));
     }
     return 0;
-#endif
+    #endif
     var buf = alloc(4096);
     var n = file_read_all("/proc/meminfo", buf, 4096);
     if (n <= 0) { return 0; }
@@ -3569,13 +3569,13 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
     if (builder_is_enabled(builder_mask, BACKEND_MEDIATEK_APU) == 1) {
         detect_mediatek_apu(profs, warns);
     }
-#ifdef CYRIUS_TARGET_WIN
+    #ifdef CYRIUS_TARGET_WIN
     # Windows-native GPU detection (wmic Win32_VideoController). detect_windows
     # exists only on PE builds, so both the symbol and call are gated.
     if (builder_is_enabled(builder_mask, BACKEND_WINDOWS) == 1) {
         detect_windows(profs, warns);
     }
-#endif
+    #endif
 
     # Post-passes: enrich profiles (sysfs only — always run)
     enrich_bandwidth(profs);
