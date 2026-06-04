@@ -25,6 +25,12 @@ if [ ! -f "$BIN_DIR/ai-hwaccel" ] && [ ! -f "$BIN_DIR/ai-hwaccel.exe" ]; then
 fi
 
 export AIH_WHEEL_PLAT="$PLAT"
+# Clear setuptools' build/ cache: package_data (the _bin/ binary) is
+# copied into build/lib.../ and stale per-platform binaries from a prior
+# run would otherwise be bundled (e.g. a Linux ELF leaking into a
+# win_amd64 wheel). CI checkouts are clean; this matters for local
+# back-to-back cross-platform builds.
+rm -rf "$PKG_DIR/build"
 ( cd "$PKG_DIR" && "$PY" -m build --wheel --outdir dist )
 echo "Built:"
 ls -1 "$PKG_DIR/dist/"

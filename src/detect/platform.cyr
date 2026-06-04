@@ -78,8 +78,46 @@ fn has_dev_device(prefix) {
     return vec_len(ids) > 0;
 }
 
-# Get total system memory from /proc/meminfo (in bytes)
+# Parse `wmic computersystem get TotalPhysicalMemory` output (a
+# `TotalPhysicalMemory=<bytes>` line) into a byte count. 0 if absent.
+# Pure — Linux-testable. v2.3.7.
+fn win_parse_total_memory(out) {
+    var lines = str_split(out, 10);
+    var nl = vec_len(lines);
+    var i = 0;
+    while (i < nl) {
+        var line = str_trim(vec_get(lines, i));
+        var ld = str_data(line);
+        var ll = str_len(line);
+        if (ll >= 20) {
+            if (memeq(ld, "TotalPhysicalMemory=", 20) == 1) {
+                return str_to_int(str_new(ld + 20, ll - 20));
+            }
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Get total system memory (in bytes). Windows: `wmic computersystem`
+# via CreateProcessW spawn. Else: /proc/meminfo. Returns 0 on failure
+# (caller substitutes a default).
 fn detect_system_memory() {
+#ifdef CYRIUS_TARGET_WIN
+    var wargs = vec_new();
+    vec_push(wargs, "wmic");
+    vec_push(wargs, "computersystem");
+    vec_push(wargs, "get");
+    vec_push(wargs, "TotalPhysicalMemory");
+    vec_push(wargs, "/value");
+    var wbuf = alloc(4096);
+    var wn = exec_capture(wargs, wbuf, 4096);
+    if (wn > 0) {
+        store8(wbuf + wn, 0);
+        return win_parse_total_memory(str_new(wbuf, wn));
+    }
+    return 0;
+#endif
     var buf = alloc(4096);
     var n = file_read_all("/proc/meminfo", buf, 4096);
     if (n <= 0) { return 0; }

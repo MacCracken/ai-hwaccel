@@ -31,6 +31,8 @@ case "${EXTRA_ARGS[*]:-}" in *--aarch64*) TAG="aarch64";; *) TAG="native";; esac
 
 echo "Staging ai-hwaccel ($TAG) with $CYBIN into $BIN_DIR"
 mkdir -p "$BIN_DIR/data"
+# Drop any stray Windows EXE so a native wheel bundles only the ELF/Mach-O.
+rm -f "$BIN_DIR/ai-hwaccel.exe"
 # `${arr[@]+"${arr[@]}"}` expands to nothing on an EMPTY array without
 # tripping `set -u` — the bare `"${arr[@]}"` is an "unbound variable"
 # error on the macOS runner's bash 3.2 (native staging passes no flag, so

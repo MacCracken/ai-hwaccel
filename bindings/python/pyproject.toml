@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-hwaccel"
-version = "2.3.6"
+version = "2.3.7"
 description = "Universal AI hardware accelerator detection — Python bindings"
 readme = "README.md"
 requires-python = ">=3.8"

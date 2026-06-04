@@ -43,6 +43,7 @@ enum AcceleratorType {
     ACCEL_GROQ = 15;
     ACCEL_SAMSUNG_NPU = 16;
     ACCEL_MEDIATEK_APU = 17;
+    ACCEL_WIN_GPU = 18;
 }
 
 fn accel_name(a) {
@@ -64,6 +65,7 @@ fn accel_name(a) {
     if (a == ACCEL_GROQ) { return "Groq LPU"; }
     if (a == ACCEL_SAMSUNG_NPU) { return "Samsung NPU"; }
     if (a == ACCEL_MEDIATEK_APU) { return "MediaTek APU"; }
+    if (a == ACCEL_WIN_GPU) { return "Windows GPU"; }
     return "Unknown";
 }
 
@@ -75,6 +77,7 @@ fn accel_is_gpu(a) {
     if (a == ACCEL_METAL) { return 1; }
     if (a == ACCEL_VULKAN) { return 1; }
     if (a == ACCEL_INTEL_ONEAPI) { return 1; }
+    if (a == ACCEL_WIN_GPU) { return 1; }
     return 0;
 }
 
@@ -193,6 +196,7 @@ fn accel_throughput_x1000(a) {
     if (a == ACCEL_GROQ) { return 30000; }
     if (a == ACCEL_SAMSUNG_NPU) { return 6000; }
     if (a == ACCEL_MEDIATEK_APU) { return 5000; }
+    if (a == ACCEL_WIN_GPU) { return 10000; }
     # TPU and Gaudi/Neuron need version/gen — use profile-level functions
     return 1000;
 }
@@ -231,6 +235,7 @@ fn accel_training_x1000(a) {
     if (a == ACCEL_ROCM) { return 15000; }
     if (a == ACCEL_METAL) { return 10000; }
     if (a == ACCEL_VULKAN) { return 6000; }
+    if (a == ACCEL_WIN_GPU) { return 6000; }
     # NPUs: inference only
     if (a == ACCEL_INTEL_NPU) { return 0; }
     if (a == ACCEL_APPLE_NPU) { return 0; }
@@ -281,6 +286,7 @@ fn accel_rank(a) {
     if (a == ACCEL_METAL) { return 40; }
     if (a == ACCEL_QUALCOMM) { return 38; }
     if (a == ACCEL_VULKAN) { return 35; }
+    if (a == ACCEL_WIN_GPU) { return 34; }
     if (a == ACCEL_APPLE_NPU) { return 30; }
     if (a == ACCEL_AMD_XDNA) { return 25; }
     if (a == ACCEL_INTEL_NPU) { return 20; }
@@ -331,8 +337,9 @@ enum Backend {
     BACKEND_GROQ = 13;
     BACKEND_SAMSUNG_NPU = 14;
     BACKEND_MEDIATEK_APU = 15;
+    BACKEND_WINDOWS = 16;
 }
-var BACKEND_COUNT = 16;
+var BACKEND_COUNT = 17;
 
 fn backend_name(b) {
     if (b == BACKEND_CUDA) { return "cuda"; }
@@ -351,6 +358,7 @@ fn backend_name(b) {
     if (b == BACKEND_GROQ) { return "groq"; }
     if (b == BACKEND_SAMSUNG_NPU) { return "samsung-npu"; }
     if (b == BACKEND_MEDIATEK_APU) { return "mediatek-apu"; }
+    if (b == BACKEND_WINDOWS) { return "windows"; }
     return "unknown";
 }
 
@@ -370,5 +378,6 @@ fn backend_uses_exec(b) {
     if (b == BACKEND_INTEL_ONEAPI) { return 1; }
     if (b == BACKEND_CEREBRAS) { return 1; }
     if (b == BACKEND_GRAPHCORE) { return 1; }
+    if (b == BACKEND_WINDOWS) { return 1; }
     return 0;
 }

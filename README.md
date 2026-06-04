@@ -14,7 +14,7 @@ decide how to quantize and shard a model across them.
 |--------|-------|
 | Binary size | **286 KB** |
 | Compiler | Cyrius cycc 6.0.0 |
-| Tests | 518 assertions (11 test units) |
+| Tests | 590 assertions (12 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** |
 | Hardware families | 18 |
@@ -207,7 +207,7 @@ cyrius vet src/main.cyr                        # Include-graph audit
 cyrius lint src/main.cyr                       # Static analysis
 cyrius fmt src/main.cyr                        # Format check (diff against committed)
 
-# Test suite — 11 units under tests/tcyr/, 518 assertions total
+# Test suite — 12 units under tests/tcyr/, 590 assertions total
 for t in tests/tcyr/*.tcyr; do
     cyrius build "$t" "/tmp/$(basename $t .tcyr)"
     "/tmp/$(basename $t .tcyr)"

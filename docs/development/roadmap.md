@@ -394,33 +394,27 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
   build` resolves `[deps] stdlib` directly. universal2 deferred until the
   backend also emits x86_64 Mach-O (see the sibling x86 issue).
 
-### 2.3.7 — Windows wheel (BLOCKED on cyrius PE surface — assessed 2026-06-03)
+### 2.3.7 — Windows wheel (SHIPPED, 2026-06-03)
 
-- [ ] **Windows x86_64 wheel** — feasibility assessed on cyrius 6.0.47.
-  Findings (filed upstream:
-  `cyrius/docs/development/issues/2026-06-03-windows-pe-syscall-surface-blocks-detection.md`):
-  - **Build path exists, no `cass` needed:** `cycc_win` is a *Linux-hosted*
-    cross-compiler emitting valid `PE32+` (verified — trivial programs
-    build). So the eventual flow is a Linux cross-build (pipe the stdlib
-    bundle + `src/main.cyr` → `cycc_win`), not a remote PowerShell build.
-  - **Blocker 1 (cyrius):** Windows PE routes only ~10 syscalls
-    (`0,1,2,3,8,9,60,83,87,228`) — **no `fork`/`execve`**. Detection
-    spawns probes via `sys_fork`+`sys_execve` (`lib/process.cyr`), so any
-    detection faults with `STATUS_ILLEGAL_INSTRUCTION`.
-  - **Blocker 2 (cyrius):** PE frontend frozen at `cc5_win 5.11.69` vs the
-    6.0.47 stdlib → the full bundle won't cross-compile
-    (`lib/atomic.cyr:98 undefined PROT_READ`; `cycc_win` wants its own
-    5.11.69 snapshot).
-  - **Blocker 3 (ours):** `src/detect/windows.cyr` is a DXGI **stub** — a
-    running Windows binary would detect only CPU until that's implemented.
-  - `builder_no_exec()` exists (masks spawn detectors) but doesn't rescue
-    this: bundle still won't build on the frozen frontend, and a no-exec
-    binary detects nothing useful while the DXGI stub stands.
-  - **Unblocks on:** the first 6.0.x whose `cycc_win` cross-builds the
-    current stdlib AND routes Win32 process creation, verified on `cass`.
-    Then: implement `windows.cyr` DXGI detection (our side), wire the
-    Linux cross-build into `wheels.yml`, flip the gate. CI job stays
-    `if: false`; build worker for runtime smoke: `cass`.
+- [x] **Windows x86_64 wheel** — `ai_hwaccel-2.3.7-py3-none-win_amd64`,
+  with real CPU + GPU detection. Verified end-to-end on `cass` (Win 11):
+  real total RAM + Intel UHD Graphics 600 detected, all subcommands run.
+  - **Cross-built on Linux** — `cycc_win` (Linux-hosted, emits PE32+); no
+    Windows runner. `stage_win_cross.sh` pipes `[deps] stdlib` +
+    `src/main.cyr` → `cycc_win`. `wheels.yml` `windows` job on
+    `ubuntu-latest`, enabled.
+  - **cyrius unblocked it:** 6.0.50 unfroze `cycc_win` (was `cc5_win`
+    5.11.69; fixed the PROT_READ build break); 6.0.51 routed Win32
+    process creation (CreateProcessW) so detection's subprocess spawns
+    work — cyrius issue
+    `2026-06-03-windows-pe-syscall-surface-blocks-detection.md` (RESOLVED).
+  - **Our side:** implemented `detect_windows` (wmic Win32_VideoController
+    → `ACCEL_WIN_GPU`) + a Windows `detect_system_memory` branch (wmic
+    ComputerSystem), replacing the DXGI stub / 16 GiB fallback. Pin →
+    6.0.54.
+  - **Follow-up (2.3.8):** native DXGI for precise VRAM (WMI AdapterRAM
+    caps at 4 GiB) — gated on cyrius PE COM-vtable + dxgi.dll IAT (filed:
+    `cyrius/docs/development/issues/2026-06-03-windows-pe-com-vtable-dxgi-for-gpu-enum.md`).
 
 ### WASM / JS
 

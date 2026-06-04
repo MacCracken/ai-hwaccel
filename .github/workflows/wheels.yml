@@ -73,27 +73,17 @@ jobs:
         with: { name: wheels-macos, path: bindings/python/dist/*.whl }
 
   windows:
-    name: windows wheel (x86_64)
-    runs-on: windows-latest
-    # GATED (2.3.7): BLOCKED on the cyrius Windows PE surface (assessed
-    # 2026-06-03 on 6.0.47 — cyrius issue
-    # 2026-06-03-windows-pe-syscall-surface-blocks-detection.md):
-    #   1. PE routes only ~10 syscalls — no fork/execve, so spawn-based
-    #      detection faults (STATUS_ILLEGAL_INSTRUCTION).
-    #   2. cycc_win frozen at cc5_win 5.11.69 vs 6.0.47 stdlib — bundle
-    #      won't cross-compile (PROT_READ).
-    #   3. our src/detect/windows.cyr DXGI is still a stub.
-    # NOTE: this windows-latest + git-bash + stage_binary.sh shape is also
-    # likely wrong — the viable path is a *Linux* cross-build via cycc_win
-    # (no Windows runner needed for the build; cass only for runtime smoke).
-    # Rework this job when the surface lands. Flip to `true` then.
-    if: ${{ false }}
+    name: windows wheel (x86_64, cross-built on Linux)
+    # ENABLED (2.3.7): cyrius 6.0.50/6.0.51 fixed the Windows PE surface
+    # (cycc_win unfrozen; CreateProcessW process routing) — cyrius issue
+    # 2026-06-03-windows-pe-syscall-surface-blocks-detection.md (RESOLVED).
+    # The wheel is CROSS-BUILT ON LINUX: cycc_win is a Linux-hosted ELF
+    # compiler that emits PE32+, so no Windows runner is needed for the
+    # build (cass is used only for manual runtime smoke). Verified on cass:
+    # real CPU RAM + GPU (Win32_VideoController) detection runs.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # NOTE: cyrius's Windows install path may differ from the sh
-      # installer; adjust this step once the Windows toolchain bootstrap
-      # is confirmed (tracked with the cass build). git-bash provides the
-      # bash shell the stage/build scripts use.
       - name: Install cyrius (pinned)
         run: |
           CYRIUS_VERSION="$(grep -E '^cyrius[[:space:]]*=' cyrius.cyml | sed -E 's/.*"([^"]+)".*/\1/')"
@@ -104,7 +94,9 @@ jobs:
         with: { python-version: "3.x" }
       - run: python -m pip install build
       - run: |
-          bindings/python/scripts/stage_binary.sh
+          bindings/python/scripts/stage_win_cross.sh
           bindings/python/scripts/build_wheel.sh win_amd64 python
+      - uses: actions/upload-artifact@v4
+        with: { name: wheels-windows, path: bindings/python/dist/*.whl }
       - uses: actions/upload-artifact@v4
         with: { name: wheels-windows, path: bindings/python/dist/*.whl }

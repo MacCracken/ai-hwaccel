@@ -309,6 +309,13 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
     if (builder_is_enabled(builder_mask, BACKEND_MEDIATEK_APU) == 1) {
         detect_mediatek_apu(profs, warns);
     }
+#ifdef CYRIUS_TARGET_WIN
+    # Windows-native GPU detection (wmic Win32_VideoController). detect_windows
+    # exists only on PE builds, so both the symbol and call are gated.
+    if (builder_is_enabled(builder_mask, BACKEND_WINDOWS) == 1) {
+        detect_windows(profs, warns);
+    }
+#endif
 
     # Post-passes: enrich profiles (sysfs only — always run)
     enrich_bandwidth(profs);

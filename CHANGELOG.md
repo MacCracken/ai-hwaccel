@@ -7,15 +7,71 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
-### Toolchain pin 6.0.43 → 6.0.47
+## [2.3.7] — 2026-06-03
 
-Stdlib re-synced into `./lib/` (83 files). No `.cyr` source changed;
-delta is codegen-only via the snapshot. 6.0.47 vs 6.0.43 baseline, same
-box/iters: deterministic ns rows within run-to-run noise
-(`total_memory_13dev` 140 vs 138, `count_family_gpu_13dev` 308 vs 292,
-`has_accelerator_13dev` 27 vs 29) — **neutral, no regression.** 11/11
-test units green; drift warning resolved. `CLAUDE.md` pin note → 6.0.47.
-Folds into the next release (2.3.7).
+**Windows x86_64 wheel ships with real CPU + GPU detection —
+`pip install ai-hwaccel` is now self-contained on Windows.** Closes the
+roadmap 2.3.7 gate. The Windows PE blockers were fixed upstream (cyrius
+6.0.50 unfroze `cycc_win`; 6.0.51 routed Win32 process creation via
+CreateProcessW), and this release implements the Windows-side detection
+that turns a running-but-blind binary into a useful one. Verified
+end-to-end on `cass` (Windows 11): real total RAM + the actual GPU
+(Intel UHD Graphics 600) are detected.
+
+#### Added
+
+- **Windows x86_64 wheel**
+  (`ai_hwaccel-2.3.7-py3-none-win_amd64`). **Cross-built on Linux** —
+  `cycc_win` is a Linux-hosted compiler that emits PE32+, so no Windows
+  runner is needed (cass is used only for runtime smoke). New
+  `bindings/python/scripts/stage_win_cross.sh` synthesizes the
+  translation unit (`[deps] stdlib` + `src/main.cyr`) and pipes it to
+  `cycc_win`; `wheels.yml` `windows` job **enabled**, now on
+  `ubuntu-latest`.
+- **Windows GPU detection** — `src/detect/windows.cyr` (was a stub) now
+  spawns `wmic path win32_VideoController` and emits one **`ACCEL_WIN_GPU`**
+  ("Windows GPU") profile per controller with device name + VRAM. New
+  `BACKEND_WINDOWS` backend (gated into `registry_detect_with` under
+  `#ifdef CYRIUS_TARGET_WIN`). The Unix detectors still run, so
+  `nvidia-smi.exe` continues to give precise NVIDIA VRAM where present.
+- **Windows CPU RAM detection** — `detect_system_memory()` gained a
+  `#ifdef CYRIUS_TARGET_WIN` branch spawning `wmic computersystem get
+  TotalPhysicalMemory`, replacing the 16 GiB fallback (`/proc/meminfo`
+  doesn't exist on Windows) with real total memory.
+- **`tests/tcyr/windows_test.tcyr`** — Linux-hosted fixture tests for the
+  pure parsers (`win_parse_videocontrollers`, `win_parse_total_memory`):
+  single/multi GPU, CRLF, key-order, empty, absent. The parsers are
+  ungated so they're testable without a Windows host. 12 test units total.
+
+#### Changed
+
+- **`cyrius.cyml`**: pin 6.0.43 → **6.0.54**. Stdlib re-synced (87 files).
+- **`build_wheel.sh`** clears `build/` before packaging, and
+  `stage_*.sh` drop the foreign-platform binary, so a per-platform wheel
+  bundles only its own binary (a Linux ELF was leaking into the
+  win_amd64 wheel via setuptools' build cache).
+- **`pyproject.toml`** 2.3.6 → 2.3.7; **`VERSION`** 2.3.6 → 2.3.7;
+  **`dist/ai-hwaccel.cyr`** regenerated; **`CLAUDE.md`** pin → 6.0.54.
+
+#### Performance
+
+No hot-path `.cyr` changed (the new code is Windows-gated + the keyed
+`accel_*` functions gained one branch each). 6.0.54 + feature vs 6.0.47
+baseline, same box/iters: `total_memory_13dev` 141 vs 143,
+`count_family_gpu_13dev` 300 vs 303, `has_accelerator_13dev` 28 vs 28,
+`json_serialize_13dev` ~23 µs flat — **neutral, no regression.**
+
+#### Known limits / follow-ups
+
+- **VRAM caps at 4 GiB on non-NVIDIA GPUs** —
+  `Win32_VideoController.AdapterRAM` is a 32-bit field. Native DXGI
+  (`EnumAdapters1`, 64-bit `DedicatedVideoMemory`, no subprocess) is the
+  2.3.8 precision upgrade, gated on cyrius PE COM-vtable + dxgi.dll IAT
+  support (filed:
+  `cyrius/docs/development/issues/2026-06-03-windows-pe-com-vtable-dxgi-for-gpu-enum.md`).
+- On Windows the irrelevant Unix probes (`system_profiler`, etc.) still
+  emit "tool not found" warnings — cosmetic; keeping the probes enabled
+  is what lets `nvidia-smi.exe` work when present.
 
 ## [2.3.6] — 2026-06-02
 

@@ -1,0 +1,110 @@
+# windows_test.tcyr — Linux-hosted tests for the Windows detection
+# parsers (win_parse_videocontrollers, win_parse_total_memory). The
+# parsers are ungated; only the wmic spawn is CYRIUS_TARGET_WIN-only, so
+# the parse logic is fully exercised here without a Windows host. Runtime
+# behaviour on real Windows is smoke-tested separately on `cass`.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/windows.cyr"
+
+# --- win_parse_videocontrollers ---
+
+fn test_win_gpu_single() {
+    var out = str_from("AdapterRAM=1073741824\nName=Intel(R) UHD Graphics 600\n");
+    var profiles = vec_new();
+    var c = win_parse_videocontrollers(out, profiles);
+    assert_eq(c, 1, "1 GPU parsed");
+    assert_eq(vec_len(profiles), 1, "1 profile");
+    var p = vec_get(profiles, 0);
+    assert_eq(profile_accel_type(p), ACCEL_WIN_GPU, "WIN_GPU type");
+    assert_eq(profile_device_id(p), 0, "device 0");
+    assert_eq(profile_memory_bytes(p), 1073741824, "1 GiB VRAM");
+    assert(streq(profile_device_name(p), "Intel(R) UHD Graphics 600") == 1, "GPU name");
+    assert_eq(accel_is_gpu(profile_accel_type(p)), 1, "is GPU");
+}
+
+# Block separated by a blank line; second block has Name-before-RAM order.
+fn test_win_gpu_multi() {
+    var out = str_from("AdapterRAM=1073741824\nName=Intel(R) UHD Graphics 600\n\nName=NVIDIA GeForce RTX 3060\nAdapterRAM=4293918720\n");
+    var profiles = vec_new();
+    var c = win_parse_videocontrollers(out, profiles);
+    assert_eq(c, 2, "2 GPUs parsed");
+    var p0 = vec_get(profiles, 0);
+    var p1 = vec_get(profiles, 1);
+    assert_eq(profile_device_id(p0), 0, "dev 0");
+    assert_eq(profile_device_id(p1), 1, "dev 1");
+    assert(streq(profile_device_name(p0), "Intel(R) UHD Graphics 600") == 1, "name 0");
+    assert(streq(profile_device_name(p1), "NVIDIA GeForce RTX 3060") == 1, "name 1");
+    assert_eq(profile_memory_bytes(p1), 4293918720, "p1 VRAM");
+}
+
+# CRLF line endings (real wmic output) — str_trim must strip the \r.
+fn test_win_gpu_crlf() {
+    var out = str_from("AdapterRAM=2147483648\r\nName=AMD Radeon RX 6600\r\n");
+    var profiles = vec_new();
+    var c = win_parse_videocontrollers(out, profiles);
+    assert_eq(c, 1, "1 GPU (crlf)");
+    var p = vec_get(profiles, 0);
+    assert(streq(profile_device_name(p), "AMD Radeon RX 6600") == 1, "crlf name trimmed");
+    assert_eq(profile_memory_bytes(p), 2147483648, "crlf VRAM");
+}
+
+# Empty / no-controller output → 0 GPUs, no crash.
+fn test_win_gpu_empty() {
+    var out = str_from("\n\n");
+    var profiles = vec_new();
+    var c = win_parse_videocontrollers(out, profiles);
+    assert_eq(c, 0, "no GPUs");
+    assert_eq(vec_len(profiles), 0, "no profiles");
+}
+
+# --- win_parse_total_memory ---
+
+fn test_win_mem() {
+    var out = str_from("\nTotalPhysicalMemory=8405598208\n\n");
+    assert_eq(win_parse_total_memory(out), 8405598208, "8 GB RAM");
+}
+
+fn test_win_mem_crlf() {
+    var out = str_from("TotalPhysicalMemory=17179869184\r\n");
+    assert_eq(win_parse_total_memory(out), 17179869184, "16 GB RAM (crlf)");
+}
+
+fn test_win_mem_absent() {
+    var out = str_from("SomethingElse=42\n");
+    assert_eq(win_parse_total_memory(out), 0, "absent -> 0");
+}
+
+# --- Run all tests ---
+
+alloc_init();
+
+test_win_gpu_single();
+test_win_gpu_multi();
+test_win_gpu_crlf();
+test_win_gpu_empty();
+test_win_mem();
+test_win_mem_crlf();
+test_win_mem_absent();
+
+var fails = assert_summary();
+syscall(60, fails);
