@@ -416,6 +416,31 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
     caps at 4 GiB) — gated on cyrius PE COM-vtable + dxgi.dll IAT (filed:
     `cyrius/docs/development/issues/2026-06-03-windows-pe-com-vtable-dxgi-for-gpu-enum.md`).
 
+### 2.3.8 — Toolchain 6.0.70 + structured logging (SHIPPED, 2026-06-05)
+
+- [x] **Pin 6.0.54 → 6.0.70**, stdlib re-synced (89 files). Builds clean,
+  12/12 test units pass. Accepted a ~5–10 % allocation-path cost from
+  cyrius 6.0.64's global allocator spinlock — a heap-corruption fix the
+  threaded `async_detect` path needs (justified in CHANGELOG 2.3.8).
+- [x] **Structured logging** (`src/log.cyr` over stdlib `sakshi`) — stderr,
+  WARN+ default, `AI_HWACCEL_LOG` env + `--log-level`/`-v`/`-vv`/`-q`
+  flags. Spans + summaries through detect / async / cache / plan; the
+  previously-silent cuda/gaudi parse failures now `warn`. stdout stays
+  byte-clean for JSON consumers; logging adds no measurable hot-path cost.
+  Bundle consumers must add `sakshi` to their `[deps] stdlib`.
+- [~] **DXGI precise VRAM → deferred to 2.3.9.** 6.0.70 lands the
+  foundation (`callptr`/`IR_CALL_INDIRECT`, `dxgi.dll!CreateDXGIFactory1`
+  import + S_OK on cass, COM-vtable dispatch capability) but the real
+  Win64 COM callee (`EnumAdapters`/`GetDesc` VRAM read) corrupts the
+  caller frame on cass — fixed upstream in **6.0.71** (cyrius issue
+  `2026-06-05-windows-com-vtable-real-callee-frame-corruption.md`).
+
+### 2.3.9 — Windows DXGI precise VRAM (cyrius 6.0.71)
+
+- [ ] On cyrius 6.0.71 (real-COM-callee frame-corruption fix), implement
+  DXGI `EnumAdapters1` → `GetDesc` → `DedicatedVideoMemory` to replace the
+  WMI `AdapterRAM` 4 GiB-capped path for precise Windows GPU VRAM.
+
 ### WASM / JS
 
 - [ ] **JS/TS bindings** — depends on cyrius WASM target (not in

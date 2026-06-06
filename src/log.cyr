@@ -1,0 +1,136 @@
+# log.cyr — structured logging shim over sakshi (2.3.8).
+#
+# ai-hwaccel previously logged nothing: detectors shelled out to
+# nvidia-smi / wmic / rocm-smi and silently swallowed failures into the
+# warnings vec (surfaced only in JSON output). This wires the AGNOS
+# `sakshi` structured logger through the pipeline so the binary is
+# observable in the field.
+#
+# Contract:
+#   - All logs go to **stderr (fd 2)** via sakshi's default output. stdout
+#     stays byte-clean for the JSON that consumers (hoosh, daimon, …) parse.
+#   - Default level is **WARN**: quiet on success, visible on failure.
+#     Raise via the `AI_HWACCEL_LOG` env var (off|fatal|error|warn|info|
+#     debug|trace) or the `--log-level <name>` / `-v` (debug) / `-vv`
+#     (trace) / `-q` (off) CLI flags. env is read first; a CLI flag wins.
+#   - Hot-path rule: a below-threshold log call still **evaluates its
+#     arguments**. Static-message helpers (hwlog_warn etc.) only cost one
+#     strlen + a level compare, but any helper that *builds* a message
+#     (hwlog_*_n) is guarded by hwlog_enabled() so no str_builder runs
+#     when the level is suppressed. Never log inside a per-iteration parse
+#     loop — log per operation (one detector, one plan), at dispatch sites.
+
+# Map a level name (cstring) to a sakshi SK_* level. "off" returns a
+# below-FATAL sentinel (-1) so even fatals are suppressed; an unknown name
+# returns -100 so the caller can leave the level untouched.
+fn hwlog_level_from_name(name): i64 {
+    if (streq(name, "off") == 1) { return 0 - 1; }
+    if (streq(name, "fatal") == 1) { return SK_FATAL; }
+    if (streq(name, "error") == 1) { return SK_ERROR; }
+    if (streq(name, "warn") == 1) { return SK_WARN; }
+    if (streq(name, "info") == 1) { return SK_INFO; }
+    if (streq(name, "debug") == 1) { return SK_DEBUG; }
+    if (streq(name, "trace") == 1) { return SK_TRACE; }
+    return 0 - 100;
+}
+
+# Initialize logging. Call once at startup, after alloc_init() (the env
+# read + any built message allocates). sakshi already defaults to stderr,
+# so we only set the level and tag the process for log correlation.
+fn hwlog_init(): i64 {
+    sakshi_set_level(SK_WARN);
+    var ev = getenv("AI_HWACCEL_LOG");
+    if (ev != 0) {
+        var lv = hwlog_level_from_name(ev);
+        if (lv != (0 - 100)) { sakshi_set_level(lv); }
+    }
+    sakshi_trace_set(getpid());
+    return 0;
+}
+
+# Apply a `--log-level <name>` value (cstring, or 0 if the flag was
+# absent). Unknown names are ignored, leaving the env/default level.
+fn hwlog_apply_level_name(val): i64 {
+    if (val == 0) { return 0; }
+    var lv = hwlog_level_from_name(val);
+    if (lv != (0 - 100)) { sakshi_set_level(lv); }
+    return 0;
+}
+
+# True if a message at `level` would be emitted at the current level —
+# guard expensive (allocating) message construction with this.
+fn hwlog_enabled(level): i64 {
+    if (level <= sakshi_get_level()) { return 1; }
+    return 0;
+}
+
+# --- Static-message emitters (cstring literal) ---
+
+fn hwlog_fatal(msg): i64 {
+    sakshi_fatal(msg, strlen(msg));
+    return 0;
+}
+
+fn hwlog_error(msg): i64 {
+    sakshi_error(msg, strlen(msg));
+    return 0;
+}
+
+fn hwlog_warn(msg): i64 {
+    sakshi_warn(msg, strlen(msg));
+    return 0;
+}
+
+fn hwlog_info(msg): i64 {
+    sakshi_info(msg, strlen(msg));
+    return 0;
+}
+
+fn hwlog_debug(msg): i64 {
+    sakshi_debug(msg, strlen(msg));
+    return 0;
+}
+
+fn hwlog_trace(msg): i64 {
+    sakshi_trace(msg, strlen(msg));
+    return 0;
+}
+
+# --- Message + integer emitter ("prefix" + n) ---
+#
+# Guarded so the str_builder never runs when the level is suppressed.
+fn hwlog_emit_n(level, prefix, n): i64 {
+    if (hwlog_enabled(level) == 0) { return 0; }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, prefix);
+    str_builder_add_int(sb, n);
+    var m = str_builder_build(sb);
+    _sk_log(level, str_data(m), str_len(m));
+    return 0;
+}
+
+fn hwlog_warn_n(prefix, n): i64 { return hwlog_emit_n(SK_WARN, prefix, n); }
+
+fn hwlog_info_n(prefix, n): i64 { return hwlog_emit_n(SK_INFO, prefix, n); }
+
+fn hwlog_debug_n(prefix, n): i64 { return hwlog_emit_n(SK_DEBUG, prefix, n); }
+
+# --- Span wrappers (cstring name) ---
+#
+# Spans are a debug+ feature. sakshi emits span enter/exit
+# unconditionally (they are not level-gated internally), so we gate here:
+# at WARN default a successful run produces no span noise. enter and exit
+# read the same fixed post-init level, so the sakshi span stack stays
+# balanced (both gated out together, or both run).
+
+fn hwlog_span_enter(name): i64 {
+    if (hwlog_enabled(SK_DEBUG) == 0) { return 0; }
+    sakshi_span_enter(name, strlen(name));
+    return 0;
+}
+
+fn hwlog_span_exit(): i64 {
+    if (hwlog_enabled(SK_DEBUG) == 0) { return 0; }
+    sakshi_span_exit();
+    return 0;
+}

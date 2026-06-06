@@ -9,6 +9,7 @@
 
 # Stdlib auto-included via cyrius.toml
 
+include "src/log.cyr"
 include "src/units.cyr"
 include "src/error.cyr"
 include "src/types.cyr"
@@ -304,6 +305,14 @@ fn _print_version() {
 
 args_init();
 alloc_init();
+
+# Logging: stderr, WARN+ by default. env (read in hwlog_init) sets the
+# floor; CLI flags below override it. stdout stays clean for JSON.
+hwlog_init();
+hwlog_apply_level_name(_get_val("--log-level"));
+if (_has_flag("-v") == 1) { sakshi_set_level(SK_DEBUG); }
+if (_has_flag("-vv") == 1) { sakshi_set_level(SK_TRACE); }
+if (_has_flag("-q") == 1) { sakshi_set_level(0 - 1); }
 
 if (_has_flag("--version") == 1) {
     _print_version();

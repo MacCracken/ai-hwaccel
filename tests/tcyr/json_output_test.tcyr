@@ -13,6 +13,8 @@ include "lib/fs.cyr"
 include "lib/tagged.cyr"
 include "lib/process.cyr"
 
+include "lib/sakshi.cyr"
+include "src/log.cyr"
 include "src/units.cyr"
 include "src/error.cyr"
 include "src/types.cyr"

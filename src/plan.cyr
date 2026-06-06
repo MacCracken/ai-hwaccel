@@ -17,10 +17,12 @@ fn reg_plan_sharding(r, model_params, quant) {
     var needed = reg_estimate_memory(model_params, quant);
     var sio = reg_system_io(r);
     var profs = reg_profiles(r);
+    hwlog_debug_n("plan: model_params=", model_params);
 
     # Find best available device
     var best = reg_best_available(r);
     if (best == 0) {
+        hwlog_warn("plan: no available accelerator, defaulting to data-parallel");
         return sharding_plan_new(SHARD_DATA, 0);
     }
 

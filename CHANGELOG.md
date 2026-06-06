@@ -7,6 +7,83 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ## [Unreleased]
 
+## [2.3.8] — 2026-06-05
+
+**Toolchain bump to cyrius 6.0.70 + the binary finally logs.**
+ai-hwaccel previously emitted nothing to stderr: every detector shelled
+out to `nvidia-smi` / `wmic` / `rocm-smi` and swallowed failures into the
+warnings vec, visible only if you parsed the JSON. This release wires the
+AGNOS `sakshi` structured logger through the whole pipeline (detectors,
+planning, cache, async spans) so the tool is observable in the field —
+while keeping **stdout byte-clean** for the JSON that consumers parse.
+
+The Windows **DXGI precise-VRAM** roadmap item (2.3.8 follow-up) stays
+**deferred to 2.3.9**: cyrius 6.0.70 lands the *foundation*
+(`callptr`/`IR_CALL_INDIRECT`, the `dxgi.dll!CreateDXGIFactory1` import,
+COM-vtable dispatch capability — `CreateDXGIFactory1` returns `S_OK` on
+cass), but `callptr` to a *real* Win64 COM callee (`EnumAdapters`/
+`GetDesc` over the DXGI vtable — the actual VRAM read) corrupts the caller
+frame on cass and is fixed upstream only in **6.0.71** (cyrius issue
+`2026-06-05-windows-com-vtable-real-callee-frame-corruption.md`). Windows
+GPU VRAM therefore stays on the WMI `AdapterRAM` path for now.
+
+#### Added
+
+- **Structured logging — `src/log.cyr`** over stdlib `sakshi`. All output
+  goes to **stderr (fd 2)**; stdout is untouched. Default level **WARN**
+  (quiet on success, visible on failure). Raise via the **`AI_HWACCEL_LOG`**
+  env var (`off|fatal|error|warn|info|debug|trace`) or the
+  **`--log-level <name>`** / **`-v`** (debug) / **`-vv`** (trace) /
+  **`-q`** (off) CLI flags. Process tagged with `getpid()` as the sakshi
+  trace id for log correlation. `hwlog_*_n` message builders and span
+  wrappers are level-guarded so nothing allocates (and spans don't emit)
+  below the active level.
+- **Pipeline instrumentation** at operation granularity (never inside a
+  per-iteration parse loop): `registry_detect_with_opts` and
+  `registry_detect_threaded_with` get a `detect` span + a profiles/warnings
+  summary; `cached_get` / `disk_cached_get` log hit/miss (debug) and disk
+  write-failure (warn); `reg_plan_sharding` logs the model size (debug) and
+  warns when no accelerator is available; the `cuda` / `gaudi` CSV parse
+  failures — previously silent — now emit a `warn`.
+
+#### Changed
+
+- **`cyrius.cyml`**: pin 6.0.54 → **6.0.70**; **`sakshi`** added to
+  `[deps] stdlib`; **`src/log.cyr`** added to `[lib] modules` (so the
+  consumer bundle carries it). Stdlib re-synced (89 files). **CLAUDE.md**
+  pin → 6.0.70.
+- **Bundle consumers** (mihi et al.): `dist/ai-hwaccel.cyr` now references
+  `sakshi_*`, so consumers must add **`sakshi`** to their own
+  `[deps] stdlib`. The bundle's "unresolved symbols" note at distlib time
+  is expected — stdlib is consumer-supplied.
+- **`VERSION`** 2.3.7 → 2.3.8; **`dist/ai-hwaccel.cyr`** regenerated.
+
+#### Performance
+
+Two deltas, both reviewed against a 6.0.70 baseline on the same box/iters
+(min-of-N, ns resolution where it matters):
+
+- **cyrius 6.0.64 global allocator spinlock — accepted, justified.**
+  6.0.70's `lib/alloc.cyr` serializes the bump pointer behind a CAS
+  spinlock (a heap-corruption fix: concurrent `alloc()` across real
+  threads was overlap-allocating). This costs ~5–10 % on allocation-heavy
+  paths — `parse_cuda_8gpu` min **16→28 µs** is the worst case. **It is not
+  a regression to fix but a correctness fix we need**: `async_detect.cyr`
+  spawns real threads (`thread_create`/`thread_join`) that all `alloc()`
+  while parsing detector output; without the lock that path corrupts the
+  heap. Single-threaded callers pay the tax; the threaded path stops being
+  unsound. Accepted per the no-regression rule's "explicitly justified"
+  clause.
+- **Logging adds nothing measurable.** Full-instrumentation tree vs
+  6.0.70-without-logging, interleaved: `parse_cuda_8gpu` min **28 µs**
+  (identical), `total_memory_13dev` 139→140 ns, `has_accelerator_13dev`
+  28→28 ns, `count_family_gpu_13dev` 292→281 ns, `json_serialize_13dev`
+  ~22–23 µs — **all within noise.** Instrumentation lives at dispatch
+  sites and error paths, off the benched hot loops; below-threshold log
+  calls build no messages. Binary grows **301 KB → 369 KB** (+68 KB, the
+  reachable `sakshi` surface; DCE NOPs 609 unreachable fns). 12/12 test
+  units pass.
+
 ## [2.3.7] — 2026-06-03
 
 **Windows x86_64 wheel ships with real CPU + GPU detection —

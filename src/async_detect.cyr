@@ -113,6 +113,7 @@ fn registry_detect_threaded() {
 }
 
 fn registry_detect_threaded_with(builder_mask) {
+    hwlog_span_enter("detect_threaded");
     var r = registry_new();
     var profs = reg_profiles(r);
     var warns = reg_warnings(r);
@@ -145,6 +146,7 @@ fn registry_detect_threaded_with(builder_mask) {
                 vec_push(targs, ta);
             } else {
                 # Thread creation failed — run synchronously
+                hwlog_warn_n("detect_threaded: thread_create failed, sync fallback for backend ", bid);
                 _detect_thread_entry(ta);
                 vec_push(targs, ta);
                 vec_push(threads, 0);
@@ -173,6 +175,11 @@ fn registry_detect_threaded_with(builder_mask) {
     detect_storage(r);
     detect_interconnects(r, reg_profiles(r), reg_warnings(r));
     detect_environment(r);
+
+    var nwarn = vec_len(warns);
+    if (nwarn > 0) { hwlog_warn_n("detect_threaded: warnings=", nwarn); }
+    hwlog_info_n("detect_threaded: profiles=", vec_len(profs));
+    hwlog_span_exit();
 
     return r;
 }

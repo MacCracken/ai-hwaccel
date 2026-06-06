@@ -264,6 +264,9 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
         builder_mask = builder_mask & builder_no_exec();
     }
 
+    hwlog_span_enter("detect");
+    hwlog_debug_n("detect: builder_mask=", builder_mask);
+
     var r = registry_new();
     var profs = reg_profiles(r);
     var warns = reg_warnings(r);
@@ -329,6 +332,15 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
     }
     detect_storage(sio);
     detect_environment(sio);
+
+    # One summary line per detection pass (info), plus a warn when a
+    # detector pushed diagnostics. Counts are cheap (vec_len); the
+    # messages are guarded inside hwlog_*_n so nothing builds when
+    # suppressed.
+    var nwarn = vec_len(warns);
+    if (nwarn > 0) { hwlog_warn_n("detect: warnings=", nwarn); }
+    hwlog_info_n("detect: profiles=", vec_len(profs));
+    hwlog_span_exit();
 
     return r;
 }

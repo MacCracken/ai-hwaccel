@@ -18,6 +18,7 @@ fn detect_gaudi(profiles, warnings) {
         var fields = parse_csv_line(line, 3);
         if (fields == 0) {
             vec_push(warnings, warning_parse("gaudi", "too few CSV fields"));
+            hwlog_warn("gaudi: too few CSV fields");
             continue;
         }
 

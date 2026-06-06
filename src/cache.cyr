@@ -49,12 +49,14 @@ fn cached_get(c) {
     # Cache hit: registry exists and within TTL
     if (reg != 0 && now - last < ttl) {
         mutex_unlock(mtx);
+        hwlog_debug("cache: hit (in-memory)");
         return reg;
     }
 
     mutex_unlock(mtx);
 
     # Cache miss: run detection (outside lock)
+    hwlog_debug("cache: miss -> detecting");
     var new_reg = registry_detect();
 
     # Store result
@@ -139,6 +141,7 @@ fn disk_cached_get(c) {
     # Memory cache hit
     if (reg != 0 && now - last < ttl) {
         mutex_unlock(mtx);
+        hwlog_debug("disk_cache: hit (in-memory)");
         return reg;
     }
 
@@ -157,6 +160,7 @@ fn disk_cached_get(c) {
     mutex_unlock(mtx);
 
     # Cache miss: detect
+    hwlog_debug("disk_cache: miss -> detecting");
     var new_reg = registry_detect();
 
     # Write to disk (best effort)
@@ -173,7 +177,9 @@ fn disk_cached_get(c) {
         # mkdir -p via syscall
         syscall(83, str_data(dir_s), 493);  # SYS_MKDIR, 0o755
     }
-    file_write_all(path, jdata, jlen);
+    if (file_write_all(path, jdata, jlen) < 0) {
+        hwlog_warn("disk_cache: write failed");
+    }
 
     # Store in memory
     mutex_lock(mtx);

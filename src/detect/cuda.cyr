@@ -50,6 +50,7 @@ fn parse_cuda_output(output, profiles, warnings) {
         var fields = parse_csv_line(line, 6);
         if (fields == 0) {
             vec_push(warnings, warning_parse("cuda", "too few CSV fields"));
+            hwlog_warn("cuda: too few CSV fields");
             continue;
         }
 
@@ -57,6 +58,7 @@ fn parse_cuda_output(output, profiles, warnings) {
         var dev_id = validate_device_id(f_id);
         if (dev_id < 0) {
             vec_push(warnings, warning_parse("cuda", "bad device id"));
+            hwlog_warn("cuda: bad device id");
             continue;
         }
 
@@ -64,6 +66,7 @@ fn parse_cuda_output(output, profiles, warnings) {
         var mem_mb = validate_memory_mb(f_mem);
         if (mem_mb < 0) {
             vec_push(warnings, warning_parse("cuda", "bad memory"));
+            hwlog_warn("cuda: bad memory");
             continue;
         }
 

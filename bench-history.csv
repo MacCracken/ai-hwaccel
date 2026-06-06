@@ -156,3 +156,8 @@ timestamp,commit,branch,suite,benchmark,avg_ns,min_ns,max_ns,iters
 2026-06-04T03:15:18Z,36350e3,main,registry,json_system_io,7000,5000,226000,2000
 2026-06-04T03:15:18Z,36350e3,main,registry,json_plan,20000,18000,224000,2000
 2026-06-04T03:15:18Z,36350e3,main,registry,json_training,4000,2000,14000,2000
+2026-06-06T03:22:08Z,04ed3e9,main,parsing,parse_cuda_8gpu,31000,28000,74000,100
+2026-06-06T03:22:08Z,04ed3e9,main,registry,total_memory_13dev,140,140,140,100000
+2026-06-06T03:22:08Z,04ed3e9,main,registry,has_accelerator_13dev,28,28,28,100000
+2026-06-06T03:22:08Z,04ed3e9,main,registry,count_family_gpu_13dev,281,281,281,100000
+2026-06-06T03:22:08Z,04ed3e9,main,registry,json_serialize_13dev,23000,20000,39000,2000
