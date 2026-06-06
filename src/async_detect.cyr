@@ -177,7 +177,7 @@ fn registry_detect_threaded_with(builder_mask) {
     detect_environment(r);
 
     var nwarn = vec_len(warns);
-    if (nwarn > 0) { hwlog_warn_n("detect_threaded: warnings=", nwarn); }
+    if (nwarn > 0) { hwlog_info_n("detect_threaded: warnings=", nwarn); }
     hwlog_info_n("detect_threaded: profiles=", vec_len(profs));
     hwlog_span_exit();
 

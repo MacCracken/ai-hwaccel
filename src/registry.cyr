@@ -338,7 +338,7 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
     # messages are guarded inside hwlog_*_n so nothing builds when
     # suppressed.
     var nwarn = vec_len(warns);
-    if (nwarn > 0) { hwlog_warn_n("detect: warnings=", nwarn); }
+    if (nwarn > 0) { hwlog_info_n("detect: warnings=", nwarn); }
     hwlog_info_n("detect: profiles=", vec_len(profs));
     hwlog_span_exit();
 
