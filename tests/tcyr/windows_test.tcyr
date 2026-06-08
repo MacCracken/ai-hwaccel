@@ -77,6 +77,34 @@ fn test_win_gpu_empty() {
     assert_eq(vec_len(profiles), 0, "no profiles");
 }
 
+# --- win_merge_vram (DXGI/WMI VRAM reconciliation) ---
+
+# Discrete card: WMI AdapterRAM caps at 4 GiB; DXGI reports the true 24 GiB.
+# The precise DXGI figure must win.
+fn test_merge_vram_discrete() {
+    var wmi = 4294967295;        # WMI 4 GiB cap (uint32 max)
+    var dxgi = 25769803776;      # 24 GiB precise
+    assert_eq(win_merge_vram(wmi, dxgi), 25769803776, "discrete -> dxgi wins");
+}
+
+# Integrated GPU (e.g. Intel UHD 600): WMI surfaces 1 GiB shared; DXGI's
+# DedicatedVideoMemory is only 128 MB. WMI's larger figure must be kept.
+fn test_merge_vram_integrated() {
+    var wmi = 1073741824;        # 1 GiB shared (WMI)
+    var dxgi = 134217728;        # 128 MB dedicated (DXGI)
+    assert_eq(win_merge_vram(wmi, dxgi), 1073741824, "integrated -> wmi kept");
+}
+
+# DXGI unavailable / failed (0) -> keep the WMI value untouched.
+fn test_merge_vram_dxgi_zero() {
+    assert_eq(win_merge_vram(2147483648, 0), 2147483648, "dxgi 0 -> wmi kept");
+}
+
+# Equal figures -> unchanged.
+fn test_merge_vram_equal() {
+    assert_eq(win_merge_vram(8589934592, 8589934592), 8589934592, "equal -> same");
+}
+
 # --- win_parse_total_memory ---
 
 fn test_win_mem() {
@@ -102,6 +130,10 @@ test_win_gpu_single();
 test_win_gpu_multi();
 test_win_gpu_crlf();
 test_win_gpu_empty();
+test_merge_vram_discrete();
+test_merge_vram_integrated();
+test_merge_vram_dxgi_zero();
+test_merge_vram_equal();
 test_win_mem();
 test_win_mem_crlf();
 test_win_mem_absent();
