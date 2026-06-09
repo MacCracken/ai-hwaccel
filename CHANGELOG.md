@@ -57,6 +57,15 @@ ships on all three platforms.
   default WARN stays silent; stdout stays byte-clean. (`getpid` is still
   unrouted on PE, so the trace-id prefix shows `[0]` — cosmetic; delivery is
   unaffected.)
+- **Windows wheel cross-build fixed (CI).** `stage_win_cross.sh` now builds
+  the PE with **`cyrius build --win`** (the Linux ELF `cycc` emits PE32+
+  natively) instead of piping a hand-synthesized translation unit to the
+  standalone `cycc_win`. `cycc_win` is itself a **Windows PE**, so on a Linux
+  host it only runs under Wine (the local `DOSWin` binfmt handler); a bare CI
+  runner (`ubuntu-latest`, no Wine) failed it with `cannot execute binary
+  file: Exec format error` (exit 126). `--win` is the correct Linux-native
+  cross path — no Wine, deps resolved by the wrapper. PE re-verified on cass
+  (`--version` 2.3.9, DXGI JSON, `-vv` logging).
 - **`cyrius.cyml`**: **`sakshi`** added to `[deps] stdlib`; **`src/log.cyr`**
   added to `[lib] modules` (so the consumer bundle carries it).
 - **Bundle consumers** (mihi et al.): `dist/ai-hwaccel.cyr` now references

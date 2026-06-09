@@ -75,12 +75,14 @@ jobs:
   windows:
     name: windows wheel (x86_64, cross-built on Linux)
     # ENABLED (2.3.7): cyrius 6.0.50/6.0.51 fixed the Windows PE surface
-    # (cycc_win unfrozen; CreateProcessW process routing) — cyrius issue
+    # (PE backend unfrozen; CreateProcessW process routing) — cyrius issue
     # 2026-06-03-windows-pe-syscall-surface-blocks-detection.md (RESOLVED).
-    # The wheel is CROSS-BUILT ON LINUX: cycc_win is a Linux-hosted ELF
-    # compiler that emits PE32+, so no Windows runner is needed for the
-    # build (cass is used only for manual runtime smoke). Verified on cass:
-    # real CPU RAM + GPU (Win32_VideoController) detection runs.
+    # The wheel is CROSS-BUILT ON LINUX via `cyrius build --win`: the
+    # Linux-hosted ELF `cycc` emits PE32+ natively (no Windows runner, no
+    # Wine). NB: the standalone `cycc_win` binary is itself a Windows PE, so
+    # the old `cycc_win` pipe needed Wine and broke here with "Exec format
+    # error" — fixed in 2.3.9 by switching stage_win_cross.sh to --win.
+    # Verified on cass: real CPU RAM + GPU detection + structured logging.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
