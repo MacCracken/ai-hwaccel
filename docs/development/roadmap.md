@@ -429,18 +429,56 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
   caller frame on cass — fixed upstream in **6.0.71** (cyrius issue
   `2026-06-05-windows-com-vtable-real-callee-frame-corruption.md`).
 
-### 2.3.9 — Windows DXGI precise VRAM (cyrius 6.0.71) + structured logging
+### 2.3.9 — Windows DXGI precise VRAM + structured logging (cyrius 6.1.18)
 
-- [ ] On cyrius 6.0.71 (real-COM-callee frame-corruption fix), implement
-  DXGI `EnumAdapters1` → `GetDesc` → `DedicatedVideoMemory` to replace the
-  WMI `AdapterRAM` 4 GiB-capped path for precise Windows GPU VRAM.
-- [~] **Structured logging** (`src/log.cyr` over stdlib `sakshi`) — code
-  landed in-tree, releasing with 2.3.9. stderr, WARN+ default (silent on
-  success), `AI_HWACCEL_LOG` env + `--log-level`/`-v`/`-vv`/`-q` flags.
-  Spans + summaries through detect / async / cache / plan; the
-  previously-silent cuda/gaudi parse failures now `warn`. stdout stays
+- [x] **Pin 6.1.5 → 6.1.18**, stdlib re-synced (94 files; sakshi
+  v2.2.6 → **v2.2.10** + new `fs_win.cyr` Windows `dir_list` port). The
+  **compiler** bump is a pure codegen no-op: cycc 6.1.15 and 6.1.18 emit a
+  **byte-identical** 370,776 B Linux binary (same bytes as the 6.1.5
+  baseline). The synced **stdlib** adds **+16 B** (370,776 → 370,792 B),
+  entirely sakshi 2.2.10 source content linked through `log.cyr` — not a
+  hot path. 13/13 test units (606 assertions) pass;
+  `fmt`/`lint`/`vet`/distlib-determinism
+  gates clean; benchmark delta within noise (see CHANGELOG /
+  bench-history.csv).
+- [x] **DXGI precise VRAM enabled by default.** The `.rdata`-corruption
+  residual that kept the DXGI pass gated behind `-D AI_HWACCEL_DXGI` was
+  fixed upstream in **cyrius 6.1.7** (m128 array-padding / PE `.rdata`
+  layout divergence; GPU-confirmed on cass via ai-hwaccel's own
+  `str_builder_add_cstr("true")` repro). `src/detect/windows.cyr` un-gated:
+  `detect_windows` parses WMI then enriches with `EnumAdapters1 → GetDesc1
+  → DedicatedVideoMemory`, reporting `max(WMI, DXGI)`. **Verified on cass**
+  (Windows 10.0.26200): clean, uncorrupted JSON; Intel UHD 600 reports
+  1 GiB (WMI's shared figure correctly kept — integrated GPUs have ~0
+  *dedicated* VRAM). Discrete precise-VRAM override path GPU-confirmed
+  upstream.
+- [x] **Structured logging** (`src/log.cyr` over stdlib `sakshi`) — now
+  works on **Linux/macOS *and* Windows PE.** It was previously silently
+  dropped on PE: sakshi holds syscall numbers in `var` slots, and cyrius's
+  PE syscall reroute only fired for a **compile-time-literal** number, so
+  `syscall(_SK_SYS_WRITE, …)` fell through to a non-functional raw `0F 05`
+  and wrote nothing (no fault, exit 0). **Fixed in cyrius 6.1.18**: the PE
+  reroute now resolves a `var`-held syscall number to its constant value,
+  so `n=1` (write) routes to `WriteFile` (the original blockers —
+  `cyrius/.../2026-06-09-pe-syscall-variable-number-not-rerouted.md` and
+  `sakshi/.../2026-06-09-windows-pe-var-syscall-no-reroute.md`, sakshi
+  roadmap **W1** — are resolved/archived). **Verified on cass** (Windows
+  10.0.26200) with the synced sakshi v2.2.10: `detect -vv` (stdout→NUL)
+  emits the full span on stderr — `[ENTER] detect`, `[DEBUG]
+  detect: builder_mask=…`, `[DEBUG] windows: dxgi vram below wmi, kept wmi
+  (bytes) 1073741824`, `[INFO] detect: profiles=2`, `[EXIT] detect`; the
+  default WARN level stays correctly silent on success. stdout remains
   byte-clean for JSON consumers; no measurable hot-path cost. Bundle
-  consumers must add `sakshi` to their `[deps] stdlib`.
+  consumers must add `sakshi` to their `[deps] stdlib`. *Cosmetic residual:*
+  the trace-id prefix is `[0]` on PE because `getpid` (syscall 39) isn't in
+  the reroute whitelist; delivery is unaffected.
+- [ ] **Windows runtime CI gate** (P1 follow-up): `wheels.yml` cross-builds
+  the PE today but only checks the `MZ` magic — it would not catch a
+  silently-broken runtime feature (both the DXGI and the logging episodes
+  were caught only by manual cass smoke, which is now green for 6.1.18). Add
+  a PE run leg (cass-style SSH smoke or a Windows runner) asserting (a) DXGI
+  JSON is well-formed and (b) a forced `-vv` log line actually reaches
+  stderr. Mirrors sakshi roadmap **W2**.
 
 ### WASM / JS
 

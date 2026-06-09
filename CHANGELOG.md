@@ -5,15 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
-## [Unreleased]
+## [2.3.9] — 2026-06-09
 
-**Targeted for 2.3.9 (alongside Windows DXGI precise VRAM on cyrius
-6.0.71).** ai-hwaccel previously emitted nothing to stderr: every detector
-shelled out to `nvidia-smi` / `wmic` / `rocm-smi` and swallowed failures
-into the warnings vec, visible only if you parsed the JSON. This wires the
-AGNOS `sakshi` structured logger through the whole pipeline (detectors,
-planning, cache, async spans) so the tool is observable in the field —
-while keeping **stdout byte-clean** for the JSON that consumers parse.
+**Windows DXGI precise VRAM + structured logging, on cyrius 6.1.18.** ai-hwaccel previously emitted nothing to stderr: every
+detector shelled out to `nvidia-smi` / `wmic` / `rocm-smi` and swallowed
+failures into the warnings vec, visible only if you parsed the JSON. This
+wires the AGNOS `sakshi` structured logger through the whole pipeline
+(detectors, planning, cache, async spans) so the tool is observable in the
+field — while keeping **stdout byte-clean** for the JSON that consumers
+parse. With the **cyrius 6.1.18** bump the logger now reaches stderr on
+**Windows PE** as well (previously dropped — see *Changed*), so the feature
+ships on all three platforms.
 
 #### Added
 
@@ -37,6 +39,24 @@ while keeping **stdout byte-clean** for the JSON that consumers parse.
 
 #### Changed
 
+- **Toolchain pin 6.1.5 → 6.1.18** (stdlib re-synced, 94 files; sakshi
+  v2.2.6 → **v2.2.10**, new `fs_win.cyr` Windows `dir_list` port). The
+  **compiler** bump is a codegen no-op — cycc 6.1.15 and 6.1.18 emit a
+  byte-identical 370,776 B Linux binary (same as 6.1.5). The synced
+  **stdlib** adds +16 B (370,776 → 370,792 B), entirely sakshi 2.2.10 source
+  linked through `log.cyr`. 13/13 test units (606 assertions) pass;
+  `fmt`/`lint`/`vet`/
+  distlib-determinism clean; bench delta within noise (bench-history.csv).
+- **Windows PE structured logging fixed (cyrius 6.1.18).** Logging was
+  silently dropped on PE: sakshi holds syscall numbers in `var` slots and
+  cyrius's PE syscall reroute only fired for compile-time-literal numbers,
+  so `syscall(_SK_SYS_WRITE, …)` fell through to a non-functional raw
+  `0F 05` (no fault, exit 0). 6.1.18 resolves a `var`-held syscall number to
+  its constant, so `n=1` (write) routes to `WriteFile`. **Verified on cass**
+  (Windows 10.0.26200): `detect -vv` emits the full `detect` span on stderr;
+  default WARN stays silent; stdout stays byte-clean. (`getpid` is still
+  unrouted on PE, so the trace-id prefix shows `[0]` — cosmetic; delivery is
+  unaffected.)
 - **`cyrius.cyml`**: **`sakshi`** added to `[deps] stdlib`; **`src/log.cyr`**
   added to `[lib] modules` (so the consumer bundle carries it).
 - **Bundle consumers** (mihi et al.): `dist/ai-hwaccel.cyr` now references
@@ -53,8 +73,9 @@ while keeping **stdout byte-clean** for the JSON that consumers parse.
   ~22–23 µs — **all within noise.** Instrumentation lives at dispatch
   sites and error paths, off the benched hot loops; below-threshold log
   calls build no messages. Binary grows **301 KB → 369 KB** (+68 KB, the
-  reachable `sakshi` surface; DCE NOPs 609 unreachable fns). 12/12 test
-  units pass.
+  reachable `sakshi` surface; DCE NOPs 623 unreachable fns). At the 6.1.18
+  pin the stripped binary is **370,792 B**; 13/13 test units (606
+  assertions) pass.
 
 ## [2.3.8] — 2026-06-05
 

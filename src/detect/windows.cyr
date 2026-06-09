@@ -20,28 +20,24 @@
 # precise large VRAM for discrete cards, WMI's shared figure for integrated
 # GPUs that report ~0 DedicatedVideoMemory).
 #
-# STATUS (2.3.9): the DXGI pass is implemented and verified CORRECT in
-# isolation (cyrius's reference dxgi_probe.cyr exits 42 on cass; our
-# win_dxgi_adapter_vram_bytes returns the right value in a minimal harness),
-# but it is **gated OFF by default behind `-D AI_HWACCEL_DXGI`** because the
-# callptr -> real-Win64-COM chain still corrupts the caller when invoked from
-# a non-trivial program. Reproduced minimally with cyrius's OWN code (no
-# ai-hwaccel logic): `dxgi_vram_bytes()` immediately followed by
-# `str_builder_add_cstr(sb, "true")` yields a garbled "true" on cass — the
-# COM call corrupts subsequent execution. The isolated probe passes only
-# because it does nothing afterward but compare ints. This is the residual
-# noted in cyrius issue 2026-06-05-windows-com-vtable-real-callee-frame-
-# corruption.md (the 6.0.71/6.0.86 alignment + frame-slot fixes cleared the
-# probe but not the general case). Filed upstream:
-# cyrius 2026-06-08-windows-com-callee-corrupts-caller-in-nontrivial-program.md.
-# Default Windows builds stay WMI-only (clean) until that lands; flip the
-# flag to re-test once cyrius fixes it.
+# STATUS (2.3.9): the DXGI precise-VRAM pass is ON by default for Windows PE
+# builds. It was previously gated OFF behind `-D AI_HWACCEL_DXGI` because the
+# callptr -> real-Win64-COM chain corrupted the caller in a non-trivial
+# program (`dxgi_vram_bytes()` followed by `str_builder_add_cstr(sb, "true")`
+# garbled the "true" literal on cass). Root-caused upstream as an m128
+# array-padding / PE `.rdata` layout divergence (function-local arrays are
+# `.rdata` globals; the &gvar prefix-sum was padded against the ELF dbase
+# while _pe_layout sized the string zone unpadded, so `&desc`'s 312-B
+# GetDesc1 write drifted +8 onto the "true" literal) — NOT a callptr
+# register/DF bug — and fixed in cyrius 6.1.7 (GPU-confirmed on cass via that
+# exact ai-hwaccel repro). Issue
+# 2026-06-08-windows-com-callee-corrupts-caller-in-nontrivial-program.md
+# (resolved). Default Windows builds now report precise DedicatedVideoMemory.
 #
 # The pure parsers `win_parse_videocontrollers` and `win_merge_vram` are
 # ungated so the Linux-hosted fixture test (tests/tcyr/windows_test.tcyr)
-# exercises them without a Windows host; only the wmic spawn and the DXGI
-# COM pass are CYRIUS_TARGET_WIN-only (callptr + syscall 0xF012 exist only
-# on the PE target), and the DXGI pass is further AI_HWACCEL_DXGI-only.
+# exercises them without a Windows host; the wmic spawn and the DXGI COM pass
+# are CYRIUS_TARGET_WIN-only (callptr + syscall 0xF012 exist only on PE).
 
 # Push an ACCEL_WIN_GPU profile (name copied to a NUL-terminated cstr).
 fn win_emit_gpu(profiles, dev_id, name, ram) {
@@ -117,14 +113,9 @@ fn win_merge_vram(wmi_bytes, dxgi_bytes) {
 
 #ifdef CYRIUS_TARGET_WIN
 
-#ifdef AI_HWACCEL_DXGI
-# --- Native DXGI precise-VRAM pass (PE only; OFF by default) ----------------
-# Gated behind -D AI_HWACCEL_DXGI: correct in isolation but re-triggers an
-# upstream cyrius callptr->COM caller-corruption residual when run inside the
-# full pipeline (see the file header STATUS note). Enable to re-test once the
-# upstream fix lands.
+# --- Native DXGI precise-VRAM pass (PE only; ON by default since 2.3.9) ------
 # Walks the COM vtable through `callptr` exactly as cyrius's reference
-# lib/dxgi.cyr (GPU-verified on cass at 6.0.86). Each method N lives at
+# lib/dxgi.cyr (GPU-verified on cass). Each method N lives at
 # load64(vtbl + N*8). DXGI_ADAPTER_DESC1: VendorId @256, DeviceId @260,
 # DedicatedVideoMemory @272 (SIZE_T) — a 320-byte buffer holds the struct.
 
@@ -209,7 +200,6 @@ fn win_enrich_dxgi_vram(profiles, base) {
     }
     return 0;
 }
-#endif
 
 # Detect Windows-visible GPUs by spawning wmic. CreateProcessW resolves
 # `wmic` from System32\wbem on PATH (no which()/PATH-env dependency,
@@ -231,16 +221,14 @@ fn detect_windows(profiles, warnings) {
         return 0;
     }
     store8(buf + n, 0);
-#ifdef AI_HWACCEL_DXGI
-    # Override WMI's 4 GiB-capped AdapterRAM with precise DXGI VRAM where the
-    # native COM pass returns a larger figure (discrete cards). OFF by default
-    # — see the file header STATUS note (upstream callptr->COM residual).
+    # Parse WMI controllers, then override WMI's 4 GiB-capped AdapterRAM with
+    # precise DXGI DedicatedVideoMemory where the native COM pass returns a
+    # larger figure (discrete cards). On by default since 2.3.9 — the upstream
+    # callptr->COM .rdata-corruption residual was fixed in cyrius 6.1.7.
     var base = vec_len(profiles);
     var count = win_parse_videocontrollers(str_new(buf, n), profiles);
     var enriched = win_enrich_dxgi_vram(profiles, base);
     return count;
-#endif
-    return win_parse_videocontrollers(str_new(buf, n), profiles);
 }
 
 #endif
