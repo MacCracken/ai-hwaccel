@@ -472,13 +472,40 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
   consumers must add `sakshi` to their `[deps] stdlib`. *Cosmetic residual:*
   the trace-id prefix is `[0]` on PE because `getpid` (syscall 39) isn't in
   the reroute whitelist; delivery is unaffected.
-- [ ] **Windows runtime CI gate** (P1 follow-up): `wheels.yml` cross-builds
-  the PE today but only checks the `MZ` magic — it would not catch a
-  silently-broken runtime feature (both the DXGI and the logging episodes
-  were caught only by manual cass smoke, which is now green for 6.1.18). Add
-  a PE run leg (cass-style SSH smoke or a Windows runner) asserting (a) DXGI
-  JSON is well-formed and (b) a forced `-vv` log line actually reaches
-  stderr. Mirrors sakshi roadmap **W2**.
+- Windows runtime CI gate → **deferred to 2.3.10** (the PE feature surface
+  is only manually cass-smoked today; see below).
+
+### 2.3.10 — Windows runtime CI gate (sakshi roadmap W2)
+
+**Why:** `wheels.yml` cross-builds the PE but only asserts the `MZ` magic, so
+a silently-broken *runtime* feature ships green. 2.3.9 proved the risk is
+real — both the DXGI `.rdata` corruption and the dropped PE logging were
+caught **only** by manual `ssh cass` smoke, never by CI. The PE is the one
+target with no automated runtime coverage. Close that gap.
+
+- [ ] **Add a PE runtime smoke leg** to `wheels.yml` (gated on the windows
+  wheel building) asserting, on a real Windows execution:
+  - [ ] **(a) DXGI / detection** — `ai-hwaccel.exe detect --json` exits 0 and
+    emits **well-formed JSON** (parse it; assert `schema_version` + a
+    non-empty `profiles[]`). This is the regression gate for the COM/`.rdata`
+    corruption class.
+  - [ ] **(b) Structured logging** — `ai-hwaccel.exe detect -vv 1>NUL` writes
+    at least one log line to **stderr** (e.g. grep `[ENTER] detect` /
+    `[EXIT] detect`); assert the default level stays **silent** on success.
+    This is the regression gate for the PE var-syscall reroute (W1).
+- [ ] **Pick the execution venue** (decide first):
+  - *`windows-latest` ephemeral runner* — self-contained, no secrets, runs
+    the cross-built EXE natively; preferred for a public CI gate.
+  - *`ssh cass` self-hosted smoke* — reuses the exact manual flow, but needs
+    host/secret wiring and a self-hosted connection. Fallback if the GH
+    Windows runner can't run the cross-built PE cleanly.
+- [ ] **Bundle a `VERSION` file beside the EXE** in the smoke step so
+  `--version` reports `2.3.10` (not `unknown`) — confirms the wheel layout's
+  `data_file_path` resolution on PE.
+
+*Out of scope (upstream, not ours):* the `[0]` trace-id prefix on PE —
+`getpid` (syscall 39) isn't in cyrius's PE reroute whitelist. Log a cyrius
+issue if we want real trace ids on Windows; log delivery is unaffected.
 
 ### WASM / JS
 
