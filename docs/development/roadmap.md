@@ -528,9 +528,34 @@ target with no automated runtime coverage. Close that gap.
 doesn't exist on Windows, so the env var the Python `_runner` sets to point
 the bundled binary at its data files is silently ignored on PE — `--version`
 / `--cost` fall back to **cwd-relative** resolution there. Detection (the
-primary path) is unaffected. Fix is a Windows `GetEnvironmentVariable` path
-in `cmd_getenv`; needs `cass` verification, so it's deferred to its own item
-rather than bundled into the CI-only 2.3.11.
+primary path) is unaffected. **→ Resolved in 2.3.12 (below) via a
+`--data-dir` flag**, since the planned `GetEnvironmentVariable` path is
+blocked on a cyrius reroute we can't add.
+
+### 2.3.12 — `--data-dir` flag (PE-safe data-file resolution)
+
+**Why:** the 2.3.11 gate confirmed `AI_HWACCEL_DATA_DIR` is unreadable on PE
+(no `/proc/self/environ`; no `GetEnvironmentVariable` reroute in cyrius
+6.2.11), so the bundled Windows wheel's `--version`/`--cost` were
+cwd-dependent. The env channel can't be fixed in-repo. Route the data dir
+through argv instead — readable on PE (`GetCommandLineW`/`CommandLineToArgvW`,
+already wired).
+
+- [x] **`--data-dir <path>` CLI flag** (`cmd_data_dir_arg()` in
+  `command.cyr`). `data_file_path` precedence is **flag → env → cwd**;
+  self-contained argv scan (works on PE and before main's parser). In
+  `--help`.
+- [x] **Python `_runner`** passes `--data-dir <bundled _bin>` on the argv
+  for the bundled binary (env var still exported for back-compat;
+  caller-set env still respected). `version()`/`cost()` now work on the
+  Windows wheel from any cwd.
+- [x] **Tests** — `test_bundled.py`: flag resolves VERSION with env stripped
+  + foreign cwd; runner places `--data-dir` on argv. 20/20 Python + 12/12
+  cyrius units pass; benchmark-neutral (no hot path touched).
+- [ ] **Upstream (cyrius), drafted not filed:** add a PE environment-read
+  reroute (`GetEnvironmentVariableW`) so `cmd_getenv` / stdlib `getenv`
+  work on PE and the env channel reaches parity. ai-hwaccel no longer
+  depends on it; tracked for completeness.
 
 *Out of scope (upstream, not ours):* the `[0]` trace-id prefix on PE —
 `getpid` (syscall 39) isn't in cyrius's PE reroute whitelist. Log a cyrius

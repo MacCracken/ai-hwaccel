@@ -47,17 +47,45 @@ fn cmd_getenv(name) {
     return 0;
 }
 
-# Resolve a data-file path against AI_HWACCEL_DATA_DIR.
+# Scan argv for `--data-dir <path>`, returning the path cstr or 0.
 #
-# The binary reads VERSION (--version) and data/cloud_pricing.json
-# (--cost) at runtime. Historically those were cwd-relative, so a binary
-# invoked from outside the project root (e.g. a pip-installed wheel)
-# couldn't find them. If AI_HWACCEL_DATA_DIR is set, paths resolve under
-# it ("<dir>/<rel>"); otherwise <rel> is returned unchanged (the
-# cwd-relative fallback). Any consumer — Python now, agnos later — sets
-# the one env var; the contract stays language-neutral. See roadmap 2.3.3.
+# Self-contained (argv/argc/streq, no dependency on main.cyr's parser) so
+# it works on PE: argv is populated from GetCommandLineW/CommandLineToArgvW
+# (cyrius PE reroutes 0xF006/0xF010), unlike environment variables, which
+# cmd_getenv cannot read on PE — there is no /proc/self/environ and cyrius
+# 6.2.11 exposes no GetEnvironmentVariable reroute (see data_file_path).
+fn cmd_data_dir_arg() {
+    var n = argc();
+    var i = 1;
+    while (i < n) {
+        var a = argv(i);
+        if (a != 0) {
+            if (streq(a, "--data-dir") == 1) {
+                if (i + 1 < n) { return argv(i + 1); }
+                return 0;
+            }
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Resolve a data-file path. The binary reads VERSION (--version) and
+# data/cloud_pricing.json (--cost) at runtime; invoked from outside the
+# project root (e.g. a pip-installed wheel) those are not cwd-relative.
+# Resolution precedence:
+#   1. `--data-dir <path>` CLI flag — works on EVERY platform including
+#      Windows PE, because argv is readable there. This is the portable
+#      channel a consumer (Python _runner now, agnos later) should use.
+#   2. AI_HWACCEL_DATA_DIR env var — honoured on Linux/macOS, but a SILENT
+#      NO-OP on PE (cmd_getenv reads /proc/self/environ, absent on Windows;
+#      cyrius has no env-read reroute). Kept for back-compat with consumers
+#      that set it; the flag supersedes it where both are present.
+#   3. cwd-relative <rel> — the original fallback.
+# See roadmap 2.3.3 (env var) and 2.3.12 (the --data-dir flag for PE).
 fn data_file_path(rel) {
-    var dir = cmd_getenv("AI_HWACCEL_DATA_DIR");
+    var dir = cmd_data_dir_arg();
+    if (dir == 0) { dir = cmd_getenv("AI_HWACCEL_DATA_DIR"); }
     if (dir == 0) { return rel; }
     var sb = str_builder_new();
     str_builder_add_cstr(sb, dir);

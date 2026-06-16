@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.12] — 2026-06-15
+
+**`--data-dir` flag — data-file resolution that works on Windows PE.**
+Follow-up to the 2.3.11 finding: the bundled binary's `--version` /
+`--cost` resolve `VERSION` and `data/cloud_pricing.json` via
+`AI_HWACCEL_DATA_DIR`, but that env var is a **silent no-op on PE** —
+`cmd_getenv` reads `/proc/self/environ` (absent on Windows) and cyrius
+6.2.11 exposes no `GetEnvironmentVariable` reroute, so on the Windows
+wheel those commands fell back to cwd-relative and reported `unknown` /
+empty recommendations. The roadmap's planned fix (a `GetEnvironmentVariable`
+path in `cmd_getenv`) is **blocked on a cyrius toolchain reroute** we
+can't add. Instead this routes the data dir through the **command line**,
+which *is* readable on PE (argv comes from `GetCommandLineW` /
+`CommandLineToArgvW`, already wired — it's how `--version` itself works on
+cass).
+
+#### Added
+
+- **`--data-dir <path>` CLI flag** (`src/detect/command.cyr`). New
+  `cmd_data_dir_arg()` scans argv (self-contained — `argv`/`argc`/`streq`,
+  no dependency on `main.cyr`'s parser, so it works before main's flag
+  parsing and on PE). `data_file_path` resolution is now **flag → env →
+  cwd**: the flag is the portable channel; `AI_HWACCEL_DATA_DIR` is kept
+  for back-compat (Linux/macOS) but superseded by the flag where both are
+  present. Listed in `--help`.
+- **Test — `bindings/python/tests/test_bundled.py`**: `--data-dir` resolves
+  `VERSION` with the env var stripped and a foreign cwd (the PE-faithful
+  path), and the runner is asserted to place `--data-dir` on the argv.
+
+#### Changed
+
+- **Python `_runner._run`** now passes `--data-dir <bundled _bin>` on the
+  argv for the bundled binary (still exporting `AI_HWACCEL_DATA_DIR` for
+  back-compat), so `version()` / `cost()` work on the Windows wheel — not
+  just where the caller's cwd happens to hold the data files. Preserves the
+  existing "never override a caller-set `AI_HWACCEL_DATA_DIR`" semantics.
+- **`VERSION`** 2.3.11 → 2.3.12; **`dist/ai-hwaccel.cyr`** regenerated.
+
+#### Notes
+
+- **Upstream issue to file (drafted, not filed — cyrius repo is off-limits
+  here):** cyrius PE backend exposes no environment-read reroute
+  (`GetEnvironmentVariableW` / `GetEnvironmentStringsW`), so neither
+  `cmd_getenv` nor stdlib `getenv` can read env on PE. The `--data-dir`
+  flag makes ai-hwaccel independent of it; the issue tracks restoring
+  env-var parity for any consumer that prefers the env channel. Text in the
+  2.3.12 PR description / roadmap.
+
+#### Performance
+
+- **No regression; no hot path touched.** `data_file_path` is called only
+  on `--version` / `--cost`, never in `registry_detect` or the JSON/parse
+  paths. Baseline vs. changed tree (same machine/iters) within run-to-run
+  noise: `total_memory_13dev` 149→140 ns, `count_family_gpu_13dev` 298→287
+  ns, `has_accelerator_13dev` 27 ns flat, `json_serialize_13dev` ~23 µs
+  flat, `parse_cuda_8gpu` ~32 µs flat. 12/12 cyrius test units + 20/20
+  Python tests pass.
+
 ## [2.3.11] — 2026-06-15
 
 **Windows PE runtime CI gate.** `wheels.yml` cross-builds the Windows PE

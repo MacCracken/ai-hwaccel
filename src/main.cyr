@@ -333,6 +333,9 @@ if (_has_flag("--help") == 1) {
     _println_cstr("  ai-hwaccel --version    Print version");
     _println_cstr("");
     _println_cstr("Options: --quant <fp16|bf16|int8|int4>  --method <full|lora|qlora-4bit|...>");
+    _println_cstr("         --data-dir <path>   Dir holding VERSION + data/ (for --version/--cost");
+    _println_cstr("                             outside the project root; required on Windows, where");
+    _println_cstr("                             AI_HWACCEL_DATA_DIR is unreadable)");
     syscall(60, 0);
 }
 

@@ -55,6 +55,51 @@ class TestBundledFromForeignCwd(unittest.TestCase):
         reg = ai_hwaccel.detect(binary=self._bin)
         self.assertGreaterEqual(len(reg.profiles), 1)
 
+    def test_version_resolves_via_data_dir_flag(self):
+        # PE-faithful path (2.3.12): on Windows the binary cannot read env
+        # vars, so the runner passes --data-dir. Prove the flag ALONE
+        # resolves VERSION — env var stripped, foreign cwd, flag only.
+        import subprocess
+
+        data_dir = str(_BUNDLED.parent)
+        env = {k: v for k, v in os.environ.items() if k != "AI_HWACCEL_DATA_DIR"}
+        proc = subprocess.run(
+            [self._bin, "--data-dir", data_dir, "--version"],
+            capture_output=True,
+            text=True,
+            cwd=self._tmp,
+            env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertRegex(proc.stdout.strip(), r"^\d+\.\d+\.\d+")
+
+    def test_runner_passes_data_dir_flag(self):
+        # The runner must put --data-dir on the argv for the bundled binary
+        # (not rely on the env var, which is a no-op on PE).
+        from ai_hwaccel import _runner
+
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+
+            class _P:
+                returncode = 0
+                stdout = "2.0.0\n"
+                stderr = ""
+
+            return _P()
+
+        orig = _runner.subprocess.run
+        _runner.subprocess.run = fake_run
+        try:
+            _runner.run_text(["--version"], binary=self._bin)
+        finally:
+            _runner.subprocess.run = orig
+        self.assertIn("--data-dir", captured["cmd"])
+        i = captured["cmd"].index("--data-dir")
+        self.assertEqual(captured["cmd"][i + 1], str(_BUNDLED.parent))
+
 
 if __name__ == "__main__":
     unittest.main()
