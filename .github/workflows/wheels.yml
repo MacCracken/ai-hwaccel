@@ -100,3 +100,86 @@ jobs:
           bindings/python/scripts/build_wheel.sh win_amd64 python
       - uses: actions/upload-artifact@v4
         with: { name: wheels-windows, path: bindings/python/dist/*.whl }
+
+  windows-smoke:
+    name: windows PE runtime smoke
+    # 2.3.11 — Windows runtime CI gate (roadmap W2). The `windows` job
+    # cross-builds the PE on Linux but only asserts the `MZ` magic, so a
+    # silently-broken *runtime* feature could ship green — both 2.3.9
+    # regressions (the DXGI `.rdata` corruption and the dropped PE structured
+    # logging) were caught ONLY by manual `ssh cass` smoke, never by CI. This
+    # gate runs the actual cross-built EXE on an ephemeral windows-latest
+    # runner (the roadmap's preferred venue: self-contained, no secrets, no
+    # self-hosted wiring) and asserts the three runtime contracts below. If
+    # the cross-built PE ever fails to *run* cleanly here (vs. on cass), the
+    # roadmap fallback is an `ssh cass` self-hosted leg.
+    needs: windows
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.x" }
+      - uses: actions/download-artifact@v4
+        with: { name: wheels-windows, path: dist }
+      - name: Extract the bundled EXE from the wheel
+        run: |
+          set -euo pipefail
+          whl=$(ls dist/*.whl | head -1)
+          echo "wheel: $whl"
+          # A wheel is a zip; extract and locate the bundled _bin/ (holds
+          # ai-hwaccel.exe + VERSION + data/cloud_pricing.json — see
+          # stage_win_cross.sh). Testing the EXE *as shipped in the wheel*
+          # is the point: this is the artifact consumers install.
+          python -c "import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall('unpacked')" "$whl"
+          bin=$(find unpacked -type d -name _bin | head -1)
+          test -n "$bin" || { echo 'FAIL: no _bin/ directory inside the wheel'; exit 1; }
+          ls -la "$bin"
+          echo "BIN_DIR=$bin" >> "$GITHUB_ENV"
+      - name: (a) detection emits well-formed JSON (schema_version + non-empty profiles[])
+        # Regression gate for the COM/`.rdata` corruption class. The CLI is
+        # flag-based (no `detect` subcommand): bare invocation = full registry
+        # JSON. A CPU profile is always present (registry.cyr always pushes
+        # one, 16 GiB fallback), so profiles[] is non-empty even on a
+        # GPU-less / wmic-less runner.
+        run: |
+          set -euo pipefail
+          out="$("$BIN_DIR/ai-hwaccel.exe")"
+          echo "${out:0:300}"
+          printf '%s' "$out" | python -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert 'schema_version' in d, 'missing schema_version'
+          p = d.get('profiles')
+          assert isinstance(p, list) and p, 'empty profiles[]'
+          print('OK schema_version=%s profiles=%d' % (d['schema_version'], len(p)))
+          "
+      - name: (b) -vv structured logging reaches stderr; default level stays silent
+        # Regression gate for the PE var-syscall reroute (sakshi W1). `-vv`
+        # raises the level to TRACE; the detect span ([ENTER]/[EXIT] detect)
+        # must reach stderr while stdout stays clean. Default level must be
+        # silent on success.
+        run: |
+          set -euo pipefail
+          err="$("$BIN_DIR/ai-hwaccel.exe" -vv 2>&1 1>/dev/null)"
+          printf '%s\n' "$err"
+          grep -qE '\[(ENTER|EXIT)\] detect' <<< "$err" \
+            || { echo 'FAIL: no detect span on stderr (PE var-syscall reroute regression?)'; exit 1; }
+          derr="$("$BIN_DIR/ai-hwaccel.exe" 2>&1 1>/dev/null)"
+          test -z "$derr" || { echo "FAIL: stderr not silent at default level:"; printf '%s\n' "$derr"; exit 1; }
+          echo 'OK logging'
+      - name: (c) --version resolves the bundled VERSION on PE
+        # Confirms the wheel layout's data_file_path resolution on PE. NB: on
+        # PE, AI_HWACCEL_DATA_DIR is unreadable (cmd_getenv reads
+        # /proc/self/environ, absent on Windows), so data_file_path falls back
+        # to cwd-relative — run from the _bin/ dir, where the wheel co-locates
+        # VERSION beside the EXE. Asserts --version reports the bundled
+        # version (not "unknown").
+        run: |
+          set -euo pipefail
+          expected="$(tr -d ' \t\r\n' < VERSION)"
+          got="$(cd "$BIN_DIR" && ./ai-hwaccel.exe --version | tr -d ' \t\r\n')"
+          echo "expected=$expected got=$got"
+          test "$got" = "$expected" \
+            || { echo 'FAIL: --version did not resolve the bundled VERSION on PE'; exit 1; }
+          echo 'OK version'

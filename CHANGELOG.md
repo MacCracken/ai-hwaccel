@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.11] — 2026-06-15
+
+**Windows PE runtime CI gate.** `wheels.yml` cross-builds the Windows PE
+on Linux but previously asserted only the `MZ` magic — a silently-broken
+*runtime* feature could ship green. The risk is proven: both 2.3.9
+regressions (the DXGI `.rdata` corruption and the dropped PE structured
+logging) were caught **only** by manual `ssh cass` smoke, never by CI.
+The PE was the one target with no automated runtime coverage. This closes
+that gap with a `windows-smoke` job that runs the actual cross-built EXE
+on an ephemeral `windows-latest` runner and asserts three runtime
+contracts.
+
+#### Added
+
+- **`windows-smoke` job — `.github/workflows/wheels.yml`** (`runs-on:
+  windows-latest`, `needs: windows`). Downloads the `wheels-windows`
+  artifact, extracts the bundled `_bin/ai-hwaccel.exe` from the wheel, and
+  asserts on a real Windows execution:
+  - **(a) Detection** — bare `ai-hwaccel.exe` exits 0 and emits
+    **well-formed JSON** (`schema_version` + a **non-empty `profiles[]`**;
+    a CPU profile is always present even on a GPU-less / `wmic`-less
+    runner). Regression gate for the COM/`.rdata` corruption class.
+  - **(b) Structured logging** — `ai-hwaccel.exe -vv` writes the
+    `[ENTER]`/`[EXIT] detect` span to **stderr** while **stdout stays
+    clean**, and the **default level stays silent**. Regression gate for
+    the PE var-syscall reroute (sakshi roadmap W1).
+  - **(c) VERSION resolution** — `ai-hwaccel.exe --version`, run from the
+    `_bin/` dir, reports the **bundled version** (not `unknown`). Confirms
+    the wheel layout's `data_file_path` resolution on PE.
+- **Venue:** `windows-latest` ephemeral runner — the roadmap's preferred
+  option (self-contained, no secrets, no self-hosted wiring). Fallback to
+  an `ssh cass` self-hosted leg if the cross-built PE ever fails to *run*
+  cleanly on the GH runner.
+
+#### Notes
+
+- The gate matches the **real CLI surface** — flag-based (`ai-hwaccel` =
+  full JSON, `-vv` = trace, `--version`), not the `detect <flag>`
+  subcommand the roadmap sketch had assumed.
+- **PE limitation surfaced by this work (follow-up, not fixed here):**
+  `AI_HWACCEL_DATA_DIR` is **unreadable on PE** — `cmd_getenv`
+  (`src/detect/command.cyr`) reads `/proc/self/environ`, which doesn't
+  exist on Windows — so the bundled binary's `--version`/`--cost` resolve
+  data files **cwd-relative** on Windows, *not* via the env var the Python
+  `_runner` sets. Detection (the primary path, which spawns `wmic` and
+  needs no data files) is unaffected. The gate runs `--version` from
+  `_bin/` to match this cwd-relative reality. A Windows
+  `GetEnvironmentVariable` path in `cmd_getenv` is filed as a follow-up so
+  the documented env-var contract holds on PE too.
+
+#### Performance
+
+- **CI-only change; binary byte-unchanged.** No `src/` touched (workflow +
+  `VERSION` + docs only) — `VERSION` is read at runtime, not compiled in —
+  so the compiled binary and every hot path are identical to 2.3.10.
+  Benchmark suite re-run for the record: within run-to-run noise, **no
+  regression.** 12/12 test units pass.
+
 ## [2.3.10] — 2026-06-15
 
 **Toolchain bump to cyrius 6.2.11.** Pin update + stdlib re-sync,

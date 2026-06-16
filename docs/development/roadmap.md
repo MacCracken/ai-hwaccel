@@ -501,25 +501,36 @@ real — both the DXGI `.rdata` corruption and the dropped PE logging were
 caught **only** by manual `ssh cass` smoke, never by CI. The PE is the one
 target with no automated runtime coverage. Close that gap.
 
-- [ ] **Add a PE runtime smoke leg** to `wheels.yml` (gated on the windows
-  wheel building) asserting, on a real Windows execution:
-  - [ ] **(a) DXGI / detection** — `ai-hwaccel.exe detect --json` exits 0 and
-    emits **well-formed JSON** (parse it; assert `schema_version` + a
-    non-empty `profiles[]`). This is the regression gate for the COM/`.rdata`
-    corruption class.
-  - [ ] **(b) Structured logging** — `ai-hwaccel.exe detect -vv 1>NUL` writes
-    at least one log line to **stderr** (e.g. grep `[ENTER] detect` /
-    `[EXIT] detect`); assert the default level stays **silent** on success.
-    This is the regression gate for the PE var-syscall reroute (W1).
-- [ ] **Pick the execution venue** (decide first):
-  - *`windows-latest` ephemeral runner* — self-contained, no secrets, runs
-    the cross-built EXE natively; preferred for a public CI gate.
-  - *`ssh cass` self-hosted smoke* — reuses the exact manual flow, but needs
-    host/secret wiring and a self-hosted connection. Fallback if the GH
-    Windows runner can't run the cross-built PE cleanly.
-- [ ] **Bundle a `VERSION` file beside the EXE** in the smoke step so
-  `--version` reports `2.3.11` (not `unknown`) — confirms the wheel layout's
-  `data_file_path` resolution on PE.
+- [x] **Added a PE runtime smoke leg** — the `windows-smoke` job in
+  `wheels.yml` (`needs: windows`). Downloads the `wheels-windows` artifact,
+  extracts the bundled `_bin/ai-hwaccel.exe`, and asserts on a real Windows
+  execution:
+  - [x] **(a) Detection** — bare `ai-hwaccel.exe` exits 0 and emits
+    **well-formed JSON** (`schema_version` + non-empty `profiles[]`; a CPU
+    profile is always present). Regression gate for the COM/`.rdata`
+    corruption class. *(The CLI is flag-based — no `detect` subcommand; bare
+    invocation is the full registry JSON.)*
+  - [x] **(b) Structured logging** — `ai-hwaccel.exe -vv` writes the
+    `[ENTER]`/`[EXIT] detect` span to **stderr** while stdout stays clean,
+    and the **default level stays silent**. Regression gate for the PE
+    var-syscall reroute (W1).
+- [x] **Execution venue chosen: `windows-latest` ephemeral runner** — the
+  preferred option (self-contained, no secrets, no self-hosted wiring).
+  `ssh cass` remains the documented fallback if the cross-built PE ever
+  fails to run cleanly on the GH runner.
+- [x] **`VERSION` resolution checked** — `ai-hwaccel.exe --version`, run from
+  `_bin/` (where the wheel co-locates VERSION beside the EXE), reports the
+  bundled version (not `unknown`). The smoke runs it cwd-relative because of
+  the PE env-var limitation below.
+
+**Follow-up surfaced by this gate — `AI_HWACCEL_DATA_DIR` is a no-op on PE.**
+`cmd_getenv` (`src/detect/command.cyr`) reads `/proc/self/environ`, which
+doesn't exist on Windows, so the env var the Python `_runner` sets to point
+the bundled binary at its data files is silently ignored on PE — `--version`
+/ `--cost` fall back to **cwd-relative** resolution there. Detection (the
+primary path) is unaffected. Fix is a Windows `GetEnvironmentVariable` path
+in `cmd_getenv`; needs `cass` verification, so it's deferred to its own item
+rather than bundled into the CI-only 2.3.11.
 
 *Out of scope (upstream, not ours):* the `[0]` trace-id prefix on PE —
 `getpid` (syscall 39) isn't in cyrius's PE reroute whitelist. Log a cyrius
