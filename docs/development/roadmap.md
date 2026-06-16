@@ -472,10 +472,28 @@ schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
   consumers must add `sakshi` to their `[deps] stdlib`. *Cosmetic residual:*
   the trace-id prefix is `[0]` on PE because `getpid` (syscall 39) isn't in
   the reroute whitelist; delivery is unaffected.
-- Windows runtime CI gate → **deferred to 2.3.10** (the PE feature surface
+- Windows runtime CI gate → **deferred to 2.3.11** (the PE feature surface
   is only manually cass-smoked today; see below).
 
-### 2.3.10 — Windows runtime CI gate (sakshi roadmap W2)
+### 2.3.10 — Toolchain bump to cyrius 6.2.11 (json → bayan stdlib reorg)
+
+- [x] **Pin 6.1.18 → 6.2.11**, stdlib re-synced (97 files). Headline is a
+  stdlib reorganization: the standalone `lib/json.cyr` is gone, folded
+  (with `base64`/`csv`/`u128`/`bigint`/`toml`/`cyml`) into the new
+  `lib/bayan.cyr` distribution bundle; its functions renamed `json_*` →
+  `bayan_json_*`. ai-hwaccel never called the stdlib JSON parser
+  (`src/json_out.cyr` is a hand-rolled `str_builder` serializer;
+  `src/model_format.cyr` does its own byte-level safetensors header parse),
+  so the now-dangling `"json"` entry in `[deps] stdlib` was **dropped**
+  rather than re-pointed at `bayan`. No `src/` changes.
+- [x] **Benchmark-neutral, no regression.** Full suite A/B'd 6.1.18 vs
+  6.2.11, same machine/iters. All moves within run-to-run noise (confirmed
+  across 3× re-runs of the deterministic sub-µs rows — `total_memory_13dev`
+  new 141–157 ns vs baseline 144–149 ns overlap). 12/12 test units pass,
+  6/6 fuzz harnesses build, binary smoke-tested. See CHANGELOG /
+  bench-history.csv.
+
+### 2.3.11 — Windows runtime CI gate (sakshi roadmap W2)
 
 **Why:** `wheels.yml` cross-builds the PE but only asserts the `MZ` magic, so
 a silently-broken *runtime* feature ships green. 2.3.9 proved the risk is
@@ -500,7 +518,7 @@ target with no automated runtime coverage. Close that gap.
     host/secret wiring and a self-hosted connection. Fallback if the GH
     Windows runner can't run the cross-built PE cleanly.
 - [ ] **Bundle a `VERSION` file beside the EXE** in the smoke step so
-  `--version` reports `2.3.10` (not `unknown`) — confirms the wheel layout's
+  `--version` reports `2.3.11` (not `unknown`) — confirms the wheel layout's
   `data_file_path` resolution on PE.
 
 *Out of scope (upstream, not ours):* the `[0]` trace-id prefix on PE —

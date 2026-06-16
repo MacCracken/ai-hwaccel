@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.10] — 2026-06-15
+
+**Toolchain bump to cyrius 6.2.11.** Pin update + stdlib re-sync,
+proving no regression. The headline of the 6.1.18 → 6.2.11 jump is a
+stdlib reorganization: the standalone `lib/json.cyr` module is gone,
+folded (with `base64`/`csv`/`u128`/`bigint`/`toml`/`cyml`) into the new
+`lib/bayan.cyr` distribution bundle, and its functions are renamed
+`json_*` → `bayan_json_*`. ai-hwaccel never called the stdlib JSON
+parser — `src/json_out.cyr` is a hand-rolled `str_builder` serializer
+and `src/model_format.cyr` does its own byte-level safetensors header
+parse — so the `"json"` entry in `[deps] stdlib` was dead weight that
+now points at a module that no longer exists. **Dropped it** rather
+than re-pointing at `bayan` (which would pull the whole bundle for
+functions we don't use; the compiler DCEs it either way, but the dep
+list should reflect reality). No `src/` changes.
+
+#### Changed
+
+- **`cyrius.cyml`**: pin 6.1.18 → **6.2.11**. Stdlib re-synced (97
+  files). Removed the unused **`"json"`** entry from `[deps] stdlib`
+  (module folded into `bayan.cyr` upstream; nothing in `src/` references
+  it).
+- **`VERSION`** 2.3.9 → 2.3.10; **`dist/ai-hwaccel.cyr`** regenerated.
+
+#### Performance
+
+- **Benchmark-neutral.** Full suite re-run on the 6.2.11 tree against
+  the 6.1.18 baseline, same machine/iteration counts. All moves sit
+  inside run-to-run noise: the deterministic sub-µs rows that looked
+  like a regression on a single pair of runs (`total_memory_13dev`
+  141→148 ns) were confirmed as noise across 3× re-runs each — new
+  141–157 ns vs baseline 144–149 ns, overlapping ranges;
+  `has_accelerator_13dev` and `count_family_gpu_13dev` likewise overlap.
+  The µs-resolution rows (`json_serialize_13dev` ~23 µs,
+  `json_plan` ~21 µs, `parse_cuda_8gpu` ~35 µs) are flat within their
+  max-spike variance. **No regression.** 12/12 test units pass, 6/6
+  fuzz harnesses build, binary smoke-tested.
+
 ## [2.3.9] — 2026-06-09
 
 **Windows DXGI precise VRAM + structured logging, on cyrius 6.1.18.** ai-hwaccel previously emitted nothing to stderr: every
