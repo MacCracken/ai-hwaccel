@@ -166,7 +166,7 @@ fn test_system_io_json() {
 }
 
 fn test_system_io_null_env() {
-    # registry_new initializes environment to 0 (null) — must serialize.
+    # hw_registry_new initializes environment to 0 (null) — must serialize.
     var profiles = vec_new();
     vec_push(profiles, profile_cpu(16 * BYTES_PER_GIB));
     var r = registry_from_profiles(profiles);

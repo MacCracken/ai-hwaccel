@@ -56,7 +56,7 @@ println("=== Registry Benchmarks ===");
 
 # Build a mock registry with 13 devices for query benchmarks
 fn _build_mock_registry() {
-    var r = registry_new();
+    var r = hw_registry_new();
     var profs = reg_profiles(r);
 
     # CPU

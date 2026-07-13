@@ -3559,7 +3559,12 @@ fn detect_windows(profiles, warnings) {
 #
 # Registry — profiles + warnings + system_io + schema_version.
 # Struct named `reg` to match the `reg_*` accessor convention;
-# constructor stays `registry_new`. 2.1.5: hand-rolled accessors
+# constructor is `hw_registry_new` (renamed from `registry_new` to
+# avoid the bote-core `registry_new` symbol collision — fns/enum
+# members are global in Cyrius, last-def-wins; see
+# docs/development/issues/2026-06-11-registry-new-collision.md).
+# No `registry_new` alias: an alias by that name would reintroduce
+# the exact collision. 2.1.5: hand-rolled accessors
 # replaced with #derive(accessors); the internal `load64(r)` /
 # `load64(r + N)` shortcuts in helpers below switched to the
 # derived `reg_*` getters for consistency with the rest of the file.
@@ -3574,7 +3579,7 @@ struct reg {
 
 var REGISTRY_SIZE = 32;
 
-fn registry_new() {
+fn hw_registry_new() {
     var r = alloc(REGISTRY_SIZE);
     reg_set_profiles(r, vec_new());
     reg_set_warnings(r, vec_new());
@@ -3824,7 +3829,7 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
     hwlog_span_enter("detect");
     hwlog_debug_n("detect: builder_mask=", builder_mask);
 
-    var r = registry_new();
+    var r = hw_registry_new();
     var profs = reg_profiles(r);
     var warns = reg_warnings(r);
     var sio = reg_system_io(r);
@@ -3904,7 +3909,7 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
 
 # Build a registry from a list of profiles (for testing)
 fn registry_from_profiles(profile_vec) {
-    var r = registry_new();
+    var r = hw_registry_new();
     var n = vec_len(profile_vec);
     var i = 0;
     while (i < n) {
@@ -5508,7 +5513,7 @@ fn registry_detect_threaded() {
 
 fn registry_detect_threaded_with(builder_mask) {
     hwlog_span_enter("detect_threaded");
-    var r = registry_new();
+    var r = hw_registry_new();
     var profs = reg_profiles(r);
     var warns = reg_warnings(r);
 
@@ -5942,7 +5947,7 @@ fn lazy_into_registry(lr) {
     var profs = lazy_profiles(lr);
     mutex_unlock(mtx);
 
-    var r = registry_new();
+    var r = hw_registry_new();
     var rp = reg_profiles(r);
     var np = vec_len(profs);
     var i = 0;

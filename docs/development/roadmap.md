@@ -576,8 +576,10 @@ global symbols, promoting a pre-existing collision to an in-tree warning.
   collided under last-def-wins (enum members are global constants). Values
   unchanged; no bare aliases (they'd reintroduce the collision). This is
   the ai-hwaccel-owned half of the 2026-06-23 collision issue, pulled
-  ahead of 2.4.0. **`registry_new → hw_registry_new` still queued for
-  2.4.0.**
+  ahead of 2.4.0. **`registry_new → hw_registry_new` also landed on main
+  (2026-07-13), pending version bump** — see the 2026-06-11 issue; the
+  sibling function-namespace rename, done for the same last-def-wins
+  reason (bote-core's 24-byte `registry_new`), no alias.
 - [x] **Bench A/B, min-of-8 raw-ns, DCE.** 8 wins (3.7%–36.7%; headline
   `parse_cuda_8gpu` −36.7%, `plan_70B_bf16_4gpu` −35.0%), 7 neutral,
   **0 regressions**. 594 assertions / 12 units, 6/6 fuzz; vet/lint/fmt/

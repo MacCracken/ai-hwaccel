@@ -114,7 +114,7 @@ fn registry_detect_threaded() {
 
 fn registry_detect_threaded_with(builder_mask) {
     hwlog_span_enter("detect_threaded");
-    var r = registry_new();
+    var r = hw_registry_new();
     var profs = reg_profiles(r);
     var warns = reg_warnings(r);
 

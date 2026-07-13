@@ -1,5 +1,19 @@
 # `registry_new` symbol collision — ai-hwaccel × bote-core
 
+> **RESOLVED on main (2026-07-13), pending version bump.** ai-hwaccel's
+> profile-registry constructor was renamed `registry_new → hw_registry_new`
+> and all four internal callers updated (`src/registry.cyr:20` def +
+> `:270`/`:350`, `src/lazy.cyr:157`, `src/async_detect.cyr:117`);
+> `benches/registry.bcyr` + `tests/tcyr/registry_test.tcyr` follow.
+> `dist/ai-hwaccel.cyr` regenerated — no bare `registry_new` code symbol
+> remains. **No `registry_new` alias was kept:** an alias by that name would
+> reintroduce the exact bote-core collision (same reasoning the 2.3.13
+> `HWA_ERR_*` enum fix used to drop bare aliases). Verified under pinned
+> cyrius 6.4.62: clean build, 12/12 units, 6/6 fuzz, bench-neutral (pure
+> symbol rename → codegen-identical). Slated for 2.4.0 in the roadmap;
+> pulled forward. `cached_registry_new` (ai-hwaccel-specific, no bote
+> collision) intentionally left unchanged.
+
 **Filed:** 2026-06-11 (discovered during the szal Rust→Cyrius port, M2 engine arc)
 **Severity:** Medium — blocks any Cyrius consumer that includes BOTH
 `dist/ai-hwaccel.cyr` and `dist/bote-core.cyr` (or `dist/bote.cyr`) in one

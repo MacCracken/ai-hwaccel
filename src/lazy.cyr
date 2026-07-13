@@ -154,7 +154,7 @@ fn lazy_into_registry(lr) {
     var profs = lazy_profiles(lr);
     mutex_unlock(mtx);
 
-    var r = registry_new();
+    var r = hw_registry_new();
     var rp = reg_profiles(r);
     var np = vec_len(profs);
     var i = 0;

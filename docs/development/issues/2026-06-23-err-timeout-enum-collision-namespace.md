@@ -7,9 +7,10 @@
 > the collision as an in-tree `duplicate symbol 'ERR_TIMEOUT'` warning on
 > our own `src/main.cyr` build (sakshi — the logging lib, present in every
 > build — owns bare `ERR_TIMEOUT = 5`). `dist/ai-hwaccel.cyr` regenerated.
-> **Still open / deferred to 2.4.0:** the sibling `registry_new →
-> hw_registry_new` function-namespacing this issue cross-references — that
-> is a separate rename and did *not* ship in 2.3.13.
+> **Sibling rename now also done (2026-07-13, pending version bump):** the
+> `registry_new → hw_registry_new` function-namespacing this issue
+> cross-references landed on main after 2.3.13 — a separate rename, same
+> last-def-wins reasoning, no alias. See the 2026-06-11 issue.
 
 **Filed:** 2026-06-23 (by a hoosh consumer — hoosh 2.4.7 toolchain bump to cyrius 6.2.37)
 **Severity:** Medium — `last-definition-wins` build warning today; latent

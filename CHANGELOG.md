@@ -5,6 +5,83 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.14] — 2026-07-13
+
+**`registry_new → hw_registry_new` — the second half of the 2026-06-11
+symbol-collision fix.** 2.3.13 namespaced the `DetectionError` enum
+because 6.4.62 promoted the `sakshi` collision to an in-tree warning; this
+release finishes the job on the sibling the same issue flagged. ai-hwaccel
+exports `fn registry_new()` — a **32-byte** profile registry
+(`{profiles, warnings, system_io, schema}`). bote-core exports a
+**different** `fn registry_new()` — a **24-byte** tool registry. Cyrius
+functions are *global* symbols resolved by textual-paste + last-definition-
+wins, so any consumer that bundles both `dist/ai-hwaccel.cyr` and
+`dist/bote-core.cyr` (szal, mihi, hoosh) gets exactly one `registry_new`,
+and every caller of the other silently allocates/interprets the wrong
+struct layout. This is **not** a benign warning: ai-hwaccel's own
+`registry_detect` / lazy / async paths call `registry_new()` internally,
+so if bote's 24-byte constructor wins the link, our code writes the
+`system_io`/`schema` fields past the end of a 24-byte blob — memory
+corruption, and no include order avoids it. Renaming ai-hwaccel's
+constructor to `hw_registry_new` is the recommended upstream fix from the
+issue; pulled ahead of its filed 2.4.0 target to sit next to the enum
+rename it belongs with.
+
+#### Changed
+
+- **`registry_new` → `hw_registry_new`** (`src/registry.cyr:20` def, plus
+  its four internal callers: `src/registry.cyr` `registry_detect` /
+  `registry_from_profiles`, `src/lazy.cyr` `lazy_into_registry`,
+  `src/async_detect.cyr` `registry_detect_threaded_with`). `hw_` matches
+  the existing `reg_*` / hardware-flavored surface — only the bare
+  `registry_new` constructor collided. `tests/tcyr/registry_test.tcyr` and
+  `benches/registry.bcyr` updated to the new name; `dist/ai-hwaccel.cyr`
+  regenerated (no bare `registry_new` code symbol remains).
+- **No `registry_new` alias kept** — an alias by that name would
+  reintroduce the exact bote-core collision, the same reason 2.3.13 kept
+  no bare `ERR_*` aliases. `cached_registry_new` is **unchanged**: it is
+  ai-hwaccel-specific and does not collide with any bote symbol.
+- **`VERSION`** 2.3.13 → 2.3.14; **`dist/ai-hwaccel.cyr`** regenerated
+  (embeds 2.3.14).
+
+#### Fixed
+
+- **`registry_new` symbol collision with bote-core** (docs/development/
+  issues/2026-06-11-registry-new-collision.md) — a consumer linking both
+  bundles no longer gets a 24-vs-32-byte layout mismatch on
+  `registry_new`. Retires the consumer-side vendoring+sed workaround szal
+  carried.
+
+#### Performance
+
+**Metric:** raw `bench_min_ns`, min-of-8, `CYRIUS_DCE=1`, same machine. A
+constructor **rename** is codegen-identical by construction (same call,
+same `REGISTRY_SIZE=32` alloc, same accessors — only the symbol name
+differs), so this is a no-op on the hot paths and the A/B is a formality:
+
+| benchmark                | 2.3.13 | 2.3.14 | Δ |
+|--------------------------|-------:|-------:|---|
+| `total_memory_13dev`     | 142 ns | 142 ns | identical (deterministic) |
+| `has_accelerator_13dev`  |  28 ns |  28 ns | identical (deterministic) |
+| `count_family_gpu_13dev` | 294 ns | 294 ns | identical (deterministic) |
+| `plan_70B_bf16_4gpu`     | 1 816 ns | 1 886 ns | neutral (noise) |
+
+**0 wins claimed, 0 regressions** — the deterministic min=max=avg registry
+benches are byte-identical, which is the proof a pure rename didn't perturb
+codegen. Full gate: **12 units / 0 failed**, 6/6 fuzz, fmt / lint /
+raw-offset guard (accessor names unchanged) / distlib determinism clean.
+
+#### Notes
+
+- **Breaking to the exported surface** (per SemVer, a rename of a public
+  symbol) — but `registry_new` had no well-behaved consumer: it resolved
+  unpredictably the moment bote was co-linked. Consumers that call it
+  directly switch to `hw_registry_new`; szal/mihi/hoosh reach the registry
+  via `registry_detect` / `cached_registry_new`, which are unaffected.
+- **Closes the 2026-06-11 issue** and the sibling half of 2026-06-23. With
+  2.3.13 (`HWA_ERR_*`) + 2.3.14 (`hw_registry_new`), ai-hwaccel's bundle no
+  longer collides with sakshi/yukti/bote/sigil on any exported symbol.
+
 ## [2.3.13] — 2026-07-13
 
 **Toolchain bump to cyrius 6.4.62 + `DetectionError` enum namespacing.**
@@ -103,7 +180,8 @@ guard / distlib determinism all clean.
 - **Scope vs. the 2026-06-23 issue.** That issue bundles two renames —
   the `DetectionError` enum *and* `registry_new → hw_registry_new` — under
   a single 2.4.0. Only the **enum** ships here (6.4.62 forced its hand);
-  `registry_new → hw_registry_new` remains queued for **2.4.0**. Sibling
+  `registry_new → hw_registry_new` follows in **2.3.14** (next release).
+  Sibling
   bare `ERR_*` (`HWA_ERR_NONE/PARSE/TOOL_NOT_FOUND/…`) that collide
   downstream with yukti/bote/sigil rather than sakshi are prefixed here
   too, so the whole enum is namespaced in one pass.

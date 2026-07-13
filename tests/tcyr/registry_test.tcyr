@@ -44,7 +44,7 @@ include "src/registry.cyr"
 # --- Registry construction ---
 
 fn test_registry_new() {
-    var r = registry_new();
+    var r = hw_registry_new();
     assert_eq(reg_num_profiles(r), 0, "empty registry");
     assert_eq(reg_num_warnings(r), 0, "no warnings");
     assert_eq(reg_schema(r), SCHEMA_VERSION, "schema v3");
