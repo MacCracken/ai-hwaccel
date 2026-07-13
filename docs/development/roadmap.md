@@ -561,6 +561,31 @@ already wired).
 `getpid` (syscall 39) isn't in cyrius's PE reroute whitelist. Log a cyrius
 issue if we want real trace ids on Windows; log delivery is unaffected.
 
+### 2.3.13 — Toolchain bump to cyrius 6.4.62 + `DetectionError` namespacing
+
+**Why:** two-minor toolchain bump (6.2.11 → 6.4.62). The codegen win is
+real and broad; more importantly, 6.4.62's linker now *reports* duplicate
+global symbols, promoting a pre-existing collision to an in-tree warning.
+
+- [x] **Pin 6.2.11 → 6.4.62**, stdlib re-synced from the 6.4.62 snapshot
+  (`cyrius lib sync` → 37-file `[deps].stdlib` subset; every `include`d
+  module verified byte-identical). Drift warning cleared.
+- [x] **`DetectionError` enum `ERR_* → HWA_ERR_*`** (all six members +
+  refs + 3 test units). `sakshi` — the logging lib, in **every** build via
+  `src/log.cyr` — owns bare `ERR_TIMEOUT = 5`; our bare `ERR_TIMEOUT = 3`
+  collided under last-def-wins (enum members are global constants). Values
+  unchanged; no bare aliases (they'd reintroduce the collision). This is
+  the ai-hwaccel-owned half of the 2026-06-23 collision issue, pulled
+  ahead of 2.4.0. **`registry_new → hw_registry_new` still queued for
+  2.4.0.**
+- [x] **Bench A/B, min-of-8 raw-ns, DCE.** 8 wins (3.7%–36.7%; headline
+  `parse_cuda_8gpu` −36.7%, `plan_70B_bf16_4gpu` −35.0%), 7 neutral,
+  **0 regressions**. 594 assertions / 12 units, 6/6 fuzz; vet/lint/fmt/
+  raw-offset/distlib all clean. See CHANGELOG / bench-history.csv.
+- [x] **`scripts/bench-history.sh` parser fixed** for 6.4.x decimal
+  `bench_report` units (`19.460us`) — the old grep captured the fractional
+  digits and would have written garbage µs rows from here on.
+
 ### WASM / JS
 
 - [ ] **JS/TS bindings** — depends on cyrius WASM target (not in

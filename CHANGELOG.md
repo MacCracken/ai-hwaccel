@@ -5,6 +5,113 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.13] — 2026-07-13
+
+**Toolchain bump to cyrius 6.4.62 + `DetectionError` enum namespacing.**
+Moving the pin two minors (6.2.11 → 6.4.62) does two things: it delivers
+a broad codegen win on the non-trivial hot paths (parse/plan/JSON, up to
+−37%), and — because 6.4.62's linker now *reports* duplicate global
+symbols — it surfaces a pre-existing collision that was silent under
+6.2.11. `sakshi` (the logging library, present in **every** build via
+`src/log.cyr`) defines a bare `ERR_TIMEOUT = 5`; our `DetectionError`
+defined a bare `ERR_TIMEOUT = 3`. Cyrius enum members are *global*
+constants (the enum name does not namespace them), so the two squatted on
+the same symbol under last-definition-wins. This release prefixes the
+**entire** enum `ERR_* → HWA_ERR_*`, which is the ai-hwaccel-owned fix
+from the 2026-06-23 collision issue — pulled ahead of its filed 2.4.0
+target now that 6.4.62 promotes it from a downstream-only warning to an
+in-tree one. **Enum values are unchanged** (`HWA_ERR_TIMEOUT` is still
+`3`); the bare names already resolved unpredictably whenever sakshi was
+linked, so no well-behaved consumer could depend on them — this is a
+de-facto bugfix to the symbol surface, not a usable-API break.
+
+#### Changed
+
+- **cyrius pin `6.2.11` → `6.4.62`** (`cyrius.cyml`). `./lib/`
+  (gitignored) re-synced from the 6.4.62 stdlib snapshot via
+  `cyrius lib sync` — the declared `[deps].stdlib` subset (37 files);
+  every `include`d module verified byte-identical to
+  `~/.cyrius/versions/6.4.62/lib/`. No drift warning: manifest pin now
+  matches the wrapper.
+- **`DetectionError` enum `ERR_* → HWA_ERR_*`** (`src/error.cyr`): all six
+  members — `HWA_ERR_{NONE,TOOL_NOT_FOUND,TOOL_FAILED,TIMEOUT,PARSE,SYSFS_READ}`
+  — plus every internal reference in `warning_new` / `warning_*` /
+  `warning_print`, and the three test units that assert on them
+  (`foundation_test`, `io_test`, `gpu_parser_test`). Values preserved
+  1:1. **No bare aliases kept** — an alias `ERR_TIMEOUT = 3` would
+  reintroduce the exact sakshi collision. `dist/ai-hwaccel.cyr`
+  regenerated (delta is the rename only; byte-deterministic).
+- **`VERSION`** 2.3.12 → 2.3.13; **`dist/ai-hwaccel.cyr`** regenerated
+  (embeds 2.3.13).
+
+#### Fixed
+
+- **`scripts/bench-history.sh` CSV parser** — 6.4.x `bench_report` prints
+  **decimal** units (`19.460us`, `1.712ms`) where 6.2.x truncated to a
+  bare integer (`19us`). The old `grep -oP '\d+(?=us avg)'` captured the
+  *fractional* digits (`460`) and ×1000'd them, writing `460000` for a
+  ~19.5 µs bench. Replaced with an awk converter that reconstructs exact
+  integer nanoseconds from `<int>ns` and `<major>.<3-frac><us|ms|s>`
+  (handles the old integer form too). Without this, every µs-scale row in
+  the audit trail would have been silent garbage from this version on.
+- **`duplicate symbol 'ERR_TIMEOUT'` build warning** on `src/main.cyr`
+  under 6.4.62 — resolved by the `HWA_ERR_*` namespacing above. Clean
+  build, no warnings.
+
+#### Performance
+
+**Metric:** raw `bench_avg_ns` / `bench_min_ns`, min-of-8 runs, `CYRIUS_DCE=1`,
+same machine, identical source (the `HWA_ERR_*` rename is codegen-neutral —
+`build/ai-hwaccel` is 330 424 bytes on both 6.2.11 and 6.4.62). A/B is the
+pure toolchain delta. `min_ns` shown (least noise); µs-scale figures are
+below the old `bench_report` truncation, hence the ns harness.
+
+_Parsing_
+
+| benchmark            | 6.2.11 | 6.4.62 | Δ |
+|----------------------|-------:|-------:|---|
+| `parse_cuda_8gpu`    | 26 610 ns | 16 832 ns | **−36.7%** |
+| `parse_vulkan_2gpu`  |  3 422 ns |  2 794 ns | **−18.4%** |
+| `parse_neuron_2dev`  |  2 305 ns |  1 886 ns | **−18.2%** |
+| `detect_safetensors` |    838 ns |    907 ns | neutral (≈0.9 µs timer floor) |
+| `detect_gguf`        |    907 ns |    907 ns | neutral (floor) |
+
+_Registry_
+
+| benchmark                | 6.2.11 | 6.4.62 | Δ |
+|--------------------------|-------:|-------:|---|
+| `plan_70B_bf16_4gpu`     |  2 793 ns |  1 816 ns | **−35.0%** |
+| `json_training`          |  2 724 ns |  2 375 ns | **−12.8%** |
+| `json_system_io`         |  5 098 ns |  4 749 ns | **−6.8%** |
+| `json_plan`              | 18 368 ns | 17 530 ns | **−4.6%** |
+| `json_serialize_13dev`   | 20 743 ns | 19 974 ns | **−3.7%** |
+| `json_summary_13dev`     |  3 213 ns |  3 212 ns | neutral |
+| `best_available_13dev`   |    907 ns |    907 ns | neutral (floor) |
+| `count_family_gpu_13dev` |    288 ns |    289 ns | neutral (batch, ±1 ns) |
+| `total_memory_13dev`     |    135 ns |    135 ns | neutral (batch) |
+| `has_accelerator_13dev`  |     27 ns |     27 ns | neutral (batch) |
+
+**8 wins (3.7%–36.7%), 7 neutral, 0 regressions.** The two apparent
+regressions seen at 3 runs (`total_memory` 135→140, `json_serialize`) were
+run-to-run noise — min-of-8 shows them equal/improved. CSV audit trail:
+`bench-history.csv` (commit `4fad379`). Full gate re-run on 6.4.62: **594
+assertions / 12 units, 0 failed**; 6/6 fuzz; vet / lint / fmt / raw-offset
+guard / distlib determinism all clean.
+
+#### Notes
+
+- **Scope vs. the 2026-06-23 issue.** That issue bundles two renames —
+  the `DetectionError` enum *and* `registry_new → hw_registry_new` — under
+  a single 2.4.0. Only the **enum** ships here (6.4.62 forced its hand);
+  `registry_new → hw_registry_new` remains queued for **2.4.0**. Sibling
+  bare `ERR_*` (`HWA_ERR_NONE/PARSE/TOOL_NOT_FOUND/…`) that collide
+  downstream with yukti/bote/sigil rather than sakshi are prefixed here
+  too, so the whole enum is namespaced in one pass.
+- **Consumers** (hoosh, mihi, daimon, Irfan, AgnosAI, murti, tazama): if
+  you referenced ai-hwaccel's `ERR_*` constants by name from the bundle,
+  switch to `HWA_ERR_*`. Integer values are identical, so any code keyed
+  on the numeric warning code is unaffected.
+
 ## [2.3.12] — 2026-06-15
 
 **`--data-dir` flag — data-file resolution that works on Windows PE.**

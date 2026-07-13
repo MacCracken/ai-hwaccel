@@ -16,38 +16,38 @@ include "src/quantization.cyr"
 # --- Error enum tests ---
 
 fn test_error_codes() {
-    assert_eq(ERR_NONE, 0, "ERR_NONE == 0");
-    assert_eq(ERR_TOOL_NOT_FOUND, 1, "ERR_TOOL_NOT_FOUND == 1");
-    assert_eq(ERR_TOOL_FAILED, 2, "ERR_TOOL_FAILED == 2");
-    assert_eq(ERR_TIMEOUT, 3, "ERR_TIMEOUT == 3");
-    assert_eq(ERR_PARSE, 4, "ERR_PARSE == 4");
-    assert_eq(ERR_SYSFS_READ, 5, "ERR_SYSFS_READ == 5");
+    assert_eq(HWA_ERR_NONE, 0, "HWA_ERR_NONE == 0");
+    assert_eq(HWA_ERR_TOOL_NOT_FOUND, 1, "HWA_ERR_TOOL_NOT_FOUND == 1");
+    assert_eq(HWA_ERR_TOOL_FAILED, 2, "HWA_ERR_TOOL_FAILED == 2");
+    assert_eq(HWA_ERR_TIMEOUT, 3, "HWA_ERR_TIMEOUT == 3");
+    assert_eq(HWA_ERR_PARSE, 4, "HWA_ERR_PARSE == 4");
+    assert_eq(HWA_ERR_SYSFS_READ, 5, "HWA_ERR_SYSFS_READ == 5");
     return 0;
 }
 
 fn test_warning_struct() {
     var w = warning_tool_not_found("nvidia-smi");
-    assert_eq(warning_code(w), ERR_TOOL_NOT_FOUND, "tool_not_found code");
+    assert_eq(warning_code(w), HWA_ERR_TOOL_NOT_FOUND, "tool_not_found code");
     assert(streq(warning_tool(w), "nvidia-smi") == 1, "tool name");
     assert_eq(warning_message(w), 0, "no message");
     # bump allocator — no individual free
 
     var w2 = warning_tool_failed("hl-smi", 1, "device not found");
-    assert_eq(warning_code(w2), ERR_TOOL_FAILED, "tool_failed code");
+    assert_eq(warning_code(w2), HWA_ERR_TOOL_FAILED, "tool_failed code");
     assert_eq(warning_exit_code(w2), 1, "exit code");
     assert(streq(warning_message(w2), "device not found") == 1, "stderr msg");
 
 
     var w3 = warning_timeout("vulkaninfo", 5000);
-    assert_eq(warning_code(w3), ERR_TIMEOUT, "timeout code");
+    assert_eq(warning_code(w3), HWA_ERR_TIMEOUT, "timeout code");
     assert_eq(warning_timeout_ms(w3), 5000, "timeout ms");
 
     var w4 = warning_parse("cuda", "invalid CSV");
-    assert_eq(warning_code(w4), ERR_PARSE, "parse code");
+    assert_eq(warning_code(w4), HWA_ERR_PARSE, "parse code");
     assert(streq(warning_message(w4), "invalid CSV") == 1, "parse msg");
 
     var w5 = warning_sysfs("/sys/class/drm/card0", "permission denied");
-    assert_eq(warning_code(w5), ERR_SYSFS_READ, "sysfs code");
+    assert_eq(warning_code(w5), HWA_ERR_SYSFS_READ, "sysfs code");
     assert(streq(warning_message(w5), "permission denied") == 1, "sysfs msg");
     return 0;
 }

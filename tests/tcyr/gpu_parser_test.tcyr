@@ -81,7 +81,7 @@ fn test_cuda_bad_csv() {
 
     assert_eq(vec_len(profiles), 0, "no profiles");
     assert_eq(vec_len(warnings), 1, "1 warning");
-    assert_eq(warning_code(vec_get(warnings, 0)), ERR_PARSE, "parse error");
+    assert_eq(warning_code(vec_get(warnings, 0)), HWA_ERR_PARSE, "parse error");
     return 0;
 }
 
