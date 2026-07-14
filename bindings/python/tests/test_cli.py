@@ -59,5 +59,38 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(v)
 
 
+class TestVersion(unittest.TestCase):
+    """`__version__` tracks the single-source VERSION file (no binary needed).
+
+    The package version is derived, never hardcoded: installed metadata
+    when present, else the repo-root VERSION file. Both come from VERSION
+    (pyproject is propagated from it by scripts/version-bump.sh), so a
+    source checkout must report exactly VERSION via the fallback branch.
+    """
+
+    def test_version_is_nonempty_string(self):
+        self.assertIsInstance(ai_hwaccel.__version__, str)
+        self.assertTrue(ai_hwaccel.__version__)
+
+    def test_fallback_reads_repo_version(self):
+        import importlib.metadata as md
+
+        version_file = pathlib.Path(__file__).resolve().parents[3] / "VERSION"
+        expected = version_file.read_text().strip()
+
+        # Force the "not installed" branch so the assertion is deterministic
+        # regardless of whatever wheel may be pip-installed in the test env.
+        original = md.version
+
+        def _not_found(name):
+            raise md.PackageNotFoundError(name)
+
+        md.version = _not_found
+        try:
+            self.assertEqual(ai_hwaccel._resolve_version(), expected)
+        finally:
+            md.version = original
+
+
 if __name__ == "__main__":
     unittest.main()

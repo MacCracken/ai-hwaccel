@@ -280,3 +280,24 @@ jobs:
           grep -q "\[$FILE_VERSION\]" CHANGELOG.md || {
             echo "FAIL: version $FILE_VERSION not in CHANGELOG.md"; exit 1; }
           echo "Version consistent: $FILE_VERSION (VERSION → cyrius.cyml via \${file:VERSION})"
+
+      - name: Verify Python bindings version
+        run: |
+          # The Python wheel metadata version is a literal in
+          # bindings/python/pyproject.toml (setuptools can't read the
+          # out-of-root VERSION file). scripts/version-bump.sh propagates
+          # VERSION into it on every bump; this gate catches a bump that
+          # skipped the script, the same way the distlib-drift gate does
+          # for dist/ai-hwaccel.cyr. The runtime ai_hwaccel.__version__
+          # derives from this via installed metadata, so pinning it here
+          # pins the whole Python surface to VERSION.
+          FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
+          PY_VERSION=$(sed -nE '/^\[project\]/,/^\[/{s/^version = "([^"]+)".*/\1/p}' \
+            bindings/python/pyproject.toml | head -1)
+          [ "$PY_VERSION" = "$FILE_VERSION" ] || {
+            echo "FAIL: bindings/python/pyproject.toml version ($PY_VERSION) != VERSION ($FILE_VERSION)."
+            echo "      Run scripts/version-bump.sh $FILE_VERSION (or sync the literal)."; exit 1; }
+          grep -q '__version__ = _resolve_version()' \
+            bindings/python/src/ai_hwaccel/__init__.py || {
+            echo "FAIL: __init__.py must derive __version__ (no hardcoded literal)."; exit 1; }
+          echo "Python bindings version consistent: $PY_VERSION (pyproject == VERSION; __version__ derived)"

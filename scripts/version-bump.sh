@@ -36,4 +36,17 @@ if [ -n "$CYBIN" ]; then
         && echo "Regenerated dist/ai-hwaccel.cyr (embeds ${NEW_VERSION})."
 fi
 
+# Propagate into the Python bindings' pyproject.toml. setuptools cannot
+# read VERSION from outside the package root, so the wheel metadata
+# version is a literal there; keep it in lockstep with VERSION here (CI's
+# "python bindings version" gate enforces the match). Only the first
+# `version = "..."` under [project] — a plain sed of the first match. The
+# package's runtime __version__ derives from this via installed metadata.
+PYPROJECT="$REPO_ROOT/bindings/python/pyproject.toml"
+if [ -f "$PYPROJECT" ]; then
+    sed -i.bak -E "0,/^version = \"[^\"]*\"/s//version = \"${NEW_VERSION}\"/" "$PYPROJECT"
+    rm -f "$PYPROJECT.bak"
+    echo "Synced bindings/python/pyproject.toml (version = ${NEW_VERSION})."
+fi
+
 echo "Bumped to ${NEW_VERSION}. Add the section to CHANGELOG.md, then tag and push."

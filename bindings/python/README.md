@@ -12,16 +12,16 @@ JSON (schema v4) into typed dataclasses.
 ## Install
 
 ```bash
-pip install ai-hwaccel              # Linux x86_64 / aarch64 wheels (2.3.4)
+pip install ai-hwaccel              # platform wheel (Linux / macOS / Windows)
 pip install ai-hwaccel[pandas]      # + DataFrame export
 ```
 
-Linux wheels (manylinux x86_64 / aarch64) bundle a self-contained binary.
-**macOS and Windows wheels are not published yet** — they're gated on
-cyrius toolchain support (the toolchain is currently Linux-only); see the
-roadmap. On those platforms, supply your own binary: the package locates
-it via, in order, an explicit `binary=` argument, the `AI_HWACCEL_BIN`
-environment variable, a wheel-bundled binary, or `ai-hwaccel` on `PATH`.
+Prebuilt wheels ship for Linux (manylinux x86_64 / aarch64), macOS
+(arm64), and Windows (x86_64) — each bundles a self-contained binary, so
+there is nothing else to install. If no wheel matches your platform, the
+package falls back to a binary you supply: it locates one via, in order,
+an explicit `binary=` argument, the `AI_HWACCEL_BIN` environment
+variable, a wheel-bundled binary, or `ai-hwaccel` on `PATH`.
 
 ## Usage
 

@@ -43,6 +43,17 @@ rename it belongs with.
   ai-hwaccel-specific and does not collide with any bote symbol.
 - **`VERSION`** 2.3.13 → 2.3.14; **`dist/ai-hwaccel.cyr`** regenerated
   (embeds 2.3.14).
+- **Python bindings version now derives from `VERSION`.**
+  `bindings/python/src/ai_hwaccel/__init__.py` `__version__` was a
+  hardcoded literal — it read `2.3.4` while the binary was at 2.3.14. It
+  now resolves from the installed wheel metadata (falling back to the
+  repo `VERSION` file when run uninstalled), so it carries no version
+  literal and cannot drift. `bindings/python/pyproject.toml`'s wheel
+  metadata version is still a literal (setuptools can't read the
+  out-of-root `VERSION`), but `scripts/version-bump.sh` now propagates
+  `VERSION` into it on every bump, and a new **"python bindings version"
+  CI gate** asserts the two match — the same drift-catch the distlib gate
+  gives `dist/ai-hwaccel.cyr`.
 
 #### Fixed
 
@@ -51,6 +62,12 @@ rename it belongs with.
   bundles no longer gets a 24-vs-32-byte layout mismatch on
   `registry_new`. Retires the consumer-side vendoring+sed workaround szal
   carried.
+- **Python wheel shipped stale version metadata.** Every wheel was tagged
+  `2.3.7` (pyproject) and `pip show`/`__version__` reported `2.3.7` /
+  `2.3.4` for a 2.3.14 binary — a packaging-only bug (no binary/behaviour
+  change), so the perf table below is unaffected. `bindings/python/README.md`
+  also still claimed macOS/Windows wheels were unpublished; corrected (all
+  three platforms build in `wheels.yml`).
 
 #### Performance
 

@@ -34,7 +34,33 @@ from .models import (
     TrainingMemory,
 )
 
-__version__ = "2.3.4"
+def _resolve_version() -> str:
+    """Package version, derived — never hardcoded, so it can't drift.
+
+    Installed (the normal case, incl. every published wheel): read the
+    distribution metadata, which setuptools stamped from pyproject's
+    ``version`` — itself propagated from the repo-root ``VERSION`` by
+    scripts/version-bump.sh. Running uninstalled from the source tree
+    (no metadata): fall back to that same ``VERSION`` file, four levels
+    up from this module (src/ai_hwaccel/__init__.py). Neither path
+    carries a version literal, so this stays in lockstep with VERSION.
+    """
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _dist_version
+
+    try:
+        return _dist_version("ai-hwaccel")
+    except PackageNotFoundError:
+        from pathlib import Path
+
+        version_file = Path(__file__).resolve().parents[4] / "VERSION"
+        try:
+            return version_file.read_text().strip()
+        except OSError:
+            return "0.0.0+source"
+
+
+__version__ = _resolve_version()
 
 __all__ = [
     "detect",
