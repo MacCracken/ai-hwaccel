@@ -71,4 +71,4 @@ var GBITS_PER_GBYTE = 8;
 # v4 (2.3.1): registry_to_json gained the "system_io" object
 # (interconnects / storage / runtime environment).
 
-var SCHEMA_VERSION = 4;
+var SCHEMA_VERSION = 5;

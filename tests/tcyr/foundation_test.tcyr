@@ -157,7 +157,7 @@ fn test_units() {
     assert_eq(FP16_BYTES_PER_PARAM, 2, "FP16 2 bytes");
     assert_eq(ACTIVATION_OVERHEAD_DIVISOR, 5, "20% overhead");
     assert_eq(PARAMS_PER_LAYER_ESTIMATE, 250000000, "250M/layer");
-    assert_eq(SCHEMA_VERSION, 4, "schema v4");
+    assert_eq(SCHEMA_VERSION, 5, "schema v5");
     return 0;
 }
 

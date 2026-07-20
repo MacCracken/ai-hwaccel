@@ -1,0 +1,141 @@
+# json_roundtrip_test.tcyr — profile JSON round-trip (profile_from_json, 2.3.15).
+#
+# profile_to_json is now lossless and profile_from_json is its inverse. The
+# TPU/Neuron cases guard the fields the pre-2.3.15 emit dropped, and the
+# requirement_satisfied checks guard the property samay actually depends on:
+# a profile rebuilt from JSON still satisfies the same placement requirement.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+include "lib/sakshi.cyr"
+
+include "src/log.cyr"
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/training.cyr"
+include "src/registry.cyr"
+include "src/requirement.cyr"
+include "src/json_out.cyr"
+
+# Round-trip a profile through to_json -> from_json_str.
+fn _rt(p) {
+    var sb = str_builder_new();
+    profile_to_json(sb, p);
+    var js = str_builder_build(sb);
+    return profile_from_json_str(str_data(js));
+}
+
+fn test_roundtrip_cuda() {
+    var c = profile_cuda(2, 24 * BYTES_PER_GIB);
+    profile_set_device_name(c, "RTX 4090");
+    profile_set_compute_cap(c, "8.9");
+    profile_set_driver_version(c, "550.54");
+    var c2 = _rt(c);
+    assert_eq(profile_accel_type(c2), ACCEL_CUDA, "cuda accel_type");
+    assert_eq(profile_device_id(c2), 2, "cuda device_id");
+    assert_eq(profile_memory_bytes(c2), 24 * BYTES_PER_GIB, "cuda memory_bytes");
+    assert_eq(profile_available(c2), 1, "cuda available");
+    assert_eq(streq(profile_device_name(c2), "RTX 4090"), 1, "cuda device_name");
+    assert_eq(streq(profile_compute_cap(c2), "8.9"), 1, "cuda compute_cap");
+    assert_eq(streq(profile_driver_version(c2), "550.54"), 1, "cuda driver_version");
+    return 0;
+}
+
+fn test_roundtrip_tpu_chips() {
+    # tpu_version + tpu_chips were DROPPED by the pre-2.3.15 emit.
+    var t = profile_tpu(0, 8, TPU_V5P);
+    var t2 = _rt(t);
+    assert_eq(profile_accel_type(t2), ACCEL_TPU, "tpu accel_type");
+    assert_eq(profile_tpu_chips(t2), 8, "tpu chips preserved");
+    assert_eq(profile_tpu_version(t2), TPU_V5P, "tpu version preserved");
+    assert_eq(profile_memory_bytes(t2), profile_memory_bytes(t), "tpu memory preserved");
+    return 0;
+}
+
+fn test_roundtrip_tpu_satisfies_requirement() {
+    # The property samay's M3 placement depends on.
+    var t = profile_tpu(0, 8, TPU_V5P);
+    var t2 = _rt(t);
+    assert_eq(requirement_satisfied(REQ_TPU, 4, t2), 1, "rebuilt TPU satisfies 4-chip req");
+    assert_eq(requirement_satisfied(REQ_TPU, 8, t2), 1, "rebuilt TPU satisfies 8-chip req");
+    assert_eq(requirement_satisfied(REQ_TPU, 16, t2), 0, "rebuilt TPU fails 16-chip req");
+    return 0;
+}
+
+fn test_roundtrip_neuron_cores() {
+    var n = profile_neuron(1, 0, 2);
+    var n2 = _rt(n);
+    assert_eq(profile_accel_type(n2), ACCEL_NEURON, "neuron accel_type");
+    assert_eq(profile_neuron_cores(n2), 2, "neuron cores preserved");
+    return 0;
+}
+
+fn test_roundtrip_gaudi() {
+    var g = profile_gaudi(0, GAUDI2);
+    var g2 = _rt(g);
+    assert_eq(profile_accel_type(g2), ACCEL_GAUDI, "gaudi accel_type");
+    assert_eq(profile_gaudi_gen(g2), GAUDI2, "gaudi gen preserved");
+    return 0;
+}
+
+fn test_roundtrip_cpu_defaults() {
+    # A bare CPU profile must come back with every optional field at its
+    # default sentinel — no leakage, no spurious strings.
+    var cpu = profile_cpu(16 * BYTES_PER_GIB);
+    var c2 = _rt(cpu);
+    assert_eq(profile_accel_type(c2), ACCEL_CPU, "cpu accel_type");
+    assert_eq(profile_available(c2), 1, "cpu available");
+    assert_eq(profile_device_name(c2), 0, "cpu no device_name");
+    assert_eq(profile_temp_c(c2), PROFILE_NONE, "cpu temp is NONE");
+    assert_eq(profile_tpu_chips(c2), 0, "cpu tpu_chips 0");
+    return 0;
+}
+
+fn test_from_json_optional_perf_fields() {
+    # Perf fields set explicitly must round-trip too.
+    var p = profile_cuda(0, 8 * BYTES_PER_GIB);
+    profile_set_temp_c(p, 65);
+    profile_set_gpu_util(p, 80);
+    profile_set_numa_node(p, 1);
+    var p2 = _rt(p);
+    assert_eq(profile_temp_c(p2), 65, "temp_c preserved");
+    assert_eq(profile_gpu_util(p2), 80, "gpu_util preserved");
+    assert_eq(profile_numa_node(p2), 1, "numa_node preserved");
+    return 0;
+}
+
+fn test_from_json_malformed() {
+    assert_eq(profile_from_json_str("not json"), 0, "malformed -> 0");
+    assert_eq(profile_from_json_str("[1,2,3]"), 0, "array root -> 0");
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    test_roundtrip_cuda();
+    test_roundtrip_tpu_chips();
+    test_roundtrip_tpu_satisfies_requirement();
+    test_roundtrip_neuron_cores();
+    test_roundtrip_gaudi();
+    test_roundtrip_cpu_defaults();
+    test_from_json_optional_perf_fields();
+    test_from_json_malformed();
+    assert_summary();
+    return 0;
+}
+
+var r = main();
+syscall(60, r);

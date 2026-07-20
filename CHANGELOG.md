@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.15] — 2026-07-20
+
+**Profile JSON round-trip: `profile_from_json` + lossless `profile_to_json`.**
+Adds the deserialization half that never existed, and fixes the emit's silent
+data loss for accelerator-specific profiles. The driver was samay, whose
+`NodeCapacity.accel_profiles` is a vec of ai-hwaccel profile pointers that its
+M4 milestone must round-trip through JSON — previously impossible, because
+`profile_to_json` dropped `tpu_version` / `tpu_chips` / `gaudi_gen` /
+`neuron_chip` / `neuron_cores` (and the perf fields), so a rebuilt TPU profile
+could not satisfy the very `REQ_TPU{min_chips}` requirement it was registered
+for.
+
+#### Added
+- `profile_from_json(v)` — reconstruct a profile from a bayan JSON object value
+  (`json_v*`); returns `0` on a non-object root. Rebuilds the raw stored state
+  directly, so `memory_bytes` and every accelerator-specific field come from the
+  document rather than being recomputed by the `profile_cuda`/`profile_tpu`/…
+  convenience constructors.
+- `profile_from_json_str(js_cstr)` — parse a JSON cstr and reconstruct in one
+  step; `0` on malformed JSON or a non-object root.
+- `bayan` added to `[deps].stdlib` (the JSON DOM the parser reads); no symbol
+  collisions with ai-hwaccel's surface (verified).
+
+#### Changed
+- **`profile_to_json` is now lossless** (schema **v4 → v5**). New keys:
+  `accel_type_id` (the raw `AcceleratorType` enum — the authoritative type tag
+  on parse; the human `accelerator` name and derived `family` are kept but
+  ignored on the way back), plus the previously-dropped `mem_bandwidth_x1000`,
+  `pcie_bandwidth_x1000`, `power_x1000`, `tpu_version`, `tpu_chips`, `gaudi_gen`,
+  `neuron_chip`, `neuron_cores`. All are emitted only when meaningful, so CPU/GPU
+  output is unchanged apart from the new `accel_type_id`. Additive and
+  backward-compatible: readers that ignore unknown keys are unaffected; the
+  `schema_version` bump is the signal that the new fields are available.
+- Toolchain pin `6.4.62 → 6.4.69` (the release that landed round-trip-correct
+  f64 JSON — Grisu2 emit + correctly-rounded parse — which samay's M4 also needs).
+
+#### Tests
+- `tests/tcyr/json_roundtrip_test.tcyr` — 8 groups: CUDA (with strings), TPU
+  (chips + version + the `requirement_satisfied` property samay depends on),
+  Neuron cores, Gaudi gen, CPU-defaults (no field leakage), explicit perf
+  fields, and malformed/non-object input (28 assertions). Full suite
+  **607 → 635 assertions**, all green.
+
 ## [2.3.14] — 2026-07-13
 
 **`registry_new → hw_registry_new` — the second half of the 2026-06-11
