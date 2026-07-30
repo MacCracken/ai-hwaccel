@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.16] — 2026-07-30
+
+**Toolchain catch-up, and the one call it broke.** cyrius 6.5.0 renamed bayan's cstr+len JSON parse
+entry points, which left `profile_from_json_str` calling a symbol that no longer exists. Reported by
+hoosh while updating to cyrius 6.5.2; on ai-hwaccel's own tree it is a hard build failure, not a
+warning, because `json_roundtrip_test` exercises the function.
+
+### Fixed
+- **`profile_from_json_str` called `json_v_parse_str`, removed in bayan 1.3.0 (cyrius 6.5.0)** —
+  renamed to `json_v_parse_buf`. The bodies are byte-identical, so this is a pure rename with no
+  behaviour change. The rename is not reversible: `X_str` is a **reserved overload slot** in Cyrius
+  — a call `X(a, …)` routes to `X_str` whenever `a` is Str-typed at the call site — so a `(ptr, len)`
+  form may never occupy that name. A comment at the call site now says so.
+  Consumers on cyrius ≥ 6.5.0 saw `warning: undefined function 'json_v_parse_str'` and, if they
+  called it, a runtime SIGILL — cycc lowers an undefined call to `ud2`. hoosh 2.5.12 shipped with
+  the warning because the function is dead in that binary.
+
+### Changed
+- **Toolchain: cyrius `6.4.69` → `6.5.2`.** No other source change was needed. The jump also removes
+  the whole `regex_*` surface; ai-hwaccel uses none of it, verified by diffing every public symbol
+  across the two lib trees. `CLAUDE.md`'s compiler line said 6.2.11 and now points at the pin
+  instead of restating a version that goes stale.
+
+### Performance
+- **No regressions across the toolchain jump** — 15 benchmarks compared before and after, per the
+  mandatory-benchmarking rule. The JSON paths all improved: `json_summary_13dev` −6%,
+  `json_system_io` −6%, `json_training` −5%, `json_serialize_13dev` −4%, `json_plan` −4%. Everything
+  else is within ±4% noise.
+
+### Known issues
+- **`load_models` returns 1 model instead of 26** — it byte-scans for `{` and brace-matches, which
+  makes the `{"models":[…]}` wrapper that `data/models.json` actually ships look like a single
+  object. Silent: no error, just a short catalog. Zero callers inside ai-hwaccel and no test, which
+  is why the suite stays green; hoosh vendors an unwrapped copy and guards it. Filed as
+  [`2026-07-30-load-models-misparses-its-own-data-file.md`](docs/development/issues/2026-07-30-load-models-misparses-its-own-data-file.md)
+  rather than fixed here, because the two candidate fixes differ in whether they change a published
+  artifact, and that is a compatibility call. The issue also records three adjacent weaknesses in
+  the same function: a one-byte overflow at exactly 32768 bytes, silent truncation past that, and
+  the fact that a real JSON parser is already linked in.
+
 ## [2.3.15] — 2026-07-20
 
 **Profile JSON round-trip: `profile_from_json` + lossless `profile_to_json`.**

@@ -6,7 +6,7 @@
 
 - **Type**: Cyrius binary (CLI)
 - **License**: GPL-3.0-only
-- **Compiler**: Cyrius cycc 6.2.11 (pinned in `cyrius.cyml`; the legacy `cc5` name is still a symlink in `~/.cyrius/bin/` but the binary is `cycc`)
+- **Compiler**: Cyrius cycc — the pin in `cyrius.cyml` is the source of truth (6.5.2 as of 2.3.16; the legacy `cc5` name is still a symlink in `~/.cyrius/bin/` but the binary is `cycc`)
 - **Version**: SemVer — `VERSION` file is the single source of truth; `cyrius.cyml` interpolates via `${file:VERSION}`
 
 ## Consumers
