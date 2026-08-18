@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.17] — 2026-08-17
+
+### Changed
+
+- **Cyrius pin `6.5.10` -> `6.5.27`** (2026-08-17, ecosystem-wide ML/AI-arc realign ahead of
+  the arc reopening). `cyrius lib sync --full` re-vendored the version-matched stdlib snapshot,
+  clearing the toolchain-drift warning.
+
+### Fixed
+
+- **`tests/tcyr/foundation_test.tcyr` asserted a backend count that had been wrong since
+  `BACKEND_AGNOS_GPU` was added.** `BACKEND_COUNT` is **18** (`src/types.cyr:356`,
+  `BACKEND_AGNOS_GPU = 17`) while the test still asserted 17, so `foundation_test` was red —
+  **before** the pin bump, not because of it (`120 passed, 1 failed` at the old pin and the
+  new one alike). Corrected to 18 and added the missing `backend_name(BACKEND_AGNOS_GPU) ==
+  "agnos-gpu"` assertion, so the count and the name table are gated together and the next
+  backend cannot land half-tested.
+
 ## [2.3.16] — 2026-07-30
 
 **Toolchain catch-up, and the one call it broke.** cyrius 6.5.0 renamed bayan's cstr+len JSON parse

@@ -44,6 +44,7 @@ enum AcceleratorType {
     ACCEL_SAMSUNG_NPU = 16;
     ACCEL_MEDIATEK_APU = 17;
     ACCEL_WIN_GPU = 18;
+    ACCEL_AGNOS_GPU = 19;
 }
 
 fn accel_name(a) {
@@ -66,6 +67,7 @@ fn accel_name(a) {
     if (a == ACCEL_SAMSUNG_NPU) { return "Samsung NPU"; }
     if (a == ACCEL_MEDIATEK_APU) { return "MediaTek APU"; }
     if (a == ACCEL_WIN_GPU) { return "Windows GPU"; }
+    if (a == ACCEL_AGNOS_GPU) { return "AGNOS GPU"; }
     return "Unknown";
 }
 
@@ -78,6 +80,7 @@ fn accel_is_gpu(a) {
     if (a == ACCEL_VULKAN) { return 1; }
     if (a == ACCEL_INTEL_ONEAPI) { return 1; }
     if (a == ACCEL_WIN_GPU) { return 1; }
+    if (a == ACCEL_AGNOS_GPU) { return 1; }
     return 0;
 }
 
@@ -197,6 +200,11 @@ fn accel_throughput_x1000(a) {
     if (a == ACCEL_SAMSUNG_NPU) { return 6000; }
     if (a == ACCEL_MEDIATEK_APU) { return 5000; }
     if (a == ACCEL_WIN_GPU) { return 10000; }
+    # AGNOS GPU: the kernel drives the silicon directly — no ROCm, no
+    # Vulkan, no vendor runtime. The compute surface it offers ring 3 is
+    # the gpu_dispatch / gpu_shader_op band, narrower than a full vendor
+    # stack, so this sits below Vulkan (10.0x) rather than beside ROCm.
+    if (a == ACCEL_AGNOS_GPU) { return 8000; }
     # TPU and Gaudi/Neuron need version/gen — use profile-level functions
     return 1000;
 }
@@ -236,6 +244,10 @@ fn accel_training_x1000(a) {
     if (a == ACCEL_METAL) { return 10000; }
     if (a == ACCEL_VULKAN) { return 6000; }
     if (a == ACCEL_WIN_GPU) { return 6000; }
+    # Training is possible — the f64 dispatch path is real — but there is
+    # no autograd runtime on the device, so gradients come back through
+    # the host. Below Vulkan deliberately.
+    if (a == ACCEL_AGNOS_GPU) { return 5000; }
     # NPUs: inference only
     if (a == ACCEL_INTEL_NPU) { return 0; }
     if (a == ACCEL_APPLE_NPU) { return 0; }
@@ -287,6 +299,7 @@ fn accel_rank(a) {
     if (a == ACCEL_QUALCOMM) { return 38; }
     if (a == ACCEL_VULKAN) { return 35; }
     if (a == ACCEL_WIN_GPU) { return 34; }
+    if (a == ACCEL_AGNOS_GPU) { return 33; }
     if (a == ACCEL_APPLE_NPU) { return 30; }
     if (a == ACCEL_AMD_XDNA) { return 25; }
     if (a == ACCEL_INTEL_NPU) { return 20; }
@@ -338,8 +351,9 @@ enum Backend {
     BACKEND_SAMSUNG_NPU = 14;
     BACKEND_MEDIATEK_APU = 15;
     BACKEND_WINDOWS = 16;
+    BACKEND_AGNOS_GPU = 17;
 }
-var BACKEND_COUNT = 17;
+var BACKEND_COUNT = 18;
 
 fn backend_name(b) {
     if (b == BACKEND_CUDA) { return "cuda"; }
@@ -359,6 +373,7 @@ fn backend_name(b) {
     if (b == BACKEND_SAMSUNG_NPU) { return "samsung-npu"; }
     if (b == BACKEND_MEDIATEK_APU) { return "mediatek-apu"; }
     if (b == BACKEND_WINDOWS) { return "windows"; }
+    if (b == BACKEND_AGNOS_GPU) { return "agnos-gpu"; }
     return "unknown";
 }
 

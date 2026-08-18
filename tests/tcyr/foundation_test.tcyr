@@ -227,7 +227,7 @@ fn test_quant_model_bytes() {
 # --- Backend tests ---
 
 fn test_backends() {
-    assert_eq(BACKEND_COUNT, 17, "17 backends");
+    assert_eq(BACKEND_COUNT, 18, "18 backends");
     assert(streq(backend_name(BACKEND_CUDA), "cuda") == 1, "cuda name");
     assert(streq(backend_name(BACKEND_WINDOWS), "windows") == 1, "windows name");
     assert(streq(backend_name(BACKEND_ROCM), "rocm") == 1, "rocm name");
@@ -235,6 +235,7 @@ fn test_backends() {
     assert(streq(backend_name(BACKEND_TPU), "tpu") == 1, "tpu name");
     assert(streq(backend_name(BACKEND_GAUDI), "gaudi") == 1, "gaudi name");
     assert(streq(backend_name(BACKEND_NEURON), "neuron") == 1, "neuron name");
+    assert(streq(backend_name(BACKEND_AGNOS_GPU), "agnos-gpu") == 1, "agnos-gpu name");
     return 0;
 }
 

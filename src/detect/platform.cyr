@@ -35,10 +35,33 @@ fn dir_exists(path) {
 }
 
 # Read symlink target. Returns Str or 0.
-# Uses readlink syscall (SYS_readlink = 89)
+#
+# The syscall NUMBER is per-target, and picking the wrong one is not a
+# harmless no-op. readlink is #89 on Linux, but on AGNOS #89 is
+# `gpu_caps(buf, len)` — a syscall that WRITES into its first argument.
+# Through 2.3.16 this called `syscall(89, path, buf, 255)` unconditionally,
+# so an AGNOS build handed a path pointer to the GPU capability syscall
+# (the `mirshi: ENOSYS agnos#89` defect). AGNOS's readlink is **#70** and
+# takes the path length explicitly: (path, pathlen, buf, buflen), a4 in r10.
+#
+# Each branch calls the stdlib `sys_readlink` peer for its target rather
+# than a local number, so the number AND the arity come from the one file
+# that owns both. cycc predefines exactly one CYRIUS_TARGET_* per compile,
+# so exactly one branch survives the preprocessor. Windows has no readlink
+# peer — and no /sys tree for the two callers (detect_rocm, detect_amd_xdna)
+# to walk — so it falls through with n = 0, i.e. "not a symlink".
 fn read_symlink(path) {
     var buf = alloc(256);
-    var n = syscall(89, path, buf, 255);
+    var n = 0;
+    #ifdef CYRIUS_TARGET_AGNOS
+    n = sys_readlink(path, strlen(path), buf, 255);
+    #endif
+    #ifdef CYRIUS_TARGET_LINUX
+    n = sys_readlink(path, buf, 255);
+    #endif
+    #ifdef CYRIUS_TARGET_MACOS
+    n = sys_readlink(path, buf, 255);
+    #endif
     if (n <= 0) { return 0; }
     store8(buf + n, 0);
     return str_new(buf, n);
