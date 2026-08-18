@@ -22,6 +22,21 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
   new one alike). Corrected to 18 and added the missing `backend_name(BACKEND_AGNOS_GPU) ==
   "agnos-gpu"` assertion, so the count and the name table are gated together and the next
   backend cannot land half-tested.
+- **Removed `cyrius.lock`.** ai-hwaccel declares **zero git deps** — it is stdlib-only — and its
+  own CI comments say so: *"cyrius deps emits no lockfile and there is nothing to verify. The
+  check stays in place so it engages automatically the day a git dep gets added."* A lockfile
+  was nonetheless present, recording **99** `lib/` hashes from an older full-snapshot sync (33
+  of the 99 do not match the 6.5.27 stdlib, so it predates this cycle's pin bump). Because
+  `lib/` is gitignored, CI rebuilds it from the declared **19**-module `[deps].stdlib` subset,
+  so `cyrius deps --verify` compared 99 recorded hashes against the ~24 files that actually
+  exist: **24 verified, 75 failed** — most "cannot hash" (file absent), the rest content
+  mismatches against the older stdlib. The lock had nothing legitimate to lock. Deleting it
+  restores the documented behaviour and matches the ecosystem's two other stdlib-only,
+  gitignored-`lib/` repos (avatara, hadara), neither of which carries one. Verified the state
+  is stable, not just quiet: with it gone, `cyrius deps`, `cyrius build` and `cyrius test` all
+  run clean and **none of them recreates it**. Deliberately NOT added to `.gitignore` — the
+  dormant CI check is supposed to engage on its own the day a git dep is added, and ignoring
+  the file would silently disable that.
 
 ## [2.3.16] — 2026-07-30
 
