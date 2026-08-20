@@ -64,7 +64,7 @@ fn _detect_nvlink_nvswitch(sio, warnings) {
         sio_add_interconnect(sio, ic);
         return 0;
     }
-    if (path_exists("/sys/bus/nvidia_nvswitch/devices") == 1) {
+    if (aihw_path_exists("/sys/bus/nvidia_nvswitch/devices") == 1) {
         var nvsw_entries = sysfs_list_dir("/sys/bus/nvidia_nvswitch/devices");
         if (vec_len(nvsw_entries) > 0) {
             var ic = interconnect_new(ICK_NVSWITCH, "nvswitch", 900000);
@@ -120,7 +120,7 @@ fn _detect_xgmi(sio) {
         if (str_index_of(name, 45) >= 0) { continue; }
 
         var hive_path = sysfs_path_str("/sys/class/drm", name, "device/xgmi_hive_info");
-        if (path_exists(str_data(hive_path)) == 1) {
+        if (aihw_path_exists(str_data(hive_path)) == 1) {
             has_xgmi = 1;
             break;
         }

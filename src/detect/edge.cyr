@@ -3,7 +3,7 @@
 
 fn detect_qualcomm(profiles, warnings) {
     var found = 0;
-    if (path_exists("/sys/class/qaic") == 1) { found = 1; }
+    if (aihw_path_exists("/sys/class/qaic") == 1) { found = 1; }
     if (found == 0) {
         if (has_dev_device("qaic_") == 1) { found = 1; }
     }
@@ -18,7 +18,7 @@ fn detect_qualcomm(profiles, warnings) {
 
 fn detect_samsung_npu(profiles, warnings) {
     var found = 0;
-    if (path_exists("/sys/class/misc/samsung_npu") == 1) { found = 1; }
+    if (aihw_path_exists("/sys/class/misc/samsung_npu") == 1) { found = 1; }
     if (found == 0) {
         if (has_dev_device("samsung_npu") == 1) { found = 1; }
     }
@@ -33,7 +33,7 @@ fn detect_samsung_npu(profiles, warnings) {
 
 fn detect_mediatek_apu(profiles, warnings) {
     var found = 0;
-    if (path_exists("/sys/class/misc/mtk_apu") == 1) { found = 1; }
+    if (aihw_path_exists("/sys/class/misc/mtk_apu") == 1) { found = 1; }
     if (found == 0) {
         if (has_dev_device("mtk_mdla") == 1) { found = 1; }
     }

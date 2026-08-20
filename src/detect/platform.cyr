@@ -24,7 +24,7 @@ fn sysfs_read_int(path) {
 }
 
 # Check if a path exists (file or directory)
-fn path_exists(path) {
+fn aihw_path_exists(path) {
     return file_exists(path);
 }
 

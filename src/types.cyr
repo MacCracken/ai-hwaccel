@@ -333,7 +333,7 @@ fn groq_rank() { return 55; }
 
 # --- Detection backends ---
 
-enum Backend {
+enum AiHwBackend {
     BACKEND_CUDA = 0;
     BACKEND_ROCM = 1;
     BACKEND_APPLE = 2;
@@ -353,7 +353,7 @@ enum Backend {
     BACKEND_WINDOWS = 16;
     BACKEND_AGNOS_GPU = 17;
 }
-var BACKEND_COUNT = 18;
+var AIHW_BACKEND_COUNT = 18;
 
 fn backend_name(b) {
     if (b == BACKEND_CUDA) { return "cuda"; }

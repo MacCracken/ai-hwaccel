@@ -137,8 +137,8 @@ fn test_sysfs_read_missing() {
 }
 
 fn test_path_exists() {
-    assert_eq(path_exists("/proc/self/status"), 1, "/proc/self/status exists");
-    assert_eq(path_exists("/nonexistent_xyz"), 0, "nonexistent path");
+    assert_eq(aihw_path_exists("/proc/self/status"), 1, "/proc/self/status exists");
+    assert_eq(aihw_path_exists("/nonexistent_xyz"), 0, "nonexistent path");
     return 0;
 }
 

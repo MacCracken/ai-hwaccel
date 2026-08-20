@@ -2,7 +2,7 @@
 
 # Intel NPU (Meteor Lake+): simple sysfs check
 fn detect_intel_npu(profiles, warnings) {
-    if (path_exists("/sys/class/misc/intel_npu") == 1) {
+    if (aihw_path_exists("/sys/class/misc/intel_npu") == 1) {
         var p = profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB);
         profile_set_device_name(p, "Intel NPU");
         vec_push(profiles, p);

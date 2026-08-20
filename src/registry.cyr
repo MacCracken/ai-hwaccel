@@ -216,7 +216,7 @@ fn reg_suggest_quant(r, model_params) {
 # --- Detection builder (bitmask) ---
 
 # All backends enabled
-fn builder_all() { return (1 << BACKEND_COUNT) - 1; }
+fn builder_all() { return (1 << AIHW_BACKEND_COUNT) - 1; }
 
 # No backends enabled
 fn builder_none() { return 0; }
@@ -233,7 +233,7 @@ fn builder_is_enabled(mask, backend) { return (mask >> backend) & 1; }
 fn builder_no_exec() {
     var mask = 0;
     var b = 0;
-    while (b < BACKEND_COUNT) {
+    while (b < AIHW_BACKEND_COUNT) {
         if (backend_uses_exec(b) == 0) {
             mask = mask | (1 << b);
         }

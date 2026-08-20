@@ -6,7 +6,7 @@ fn detect_environment(sio) {
     var detected = 0;
 
     # --- Docker detection ---
-    if (path_exists("/.dockerenv") == 1) {
+    if (aihw_path_exists("/.dockerenv") == 1) {
         env_set_is_docker(env, 1);
         detected = 1;
     } else {
@@ -24,7 +24,7 @@ fn detect_environment(sio) {
     }
 
     # --- Kubernetes detection ---
-    if (path_exists("/var/run/secrets/kubernetes.io") == 1) {
+    if (aihw_path_exists("/var/run/secrets/kubernetes.io") == 1) {
         env_set_is_k8s(env, 1);
         detected = 1;
         # Read namespace
