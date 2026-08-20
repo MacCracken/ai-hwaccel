@@ -122,7 +122,7 @@ fn profile_throughput_x1000(p) {
     if (at == ACCEL_GAUDI) { return gaudi_throughput_x1000(profile_gaudi_gen(p)); }
     if (at == ACCEL_NEURON) {
         return neuron_throughput_x1000(
-        profile_neuron_chip(p), profile_neuron_cores(p));
+          profile_neuron_chip(p), profile_neuron_cores(p));
     }
     return accel_throughput_x1000(at);
 }
@@ -134,7 +134,7 @@ fn profile_training_x1000(p) {
     if (at == ACCEL_GAUDI) { return gaudi_training_x1000(profile_gaudi_gen(p)); }
     if (at == ACCEL_NEURON) {
         return neuron_training_x1000(
-        profile_neuron_chip(p), profile_neuron_cores(p));
+          profile_neuron_chip(p), profile_neuron_cores(p));
     }
     return accel_training_x1000(at);
 }

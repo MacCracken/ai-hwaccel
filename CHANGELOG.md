@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.18] — 2026-08-20 — definitive names for three symbols kavach also defined
+
+### Changed — three symbols renamed
+
+| was | now |
+|---|---|
+| `var BACKEND_COUNT` | `var AIHW_BACKEND_COUNT` |
+| `enum Backend` | `enum AiHwBackend` |
+| `fn path_exists` | `fn aihw_path_exists` |
+
+All three were also defined by **kavach**, and Cyrius has one flat symbol table with
+last-definition-wins. `BACKEND_COUNT` was the damaging one: 18 here, 10 in kavach, and in any binary
+linking both this definition won. kavach's `_backend_fp` uses it as the bounds check on a **10-slot**
+table, so the guard admitted ids 0–17 and `_backend_slot(17)` read 224 bytes past the end — a wild
+function-pointer load, which is exactly what kavach's own comment says the check exists to prevent.
+
+Measured rather than inferred: a probe returning `BACKEND_COUNT` as its exit code printed **18** at
+cyrius 6.5.32, in a project linking both libraries through agnosai.
+
+The compiler is **silent** on a duplicate `var`, and `check-symbols.sh` in every sibling scans `src/`
+only — so a `lib/`↔`lib/` collision between two dependencies is invisible to every gate in the
+ecosystem. Fixed at the source in both libraries rather than worked around downstream; see
+kavach 3.11.15.
+
+**Breaking for direct consumers of these three names.** `AiHwBackend`'s members are unchanged
+(`BACKEND_CUDA`, `BACKEND_ROCM`, …) — only the enum's type name moved, so `AiHwBackend.BACKEND_CUDA`
+is the edit.
+
+### Changed — Cyrius pin 6.5.27 → 6.5.32
+
+Also clears real drift: the installed toolchain was 6.5.32 while the manifest pinned 6.5.27, so
+`lib sync --full` and `deps` had been provisioning from a version the manifest did not name.
+
+### Fixed — five files failing `cyrfmt --check`
+
+`src/{model_format,profile,plan}.cyr` and `tests/tcyr/{requirement,model_format}_test.tcyr`.
+**Pre-existing** — verified unformatted at the 2.3.17 tag, so this is drift the rename surfaced
+rather than caused. `git diff -w` over the three `src/` files is empty.
+
+**636 assertions green, 0 failed** — identical to the pre-rename baseline. `dist/ai-hwaccel.cyr`
+regenerated (6,265 lines), carrying the new names and none of the old. Cross-checked against
+`dist/kavach.cyr` 3.11.15: **0 remaining collisions** between the two.
+
 ## [2.3.17] — 2026-08-17
 
 ### Changed

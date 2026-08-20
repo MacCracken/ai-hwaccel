@@ -951,7 +951,7 @@ fn profile_throughput_x1000(p) {
     if (at == ACCEL_GAUDI) { return gaudi_throughput_x1000(profile_gaudi_gen(p)); }
     if (at == ACCEL_NEURON) {
         return neuron_throughput_x1000(
-        profile_neuron_chip(p), profile_neuron_cores(p));
+          profile_neuron_chip(p), profile_neuron_cores(p));
     }
     return accel_throughput_x1000(at);
 }
@@ -963,7 +963,7 @@ fn profile_training_x1000(p) {
     if (at == ACCEL_GAUDI) { return gaudi_training_x1000(profile_gaudi_gen(p)); }
     if (at == ACCEL_NEURON) {
         return neuron_training_x1000(
-        profile_neuron_chip(p), profile_neuron_cores(p));
+          profile_neuron_chip(p), profile_neuron_cores(p));
     }
     return accel_training_x1000(at);
 }
@@ -3997,7 +3997,7 @@ fn reg_plan_sharding(r, model_params, quant) {
         plan_add_shard(sp, ms);
         plan_set_total_memory(sp, needed);
         var tps = estimate_tps_x1000(
-        at, profile_throughput_x1000(best), model_params, quant);
+          at, profile_throughput_x1000(best), model_params, quant);
         plan_set_est_tps_x1000(sp, tps);
         return sp;
     }
@@ -5020,19 +5020,19 @@ fn _extract_safetensors_meta(json, json_len) {
         # Extract dtype from this tensor (first tensor wins)
         if (dtype == 0) {
             dtype = _find_json_string(json + obj_start,
-            obj_end - obj_start, "dtype");
+              obj_end - obj_start, "dtype");
         }
 
         # Extract shape and multiply dimensions for param count
         var params = _extract_shape_product(json + obj_start,
-        obj_end - obj_start);
+          obj_end - obj_start);
         total_params = total_params + params;
 
         pos = obj_end;
     }
 
     return meta_new(FMT_SAFETENSORS, total_params,
-    dtype, tensor_count, 0);
+      dtype, tensor_count, 0);
 }
 
 # Skip a JSON value (object, array, string, number, etc.)

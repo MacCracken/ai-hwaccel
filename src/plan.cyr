@@ -35,7 +35,7 @@ fn reg_plan_sharding(r, model_params, quant) {
         plan_add_shard(sp, ms);
         plan_set_total_memory(sp, needed);
         var tps = estimate_tps_x1000(
-        at, profile_throughput_x1000(best), model_params, quant);
+          at, profile_throughput_x1000(best), model_params, quant);
         plan_set_est_tps_x1000(sp, tps);
         return sp;
     }
