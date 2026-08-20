@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
-## [2.3.18] — 2026-08-20 — definitive names for three symbols kavach also defined
+## [2.3.18] — 2026-08-19 — definitive names for three symbols kavach also defined
 
 ### Changed — three symbols renamed
 
