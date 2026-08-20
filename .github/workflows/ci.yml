@@ -155,7 +155,13 @@ jobs:
           fail=0
           for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do
             [ -f "$f" ] || continue
-            if ! diff -q <(cyrius fmt "$f" 2>/dev/null) "$f" > /dev/null; then
+            # ⚠ Do NOT diff against `cyrius fmt`'s stdout. fmt rewrites the file
+          # IN PLACE and prints nothing (`cyrius fmt` usage: "(no flag) rewrite
+          # the file in place"), so the old form compared every file against an
+          # empty stream and could never pass — a file cyrfmt calls FORMATTED
+          # still reported drift. `--check` is the purpose-built flag: exit 1 if
+          # not canonically formatted, and say where.
+          if ! cyrius fmt "$f" --check > /dev/null 2>&1; then
               echo "needs fmt: $f"
               fail=1
             fi
