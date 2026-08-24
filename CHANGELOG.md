@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.19] — 2026-08-24 — canonical bayan API; consumers no longer forced onto the 641 KB monolith
+
+`src/json_out.cyr` called bayan's **legacy back-compat aliases** (`json_v_obj_get`,
+`json_v_int`, `json_v_bool`, `json_v_is_str`, `json_v_str`, `json_v_is_obj`,
+`json_v_parse_buf`). Those aliases ship **only in the monolithic `dist/bayan.cyr`** —
+bayan's focused `dist/bayan-json.cyr` sublib exports the canonical `bayan_json_v_*` names
+only. So every consumer of this bundle was transitively forced to link all 641 KB of
+bayan (json + toml + cyml + csv + base64 + bigint + u128 + yaml + pdf) to satisfy seven
+JSON calls.
+
+Measured downstream in chakshu, whose lean binary links this bundle for the GPU panel:
+substituting the sublib for the monolith takes it from **861,536 B to 571,496 B —
+−290,040 B (−33.7%)**, with its full suite still green.
+
+### Changed
+
+- **All 11 `json_v_*` call sites → canonical `bayan_json_v_*`** (`src/json_out.cyr`).
+  Behaviour is identical; the aliases and the canonical names are the same functions.
+  cyrius `docs/stdlib-modules.md` documents the `bayan_*` form as canonical and the bare
+  names as legacy aliases, dating from the v6.1.25 carve of json/toml/csv/… out of stdlib.
+- **`bayan` moves from `[deps].stdlib` to a focused git dep** pinned to
+  `dist/bayan-json.cyr` (100,309 B, versus the 641,083 B monolith). A clean
+  `cyrius deps` now vendors `lib/bayan-json.cyr` and no `lib/bayan.cyr` at all.
+- **`dist/ai-hwaccel.deps` drops `bayan`** — 19 → 18 stdlib leaves. Consumers are no
+  longer told to pull the monolith on this bundle's behalf.
+- **Cyrius pin `6.5.32` → `6.5.35`**, clearing the toolchain-drift warning that
+  `cyrius distlib` emitted against the installed cycc.
+
+### Note for consumers
+
+`dist/ai-hwaccel.cyr` references seven `bayan_json_v_*` symbols and defines none — they
+are reached only through `profile_from_json_str`. A consumer that calls that function
+should add the same focused dep:
+
+```toml
+[deps.bayan]
+git = "https://github.com/MacCracken/bayan.git"
+tag = "1.5.2"
+modules = ["dist/bayan-json.cyr"]
+```
+
+A consumer that does **not** call it (chakshu and mihi both do not) will see seven
+`undefined function 'bayan_json_v_*'` warnings on that unreachable path and can either
+add the dep to silence them or ignore them. Either way it is now a **100 KB opt-in**
+rather than a 641 KB obligation.
+
 ## [2.3.18] — 2026-08-19 — definitive names for three symbols kavach also defined
 
 ### Changed — three symbols renamed
@@ -29,9 +75,13 @@ only — so a `lib/`↔`lib/` collision between two dependencies is invisible to
 ecosystem. Fixed at the source in both libraries rather than worked around downstream; see
 kavach 3.11.15.
 
-**Breaking for direct consumers of these three names.** `AiHwBackend`'s members are unchanged
-(`BACKEND_CUDA`, `BACKEND_ROCM`, …) — only the enum's type name moved, so `AiHwBackend.BACKEND_CUDA`
-is the edit.
+**Not breaking for the enum rename.** In Cyrius an enum qualifier is cosmetic — `Backend.X` and
+`AiHwBackend.X` both resolve to the member `X`, with the type name playing no part in resolution
+(verified against agnosai, which builds unchanged). Members are untouched (`BACKEND_CUDA`,
+`BACKEND_ROCM`, …).
+
+Which means only `BACKEND_COUNT` and `path_exists` closed real collisions here; the `enum Backend`
+rename is defensive — it removes a duplicate symbol-table entry that was never resolved through.
 
 ### Changed — Cyrius pin 6.5.27 → 6.5.32
 
