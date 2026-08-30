@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.20] — 2026-08-30 — the focused bayan dep no longer leaks into consumers
+
+2.3.19 replaced the 641 KB bayan monolith with the focused 100 KB
+`dist/bayan-json.cyr` sublib — a real win, measured at **−290,040 B (−33.7 %)**
+in chakshu. But the dep still resolved **transitively**, so it reached every
+consumer whether or not that consumer wanted it. This release keeps the win and
+stops the leak. No source change: 122 assertions pass, benchmarks show no
+regression on any of 15.
+
+### Fixed — `[deps.bayan]` is now optional and feature-gated
+
+A consumer that already links the stdlib bayan monolith got `lib/bayan-json.cyr`
+vendored **alongside** `lib/bayan.cyr`, producing **131 duplicate function
+definitions** in which the older 1.5.2 copy silently won ("last definition
+wins"). Seven of the twelve known consumers are in that position — hoosh,
+agnosai, szal, stiva, iam, kavach, ranga. All 131 bodies happen to be identical
+today, so this was a supply-chain hazard rather than a live defect, but it is
+precisely the failure mode cyrius `docs/ecosystem.md` records for patra pinning
+a stale sakshi: a folded module pinning its own dep silently downgrades that
+module for every transitive consumer.
+
+The dep is now `optional = true`, activated by a `[features] default = ["bayan"]`
+entry. cyrius resolves `[features]` from the **root** manifest only (v6.3.1
+lever 2), so:
+
+- **this repo's** builds and tests activate it and are unchanged;
+- a **downstream** build that does not name `bayan` skips the dep entirely — no
+  clone, no module copy, no include push.
+
+### What consumers need to do
+
+Usually nothing. `dist/ai-hwaccel.cyr` references eleven `bayan_json_v_*` call
+sites and **defines none**; they are reachable only through
+`profile_from_json_str`. Verified against all twelve known consumers:
+
+- **Nine already supply bayan** — via `"bayan"` in `[deps].stdlib` (agnosai,
+  szal, stiva, iam, kavach, ranga, hoosh) or their own `[deps.bayan]` (daimon,
+  samay). They keep working, and the seven stdlib ones lose 131 duplicate-fn
+  warnings.
+- **Three do not link bayan at all** (chakshu, agnodrm, mihi) and never call
+  `profile_from_json_str`, so the symbols are unreachable and eliminated. They
+  stop vendoring a 100 KB file they never used.
+
+A consumer that *does* call `profile_from_json_str` and links no bayan must now
+supply it — `"bayan"` in `[deps].stdlib`, the same focused `[deps.bayan]` block,
+or `--features bayan`. That was already the instruction in 2.3.19's *Note for
+consumers*; it is now enforced by resolution rather than by documentation.
+
+### Changed
+
+- **Cyrius pin `6.5.35` → `6.5.36`**, matching the installed compiler; `lib/`
+  resynced (38 declared modules). Clears the toolchain-drift warning.
+
+### Performance
+
+Interleaved A/B, 3 rounds each, same machine and session: 2.3.19 source with the
+6.5.35 stdlib versus this tree with 6.5.36, both compiled by cycc 6.5.36 (the
+source is byte-identical, so this measures the stdlib swap alone). **No
+regressions** across all 15 benchmarks; every delta is within its own run-to-run
+spread. Largest movements: `json_system_io` 4945 → 4821 ns (−2.5 %),
+`plan_70B_bf16_4gpu` 1833 → 1795 ns (−2.1 %), `count_family_gpu_13dev` 284 →
+278 ns (−2.1 %).
+
 ## [2.3.19] — 2026-08-24 — canonical bayan API; consumers no longer forced onto the 641 KB monolith
 
 `src/json_out.cyr` called bayan's **legacy back-compat aliases** (`json_v_obj_get`,

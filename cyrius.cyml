@@ -4,7 +4,7 @@ version = "${file:VERSION}"
 description = "Hardware accelerator detection and planning for AI workloads"
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.5.35"
+cyrius = "6.5.36"
 repository = "https://github.com/MacCracken/ai-hwaccel"
 
 [build]
@@ -71,8 +71,37 @@ modules = [
 stdlib = ["string", "alloc", "vec", "str", "fmt", "io", "syscalls", "fs", "tagged", "process", "args", "fnptr", "thread", "assert", "bench", "freelist", "hashmap", "sakshi", ]
 
 # bayan — JSON parsing for profile_from_json_str. Consumed as the FOCUSED
-# sublib rather than the 641 KB monolith.
+# sublib (100 KB) rather than the 641 KB monolith.
+#
+# OPTIONAL, and gated on the `bayan` feature (v6.3.1 lever 2), because cyrius
+# resolves `[features]` from the ROOT manifest only: this repo's own builds and
+# tests activate it via `[features] default`, while a DOWNSTREAM build that does
+# not name `bayan` skips the dep entirely — no clone, no module copy.
+#
+# That gate is the point. 2.3.19 moved bayan from `[deps].stdlib` to this
+# focused sublib, which was a real win for a consumer with no bayan of its own
+# (chakshu measured -290,040 B, -33.7%). But the dep still resolved
+# TRANSITIVELY, so a consumer that already links the stdlib bayan monolith —
+# hoosh, agnosai, szal, stiva, iam, kavach, ranga — got `lib/bayan-json.cyr`
+# vendored alongside `lib/bayan.cyr` and 131 duplicate function definitions,
+# where the older 1.5.2 copy silently won ("last definition wins"). The bodies
+# are currently identical, so it was a supply-chain hazard rather than a live
+# bug, but it is exactly the failure mode cyrius `docs/ecosystem.md` records
+# for patra pinning a stale sakshi.
+#
+# `dist/ai-hwaccel.cyr` references seven `bayan_json_v_*` symbols and defines
+# none; they are reachable only through `profile_from_json_str`. So a consumer
+# that never calls that function needs nothing (the symbols are unreachable and
+# eliminated), and a consumer that DOES call it supplies bayan its own way:
+# either `"bayan"` in `[deps].stdlib`, or this same focused dep, or by building
+# with `--features bayan`.
 [deps.bayan]
+optional = true
 git = "https://github.com/MacCracken/bayan.git"
 tag = "1.5.2"
 modules = ["dist/bayan-json.cyr"]
+
+# Activates the optional bayan dep for THIS repo's own build and test runs.
+# Root-manifest-only resolution means downstream consumers do not inherit it.
+[features]
+default = ["bayan"]
