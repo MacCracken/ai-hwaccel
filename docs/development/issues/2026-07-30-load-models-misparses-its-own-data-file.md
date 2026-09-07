@@ -1,6 +1,37 @@
 # `load_models` returns 1 model instead of 26 — it mis-parses ai-hwaccel's own `data/models.json`
 
-**Status:** 🟡 **OPEN** — filed 2026-07-30 against ai-hwaccel 2.3.15/2.3.16. Verified by reading
+**Status:** ✅ **RESOLVED in 2.3.22**
+
+> **RESOLVED in ai-hwaccel 2.3.22 (2026-09-07)** via **option (a)** — the loader
+> was taught the wrapper, so the shipped `data/models.json` did not have to change
+> and both document shapes now parse. All three "adjacent weaknesses" were fixed in
+> the same pass, plus a fourth this issue did not name:
+>
+> 1. **The wrapper** — the scan now starts just past the `[` that follows a
+>    `"models"` key when one is present; a top-level array still starts at 0.
+> 2. **Off-by-one** — reads at most `MODELS_BUF - 1`, so the `store8(buf + n, 0)`
+>    NUL can no longer land one byte past the allocation on an exactly-full read.
+> 3. **Silent truncation** — a read that fills the buffer now emits `hwlog_warn`.
+> 4. **Wrong path (not in the original report)** — it read a bare cwd-relative
+>    `"data/models.json"` while its sibling loader `cost.cyr:79` already went
+>    through `data_file_path()`. From a pip-installed wheel it read nothing and
+>    returned an empty vec. Now uses `data_file_path()` too.
+>
+> Option (3) — routing through the real bayan parser — was **declined**, and not
+> only on size: `[deps.bayan]` is `optional = true` and feature-gated, so making
+> `load_models` depend on it would break every consumer that links ai-hwaccel
+> without bayan. The hand-rolled scanner has to stay dependency-free.
+>
+> **The missing test is the real fix.** `tests/tcyr/model_catalog_test.tcyr` loads
+> `data/models.json` **as shipped** and asserts the count. Verified in both
+> directions: against the pre-fix loader it reports
+> `FAIL: load_models returns every model in data/models.json (got 1, expected 26)`;
+> against the fixed one, 6/6. While writing it, a second gate hole turned up —
+> `json_roundtrip_test.tcyr` discarded `assert_summary()`'s return value, so its
+> failures exited 0 and could never fail `cyrius tests`. Fixed; `cyrius tests` now
+> exits 1 on a deliberately broken assertion, confirmed.
+
+**Original status was:** 🟡 OPEN — filed 2026-07-30 against ai-hwaccel 2.3.15/2.3.16. Verified by reading
 `src/model.cyr:37-71` against `data/models.json` as shipped. Not fixed in 2.3.16, because the fix
 has two incompatible shapes and the choice is a compatibility decision (see *Proposed fix*).
 **Placement:** unpinned — next patch, once the shape question is settled.

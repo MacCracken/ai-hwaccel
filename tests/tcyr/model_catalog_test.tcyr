@@ -1,0 +1,106 @@
+# model_catalog_test.tcyr — load_models against the REAL shipped data file.
+#
+# Added 2.3.22 with the fix for
+# docs/development/issues/2026-07-30-load-models-misparses-its-own-data-file.md.
+# The whole reason that defect survived three releases is that `load_models`
+# has no callers inside ai-hwaccel and had no test: the suite was green while
+# the function returned 1 model out of 26 to every downstream consumer.
+#
+# This asserts against `data/models.json` AS SHIPPED, so it fails if the loader
+# regresses OR if the data file's shape changes underneath it. That coupling is
+# deliberate — drift between the two is exactly what happened.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+include "lib/args.cyr"
+include "lib/assert.cyr"
+include "lib/sakshi.cyr"
+
+include "src/log.cyr"
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/registry.cyr"
+include "src/model.cyr"
+
+# Stub detectors — registry.cyr references them but this unit never detects.
+# NB: `cmd_getenv` / `data_file_path` are deliberately NOT stubbed; the point of
+# this unit is that load_models resolves its data file the same way cost.cyr does.
+fn detect_cuda(p, w) { return 0; }
+fn detect_rocm(p, w) { return 0; }
+fn detect_apple(p, w) { return 0; }
+fn detect_vulkan(p, w) { return 0; }
+fn detect_intel_npu(p, w) { return 0; }
+fn detect_amd_xdna(p, w) { return 0; }
+fn detect_tpu(p, w) { return 0; }
+fn detect_gaudi(p, w) { return 0; }
+fn detect_neuron(p, w) { return 0; }
+fn detect_intel_oneapi(p, w) { return 0; }
+fn detect_qualcomm(p, w) { return 0; }
+fn detect_cerebras(p, w) { return 0; }
+fn detect_graphcore(p, w) { return 0; }
+fn detect_groq(p, w) { return 0; }
+fn detect_samsung_npu(p, w) { return 0; }
+fn detect_mediatek_apu(p, w) { return 0; }
+fn enrich_bandwidth(p) { return 0; }
+fn enrich_pcie(p) { return 0; }
+fn enrich_numa(p) { return 0; }
+fn detect_interconnects(s, p, w) { return 0; }
+fn detect_storage(s) { return 0; }
+fn detect_environment(s) { return 0; }
+
+fn test_catalog_loads_every_model() {
+    var models = load_models();
+    # data/models.json ships 26 entries under a {"models":[…]} wrapper.
+    # Before 2.3.22 this returned 1 — the wrapper was brace-matched as a
+    # single object and the scan hit EOF.
+    assert_eq(vec_len(models), 26, "load_models returns every model in data/models.json");
+    return 0;
+}
+
+fn test_catalog_first_and_last_parse() {
+    var models = load_models();
+    if (vec_len(models) < 2) { return 0; }
+    var first = vec_get(models, 0);
+    var last = vec_get(models, vec_len(models) - 1);
+    assert_nonnull(model_name(first), "first model has a name");
+    assert_nonnull(model_name(last), "last model has a name");
+    assert_gt(model_param_count(first), 0, "first model has a param count");
+    assert_gt(model_param_count(last), 0, "last model has a param count");
+    return 0;
+}
+
+fn test_catalog_entries_are_distinct() {
+    # The wrapper bug returned one profile; a partial regression could return
+    # several copies of the same object. Assert the names actually differ.
+    var models = load_models();
+    if (vec_len(models) < 2) { return 0; }
+    var a = model_name(vec_get(models, 0));
+    var b = model_name(vec_get(models, 1));
+    assert_eq(streq(a, b), 0, "consecutive catalogue entries are distinct models");
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    args_init();
+    hwlog_init();
+    test_catalog_loads_every_model();
+    test_catalog_first_and_last_parse();
+    test_catalog_entries_are_distinct();
+    # Propagate the failure count so a regression actually fails `cyrius tests`.
+    return assert_summary();
+}

@@ -1,5 +1,11 @@
 # `ERR_TIMEOUT` enum constant collides ecosystem-wide — namespace `DetectionError` as `HWA_ERR_*`
 
+> **RESOLVED — verified closed in ai-hwaccel 2.3.22 (2026-09-07).** Re-checked
+> against the tree: `src/error.cyr` defines exactly the six `HWA_ERR_*` members
+> (`NONE`/`PARSE`/`SYSFS_READ`/`TIMEOUT`/`TOOL_FAILED`/`TOOL_NOT_FOUND`), no bare
+> `ERR_*` constant is defined anywhere in `src/`, and `dist/ai-hwaccel.cyr`
+> contains **zero** bare `ERR_*` occurrences. The sakshi `ERR_TIMEOUT` collision
+> cannot recur. Archived.
 > **RESOLVED in ai-hwaccel 2.3.13 (2026-07-13).** The `DetectionError`
 > enum was prefixed `ERR_* → HWA_ERR_*` (all six members; values
 > unchanged; no bare aliases). Pulled ahead of the filed 2.4.0 target

@@ -1,5 +1,28 @@
 # Threaded GPU backend probe blocks the agnos build (pulls the Linux clone-thread path → `CLONE_VM`)
 
+> **RESOLVED UPSTREAM — closed in ai-hwaccel 2.3.22 (2026-09-07) with NO source
+> change.** The proposed fix (gate `thread_create`/`thread_join` behind
+> `#ifndef CYRIUS_TARGET_AGNOS` and fall back to the sync entry) is no longer
+> needed: cyrius gained agnos threading after this was filed. `lib/thread_agnos.cyr`
+> now provides `thread_create`, which runs the body **serially inline**, snapshots
+> and restores the caller's thread-local slots, and returns a fake non-zero handle
+> so caller null-checks pass and `thread_join` stays valid — i.e. upstream now
+> implements exactly the sync-fallback contract this issue asked ai-hwaccel to
+> hand-roll. `lib/sync.cyr` likewise has a `CYRIUS_TARGET_AGNOS` branch making
+> `mutex_*` allocating no-ops, covering the `cache.cyr` / `lazy.cyr` sweep this
+> issue also asked for.
+>
+> Verified empirically under the pinned cyrius 6.6.0, not inferred:
+>
+> ```
+> cyrius build --agnos src/main.cyr             -> OK (425,288 bytes)
+> CYRIUS_DCE=1 cyrius build --agnos src/main.cyr -> OK (216,392 bytes)
+> ```
+>
+> `CLONE_VM` appears only in `lib/syscalls_x86_64_linux.cyr` (not compiled for
+> agnos) and in comments. Adding the `#ifndef` gating now would duplicate — and
+> almost certainly get wrong — upstream's TLS-isolation contract, so it was
+> deliberately NOT added. Archived.
 **Filed:** 2026-06-12
 **Severity:** MEDIUM — blocks the agnos build of ai-hwaccel and every downstream agnos consumer; on agnos, `mihi`/`iam`/`chakshu` cannot render GPU sysinfo
 **Component:** `src/async_detect.cyr` — parallel backend detection via `thread_create` / `thread_join`

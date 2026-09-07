@@ -5,6 +5,116 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.22] — 2026-09-07 — issue-folder triage: three closed on verification, one really broken
+
+A triage pass over the four issues that predated the 2.3.21 work. **Three were
+already fixed and nobody had checked**; the fourth was live, had been shipping a
+wrong answer to every downstream consumer since 2.3.15, and had no test. Fixing
+it turned up a second hole: part of the test suite could not fail.
+
+### Fixed — `load_models` returned 1 model instead of 26
+
+`load_models` does not parse JSON — it scans for `{`, brace-matches to the
+object's end, extracts fields from that slice, and resumes. That is right for a
+**top-level array**. `data/models.json` ships as `{"models":[ … ]}`, so the first
+`{` was the **wrapper**: brace-matching ran to the last byte of the document, the
+whole file became one "object", the first `"name":` in it matched, one profile was
+pushed, and `pos` was already at EOF. **26 models in the file, 1 returned, no
+error.** hoosh hit this and vendors an unwrapped copy to work around it.
+
+Fixed by **option (a)** from the issue — the loader learned the wrapper, so the
+shipped data file did not have to change and both shapes parse. Three adjacent
+weaknesses the issue named went with it, plus a fourth it did not:
+
+1. **The wrapper** — the scan starts just past the `[` following a `"models"` key
+   when one is present; a top-level array still starts at 0.
+2. **Off-by-one** — `alloc(32768)` + `file_read_all(…, 32768)` + `store8(buf + n,
+   0)` wrote the NUL one byte past the allocation on an exactly-full read. Now
+   reads at most `MODELS_BUF - 1`.
+3. **Silent truncation** — a read that fills the buffer now warns instead of
+   quietly dropping models.
+4. **Wrong path (not in the report)** — it read a bare cwd-relative
+   `"data/models.json"` while its sibling loader `cost.cyr:79` already went through
+   `data_file_path()`. From a pip-installed wheel it read nothing and returned an
+   empty vec. Now uses `data_file_path()` too.
+
+Routing through the real bayan parser (the issue's option 3) was **declined**:
+`[deps.bayan]` is `optional = true` and feature-gated, so making `load_models`
+depend on it would break every consumer that links ai-hwaccel without bayan. The
+hand-rolled scanner stays dependency-free.
+
+### Fixed — the test suite could not fail
+
+`load_models` had **zero callers inside ai-hwaccel** and no test, which is exactly
+why the suite stayed green for three releases while the function returned 1 of 26.
+`tests/tcyr/model_catalog_test.tcyr` now loads `data/models.json` **as shipped**
+and asserts the count, so the loader and the data file are gated together — drift
+between the two is what happened. Verified in both directions: against the pre-fix
+loader it reports `FAIL: load_models returns every model in data/models.json (got
+1, expected 26)`; against the fixed one, 6/6.
+
+Writing it surfaced a worse problem. `json_roundtrip_test.tcyr` ended
+`assert_summary(); return 0;` — **discarding the failure count**, so `syscall(60,
+r)` always exited 0 and a failing assertion in that unit could never fail `cyrius
+tests`, which gates on exit status. Twelve of the fourteen units already
+propagated it; that one did not. Both it and the new unit now `return
+assert_summary()`. Confirmed by sabotage: with a deliberately broken assertion
+`cyrius tests` now exits **1**, where before it exited **0**.
+
+### Closed on verification — three issues that were already fixed
+
+Re-checked against the tree rather than trusting their own notes, then archived:
+
+- **`registry_new` symbol collision** (filed 2026-06-11, vs bote-core) — `grep -c
+  '^fn registry_new('` over `src/` is **0**, `hw_registry_new` is at
+  `src/registry.cyr:25`, and the only three bare occurrences in
+  `dist/ai-hwaccel.cyr` are the explanatory comment at `:3629-3633`.
+- **`ERR_TIMEOUT` enum collision** (filed 2026-06-23, vs sakshi) — six `HWA_ERR_*`
+  members, no bare `ERR_*` defined anywhere in `src/`, and **zero** bare `ERR_*`
+  occurrences in the bundle.
+- **Threaded GPU probe blocks the agnos build** (filed 2026-06-12) — **resolved
+  upstream, no source change.** The fix this issue asked for (gate
+  `thread_create`/`thread_join` behind `#ifndef CYRIUS_TARGET_AGNOS`) is now
+  redundant: `lib/thread_agnos.cyr` provides `thread_create`, which runs the body
+  serially inline, snapshots and restores the caller's thread-local slots, and
+  returns a fake non-zero handle so null-checks and `thread_join` stay valid — the
+  exact contract the issue wanted hand-rolled. `lib/sync.cyr` has a matching agnos
+  branch making `mutex_*` allocating no-ops, covering the `cache.cyr` / `lazy.cyr`
+  sweep it also asked for. Verified rather than assumed:
+
+  ```
+  cyrius build --agnos src/main.cyr              -> OK (425 288 bytes)
+  CYRIUS_DCE=1 cyrius build --agnos src/main.cyr -> OK (216 392 bytes)
+  ```
+
+  `CLONE_VM` now appears only in `lib/syscalls_x86_64_linux.cyr` (not compiled for
+  agnos) and in comments. Gating was **deliberately not added** — it would
+  duplicate, and probably get wrong, upstream's TLS-isolation contract.
+
+### Performance
+
+ABBA-balanced A/B, same toolchain, n=30 per arm, Mann-Whitney: **0 regressions,
+14 neutral, 1 marginal improvement** (`json_plan` −1.0%, p=0.0016 — at the
+threshold, treated as neutral).
+
+The change is not reachable from either benchmark — `load_models` has no bench
+caller — so this measures layout only. `benches/parsing.bcyr` compiles to a
+**byte-identical** binary in both arms and serves as the noise floor in the same
+run: those five rows still swing up to **+2.3%** (p ≥ 0.24), which is the scale
+below which nothing in this table means anything. `registry.bcyr` moved by 96
+bytes of layout. Suite: 623 → 629 assertions across 14 units (the new catalogue
+unit adds 6). Binary 214 504 → 214 600 B (+96 B).
+
+### Notes
+
+- **Consumers**: anyone calling `load_models` against the shipped
+  `data/models.json` was getting one model. They now get all 26 with no change on
+  their side. A consumer that vendored an unwrapped top-level array (hoosh) keeps
+  working — both shapes parse. `data/models.json` itself is **unchanged**.
+- Still open in `docs/development/issues/`: the four filed during 2.3.21 (all
+  marked RESOLVED there, kept as that release's record) and the upstream cyrius
+  `CYRIUS_DCE=1` PE defect, which is not ours to close.
+
 ## [2.3.21] — 2026-09-07 — cyrius 6.6.0, and the five defects it surfaced
 
 **Toolchain `6.5.36 → 6.6.0` (38 releases) + bayan `1.5.2 → 1.5.5`**, plus the

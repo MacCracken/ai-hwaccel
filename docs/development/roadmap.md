@@ -649,6 +649,28 @@ setters through the inline-replay path — and every heap struct here is
 - [ ] **Backfill 2.3.14–2.3.20** — this file's last SHIPPED entry before 2.3.21
   was 2.3.13; the CHANGELOG has them, the roadmap does not.
 
+### 2.3.22 — Issue-folder triage (SHIPPED, 2026-09-07)
+
+**Why:** four issues predated the 2.3.21 work and none had been re-checked.
+
+- [x] **`load_models` returned 1 of 26 models** — the scanner brace-matched the
+  `{"models":[…]}` wrapper as a single object. Fixed via option (a) (teach the
+  loader the wrapper; shipped data file unchanged), plus the off-by-one NUL
+  write, the silent truncation, and a bare cwd-relative path where the sibling
+  loader already used `data_file_path()`.
+- [x] **Added `tests/tcyr/model_catalog_test.tcyr`** — asserts against
+  `data/models.json` as shipped. The absence of any test is why the defect
+  survived three releases; `load_models` has no in-repo callers.
+- [x] **Fixed a suite that could not fail** — `json_roundtrip_test.tcyr`
+  discarded `assert_summary()`'s return, so its failures exited 0. `cyrius tests`
+  now exits 1 on a broken assertion; confirmed by sabotage.
+- [x] **Closed three issues on verification** and archived them: `registry_new`
+  collision, `ERR_TIMEOUT` enum collision, and the agnos threading blocker — the
+  last resolved upstream (`lib/thread_agnos.cyr` + `lib/sync.cyr` agnos branches),
+  so no gating was added. `cyrius build --agnos` verified green.
+- [x] **Bench delta:** 0 regressions, 14 neutral, 1 marginal improvement, with a
+  byte-identical `parsing` binary as the in-run noise floor (±2.3%).
+
 ### WASM / JS
 
 - [ ] **JS/TS bindings** — depends on cyrius WASM target (not in

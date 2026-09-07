@@ -133,8 +133,11 @@ fn main() {
     test_roundtrip_cpu_defaults();
     test_from_json_optional_perf_fields();
     test_from_json_malformed();
-    assert_summary();
-    return 0;
+    # 2.3.22: was `assert_summary(); return 0;` — which DISCARDED the failure
+    # count, so `syscall(60, r)` below always exited 0 and a failing assertion
+    # in this unit could never fail `cyrius tests` (it checks exit 0). Every
+    # other unit already propagated it.
+    return assert_summary();
 }
 
 var r = main();

@@ -1,5 +1,11 @@
 # `registry_new` symbol collision — ai-hwaccel × bote-core
 
+> **RESOLVED — verified closed in ai-hwaccel 2.3.22 (2026-09-07).** Re-checked
+> against the tree rather than trusting the note below: `grep -c '^fn registry_new('`
+> over `src/` returns **0**, `hw_registry_new` is defined at `src/registry.cyr:25`,
+> and the only three occurrences of the bare name anywhere in `dist/ai-hwaccel.cyr`
+> are the explanatory comment at `:3629-3633`. No bare `registry_new` code symbol
+> exists, so the bote-core collision is gone. Archived.
 > **RESOLVED on main (2026-07-13), pending version bump.** ai-hwaccel's
 > profile-registry constructor was renamed `registry_new → hw_registry_new`
 > and all four internal callers updated (`src/registry.cyr:20` def +
