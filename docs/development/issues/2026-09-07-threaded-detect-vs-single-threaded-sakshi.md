@@ -1,6 +1,6 @@
 # `registry_detect_threaded` logs through sakshi, which is single-threaded by contract
 
-> **RESOLVED in 2.3.22 (2026-09-07)** via option (2): the four parser sites no
+> **RESOLVED in 2.3.21 (2026-09-07)** via option (2): the four parser sites no
 > longer log. `warnings_log_parse()` (`src/error.cyr`) emits them on the main
 > thread from the merged warnings vec, in both detection paths, filtered to
 > `HWA_ERR_PARSE` so the logged set is byte-identical to before. No detector
@@ -12,7 +12,7 @@
 through the threaded detection API, and only when the log level is raised enough
 for a detector to actually emit.
 **Repos:** ai-hwaccel `2.3.21` · cyrius `6.6.0` (sakshi 2.4.12)
-**Status:** RESOLVED in 2.3.22 — follow-ups noted above. Pre-existing on Linux; **cyrius 6.5.44 extends the exposure to
+**Status:** RESOLVED in 2.3.21 — follow-ups noted above. Pre-existing on Linux; **cyrius 6.5.44 extends the exposure to
 arm64-macOS**, which is what surfaced it.
 
 ## Summary

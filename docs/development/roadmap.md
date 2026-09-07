@@ -603,17 +603,23 @@ setters through the inline-replay path — and every heap struct here is
   `Result` arity gate lives in the vendored `lib/result.cyr`: 1.5.2 + the new
   `lib/` is a hard compile error, 1.5.5 + the old `lib/` compiles and corrupts
   silently. Neither half is landable alone.
-- [x] **No source change.** 623 assertions / 13 units, 6/6 fuzz, vet / lint /
-  fmt / raw-offset guard / distlib determinism clean; CLI output byte-identical
-  between the two binaries.
+- [x] **Five defects fixed** — four repo-side portability bugs (cmd_getenv
+  /proc-only; cache.cyr raw x86_64 mkdir/unlink on aarch64; _monotonic_secs
+  unguarded; detector threads logging through single-threaded sakshi) and one
+  upstream: `CYRIUS_DCE=1` emits a PE that dies with 0xC0000005, so the flag is
+  dropped on the `--win` build only. 623 assertions / 13 units, 6/6 fuzz, vet /
+  lint / fmt / raw-offset guard / distlib all clean.
 - [x] **Bench A/B**, per-arm shadow `CYRIUS_HOME` with a drift guard (both arms
   otherwise resolve the same `cycc` and the A/B measures nothing), 9 interleaved
   build rounds + 40 alternating executions, Mann-Whitney over the distributions.
   **12 wins (2.3%–55.8%), 3 neutral, 0 regressions.** See CHANGELOG /
   bench-history.csv.
-- [x] **Binary size:** x86_64 ELF 419 360 → 214 592 B (**−48.8%**) with
-  `CYRIUS_DCE=1`. PE +7 680 B (+1.6%), aarch64 +24 B — only the x86_64 backend
-  reclaims today; reported rather than averaged away.
+- [x] **Binary size:** x86_64 ELF 419 360 → 214 504 B (**−48.9%**) with
+  `CYRIUS_DCE=1`. PE 497 152 B (now built without DCE), Mach-O arm64 691 808 B,
+  aarch64 673 096 B — only the x86_64 backend reclaims today.
+- [x] **Verified on all four targets**, not just Linux: Windows PE on `cass`
+  (all three `windows-smoke` assertions, real CPU+GPU detection), arm64 macOS on
+  `ecb`, ELF-aarch64 under `qemu-aarch64`, x86_64 Linux native.
 - [x] **Inherited user-visible:** `AI_HWACCEL_LOG` now honoured on the macOS and
   Windows wheels (a silent no-op there since 2.3.8); arm64-macOS threading and
   mutexes become real.
@@ -626,37 +632,22 @@ setters through the inline-replay path — and every heap struct here is
   rewritten and could never fail. Now a sorted content comparison against
   `git show HEAD:cyrius.lock` (sorted because `deps` line order is not stable
   across a clean-tree rebuild); tested in both directions.
-- [x] **All four filed defects fixed in 2.3.21's follow-up, 2.3.22** — see that
+- [x] **All four filed defects fixed in 2.3.21's follow-up, 2.3.21** — see that
   CHANGELOG section. Remaining in each issue: the cross-host / qemu tests that
   would have caught them.
-- [x] **Filed in 2.3.21, fixed in 2.3.22:**
+- [x] **Filed in 2.3.21, fixed in 2.3.21:**
   [`cmd_getenv` is /proc-only](issues/2026-09-07-cmd-getenv-proc-only.md),
   [`_monotonic_secs` unguarded on macOS/Windows](issues/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md),
   [threaded detection logs through single-threaded sakshi](issues/2026-09-07-threaded-detect-vs-single-threaded-sakshi.md),
   [`cache.cyr` raw syscalls wrong on aarch64](issues/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md).
+- [x] **`cmd_getenv` -> stdlib `getenv`** — `AI_HWACCEL_DATA_DIR`, `$PATH`
+- [x] **`cache.cyr` mkdir/unlink via per-target `sys_*` peers** — disk cache
+- [x] **`_monotonic_secs` target-branched** — cache TTL is no longer an
+- [x] **Parse-warning logging hoisted to the main thread** — closes the sakshi
+- [x] **Bench delta** — 0 algorithmic regressions; one layout-attributable
+- [ ] **Still open:** qemu-aarch64 disk-cache test, threaded path on real Apple
 - [ ] **Backfill 2.3.14–2.3.20** — this file's last SHIPPED entry before 2.3.21
   was 2.3.13; the CHANGELOG has them, the roadmap does not.
-
-### 2.3.22 — The four portability defects (SHIPPED, 2026-09-07)
-
-**Why:** 2.3.21's bump surfaced four pre-existing host assumptions with no
-target guard. Each changes behaviour on a shipped target, so none belonged in a
-toolchain bump.
-
-- [x] **`cmd_getenv` -> stdlib `getenv`** — `AI_HWACCEL_DATA_DIR`, `$PATH`
-  lookup and `NVIDIA_VISIBLE_DEVICES` now work on macOS and Windows.
-- [x] **`cache.cyr` mkdir/unlink via per-target `sys_*` peers** — disk cache
-  works on aarch64; measured under qemu (`-9` -> `0`, directory created).
-- [x] **`_monotonic_secs` target-branched** — cache TTL is no longer an
-  uninitialised stack read on macOS/Windows.
-- [x] **Parse-warning logging hoisted to the main thread** — closes the sakshi
-  data race in `registry_detect_threaded`; logged set byte-identical.
-- [x] **Bench delta** — 0 algorithmic regressions; one layout-attributable
-  ~+1.8% on `parse_cuda_8gpu`, proven not to come from the changed function and
-  reproduced by a semantically-null control. Binary −88 B.
-- [ ] **Still open:** qemu-aarch64 disk-cache test, threaded path on real Apple
-  Silicon, cross-host env-var re-test. The suite still only covers x86_64 Linux,
-  single-threaded — which is why all four survived this long.
 
 ### WASM / JS
 

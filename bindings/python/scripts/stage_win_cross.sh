@@ -45,7 +45,30 @@ mkdir -p "$BIN_DIR/data"
 # Drop any stray native ELF so the win_amd64 wheel bundles only the EXE
 # (CI checkouts start clean; this matters for local back-to-back builds).
 rm -f "$BIN_DIR/ai-hwaccel"
-CYRIUS_DCE=1 cyrius build --win src/main.cyr "$BIN_DIR/ai-hwaccel.exe"
+
+# ⛔ NO `CYRIUS_DCE=1` ON THE PE TARGET. Under cyrius 6.6.0 it produces a
+# binary that dies on startup with 0xC0000005 (STATUS_ACCESS_VIOLATION) —
+# which Git Bash on the windows-latest runner reports as exit 139, failing
+# the `windows-smoke` job's very first assertion.
+#
+# Measured on cass (Windows 11), same source, same toolchain, flag the only
+# difference:
+#
+#     cyrius build --win                 -> exit 0, 499 bytes of registry JSON
+#     CYRIUS_DCE=1 cyrius build --win    -> exit -1073741819 (0xC0000005), no output
+#
+# It is PE-specific: `CYRIUS_DCE=1` is correct on x86_64 ELF (where 6.5.72
+# made it genuinely reclaim, halving that binary) and on ELF-aarch64 (run
+# under qemu-aarch64, exit 0). Only the PE backend eliminates something
+# reachable. Note the flag buys nothing here anyway — the PE is 497,152
+# bytes with or without it; DCE reports "244,277 bytes eliminated" and the
+# file does not shrink, which is itself the smell.
+#
+# Upstream defect, not ours — the toolchain is not this repo's to patch.
+# Filed as docs/development/issues/2026-09-07-cyrius-dce-pe-access-violation.md.
+# Restore the flag once a cyrius release fixes it AND the windows-smoke job
+# passes with it on.
+cyrius build --win src/main.cyr "$BIN_DIR/ai-hwaccel.exe"
 
 # A PE32+ starts with "MZ"; sanity-check we didn't capture an error.
 if [ "$(head -c2 "$BIN_DIR/ai-hwaccel.exe")" != "MZ" ]; then

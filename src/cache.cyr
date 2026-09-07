@@ -10,7 +10,7 @@
 # Monotonic clock → whole seconds. Used only for TTL expiry, so second
 # resolution is enough and a monotonic-since-boot source is fine.
 #
-# 2.3.22: this was a bare `syscall(228, 1, &ts); return load64(&ts);` with NO
+# 2.3.21: this was a bare `syscall(228, 1, &ts); return load64(&ts);` with NO
 # target guard, and the Linux assumption baked into it holds on exactly one
 # target. cyrius `lib/chrono.cyr` documents the divergence, and this mirrors
 # its branches rather than re-deriving them:
@@ -210,7 +210,7 @@ fn disk_cached_get(c) {
         str_builder_add_cstr(dir_sb, home);
         str_builder_add_cstr(dir_sb, "/.cache/ai-hwaccel");
         var dir_s = str_builder_build(dir_sb);
-        # 2.3.22: was `syscall(83, ..., 493)` — the x86_64 SYS_MKDIR number,
+        # 2.3.21: was `syscall(83, ..., 493)` — the x86_64 SYS_MKDIR number,
         # unguarded. ELF-aarch64 has no mkdir syscall at all (only mkdirat 34),
         # and cyrius does not remap 83, so on that target this returned -9
         # (EBADF) and the cache directory was never created — measured under
@@ -245,7 +245,7 @@ fn disk_cached_invalidate(c) {
     mutex_unlock(mtx);
     # Remove disk cache
     var path = disk_cached_cache_path(c);
-    # 2.3.22: was `syscall(87, path)` — the x86_64 SYS_UNLINK number. On
+    # 2.3.21: was `syscall(87, path)` — the x86_64 SYS_UNLINK number. On
     # ELF-aarch64 that is not unlink (only unlinkat 35 exists) and it returned
     # -14 (EFAULT), so the cache file was never removed. See the mkdir note.
     #ifdef CYRIUS_TARGET_AGNOS

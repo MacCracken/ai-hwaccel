@@ -1,6 +1,6 @@
 # `src/cache.cyr` raw `syscall(83)` / `syscall(87)` are not mkdir/unlink on ELF-aarch64 — the disk cache silently does nothing there
 
-> **RESOLVED in 2.3.22 (2026-09-07).** Both call sites now use the per-target
+> **RESOLVED in 2.3.21 (2026-09-07).** Both call sites now use the per-target
 > `sys_mkdir` / `sys_unlink` peers behind the `read_symlink` `#ifdef` pattern,
 > with the AGNOS pathlen arity handled separately. Re-measured under
 > `qemu-aarch64`: `old syscall(83) = -9` -> `new sys_mkdir = 0`, directory
@@ -10,7 +10,7 @@
 **Severity:** Medium — `DiskCachedRegistry` never creates its directory and never
 removes its cache file on aarch64. Silent: no crash, no diagnostic, no warning.
 **Repos:** ai-hwaccel `2.3.21` · cyrius `6.6.0`
-**Status:** RESOLVED in 2.3.22 — follow-ups noted above. **Pre-existing** — identical under the 6.5.36 pin, not caused by
+**Status:** RESOLVED in 2.3.21 — follow-ups noted above. **Pre-existing** — identical under the 6.5.36 pin, not caused by
 the bump. Kept out of a toolchain-bump release deliberately.
 
 ## Summary

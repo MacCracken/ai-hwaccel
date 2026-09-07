@@ -169,12 +169,13 @@ jobs:
           test -z "$derr" || { echo "FAIL: stderr not silent at default level:"; printf '%s\n' "$derr"; exit 1; }
           echo 'OK logging'
       - name: (c) --version resolves the bundled VERSION on PE
-        # Confirms the wheel layout's data_file_path resolution on PE. NB: on
-        # PE, AI_HWACCEL_DATA_DIR is unreadable (cmd_getenv reads
-        # /proc/self/environ, absent on Windows), so data_file_path falls back
-        # to cwd-relative — run from the _bin/ dir, where the wheel co-locates
-        # VERSION beside the EXE. Asserts --version reports the bundled
-        # version (not "unknown").
+        # Confirms the wheel layout's data_file_path resolution on PE. Run
+        # from the _bin/ dir, where the wheel co-locates VERSION beside the
+        # EXE, and assert --version reports the bundled version (not
+        # "unknown"). NB: AI_HWACCEL_DATA_DIR IS readable on PE as of 2.3.21
+        # (cmd_getenv delegates to the stdlib getenv, which calls the 0xF015
+        # GetEnvironmentVariableA reroute) — verified on cass. It was a silent
+        # no-op there before, which is what this comment used to describe.
         run: |
           set -euo pipefail
           expected="$(tr -d ' \t\r\n' < VERSION)"

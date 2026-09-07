@@ -14,7 +14,7 @@ var CMD_MAX_DEVICE_ID = 1024;
 # Read an environment variable. Returns a null-terminated string, or 0 if
 # unset.
 #
-# 2.3.22: this was a local /proc/self/environ reader, added long ago to work
+# 2.3.21: this was a local /proc/self/environ reader, added long ago to work
 # around an io.cyr getenv bug (variable re-declaration in a loop). That bug is
 # gone, and cyrius 6.6.0 made the stdlib `getenv` correct on every target
 # ai-hwaccel ships to — it derives envp from the init stack on macOS
@@ -38,7 +38,7 @@ fn cmd_getenv(name) {
 # Self-contained (argv/argc/streq, no dependency on main.cyr's parser) so
 # it works on PE: argv is populated from GetCommandLineW/CommandLineToArgvW
 # (cyrius PE reroutes 0xF006/0xF010). Environment variables are readable on PE
-# too as of 2.3.22 (cmd_getenv now delegates to the stdlib getenv, which calls
+# too as of 2.3.21 (cmd_getenv now delegates to the stdlib getenv, which calls
 # the 0xF015 GetEnvironmentVariableA reroute), so the flag is no longer the
 # ONLY channel there — it remains the preferred one because it is explicit and
 # needs no environment plumbing through the Python runner.
@@ -66,7 +66,7 @@ fn cmd_data_dir_arg() {
 #      Windows PE, because argv is readable there. This is the portable
 #      channel a consumer (Python _runner now, agnos later) should use.
 #   2. AI_HWACCEL_DATA_DIR env var — honoured on **every target** as of
-#      2.3.22. It was a silent no-op on macOS and Windows through 2.3.21
+#      2.3.21. It was a silent no-op on macOS and Windows through 2.3.21
 #      because `cmd_getenv` read /proc/self/environ, which neither has; it
 #      now delegates to the stdlib `getenv`. The flag still supersedes it
 #      where both are present.
