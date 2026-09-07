@@ -47,23 +47,51 @@ jobs:
         run: cyrius lib sync
 
       - name: Resolve non-stdlib deps
-        # `cyrius deps` resolves any `[deps.<name>]` git entries (none
-        # today — ai-hwaccel is stdlib-only). Kept in place so the gate
-        # engages automatically the day a git dep is added.
-        run: cyrius deps || echo "no non-stdlib deps to resolve"
+        # `cyrius deps` resolves the `[deps.<name>]` git entries. Since
+        # 2.3.19 there is exactly one: `[deps.bayan]`, the focused
+        # `dist/bayan-json.cyr` sublib, `optional = true` and activated
+        # for THIS repo by `[features] default = ["bayan"]` (a downstream
+        # build that does not name `bayan` skips it entirely). This step
+        # is load-bearing, not a placeholder — src/json_out.cyr's seven
+        # `bayan_json_v_*` call sites do not link without it.
+        run: cyrius deps
 
       - name: Verify dep hashes
-        # `cyrius.lock` records the hash of each [deps.<git>] entry —
-        # ai-hwaccel is stdlib-only (no external git deps), so cyrius
-        # deps emits no lockfile and there is nothing to verify. The
-        # check stays in place so it engages automatically the day a
-        # git dep gets added.
+        # `cyrius.lock` pins the bayan commit and a SHA-256 for each of
+        # the 46 vendored lib files.
+        #
+        # ⚠ `cyrius deps --verify` ALONE CANNOT CATCH A STALE COMMITTED
+        # LOCK IN THIS JOB, because the step above already rewrote it.
+        # Measured on 2026-09-07 (ai-hwaccel 2.3.21): corrupt a hash in
+        # cyrius.lock, run `cyrius deps` then `cyrius deps --verify` and
+        # you get "46 verified, 0 failed" — `deps` silently repaired the
+        # file first. Run standalone against this release's pre-bump lock
+        # it correctly reports "30 verified, 15 failed", exit 1. So the
+        # hash check below is a lib/-integrity assertion, NOT a
+        # lock-drift gate.
+        #
+        # The drift gate is the SORTED comparison below: if what `cyrius
+        # deps` just wrote differs in CONTENT from the committed lock,
+        # the commit shipped a stale one. Same shape as the distlib-drift
+        # gate.
+        #
+        # ⚠ Compared SORTED, and that is not cosmetic. `cyrius deps`
+        # emits the hash lines in hash-map iteration order, which is
+        # stable for repeated runs over an existing ./lib/ but NOT across
+        # a clean-tree `lib sync` + `deps` — exactly what this job does.
+        # A plain `git diff --exit-code cyrius.lock` here goes red on line
+        # order alone. Verified 2026-09-07: five successive `deps` runs
+        # byte-identical, one clean rebuild reordered 6 lines.
         run: |
-          if [ -f cyrius.lock ]; then
-            cyrius deps --verify
-          else
-            echo "no cyrius.lock (stdlib-only project) — nothing to verify"
+          cyrius deps --verify
+          git show HEAD:cyrius.lock | sort > /tmp/lock.committed
+          sort cyrius.lock > /tmp/lock.current
+          if ! diff -u /tmp/lock.committed /tmp/lock.current; then
+            echo "FAIL: cyrius.lock is stale — 'cyrius deps' produced different content."
+            echo "Run 'cyrius lib sync && cyrius deps' locally and commit cyrius.lock."
+            exit 1
           fi
+          echo "cyrius.lock is current (46 entries, content-compared)."
 
       - name: Include-graph audit
         # `cyrius vet` walks every `include` from src/main.cyr and

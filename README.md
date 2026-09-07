@@ -12,9 +12,9 @@ decide how to quantize and shard a model across them.
 
 | Metric | Value |
 |--------|-------|
-| Binary size | **286 KB** |
-| Compiler | Cyrius cycc 6.0.0 |
-| Tests | 590 assertions (12 test units) |
+| Binary size | **210 KB** (`CYRIUS_DCE=1`) |
+| Compiler | Cyrius cycc 6.6.0 |
+| Tests | 623 assertions (13 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** |
 | Hardware families | 18 |
@@ -140,7 +140,7 @@ src/
 ├── units.cyr               Named constants for unit conversions
 ├── error.cyr               Warning/error types
 ├── system_io.cyr           Interconnects, storage, runtime environment
-└── detect/                 Hardware detection (19 modules)
+└── detect/                 Hardware detection (20 modules)
     ├── cuda.cyr             NVIDIA via nvidia-smi
     ├── rocm.cyr             AMD via sysfs
     ├── apple.cyr            Metal + ANE via system_profiler
@@ -201,13 +201,14 @@ If a tool or sysfs path is absent the accelerator simply isn't registered — no
 ## Development
 
 ```sh
-cyrius deps                                    # Repopulate lib/ from version-pinned stdlib
-cyrius build src/main.cyr build/ai-hwaccel    # Build (≈286 KB ELF, x86_64)
+cyrius lib sync                                # Repopulate lib/ from the version-pinned stdlib snapshot
+cyrius deps                                    # Resolve non-stdlib [deps.*] entries (bayan)
+CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # Build (≈210 KB ELF, x86_64)
 cyrius vet src/main.cyr                        # Include-graph audit
 cyrius lint src/main.cyr                       # Static analysis
 cyrius fmt src/main.cyr                        # Format check (diff against committed)
 
-# Test suite — 12 units under tests/tcyr/, 590 assertions total
+# Test suite — 13 units under tests/tcyr/, 623 assertions total
 for t in tests/tcyr/*.tcyr; do
     cyrius build "$t" "/tmp/$(basename $t .tcyr)"
     "/tmp/$(basename $t .tcyr)"

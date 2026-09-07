@@ -1,10 +1,18 @@
 # Build artifacts
 /build/
+# `[build] output = "ai-hwaccel"` puts a bare binary in the repo root when a
+# command compiles without an explicit output path (e.g. `cyrius distlib`,
+# which builds to verify). It has been committed by accident before — see
+# "rm erroneous bin".
+/ai-hwaccel
 
-# Vendored stdlib — repopulated by `cyrius deps` from the
-# version-pinned snapshot in cyrius.cyml [deps] stdlib. Keeping
-# this out of the repo prevents stale stubs from a prior cyrius
-# version sitting in tree (matches agnosys/libro/patra convention).
+# Vendored stdlib — repopulated by `cyrius lib sync` from the
+# version-pinned snapshot named by cyrius.cyml [package].cyrius,
+# filtered to the [deps] stdlib subset. (`cyrius deps` handles the
+# non-stdlib [deps.*] git entries only; the "stdlib via deps" path
+# was retired in cyrius 6.0.0.) Keeping this out of the repo prevents
+# stale stubs from a prior cyrius version sitting in tree (matches
+# agnosys/libro/patra convention).
 /lib/
 
 # Editor / IDE

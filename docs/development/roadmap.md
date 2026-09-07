@@ -588,6 +588,55 @@ global symbols, promoting a pre-existing collision to an in-tree warning.
   `bench_report` units (`19.460us`) — the old grep captured the fractional
   digits and would have written garbage µs rows from here on.
 
+### 2.3.21 — Toolchain bump to cyrius 6.6.0 + bayan 1.5.5 (SHIPPED, 2026-09-07)
+
+**Why:** 38 upstream releases (6.5.36 → 6.6.0). Two of them land directly on
+ai-hwaccel's shape: 6.5.72 makes `CYRIUS_DCE=1` actually eliminate dead code
+instead of NOP-padding it, and 6.5.71 routes `#derive(accessors)` getters and
+setters through the inline-replay path — and every heap struct here is
+`#derive(accessors)`.
+
+- [x] **Pin 6.5.36 → 6.6.0**, `./lib/` re-synced (38 declared leaves, 16 files
+  changed) and `cyrius.lock` regenerated (45 → 46 entries; `lib/hashseed.cyr`
+  arrives via `cyrius deps`, not `lib sync`). Drift warning cleared.
+- [x] **bayan `1.5.2` → `1.5.5`** — forced, and atomic with the pin. The
+  `Result` arity gate lives in the vendored `lib/result.cyr`: 1.5.2 + the new
+  `lib/` is a hard compile error, 1.5.5 + the old `lib/` compiles and corrupts
+  silently. Neither half is landable alone.
+- [x] **No source change.** 623 assertions / 13 units, 6/6 fuzz, vet / lint /
+  fmt / raw-offset guard / distlib determinism clean; CLI output byte-identical
+  between the two binaries.
+- [x] **Bench A/B**, per-arm shadow `CYRIUS_HOME` with a drift guard (both arms
+  otherwise resolve the same `cycc` and the A/B measures nothing), 9 interleaved
+  build rounds + 40 alternating executions, Mann-Whitney over the distributions.
+  **12 wins (2.3%–55.8%), 3 neutral, 0 regressions.** See CHANGELOG /
+  bench-history.csv.
+- [x] **Binary size:** x86_64 ELF 419 360 → 214 592 B (**−48.8%**) with
+  `CYRIUS_DCE=1`. PE +7 680 B (+1.6%), aarch64 +24 B — only the x86_64 backend
+  reclaims today; reported rather than averaged away.
+- [x] **Inherited user-visible:** `AI_HWACCEL_LOG` now honoured on the macOS and
+  Windows wheels (a silent no-op there since 2.3.8); arm64-macOS threading and
+  mutexes become real.
+- [x] **Doc rot cleared** where the bump made a claim false — README key numbers
+  and the retired `cyrius deps` recipe, CLAUDE.md pins and counts, ci.yml's
+  "stdlib-only, nothing to verify" comments, `.gitignore`, CONTRIBUTING and
+  docs/guides/testing.md counts.
+- [x] **Repaired the `cyrius.lock` drift gate** — `cyrius deps` ran before
+  `cyrius deps --verify`, so verify only ever checked the file it had just
+  rewritten and could never fail. Now a sorted content comparison against
+  `git show HEAD:cyrius.lock` (sorted because `deps` line order is not stable
+  across a clean-tree rebuild); tested in both directions.
+- [ ] **Filed, not fixed** (each needs its own version + benchmark delta):
+  [`cmd_getenv` is /proc-only](issues/2026-09-07-cmd-getenv-proc-only.md),
+  [`_monotonic_secs` unguarded on macOS/Windows](issues/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md),
+  [threaded detection logs through single-threaded sakshi](issues/2026-09-07-threaded-detect-vs-single-threaded-sakshi.md),
+  [`cache.cyr` raw syscalls wrong on aarch64](issues/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md).
+- [x] **Full audit written up** —
+  [2026-09-07-cyrius-6.6.0-audit.md](2026-09-07-cyrius-6.6.0-audit.md): method,
+  142 findings, what was dismissed and why, coverage limits.
+- [ ] **Backfill 2.3.14–2.3.20** — this file's last SHIPPED entry before 2.3.21
+  was 2.3.13; the CHANGELOG has them, the roadmap does not.
+
 ### WASM / JS
 
 - [ ] **JS/TS bindings** — depends on cyrius WASM target (not in

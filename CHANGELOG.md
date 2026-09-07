@@ -5,6 +5,241 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.21] — 2026-09-07 — cyrius 6.6.0: the binary halves and the derived accessors inline
+
+**Toolchain bump `6.5.36 → 6.6.0` (38 releases) + bayan `1.5.2 → 1.5.5`.**
+**Not one line of `.cyr` logic changed** — 623 assertions across 13 units, 6/6
+fuzz harnesses, `vet` / `lint` / `fmt --check` / raw-offset guard / distlib
+determinism all clean, and `--summary`, `--table` and full-registry JSON output
+are **byte-identical** between the 6.5.36 and 6.6.0 binaries on the same
+machine. Everything below is inherited.
+
+Two of those inherited changes are large. `CYRIUS_DCE=1` — which CI, the release
+job and every wheel-staging script already pass — **finally eliminates dead code
+instead of NOP-padding it** (cyrius 6.5.72), halving the shipped x86_64 binary.
+And `#derive(accessors)` getters/setters now route through the inline-replay
+path (6.5.71), which lands on exactly ai-hwaccel's shape: all 16 heap structs
+are `#derive(accessors)`, and the registry benchmarks are close to pure accessor
+traffic. Twelve of fifteen benchmarks improve, three are neutral, **none
+regress**.
+
+### Changed
+
+- **cyrius pin `6.5.36` → `6.6.0`** (`cyrius.cyml`). `./lib/` (gitignored)
+  re-synced: `cyrius lib sync` copies the 38 declared `[deps].stdlib` leaves,
+  of which **16 files change**; `cyrius deps` then pulls the transitive leaf
+  **`lib/hashseed.cyr`** (new in 6.5.39, required by the declared `hashmap`
+  leaf), taking `./lib/` from 45 to 46 files. `lib sync` alone now leaves the
+  tree incomplete — the `CLAUDE.md` vendoring principle was corrected to say so.
+- **`cyrius.lock` regenerated** — 45 → 46 hashed entries, 16 stdlib hashes
+  rotated, bayan commit `b4cb1d8` → `c0500d9`. Format unchanged.
+- **`[deps.bayan]` tag `1.5.2` → `1.5.5`.** This is **forced, not cosmetic, and
+  atomic with the pin.** The arity gate lives in the *vendored* `lib/result.cyr`,
+  not in `cycc`: once `./lib/` is re-synced, `Result` is declared `: stack` and
+  bayan 1.5.2's single-variable binds of `file_open_r` / `file_read_r` inside
+  `bayan_json_parse_file_r` are hard compile errors. The failure is loud in that
+  direction and **silent in the other** — bayan 1.5.5 against the old 6.5.36
+  `lib/` compiles clean while destructuring a heap pointer into a (tag, payload)
+  pair, i.e. garbage. Neither half is landable alone.
+- **No source change.** `src/detect/command.cyr` carries comment-only
+  corrections (below); the rebuilt binary is byte-for-byte identical to the one
+  built before them, so the edit is codegen-neutral by construction.
+- **`dist/ai-hwaccel.cyr`** regenerated (version header + the `command.cyr`
+  comments). `dist/ai-hwaccel.deps` unchanged at 18 stdlib leaves.
+
+### Inherited — user-visible behaviour
+
+- **`AI_HWACCEL_LOG` now works on the macOS and Windows wheels.** `src/log.cyr`
+  reads it through the stdlib `getenv`, whose `_env_load` opened
+  `/proc/self/environ` unconditionally — so on macOS and Windows it returned 0
+  for **every** name and the variable had been a silent no-op since 2.3.8
+  shipped it. cyrius 6.5.45 derives `envp` from the init stack on macOS and
+  calls the PE `GetEnvironmentVariableA` reroute (`0xF015`) on Windows.
+  `AI_HWACCEL_DATA_DIR` is **not** fixed by this — it goes through ai-hwaccel's
+  own `/proc`-only `cmd_getenv`; see *Filed, not fixed*.
+- **arm64-macOS detection becomes genuinely parallel.** Through 6.5.43, Darwin
+  `thread_create` ran the thread body *inline* and `thread_join` was a no-op, so
+  `registry_detect_threaded` returned correct answers one backend at a time.
+  6.5.44 wires real Darwin pthreads plus a blocking `__ulock` mutex — which also
+  replaces the bare spinlock `cached_registry` was taking on that target. The
+  logger caveat this exposes is filed, not fixed (below).
+- **sakshi `2.4.11` → `2.4.12`** — `sakshi_span_enter` gained a negative-depth
+  guard, clamping to 0 before computing the span-stack write offset. The only
+  body change in sakshi across the two snapshots, and the only one on the Linux
+  path; `src/log.cyr` exercises it. Measured neutral.
+
+### Performance
+
+**Method.** Source is byte-identical in both arms, so this is the pure
+toolchain + stdlib + dep delta. Each arm was built under its **own** shadow
+`CYRIUS_HOME` with a hard guard that aborts on a toolchain-drift warning —
+without it both arms resolve `cycc` through `~/.cyrius/bin` (a symlink to the
+newest install) and the A/B silently measures nothing but the stdlib swap. Nine
+interleaved build rounds per arm, then 40 alternating executions of the two
+fixed binaries; the table reports median of the 40 `bench_avg_ns` samples with a
+two-sided Mann-Whitney p over the full distributions. Non-DCE build, matching
+`scripts/bench-history.sh`.
+
+_Registry_
+
+| benchmark | 6.5.36 | 6.6.0 | Δ | p |
+|---|---:|---:|---:|---:|
+| `best_available_13dev`   |    364 ns |    161 ns | **−55.8%** | 0.0000 |
+| `total_memory_13dev`     |    136 ns |     82 ns | **−39.5%** | 0.0000 |
+| `has_accelerator_13dev`  |     27 ns |     17 ns | **−37.0%** | 0.0000 |
+| `plan_70B_bf16_4gpu`     |  1 780 ns |  1 382 ns | **−22.4%** | 0.0000 |
+| `count_family_gpu_13dev` |    284 ns |    231 ns | **−18.7%** | 0.0000 |
+| `json_summary_13dev`     |  3 272 ns |  2 968 ns | **−9.3%**  | 0.0000 |
+| `json_system_io`         |  4 956 ns |  4 788 ns | **−3.4%**  | 0.0000 |
+| `json_serialize_13dev`   | 22 195 ns | 21 474 ns | **−3.3%**  | 0.0000 |
+| `json_plan`              | 16 594 ns | 16 131 ns | **−2.8%**  | 0.0016 |
+| `json_training`          |  2 346 ns |  2 336 ns | neutral (−0.4%) | 0.26 |
+
+_Parsing_
+
+| benchmark | 6.5.36 | 6.6.0 | Δ | p |
+|---|---:|---:|---:|---:|
+| `parse_neuron_2dev`  |  1 650 ns |  1 564 ns | **−5.2%** | 0.0000 |
+| `parse_vulkan_2gpu`  |  2 676 ns |  2 572 ns | **−3.9%** | 0.0001 |
+| `parse_cuda_8gpu`    | 14 070 ns | 13 746 ns | **−2.3%** | 0.0001 |
+| `detect_gguf`        |    133 ns |    128 ns | neutral (−3.8%) | 0.50 |
+| `detect_safetensors` |    534 ns |    526 ns | neutral (−1.6%) | 0.28 |
+
+**12 wins (2.3%–55.8%), 3 neutral, 0 regressions.** The three neutral rows are
+the ones that sit at or under the measured timer floor (1.34 µs per clock read,
+subtracted from every sample) — `detect_gguf` and `best_available_13dev` both
+report `min=0`, so their per-sample resolution is quantisation, not signal;
+`best_available` only clears the floor at the median. The attribution is clean:
+a control A/B holding `cycc` at 6.6.0 and swapping **only** the stdlib and bayan
+is neutral on all fifteen, so the whole win is codegen.
+
+CSV audit trail: `bench-history.csv` (15 rows appended at `2026-09-07T15:54:00Z`).
+
+### Binary size
+
+`CYRIUS_DCE=1`, `src/main.cyr`, both arms built from the published release
+tarballs so the cross-compilers match CI rather than a local install:
+
+| target | 6.5.36 | 6.6.0 | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF (Linux)      | 419 360 B | **214 592 B** | **−204 768 B (−48.8%)** |
+| x86_64 PE (Windows)     | 489 984 B |   497 664 B | +7 680 B (+1.6%) |
+| aarch64 ELF             | 673 160 B |   673 184 B | +24 B (+0.004%) |
+
+Only the x86_64 ELF backend actually reclaims the dead code today; PE and
+aarch64 are within a rounding error of where they were, and the PE growth is
+reported here rather than averaged away. Without `CYRIUS_DCE=1` the Linux binary
+goes 419 360 → 427 584 B (+2.0%) — the 6.6.0 stdlib is simply bigger, which is
+exactly why the elimination fix matters.
+
+### Fixed — a CI gate that could not fail
+
+- **The `cyrius.lock` drift gate was dead**, and this release is exactly the kind
+  of commit it exists to catch. `.github/workflows/ci.yml` runs `cyrius deps`
+  and then `cyrius deps --verify` — but `deps` **rewrites the lockfile**, so
+  verify only ever checks the file it just wrote. Measured: corrupt a hash, run
+  the two in CI order, get `46 verified, 0 failed` and a silently repaired file;
+  run verify alone against this release's pre-bump lock and get
+  `30 verified, 15 failed`, exit 1.
+
+  The step now compares the regenerated lock against `git show HEAD:cyrius.lock`.
+  **Sorted**, and that is not cosmetic: `cyrius deps` emits hash lines in
+  hash-map iteration order, stable across repeated runs over an existing `lib/`
+  but **not** across the clean-tree `lib sync` + `deps` that CI actually does (5
+  successive runs byte-identical; one clean rebuild reordered 6 lines). A plain
+  `git diff --exit-code` here would have gone red on line order alone. The gate
+  was tested both ways: passes on a reordering clean rebuild, fails with 35
+  differing lines on the pre-bump lock. The `|| echo` that was masking `cyrius
+  deps`' exit code is also gone.
+
+### Fixed — documentation that the bump made false
+
+- **`src/detect/command.cyr`** — three comment blocks explained the
+  `AI_HWACCEL_DATA_DIR` limitation as "cyrius exposes no `GetEnvironmentVariable`
+  reroute" and claimed the variable was "honoured on Linux/macOS". Both are
+  wrong: cyrius routes `0xF015` and, since 6.5.45, the stdlib `getenv` calls it;
+  and macOS has no `/proc` either, so `cmd_getenv` never worked there. Corrected
+  to name the real cause — ai-hwaccel's own `/proc`-only reader — and to say
+  **Linux only**.
+- **`.github/workflows/ci.yml`** — the "Resolve non-stdlib deps" and "Verify dep
+  hashes" steps still described ai-hwaccel as "stdlib-only (no external git
+  deps)" with "nothing to verify". Both have been false since 2.3.19; the second
+  described a live 46-hash gate as a dormant placeholder.
+- **`.gitignore`** — the `lib/` note named the retired `cyrius deps` stdlib
+  path. Also now ignores the bare `/ai-hwaccel` binary that `[build] output`
+  drops in the repo root whenever a command compiles without an explicit
+  output path (`cyrius distlib` does), which has been committed by accident
+  before.
+- **`CLAUDE.md`** — compiler pin (`6.5.2 as of 2.3.16` → `6.6.0 as of 2.3.21`),
+  the second stale pin in the vendoring principle (`6.2.x / 6.2.11`), the
+  now-removed `cc5` alias, and the counts (`590 assertions, 20 benchmarks` →
+  measured **623 assertions across 13 units, 15 benchmarks in 2 suites**).
+- **`README.md`** — binary size (`286 KB` → `210 KB`, matching neither arm
+  before), compiler (`6.0.0` → `6.6.0`), test counts, `detect/` module count
+  (19 → 20), and the development recipe, which told a fresh clone to run
+  `cyrius deps` to repopulate `lib/` — a path retired in cyrius 6.0.0.
+- **`CONTRIBUTING.md`, `docs/guides/testing.md`** — `518 assertions (11 test
+  phases)` → `623 assertions (13 test units)`, and `cyrius test` → `cyrius tests`.
+
+### Filed, not fixed
+
+Four defects surfaced by the audit. None are caused by this bump and none are
+in a toolchain-bump release's scope — each changes behaviour on a shipped target
+and gets its own version and its own benchmark delta:
+
+- [`cmd-getenv-proc-only`](docs/development/issues/2026-09-07-cmd-getenv-proc-only.md)
+  — `AI_HWACCEL_DATA_DIR` is a silent no-op on macOS **and** Windows, because
+  `cmd_getenv` reads `/proc/self/environ`. Now trivially fixable by delegating
+  to the repaired stdlib `getenv`. `--data-dir` remains the portable channel.
+- [`monotonic-secs-unguarded-on-macos-windows`](docs/development/issues/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md)
+  — `src/cache.cyr`'s `_monotonic_secs()` issues a bare `syscall(228, 1, &ts)`.
+  On macOS the route *returns* the ns count (and Darwin's monotonic id is 6, not
+  1); on Windows it returns ms from `GetTickCount64`. Neither fills `&ts`, so
+  the function returns an uninitialised stack read and cache TTL expiry is
+  undefined on both.
+- [`threaded-detect-vs-single-threaded-sakshi`](docs/development/issues/2026-09-07-threaded-detect-vs-single-threaded-sakshi.md)
+  — `_detect_thread_entry` calls detectors that log, and sakshi is
+  single-threaded by contract on the default stderr target. Live on Linux for as
+  long as the threaded API has existed; 6.5.44 extends it to arm64-macOS.
+- [`cache-raw-syscalls-wrong-on-aarch64`](docs/development/issues/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md)
+  — `src/cache.cyr` issues raw **x86_64** `syscall(83)` / `syscall(87)` for
+  mkdir/unlink. ELF-aarch64 has neither (only `mkdirat` 34 / `unlinkat` 35) and
+  cyrius does not remap those two, so the disk cache silently never creates its
+  directory and never removes its file. Measured under `qemu-aarch64`:
+  `mkdir(83)=-9  unlink(87)=-14`, no directory — against `mkdir(83)=0`, directory
+  created, on x86_64. `CYRIUS_DCE=1` eliminates the disk-cache API from the CLI
+  binary, so **the shipped executable is unaffected on every platform**; the
+  exposure is library consumers of `dist/ai-hwaccel.cyr` on aarch64. 6.5.51's new
+  raw-syscall diagnostic excludes 83/87, so the build log stays quiet.
+
+The full audit — method, the 142 findings, what was dismissed and why, and the
+coverage limits — is in
+[`docs/development/2026-09-07-cyrius-6.6.0-audit.md`](docs/development/2026-09-07-cyrius-6.6.0-audit.md).
+
+### Notes
+
+- **The `Result` / `Option` / `Either` value form is a no-op for this repo.**
+  6.6.0's headline breaking change — construction returns a `(tag, payload)`
+  register pair, `payload()` and `tagged_new()` deleted, `result_unwrap` /
+  `err_code_of` / `result_print` / `unwrap` / `unwrap_or` gaining the tag
+  argument — touches nothing in `src/`, `tests/`, `benches/` or `fuzz/`: the
+  repo calls none of that surface. It reaches ai-hwaccel only through bayan,
+  which is why the dep bump is mandatory rather than optional.
+- **Consumers**: mostly nothing to do. `dist/ai-hwaccel.cyr` exports the same
+  symbols with the same arities; the seven `bayan_json_v_*` calls in
+  `json_out.cyr` are byte-identical between bayan 1.5.2 and 1.5.5. Two caveats:
+  a consumer that **calls `profile_from_json_str`** must now build with a
+  6.6.0-class toolchain and supply a value-form bayan (1.5.5), in the same commit
+  — one that never calls it is unaffected, since the symbols are unreachable and
+  eliminated. And a consumer pinned in **cyrius 6.5.50–6.5.55** should move off
+  that band before building this bundle: those releases miscompile
+  prefix-colliding identifiers (a shorter identifier that prefixes a longer one
+  in the same bucket took the wrong pool offset — exit 0, no diagnostic).
+  ai-hwaccel never pinned inside it, going 6.5.36 → 6.6.0 directly, so this is
+  inherited risk rather than anything this repo introduced.
+- **`docs/benchmarks-rust-v-cyrius.md` is left as-is** — it is a dated
+  Rust-vs-Cyrius record from v2.0.0, not a live claim about this tree.
+
 ## [2.3.20] — 2026-08-30 — the focused bayan dep no longer leaks into consumers
 
 2.3.19 replaced the 641 KB bayan monolith with the focused 100 KB

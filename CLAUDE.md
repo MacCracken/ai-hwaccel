@@ -6,7 +6,7 @@
 
 - **Type**: Cyrius binary (CLI)
 - **License**: GPL-3.0-only
-- **Compiler**: Cyrius cycc — the pin in `cyrius.cyml` is the source of truth (6.5.2 as of 2.3.16; the legacy `cc5` name is still a symlink in `~/.cyrius/bin/` but the binary is `cycc`)
+- **Compiler**: Cyrius cycc — the pin in `cyrius.cyml` is the source of truth (6.6.0 as of 2.3.21; the binary is `cycc` — the legacy `cc5` alias is gone from `~/.cyrius/bin/`)
 - **Version**: SemVer — `VERSION` file is the single source of truth; `cyrius.cyml` interpolates via `${file:VERSION}`
 
 ## Consumers
@@ -81,16 +81,16 @@ just makes the "every version" cadence explicit and non-optional.
 - **Never skip benchmarks.** Numbers don't lie. The CSV history is the
   proof. **Every version** ships a before/after delta review proving no
   regression — see *Mandatory Benchmarking* above.
-- **Tests + benchmarks are the way.** 590 assertions, 6 fuzz harnesses, 20 benchmarks.
+- **Tests + benchmarks are the way.** 623 assertions (13 units), 6 fuzz harnesses, 15 benchmarks (2 suites).
 - **Own the stack.** Zero external dependencies.
 - **No magic.** Every operation is measurable, auditable, traceable.
 - **Fixed-point arithmetic** — x1000 multipliers, no floats in the entire codebase.
 - **`str_builder` over `format!`** — avoid temporary allocations.
 - **Enum constants over global vars** — avoid the 1024 global var limit.
 - **Feature-gate optional modules** — `#ifdef` / `-D` flags for conditional compilation.
-- **Vendored stdlib in `lib/` is gitignored** — under cyrius 6.2.x (pinned at 6.2.11), run `cyrius lib sync` to copy the pinned stdlib snapshot (`~/.cyrius/versions/<pin>/lib/*.cyr`) into `./lib/`. Run after fresh clone or cyrius upgrade. (`cyrius deps` handles non-stdlib `[deps.*]` entries only; the legacy "stdlib via deps" behaviour was retired in 6.0.0.)
+- **Vendored stdlib in `lib/` is gitignored** — under cyrius 6.6.x (pinned at 6.6.0), run `cyrius lib sync` **then** `cyrius deps` after a fresh clone or a toolchain bump. `lib sync` copies the declared `[deps].stdlib` subset from the pinned snapshot (`~/.cyrius/versions/<pin>/lib/*.cyr`, 38 files); `cyrius deps` resolves the non-stdlib `[deps.*]` git entries (bayan) **and** pulls the transitive stdlib leaves `lib sync` does not — as of 6.6.0 that includes `lib/hashseed.cyr`, required by the declared `hashmap` leaf. `lib sync` alone leaves `./lib/` incomplete. (The legacy "stdlib via deps" behaviour was retired in 6.0.0.)
 - **Single version source** — bump only `VERSION`; `cyrius.cyml` reads it via `${file:VERSION}`. Use `./scripts/version-bump.sh <new>` then add the CHANGELOG section, tag, and push.
-- **All heap-allocated structs use `#derive(accessors)`** (cycc v3.7.1+, shipped under the legacy `cc5` name). Pattern: `#derive(accessors) struct <name> { field1; field2; … }` generates `<name>_<field>(p)` getters and `<name>_set_<field>(p, v)` setters under the existing accessor-prefix convention. Constructors stay manual (derive only generates accessors), calling the derived setters internally instead of raw `store64(p + N, v)`. The 16 derived structs at 2.1.7 are: `meta`, `storage`, `ic`, `plan`, `est`, `reg`, `model`, `profile`, `env`, `sio`, `shard`, `cloud_inst`, `rec`, `cached`, `disk_cached`, `lazy`. New structs follow the same pattern.
+- **All heap-allocated structs use `#derive(accessors)`** (cycc v3.7.1+). Pattern: `#derive(accessors) struct <name> { field1; field2; … }` generates `<name>_<field>(p)` getters and `<name>_set_<field>(p, v)` setters under the existing accessor-prefix convention. Constructors stay manual (derive only generates accessors), calling the derived setters internally instead of raw `store64(p + N, v)`. The 16 derived structs at 2.1.7 are: `meta`, `storage`, `ic`, `plan`, `est`, `reg`, `model`, `profile`, `env`, `sio`, `shard`, `cloud_inst`, `rec`, `cached`, `disk_cached`, `lazy`. New structs follow the same pattern.
 - **Raw-offset access on derived structs is CI-gated** (`.github/workflows/ci.yml` → `Raw-offset guard`). Cross-file `check_struct <struct> <defining_file> <param>` catches any `load64(<param> + N)` / `store64(<param> + N, …)` outside the defining file (only valid when param is unambiguous across `src/`). Per-file `check_offset_bound <file> <param> <struct> <field_count>` catches offsets past the struct boundary for ambiguous params. New derived struct → add an entry; rename a field → no gate change (derive picks up the new accessor name).
 
 ## DO NOT

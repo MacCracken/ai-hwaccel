@@ -6,7 +6,7 @@ results.
 ## Quick start
 
 ```sh
-cyrius test                          # run all 518 assertions (11 test phases)
+cyrius tests                         # run all 623 assertions (13 test units)
 cyrius lint src/main.cyr             # lint (zero warnings)
 cyrius fmt src/main.cyr --check      # check formatting
 ```
