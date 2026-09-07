@@ -5,6 +5,134 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.22] — 2026-09-07 — the four portability defects 2.3.21 found
+
+2.3.21's toolchain bump surfaced four pre-existing defects that were filed
+rather than fixed, because each changes behaviour on a shipped target and a
+toolchain bump is the wrong release to carry that. This is that release. **All
+four are closed**; no new feature, no toolchain movement (still cyrius 6.6.0 /
+bayan 1.5.5).
+
+Every one is the same shape: **a host assumption with no target guard.** Three
+assume x86_64-Linux syscall or `/proc` semantics; the fourth assumes single
+threading. None was caught by the suite, because the suite only ever runs
+x86_64 Linux on one thread.
+
+### Fixed
+
+- **`AI_HWACCEL_DATA_DIR` now works on macOS and Windows** — it was a silent
+  no-op on both. `cmd_getenv` (`src/detect/command.cyr`) was a local
+  `/proc/self/environ` reader added to route around an old `io.cyr` bug; neither
+  target has `/proc`, so it returned 0 for **every** name. That bug is long gone
+  and cyrius 6.6.0 made the stdlib `getenv` correct on every target we ship to,
+  so `cmd_getenv` is now a one-line delegation to it. This also repairs
+  `which()`'s `$PATH` lookup and `NVIDIA_VISIBLE_DEVICES` on those targets.
+  Verified on Linux that both channels still resolve and the cwd fallback is
+  unchanged. Issue
+  [2026-09-07-cmd-getenv-proc-only](docs/development/issues/2026-09-07-cmd-getenv-proc-only.md).
+
+- **The disk cache works on aarch64** — it silently did nothing there.
+  `src/cache.cyr` issued raw **x86_64** `syscall(83)` / `syscall(87)` for
+  mkdir/unlink. ELF-aarch64 has neither (only `mkdirat` 34 / `unlinkat` 35) and
+  cyrius does not remap those two, so both calls hit unrelated syscalls with a
+  path pointer in the fd slot. Now routed through the per-target `sys_mkdir` /
+  `sys_unlink` peers behind the same `#ifdef` pattern
+  `src/detect/platform.cyr`'s `read_symlink` uses — AGNOS's peers take an
+  explicit pathlen, so that branch is separate. Measured before/after under
+  `qemu-aarch64`:
+
+  ```
+  aarch64   old syscall(83) = -9 (EBADF)   new sys_mkdir = 0   dir created: NO -> YES
+  x86_64    old syscall(83) =  0           new sys_mkdir = 0   (unchanged)
+  ```
+
+  `CYRIUS_DCE=1` eliminates the disk-cache API from the CLI, so the shipped
+  executable was never affected — the fix is for library consumers of
+  `dist/ai-hwaccel.cyr`. Issue
+  [2026-09-07-cache-raw-syscalls-wrong-on-aarch64](docs/development/issues/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md).
+
+- **Cache TTL expiry is defined on macOS and Windows** — it was an
+  uninitialised stack read. `_monotonic_secs()` was a bare
+  `syscall(228, 1, &ts); return load64(&ts);`. On macOS the route *returns* the
+  ns count and never touches `&ts` (and Darwin's `CLOCK_MONOTONIC` is **6**, not
+  1); on Windows it returns ms from `GetTickCount64` and never touches `&ts`.
+  So on both, the function returned whatever happened to be on the stack, and
+  the TTL comparison was arbitrary — a cache that never expires or expires on
+  every call. Now branched per target, mirroring `lib/chrono.cyr` rather than
+  re-deriving it, with AGNOS on `sys_uptime_ms()`. Issue
+  [2026-09-07-monotonic-secs-unguarded-on-macos-windows](docs/development/issues/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md).
+
+- **Detector threads no longer log** — `registry_detect_threaded` spawns six
+  threads whose parsers called `hwlog_warn` directly, and `lib/sakshi.cyr`'s own
+  header states it is *"Single-threaded only, EXCEPT `SK_OUT_ATOMIC_RING`
+  (multi-producer)"*. `hwlog_init` selects no target, so the process runs on the
+  default stderr path. Live on Linux for as long as the threaded API has
+  existed; cyrius 6.5.44 extended it to arm64-macOS by making Darwin threads
+  real.
+
+  Every one of those four call sites **already** pushed the same text into the
+  warnings vec via `warning_parse()`, and that vec is merged on the main thread
+  — so the emission was hoisted into a new `warnings_log_parse()`
+  (`src/error.cyr`) called from the main thread in **both** detection paths.
+  Filtered to `HWA_ERR_PARSE` so the set of logged lines is exactly what it was:
+  tool-not-found / timeout / sysfs warnings stay JSON-only and do not become new
+  stderr noise at the default WARN level. Verified byte-equivalent — pre-fix and
+  post-fix emit the same line, `cuda: too few CSV fields`, and suppress
+  identically at every level (`off`/`error` → 0, `warn`+ → 1). Issue
+  [2026-09-07-threaded-detect-vs-single-threaded-sakshi](docs/development/issues/2026-09-07-threaded-detect-vs-single-threaded-sakshi.md).
+
+### Performance — no algorithmic regression, and why the raw table says otherwise
+
+`CYRIUS_DCE=1` binary **214 592 → 214 504 B** (−88 B). Suite unchanged at 623
+assertions / 13 units, 6/6 fuzz.
+
+The honest raw result first. ABBA-balanced A/B, same toolchain, n=40 per arm,
+Mann-Whitney over the distributions — **4 benchmarks flag as regressions**:
+`best_available_13dev` +23.8%, `plan_70B_bf16_4gpu` +2.7%, `parse_vulkan_2gpu`
++2.6%, `parse_cuda_8gpu` +2.5%. Three of those four are code this release does
+not touch at all.
+
+Two controls establish that the flags are **code layout, not behaviour**:
+
+1. **A semantically-null control.** A dead, never-called function added to the
+   *2.3.21* source produced `plan_70B_bf16_4gpu` **+2.3%, p=0.0028** — flagged
+   "significant" — and swung `best_available_13dev` by −9.1%, from code that
+   cannot differ in behaviour. This harness manufactures ~2–3% false
+   regressions, and `best_available_13dev` (median 166 ns, `min=0`, i.e. under
+   the 1.34 µs timer floor) swings freely by ±10–24%.
+2. **A/B of the exact changed function.** Restoring the three `hwlog_warn` calls
+   in `parse_cuda_output` — the only change in a benchmarked hot path, and one
+   that returns the binary to 345 760 B, byte-for-byte 2.3.21's size — leaves
+   `parse_cuda_8gpu` at **+1.7%**, statistically indistinguishable from the
+   +1.9% with them removed. The cuda change is therefore **not** the cause.
+
+The mechanism is identifiable: `parse_csv_line`, `validate_device_id` and
+`validate_memory_mb` — the three hot callees of `parse_cuda_output` — all live in
+`src/detect/command.cyr`, the file where `cmd_getenv` shrank from a ~40-line
+`/proc` reader to a one-line delegation (−56/+28 lines). Deleting that function
+moves all three and changes their alignment.
+
+**Recorded as: 0 algorithmic regressions, 1 layout-attributable move
+(`parse_cuda_8gpu` ~+1.8%), 14 within noise.** Not rounded down to "neutral" —
+the ~1.8% is real wall-clock on that bench and a future release that reorders
+`command.cyr` may move it back. It is accepted here because the alternative is
+keeping a `/proc`-only environment reader that is broken on two of three shipped
+wheel targets. CSV audit trail: `bench-history.csv`, commit `060a306`.
+
+### Notes
+
+- **No toolchain or dependency movement.** cyrius stays at 6.6.0, bayan at
+  1.5.5, `cyrius.lock` unchanged, `dist/ai-hwaccel.deps` unchanged at 18 stdlib
+  leaves. `dist/ai-hwaccel.cyr` regenerated for the version header and the
+  changed modules.
+- **Consumers**: `disk_cached_*` on aarch64 and `AI_HWACCEL_DATA_DIR` on
+  macOS/Windows start working where they previously did nothing. No signature
+  changed; nothing that worked before behaves differently.
+- **Still open:** none of the four is partially fixed. The follow-ups the issues
+  name — a disk-cache test that runs under `qemu-aarch64`, and exercising the
+  threaded path on real Apple hardware — are not done, and the suite still only
+  covers x86_64 Linux on one thread.
+
 ## [2.3.21] — 2026-09-07 — cyrius 6.6.0: the binary halves and the derived accessors inline
 
 **Toolchain bump `6.5.36 → 6.6.0` (38 releases) + bayan `1.5.2 → 1.5.5`.**
@@ -211,10 +339,6 @@ and gets its own version and its own benchmark delta:
   binary, so **the shipped executable is unaffected on every platform**; the
   exposure is library consumers of `dist/ai-hwaccel.cyr` on aarch64. 6.5.51's new
   raw-syscall diagnostic excludes 83/87, so the build log stays quiet.
-
-The full audit — method, the 142 findings, what was dismissed and why, and the
-coverage limits — is in
-[`docs/development/2026-09-07-cyrius-6.6.0-audit.md`](docs/development/2026-09-07-cyrius-6.6.0-audit.md).
 
 ### Notes
 

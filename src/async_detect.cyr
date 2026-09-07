@@ -176,7 +176,10 @@ fn registry_detect_threaded_with(builder_mask) {
     detect_interconnects(r, reg_profiles(r), reg_warnings(r));
     detect_environment(r);
 
+    # Main thread, after every join+merge — see warnings_log_parse in
+    # src/error.cyr for why the detector threads no longer log directly.
     var nwarn = vec_len(warns);
+    warnings_log_parse(warns, 0);
     if (nwarn > 0) { hwlog_info_n("detect_threaded: warnings=", nwarn); }
     hwlog_info_n("detect_threaded: profiles=", vec_len(profs));
     hwlog_span_exit();

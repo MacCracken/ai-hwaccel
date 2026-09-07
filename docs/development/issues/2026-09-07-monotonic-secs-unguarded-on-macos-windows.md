@@ -1,11 +1,18 @@
 # `_monotonic_secs()` reads uninitialised stack on macOS and Windows — cache TTL is undefined there
 
+> **RESOLVED in 2.3.22 (2026-09-07)** via option (1): `_monotonic_secs` now
+> carries per-target branches mirroring `lib/chrono.cyr` (Darwin id 6 +
+> return value, Windows ms + return value, AGNOS `sys_uptime_ms()`, Linux
+> `&ts`), rather than adding `chrono` to `[deps].stdlib` — that would have
+> moved `dist/ai-hwaccel.deps` from 18 leaves to 19 and made every consumer
+> satisfy it. The TTL test that does not assume Linux is **still open**.
+
 **Filed:** 2026-09-07 (found auditing the cyrius `6.5.36 → 6.6.0` bump for 2.3.21)
 **Severity:** Medium — `CachedRegistry` / `DiskCachedRegistry` TTL expiry is
 undefined on two of the three shipped wheel targets. Detection still returns
 correct results; only the *decision to reuse a cached one* is garbage.
 **Repos:** ai-hwaccel `2.3.21` · cyrius `6.6.0`
-**Status:** OPEN. Pre-existing (not introduced by the 6.6.0 bump); kept out of a
+**Status:** RESOLVED in 2.3.22 — follow-ups noted above. Pre-existing (not introduced by the 6.6.0 bump); kept out of a
 toolchain-bump release deliberately.
 
 ## Summary

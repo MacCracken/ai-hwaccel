@@ -1,10 +1,18 @@
 # `cmd_getenv` is /proc-only — `AI_HWACCEL_DATA_DIR` is a silent no-op on macOS *and* Windows
 
+> **RESOLVED in 2.3.22 (2026-09-07).** `cmd_getenv` is now a one-line
+> delegation to the stdlib `getenv`, which cyrius 6.6.0 made correct on every
+> target ai-hwaccel ships to. `AI_HWACCEL_DATA_DIR`, `which()`'s `$PATH`
+> lookup and `NVIDIA_VISIBLE_DEVICES` now work on macOS and Windows.
+> Verified on Linux that both resolution channels and the cwd fallback are
+> unchanged. Steps 3 and 4 below (real-hardware re-test on ecb/ach/cass, and
+> the roadmap 2.3.3/2.3.12 note) are **still open**.
+
 **Filed:** 2026-09-07 (found auditing the cyrius `6.5.36 → 6.6.0` bump for 2.3.21)
 **Severity:** Medium — a documented feature is silently inert on two of the three
 shipped wheel targets, and the docs said it worked on one of them.
 **Repos:** ai-hwaccel `2.3.21` · cyrius `6.6.0`
-**Status:** OPEN. 2.3.21 corrected the comments only; the behaviour change is
+**Status:** RESOLVED in 2.3.22 — follow-ups noted above. 2.3.21 corrected the comments only; the behaviour change is
 deliberately **not** in a toolchain-bump release — it needs its own version and
 its own before/after benchmark delta.
 

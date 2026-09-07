@@ -626,16 +626,37 @@ setters through the inline-replay path — and every heap struct here is
   rewritten and could never fail. Now a sorted content comparison against
   `git show HEAD:cyrius.lock` (sorted because `deps` line order is not stable
   across a clean-tree rebuild); tested in both directions.
-- [ ] **Filed, not fixed** (each needs its own version + benchmark delta):
+- [x] **All four filed defects fixed in 2.3.21's follow-up, 2.3.22** — see that
+  CHANGELOG section. Remaining in each issue: the cross-host / qemu tests that
+  would have caught them.
+- [x] **Filed in 2.3.21, fixed in 2.3.22:**
   [`cmd_getenv` is /proc-only](issues/2026-09-07-cmd-getenv-proc-only.md),
   [`_monotonic_secs` unguarded on macOS/Windows](issues/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md),
   [threaded detection logs through single-threaded sakshi](issues/2026-09-07-threaded-detect-vs-single-threaded-sakshi.md),
   [`cache.cyr` raw syscalls wrong on aarch64](issues/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md).
-- [x] **Full audit written up** —
-  [2026-09-07-cyrius-6.6.0-audit.md](2026-09-07-cyrius-6.6.0-audit.md): method,
-  142 findings, what was dismissed and why, coverage limits.
 - [ ] **Backfill 2.3.14–2.3.20** — this file's last SHIPPED entry before 2.3.21
   was 2.3.13; the CHANGELOG has them, the roadmap does not.
+
+### 2.3.22 — The four portability defects (SHIPPED, 2026-09-07)
+
+**Why:** 2.3.21's bump surfaced four pre-existing host assumptions with no
+target guard. Each changes behaviour on a shipped target, so none belonged in a
+toolchain bump.
+
+- [x] **`cmd_getenv` -> stdlib `getenv`** — `AI_HWACCEL_DATA_DIR`, `$PATH`
+  lookup and `NVIDIA_VISIBLE_DEVICES` now work on macOS and Windows.
+- [x] **`cache.cyr` mkdir/unlink via per-target `sys_*` peers** — disk cache
+  works on aarch64; measured under qemu (`-9` -> `0`, directory created).
+- [x] **`_monotonic_secs` target-branched** — cache TTL is no longer an
+  uninitialised stack read on macOS/Windows.
+- [x] **Parse-warning logging hoisted to the main thread** — closes the sakshi
+  data race in `registry_detect_threaded`; logged set byte-identical.
+- [x] **Bench delta** — 0 algorithmic regressions; one layout-attributable
+  ~+1.8% on `parse_cuda_8gpu`, proven not to come from the changed function and
+  reproduced by a semantically-null control. Binary −88 B.
+- [ ] **Still open:** qemu-aarch64 disk-cache test, threaded path on real Apple
+  Silicon, cross-host env-var re-test. The suite still only covers x86_64 Linux,
+  single-threaded — which is why all four survived this long.
 
 ### WASM / JS
 

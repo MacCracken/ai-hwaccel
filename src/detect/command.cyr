@@ -11,62 +11,37 @@ var CMD_MAX_STDOUT = 1048576;
 var CMD_DEFAULT_TIMEOUT_MS = 5000;
 var CMD_MAX_DEVICE_ID = 1024;
 
-# Read an environment variable from /proc/self/environ.
-# Returns heap-allocated null-terminated string, or 0 if not found.
+# Read an environment variable. Returns a null-terminated string, or 0 if
+# unset.
 #
-# Added to work around an io.cyr getenv bug (variable re-declaration in a
-# loop). 2.3.21: that bug is long gone, and cyrius 6.6.0 went further —
-# stdlib `getenv` now reads the init-stack envp on macOS and calls the PE
-# `GetEnvironmentVariableA` reroute on Windows (cyrius v6.5.45), so it is
-# correct on every target ai-hwaccel ships to. THIS function is still
-# /proc-only, which means it returns 0 for every name on macOS and Windows.
-# Retiring it in favour of the stdlib `getenv` is filed as
-# docs/development/issues/2026-09-07-cmd-getenv-proc-only.md — a behaviour
-# change on two targets, so it gets its own version and its own benchmarks
-# rather than riding along with a toolchain bump.
+# 2.3.22: this was a local /proc/self/environ reader, added long ago to work
+# around an io.cyr getenv bug (variable re-declaration in a loop). That bug is
+# gone, and cyrius 6.6.0 made the stdlib `getenv` correct on every target
+# ai-hwaccel ships to — it derives envp from the init stack on macOS
+# (`_macho_argv_base`) and calls the PE `GetEnvironmentVariableA` reroute
+# (0xF015) on Windows, alongside the existing /proc and AGNOS paths.
+#
+# The local reader had the same /proc assumption the stdlib just shed, so it
+# returned 0 for EVERY name on macOS and Windows. That made AI_HWACCEL_DATA_DIR
+# a silent no-op on both (issue 2026-09-07-cmd-getenv-proc-only), and also
+# broke `which()`'s $PATH lookup and NVIDIA_VISIBLE_DEVICES there.
+#
+# Kept as a named wrapper rather than replacing the four call sites: the name
+# documents intent at the call site, and a single seam is the right place to
+# put any future per-target quirk.
 fn cmd_getenv(name) {
-    var ebuf[8192];
-    var fd = file_open("/proc/self/environ", 0, 0);
-    if (fd < 0) { return 0; }
-    var n = file_read(fd, &ebuf, 8192);
-    file_close(fd);
-    if (n <= 0) { return 0; }
-    var nlen = strlen(name);
-    var pos = 0;
-    while (pos < n) {
-        if (memeq(&ebuf + pos, name, nlen) == 1) {
-            if (load8(&ebuf + pos + nlen) == 61) {
-                var vstart = pos + nlen + 1;
-                var vlen = 0;
-                while (vstart + vlen < n) {
-                    if (load8(&ebuf + vstart + vlen) == 0) { break; }
-                    vlen = vlen + 1;
-                }
-                var result = alloc(vlen + 1);
-                memcpy(result, &ebuf + vstart, vlen);
-                store8(result + vlen, 0);
-                return result;
-            }
-        }
-        # Skip to next null-terminated entry
-        while (pos < n) {
-            if (load8(&ebuf + pos) == 0) { pos = pos + 1; break; }
-            pos = pos + 1;
-        }
-    }
-    return 0;
+    return getenv(name);
 }
 
 # Scan argv for `--data-dir <path>`, returning the path cstr or 0.
 #
 # Self-contained (argv/argc/streq, no dependency on main.cyr's parser) so
 # it works on PE: argv is populated from GetCommandLineW/CommandLineToArgvW
-# (cyrius PE reroutes 0xF006/0xF010), unlike environment variables, which
-# cmd_getenv cannot read on PE — there is no /proc/self/environ. 2.3.21: the
-# toolchain half of that has changed — cyrius routes 0xF015
-# GetEnvironmentVariableA and, since 6.5.45, the stdlib `getenv` actually
-# calls it — but `cmd_getenv` here still reads /proc, so the flag remains
-# the portable channel (see data_file_path).
+# (cyrius PE reroutes 0xF006/0xF010). Environment variables are readable on PE
+# too as of 2.3.22 (cmd_getenv now delegates to the stdlib getenv, which calls
+# the 0xF015 GetEnvironmentVariableA reroute), so the flag is no longer the
+# ONLY channel there — it remains the preferred one because it is explicit and
+# needs no environment plumbing through the Python runner.
 fn cmd_data_dir_arg() {
     var n = argc();
     var i = 1;
@@ -90,14 +65,11 @@ fn cmd_data_dir_arg() {
 #   1. `--data-dir <path>` CLI flag — works on EVERY platform including
 #      Windows PE, because argv is readable there. This is the portable
 #      channel a consumer (Python _runner now, agnos later) should use.
-#   2. AI_HWACCEL_DATA_DIR env var — honoured on **Linux only**, and a
-#      SILENT NO-OP on both macOS and Windows: `cmd_getenv` reads
-#      /proc/self/environ, which neither target has. (An earlier version of
-#      this note said "Linux/macOS" — macOS has no /proc either, so it was
-#      never honoured there.) The cyrius-side half of that gap closed in
-#      6.6.0, but only for the stdlib `getenv`; see the note on cmd_getenv.
-#      Kept for back-compat with consumers that set it; the flag supersedes
-#      it where both are present.
+#   2. AI_HWACCEL_DATA_DIR env var — honoured on **every target** as of
+#      2.3.22. It was a silent no-op on macOS and Windows through 2.3.21
+#      because `cmd_getenv` read /proc/self/environ, which neither has; it
+#      now delegates to the stdlib `getenv`. The flag still supersedes it
+#      where both are present.
 #   3. cwd-relative <rel> — the original fallback.
 # See roadmap 2.3.3 (env var) and 2.3.12 (the --data-dir flag for PE).
 fn data_file_path(rel) {

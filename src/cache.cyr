@@ -7,11 +7,47 @@
 #   var r = cached_get(c);            # within TTL: returns cached
 #   cached_invalidate(c);             # force re-detect on next get
 
-# clock_gettime(CLOCK_MONOTONIC) → seconds
+# Monotonic clock → whole seconds. Used only for TTL expiry, so second
+# resolution is enough and a monotonic-since-boot source is fine.
+#
+# 2.3.22: this was a bare `syscall(228, 1, &ts); return load64(&ts);` with NO
+# target guard, and the Linux assumption baked into it holds on exactly one
+# target. cyrius `lib/chrono.cyr` documents the divergence, and this mirrors
+# its branches rather than re-deriving them:
+#
+#   Linux   — 228 fills the timespec at &ts; CLOCK_MONOTONIC is 1.
+#   macOS   — arm64 routes 228 to libSystem `_clock_gettime_nsec_np(clock_id)`,
+#             which RETURNS the ns count and does NOT touch &ts; and Darwin's
+#             CLOCK_MONOTONIC is **6**, not 1. (x86-macOS does not route 228 at
+#             all — that arch is held upstream; it falls through to 0, i.e.
+#             "no clock", which makes the TTL always-expired rather than
+#             arbitrary.)
+#   Windows — 228 routes to kernel32!GetTickCount64, which RETURNS ms since
+#             boot and does NOT touch &ts.
+#   AGNOS   — no 228; `sys_uptime_ms()` is the peer.
+#
+# Unguarded, the two return-value targets returned `load64(&ts)` on a timespec
+# nothing had written — an uninitialised stack read, so TTL expiry was
+# undefined on both. Issue 2026-09-07-monotonic-secs-unguarded-on-macos-windows.
 fn _monotonic_secs() {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return sys_uptime_ms() / 1000;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
     var ts[16];
-    syscall(228, 1, &ts);  # SYS_CLOCK_GETTIME, CLOCK_MONOTONIC
+    #ifdef CYRIUS_TARGET_MACOS
+    return syscall(228, 6, &ts) / 1000000000;
+    #endif
+    #ifdef CYRIUS_TARGET_WIN
+    return syscall(228, 1, &ts) / 1000;
+    #endif
+    #ifndef CYRIUS_TARGET_MACOS
+    #ifndef CYRIUS_TARGET_WIN
+    syscall(228, 1, &ts);
     return load64(&ts);
+    #endif
+    #endif
+    #endif
 }
 
 # CachedRegistry — in-memory cache with TTL + mutex.
@@ -174,8 +210,19 @@ fn disk_cached_get(c) {
         str_builder_add_cstr(dir_sb, home);
         str_builder_add_cstr(dir_sb, "/.cache/ai-hwaccel");
         var dir_s = str_builder_build(dir_sb);
-        # mkdir -p via syscall
-        syscall(83, str_data(dir_s), 493);  # SYS_MKDIR, 0o755
+        # 2.3.22: was `syscall(83, ..., 493)` — the x86_64 SYS_MKDIR number,
+        # unguarded. ELF-aarch64 has no mkdir syscall at all (only mkdirat 34),
+        # and cyrius does not remap 83, so on that target this returned -9
+        # (EBADF) and the cache directory was never created — measured under
+        # qemu-aarch64. Same class as the readlink defect in detect/platform.cyr:
+        # take the number AND the arity from the stdlib peer that owns both.
+        # AGNOS's sys_mkdir takes an explicit pathlen.
+        #ifdef CYRIUS_TARGET_AGNOS
+        sys_mkdir(str_data(dir_s), str_len(dir_s));
+        #endif
+        #ifndef CYRIUS_TARGET_AGNOS
+        sys_mkdir(str_data(dir_s), 493);  # 0o755
+        #endif
     }
     if (file_write_all(path, jdata, jlen) < 0) {
         hwlog_warn("disk_cache: write failed");
@@ -198,6 +245,14 @@ fn disk_cached_invalidate(c) {
     mutex_unlock(mtx);
     # Remove disk cache
     var path = disk_cached_cache_path(c);
-    syscall(87, path);  # SYS_UNLINK
+    # 2.3.22: was `syscall(87, path)` — the x86_64 SYS_UNLINK number. On
+    # ELF-aarch64 that is not unlink (only unlinkat 35 exists) and it returned
+    # -14 (EFAULT), so the cache file was never removed. See the mkdir note.
+    #ifdef CYRIUS_TARGET_AGNOS
+    sys_unlink(path, strlen(path));
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    sys_unlink(path);
+    #endif
     return 0;
 }
