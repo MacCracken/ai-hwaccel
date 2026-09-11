@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.23] — 2026-09-11 — cyrius 6.6.2
+
+### Changed
+
+- **Toolchain `6.6.0` → `6.6.2`.** No source change. ai-hwaccel constructs no
+  `Result` / `Option` / `Either` — every `Ok(` / `Some(` occurrence in `src/` is
+  inside a `#` comment — so the 6.6.0 value form has no surface here. Zero sites
+  the compiler rejects, zero fail-open sites. **629 assertions** pass unchanged.
+
+  Its five `callptr` sites were traced to their full function-pointer target sets
+  and no reachable target is pair-returning. That check has to be done by hand:
+  `callptr` dispatches through a runtime pointer, so the compiler cannot see a
+  pair-returning callee and a clean build proves nothing about this class.
+
+  Four candidate arity collisions were examined and all four refuted on
+  independent re-derivation — `tag/1` (retired at 6.6.2, not redefined), the 131
+  `bayan_json_*` names (the two definitions never co-occur in this compile set),
+  16 `sys_*` names (`#ifdef`-guarded per-arch alternates), and the
+  `boxed_*`/`tagged_new` set (same arity on both sides).
+
 ## [2.3.22] — 2026-09-07 — issue-folder triage: three closed on verification, one really broken
 
 A triage pass over the four issues that predated the 2.3.21 work. **Three were
