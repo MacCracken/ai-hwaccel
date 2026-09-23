@@ -1,8 +1,12 @@
 # Benchmarks: Rust vs Cyrius
 
 Comparison of the ai-hwaccel Rust implementation (v1.2.0, final commit `84dfb0d`)
-against the Cyrius port (v1.2.0). All numbers from the same machine.
-Rust source has been removed — this document preserves the final numbers.
+against the Cyrius port as it stood when it replaced it (released as 2.0.0).
+All numbers from the same machine. Rust source has been removed — this document
+preserves the final numbers.
+
+This is a snapshot from April 2026. Current numbers are in `bench-history.csv`,
+and each release's CHANGELOG section compares it with the one before.
 
 ## Summary
 
@@ -114,7 +118,7 @@ dominate wall time).
 | Rust Module | Lines | Reason |
 |-------------|-------|--------|
 | ffi.rs | 116 | N/A — Cyrius is native code, no FFI wrapper needed |
-| detect/windows.rs | 218 | Windows target — Cyrius doesn't target Windows yet (v4.0.0 roadmap) |
+| detect/windows.rs | 218 | Windows target, not supported by Cyrius at the time. Reimplemented later as `src/detect/windows.cyr` (DXGI). |
 
 ## Rust Benchmarks (Final — commit `84dfb0d`, 2026-04-06)
 

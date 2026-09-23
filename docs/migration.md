@@ -33,7 +33,7 @@ function calls.
 
 ### Binary
 
-| | Rust | Cyrius |
+| | Rust (v1.2.0) | Cyrius (v2.0.0) |
 |--|------|--------|
 | Format | ELF (via LLVM) | ELF (direct x86_64) |
 | Size | 708 KB | 217 KB |
@@ -41,8 +41,10 @@ function calls.
 
 ### JSON output
 
-The JSON schema is unchanged. v1.x and v2.0.0 produce identical JSON
-structures. `schema_version` remains `2`.
+v2.0.0 kept v1.x's JSON structure (`schema_version` 2). The format has grown
+since, one `schema_version` per change; it is 6 as of 2.3.28, and
+[docs/schema.json](schema.json) describes it. Check `schema_version` rather
+than assuming a shape.
 
 ### What's new in v2.0.0
 
@@ -55,6 +57,8 @@ structures. `schema_version` remains `2`.
 ### What's removed
 
 - **Rust crate** — no longer published to crates.io
-- **C FFI** (`ffi.rs`) — Cyrius is native, no wrapper needed
-- **Windows detection** — Cyrius doesn't target Windows yet (v4.0.0)
+- **C FFI** (`ffi.rs`) — there is no C API; other languages run the CLI and
+  parse its JSON, as the Python package (`pip install ai-hwaccel`) does
 - **serde/tokio/tracing** — replaced by manual JSON, thread.cyr, stderr
+
+Windows detection, removed in 2.0.0, came back in the 2.3 series (DXGI).

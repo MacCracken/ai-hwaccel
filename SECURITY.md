@@ -2,10 +2,15 @@
 
 ## Scope
 
-`ai-hwaccel` runs shell commands (`nvidia-smi`, `hl-smi`, `vulkaninfo`,
-`neuron-ls`) and reads sysfs/procfs paths during hardware detection. Although
-these operations are read-only and non-destructive, bugs in command parsing or
-path handling could have security implications.
+During detection `ai-hwaccel` reads sysfs, procfs and `/dev` paths, calls OS
+APIs (`sysctl` on macOS, DXGI and `GlobalMemoryStatusEx` on Windows) and runs
+vendor tools found on `$PATH`: `nvidia-smi`, `vulkaninfo`, `hl-smi`,
+`neuron-ls`, `xpu-smi`, `cerebras_cli`, `gc-info`, and the `system_profiler`
+(macOS) and `wmic` (Windows) fallbacks. It makes no network connections. Bugs
+in output parsing or path handling could still have security implications.
+
+[docs/development/threat-model.md](docs/development/threat-model.md)
+describes the trust boundaries, the mitigations and the known gaps.
 
 ## Supported versions
 
@@ -35,10 +40,17 @@ within 14 days of confirmation.
 
 ## Security considerations
 
-- **Command execution**: Detection functions execute external tools with no
-  user-controlled arguments. Ensure `$PATH` is trusted in your deployment
-  environment.
-- **sysfs/procfs reads**: The crate reads system files but never writes to them.
-- **Serialization**: `AcceleratorProfile` and related types derive `Serialize`
-  and `Deserialize`. If you deserialize untrusted input, apply your own
-  validation layer.
+- **Command execution**: tools are resolved through `$PATH` and run without a
+  shell, with fixed arguments; on Linux they get an empty environment. Make
+  sure `$PATH` is trusted in your deployment. Tools run without a time limit,
+  so a hung tool blocks detection: `registry_detect_no_exec()` runs none, and
+  the Python package bounds each call (30 s by default).
+- **sysfs/procfs reads**: the library reads system files but never writes to
+  them.
+- **File writes**: the CLI writes nothing. Only the opt-in disk cache
+  (`disk_cached_get`) writes a file: `~/.cache/ai-hwaccel/registry.json`, or
+  `/tmp/ai-hwaccel-cache.json` when `HOME` is unset. The write follows
+  symlinks, so don't use the disk cache without `HOME` on a shared host.
+- **Deserialization**: `profile_from_json_str` parses with bayan-json, reads
+  the keys it knows and ignores the rest. If you deserialize untrusted input,
+  apply your own size limits and validation.

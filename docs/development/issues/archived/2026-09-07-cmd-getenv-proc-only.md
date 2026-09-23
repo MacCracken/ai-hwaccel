@@ -7,6 +7,10 @@
 > Verified on Linux that both resolution channels and the cwd fallback are
 > unchanged. Steps 3 and 4 below (real-hardware re-test on ecb/ach/cass, and
 > the roadmap 2.3.3/2.3.12 note) are **still open**.
+>
+> **Archived 2026-09-23.** Step 3: `AI_HWACCEL_DATA_DIR` and `--data-dir`
+> resolve on `ecb` (2.3.27) and `cass`; `ach` was not re-tested, and no wheel
+> targets Intel Macs. Step 4: the roadmap no longer carries the note.
 
 **Filed:** 2026-09-07 (found auditing the cyrius `6.5.36 → 6.6.0` bump for 2.3.21)
 **Severity:** Medium — a documented feature is silently inert on two of the three

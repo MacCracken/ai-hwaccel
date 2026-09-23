@@ -1,110 +1,121 @@
 # Architecture Overview
 
-ai-hwaccel is a flat Cyrius project (CLI binary) that detects AI
-hardware accelerators, queries their capabilities, and plans model
-distribution across devices.
+ai-hwaccel is a flat Cyrius project: a CLI binary (`src/main.cyr`) over a
+library (`dist/ai-hwaccel.cyr`, every other module) that detects AI hardware
+accelerators, queries their capabilities, and plans model placement.
 
 ## Module Map
 
 ```
-main.cyr                 CLI binary (table, JSON, watch, cost, profile modes)
-  hardware/              AcceleratorType, AcceleratorFamily, TpuVersion, etc.
-  profile.cyr            AcceleratorProfile — per-device capability snapshot
-  registry.cyr           registry_detect() + DetectBuilder
-  detect/                Backend detection (one module per hardware family)
-    mod.cyr              Orchestrator: threading, enrichment pipeline
-    command.cyr          Safe subprocess execution (path resolution, timeout, env sanitization)
-    platform.cyr         PlatformProbe trait + LivePlatform + MockPlatform
+src/
+  main.cyr               CLI: JSON (default), --summary, --table, --plan, --train, --cost
+  types.cyr              AcceleratorType (20, CPU included), families, backends, exec classification
+  profile.cyr            AcceleratorProfile: one device's memory, capabilities, PCI id, shared RAM
+  registry.cyr           Detection entry points, builder masks, post-passes, duplicate-device pass, totals
+  async_detect.cyr       registry_detect_threaded(): exec backends in threads
+  lazy.cyr               LazyRegistry: probe a family on first query
+  cache.cyr              CachedRegistry (TTL) + DiskCachedRegistry
+  json_out.cyr           JSON out (registry, summary, plan, training) and profile_from_json
+  system_io.cyr          Interconnects, storage, runtime environment
+  quantization.cyr       FP32 / FP16 / BF16 / INT8 / INT4 (fixed-point x1000)
+  plan.cyr               Sharding planner (none / tensor / pipeline / data parallel)
+  training.cyr           Training memory estimation (8 methods, 4 targets)
+  cost.cyr               Cloud instance pricing and recommendations (data/cloud_pricing.json)
+  model.cyr              Model catalogue (data/models.json) and compatibility
+  model_format.cyr       SafeTensors / GGUF / ONNX / PyTorch header detection
+  requirement.cyr        Accelerator requirements for scheduling
+  error.cyr              Warnings (the tool that was missing or failed)
+  log.cyr                Structured logging to stderr (sakshi)
+  units.cyr              Named constants and SCHEMA_VERSION
+  detect/
+    platform.cyr         sysfs / procfs helpers, total RAM (meminfo, sysctl, GlobalMemoryStatusEx)
+    command.cyr          Tool execution (PATH lookup, timeout, empty environment), CSV / hex parsing
     cuda.cyr             NVIDIA via nvidia-smi CSV
-    rocm.cyr             AMD via sysfs (/sys/class/drm)
-    apple.cyr            Metal/ANE via sysctl (system_profiler fallback)
-    vulkan.cyr           Vulkan via vulkaninfo + sysfs fallback
+    rocm.cyr             AMD via sysfs (/sys/class/drm, amdgpu)
+    apple.cyr            Metal GPU + Neural Engine via sysctl (system_profiler fallback), Asahi device tree
+    vulkan.cyr           Vulkan via vulkaninfo, or a sysfs scan of the DRM cards
+    windows.cyr          Windows GPUs via DXGI adapter enumeration (wmic fallback)
     tpu.cyr              Google TPU via sysfs (/sys/class/accel)
     gaudi.cyr            Intel Gaudi via hl-smi CSV
-    neuron.cyr           AWS Neuron via neuron-ls JSON
-    intel.cyr            Intel NPU (sysfs) + oneAPI/Arc (xpu-smi)
+    neuron.cyr           AWS Neuron via neuron-ls JSON, or /dev/neuron*
+    intel.cyr            Intel NPU (sysfs) + oneAPI (xpu-smi)
     amd_xdna.cyr         AMD XDNA via sysfs
     cloud_asic.cyr       Cerebras WSE, Graphcore IPU, Groq LPU
     edge.cyr             Qualcomm AI 100, Samsung NPU, MediaTek APU
-    bandwidth.cyr        Memory bandwidth estimation (NVIDIA clock+bus width)
-    interconnect.cyr     NVLink/IB/XGMI/ICI detection
-    pcie.cyr             PCIe link speed from sysfs
-    numa.cyr             NUMA node affinity
+    bandwidth.cyr        Memory bandwidth estimation
+    pcie.cyr             PCIe link bandwidth from sysfs
+    numa.cyr             NUMA node per device
+    interconnect.cyr     InfiniBand, RoCE, NVLink, NVSwitch, XGMI, ICI
     disk.cyr             Storage device classification
-    environment.cyr      Container/cloud detection (Docker, k8s, AWS/GCP/Azure)
-  quantization.cyr       QuantizationLevel (FP32/FP16/BF16/INT8/INT4)
-  plan.cyr               Sharding planner + ShardingPlan/ModelShard (merged)
-  training.cyr           Training memory estimation (LoRA, QLoRA, DPO, RLHF, etc.)
-  cost.cyr               Cloud instance pricing + recommendations
-  requirement.cyr        AcceleratorRequirement for scheduling
-  cache.cyr              CachedRegistry + DiskCachedRegistry (TTL-based)
-  lazy.cyr               LazyRegistry (detect-on-first-query)
-  system_io.cyr          SystemIo, Interconnect, StorageDevice
-  error.cyr              DetectionError enum
-  units.cyr              Named constants (no magic numbers)
-  ffi.cyr                C-compatible FFI bindings
-  thread.cyr             Threaded detection for parallel backends
-  fuzz_helpers.cyr       Fuzz target entry points
+    environment.cyr      Docker, Kubernetes, cloud instance metadata
 ```
 
 ## Detection Flow
 
 ```
-registry_detect()
-  -> DetectBuilder (all backends enabled)
-  -> detect_with_builder()
-       1. cpu_profile()                     Always: read /proc/meminfo or sysctl
-       2. spawn backends in parallel        thread.cyr for 2+ backends
-          each: run_tool() or read sysfs -> parse -> Vec<AcceleratorProfile>
-       3. collect profiles + warnings
-       4. post-passes (registry_post_passes):
-          a. duplicate devices (2.4.0)      profiles_dedup: a Vulkan profile
-                                            with a CUDA/ROCm profile's PCI
-                                            vendor:device ID, or a Vulkan
-                                            iGPU next to Apple's Metal GPU,
-                                            is dropped; the survivor keeps
-                                            its memory and fields
-          b. bandwidth enrichment           nvidia-smi clock -> BW estimate
-          c. PCIe enrichment                sysfs link speed/width
-          d. NUMA enrichment                sysfs numa_node per PCI address
-          e. interconnect detection         InfiniBand, NVLink, XGMI (exec only)
-          f. storage detection              NVMe/SATA/HDD classification
-          g. environment detection          Docker, k8s, cloud instance metadata
-          The Vulkan backend's sysfs scan is part of the backend, run when
-          vulkaninfo is missing and in no-exec mode.
-       5. build AcceleratorRegistry
+registry_detect()                      = registry_detect_with_opts(builder_all(), allow_exec 1)
+registry_detect_no_exec()              = registry_detect_with_opts(builder_no_exec(), allow_exec 0)
+registry_detect_with_opts(mask, allow_exec)
+  1. CPU profile                       total RAM: /proc/meminfo, sysctl hw.memsize (macOS),
+                                       GlobalMemoryStatusEx (Windows); 16 GiB if all fail
+  2. each backend in the mask, in turn  sysfs / syscalls / DXGI / sysctl, and vendor
+                                       tools only when allow_exec is 1
+  3. registry_post_passes:
+     a. duplicate devices              profiles_dedup: a Vulkan profile with a CUDA or
+                                       ROCm profile's PCI vendor:device ID, or a Vulkan
+                                       iGPU next to Apple's Metal GPU, is dropped; the
+                                       survivor keeps its own memory and fields
+     b. bandwidth enrichment           clock x bus width, or an estimate
+     c. PCIe enrichment                sysfs link speed x width
+     d. NUMA enrichment                sysfs numa_node
+     e. interconnect detection         InfiniBand, NVLink, XGMI, ... (allow_exec 1 only)
+     f. storage detection              NVMe / SATA SSD / HDD
+     g. environment detection          Docker, Kubernetes, cloud metadata
 ```
+
+The other entry points share the backends and `registry_post_passes`:
+`registry_detect_threaded()` runs the tool-based backends in threads and the
+sysfs ones on the calling thread; `lazy_by_family()` probes one family's
+backends on its first query and deduplicates as families accumulate;
+`cached_get()` / `disk_cached_get()` reuse a registry until its TTL runs out.
+
+Totals (`reg_total_memory`, `reg_total_accel_memory`) count system RAM once:
+a profile's `shared_memory_bytes` is folded into one pool, the largest shared
+part, and only memory of its own adds up.
 
 ## Data Flow
 
 ```
-Detection -> AcceleratorRegistry -> Query/Plan
-                |                      |
-                v                      v
-            JSON (str_builder)    suggest_quantization()
-            from_json()           plan_sharding()
-            DiskCachedRegistry    estimate_training_memory()
-                                  recommend_instance()
+Detection -> registry -> Query / Plan
+               |             |
+               v             v
+   registry_to_json()      reg_suggest_quant()
+   registry_to_summary_json()   reg_plan_sharding()
+   profile_from_json()     estimate_training_memory()
+   DiskCachedRegistry      recommend_instances(), compatible_with_registry()
 ```
 
 ## Design Decisions
 
-- **No vendor SDK dependencies** — all detection via CLI tools + sysfs
-  (see ADR-001)
-- **Compile-time backend selection** — `#ifdef`/`-D` flags control which backends are compiled
-  (see ADR-004)
-- **Parallel detection** — thread.cyr for 2+ backends
-  (see ADR-003)
-- **Best-effort** — errors become warnings, CPU always available
-- **AcceleratorType is Copy** — zero-cost pass-by-value, device name on profile
+- **No vendor SDK dependencies.** Detection uses sysfs, `/dev`, OS APIs
+  (DXGI, sysctl) and vendor CLI tools (ADR-001).
+- **Backends are selected at run time** with a builder mask
+  (`builder_with` / `builder_without`); every backend is compiled in. The
+  compile-time flags in ADR-004 were never implemented.
+- **Parallel detection is opt-in** (`registry_detect_threaded()`, ADR-003);
+  `registry_detect()` runs the backends in turn.
+- **Best-effort.** A missing tool or path becomes a warning; the CPU profile
+  is always present.
+- **No-exec contract.** `registry_detect_no_exec()` spawns nothing
+  (`backend_uses_exec()` in `types.cyr` classifies the backends).
+- **Fixed-point arithmetic** throughout (x1000 multipliers), no floats.
 
 ## Dependency Stack
 
 ```
 ai-hwaccel
-  (zero external dependencies)
-  JSON via str_builder     Manual serialization
-  thread.cyr               Parallel detection
+  Cyrius stdlib (vendored in lib/, pinned by cyrius.cyml)
+  bayan-json (optional, first-party)   only for profile_from_json_str
 ```
 
-Zero external dependencies. Zero vendor SDK dependencies.
+No third-party dependencies, and no vendor SDK dependencies.

@@ -6,6 +6,9 @@
 > `&ts`), rather than adding `chrono` to `[deps].stdlib` — that would have
 > moved `dist/ai-hwaccel.deps` from 18 leaves to 19 and made every consumer
 > satisfy it. The TTL test that does not assume Linux is **still open**.
+>
+> **Archived 2026-09-23.** That test is tracked in the
+> [roadmap](../../roadmap.md).
 
 **Filed:** 2026-09-07 (found auditing the cyrius `6.5.36 → 6.6.0` bump for 2.3.21)
 **Severity:** Medium — `CachedRegistry` / `DiskCachedRegistry` TTL expiry is

@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [Unreleased] — documentation checked against the code
+
+Documentation only. The source changes are comments, so the CLI and both
+benchmark binaries build byte-identical to 2.4.0 (236 120, 146 200 and
+164 840 B with `CYRIUS_DCE=1`), and there is no benchmark delta to review.
+
+### Changed
+
+- **`docs/schema.json` describes the real output.** It described the Rust-era
+  v1 registry, which no current output validates against. It is now a JSON
+  Schema (draft 2020-12) for every JSON the CLI prints: the registry (schema
+  v6), `--summary`, `--plan`, `--train` and `--cost --json`. Checked against
+  real output from the dev host and `cass`, the Python fixtures, and
+  hand-built edge cases; 15 deliberately broken documents are all rejected.
+- **Every doc checked against the code**: README, CONTRIBUTING, SECURITY, the
+  architecture overview, the production, testing and framework-integration
+  guides, troubleshooting, performance, migration, the threat model, ADRs
+  001–004 and the Python README. Among the corrections:
+  - vendor tools run without a time limit; the docs promised 5 s;
+  - `ibstat` is never run; the interconnect pass runs `nvidia-smi nvlink -s`;
+  - the disk cache writes its file but never reads it back;
+  - there is no C API, and `--debug` is `--log-level debug`;
+  - ADR-004's per-backend `-D` flags were never implemented;
+  - the probe paths for TPU, Neuron, Cerebras, Graphcore, Groq, Samsung and
+    MediaTek;
+  - `cyrius lint` exits 0 on warnings, so the documented loops use `--strict`.
+- **The roadmap lists open work only.** New items from this review: tools
+  without a time limit, a one-byte overrun when a read fills its buffer, a
+  phantom Apple GPU and Neural Engine on Intel Macs, no `pci_id` on oneAPI,
+  DXGI and Apple profiles, the write-only disk cache and its `/tmp` fallback,
+  warnings for tools that cannot exist, and a lint step that cannot fail.
+- **Five resolved issues moved to `docs/development/issues/archived/`**, with
+  their links updated. Their open follow-ups are roadmap items.
+- Comments only: `builder_no_exec()` and the post-pass comments in
+  `src/registry.cyr` (`dist/ai-hwaccel.cyr` regenerated to match), and the
+  Python runner's comment on reading environment variables on Windows.
+
 ## [2.4.0] — 2026-09-23 — one physical device, one profile
 
 A GPU that two backends report is now listed once. Vulkan sees every card that
@@ -1495,7 +1532,7 @@ Linux, single-threaded. This release was verified on **all four targets** instea
   and `NVIDIA_VISIBLE_DEVICES` there. **Verified on both:** `--version` resolves
   a probe VERSION through the env var on `cass` and on `ecb`, where it previously
   could not. Issue
-  [2026-09-07-cmd-getenv-proc-only](docs/development/issues/2026-09-07-cmd-getenv-proc-only.md).
+  [2026-09-07-cmd-getenv-proc-only](docs/development/issues/archived/2026-09-07-cmd-getenv-proc-only.md).
 
 - **The disk cache works on aarch64** — it silently did nothing there.
   `src/cache.cyr` issued raw **x86_64** `syscall(83)`/`syscall(87)` for
@@ -1512,7 +1549,7 @@ Linux, single-threaded. This release was verified on **all four targets** instea
   `CYRIUS_DCE=1` eliminates the disk-cache API from the CLI, so the shipped
   executable was never affected — this is for library consumers of
   `dist/ai-hwaccel.cyr`. Issue
-  [2026-09-07-cache-raw-syscalls-wrong-on-aarch64](docs/development/issues/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md).
+  [2026-09-07-cache-raw-syscalls-wrong-on-aarch64](docs/development/issues/archived/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md).
 
 - **Cache TTL expiry is defined on macOS and Windows** — it was an uninitialised
   stack read. `_monotonic_secs()` was a bare `syscall(228, 1, &ts); return
@@ -1521,7 +1558,7 @@ Linux, single-threaded. This release was verified on **all four targets** instea
   from `GetTickCount64` and never touches `&ts`. Now branched per target,
   mirroring `lib/chrono.cyr` rather than re-deriving it, with AGNOS on
   `sys_uptime_ms()`. Issue
-  [2026-09-07-monotonic-secs-unguarded-on-macos-windows](docs/development/issues/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md).
+  [2026-09-07-monotonic-secs-unguarded-on-macos-windows](docs/development/issues/archived/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md).
 
 - **Detector threads no longer log.** `registry_detect_threaded` spawns six
   threads whose parsers called `hwlog_warn` directly, and `lib/sakshi.cyr`'s
@@ -1533,7 +1570,7 @@ Linux, single-threaded. This release was verified on **all four targets** instea
   `warnings_log_parse()` (`src/error.cyr`) called from the main thread in both
   detection paths, filtered to `HWA_ERR_PARSE`. Verified byte-equivalent: same
   line emitted, same suppression at every level. Issue
-  [2026-09-07-threaded-detect-vs-single-threaded-sakshi](docs/development/issues/2026-09-07-threaded-detect-vs-single-threaded-sakshi.md).
+  [2026-09-07-threaded-detect-vs-single-threaded-sakshi](docs/development/issues/archived/2026-09-07-threaded-detect-vs-single-threaded-sakshi.md).
 
 ### Changed — toolchain and dependency
 
@@ -1902,7 +1939,7 @@ warning, because `json_roundtrip_test` exercises the function.
   makes the `{"models":[…]}` wrapper that `data/models.json` actually ships look like a single
   object. Silent: no error, just a short catalog. Zero callers inside ai-hwaccel and no test, which
   is why the suite stays green; hoosh vendors an unwrapped copy and guards it. Filed as
-  [`2026-07-30-load-models-misparses-its-own-data-file.md`](docs/development/issues/2026-07-30-load-models-misparses-its-own-data-file.md)
+  [`2026-07-30-load-models-misparses-its-own-data-file.md`](docs/development/issues/archived/2026-07-30-load-models-misparses-its-own-data-file.md)
   rather than fixed here, because the two candidate fixes differ in whether they change a published
   artifact, and that is a compatibility call. The issue also records three adjacent weaknesses in
   the same function: a one-byte overflow at exactly 32768 bytes, silent truncation past that, and
@@ -2004,7 +2041,7 @@ rename it belongs with.
 #### Fixed
 
 - **`registry_new` symbol collision with bote-core** (docs/development/
-  issues/2026-06-11-registry-new-collision.md) — a consumer linking both
+  issues/archived/2026-06-11-registry-new-collision.md) — a consumer linking both
   bundles no longer gets a 24-vs-32-byte layout mismatch on
   `registry_new`. Retires the consumer-side vendoring+sed workaround szal
   carried.

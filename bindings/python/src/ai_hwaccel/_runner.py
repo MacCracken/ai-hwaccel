@@ -81,12 +81,11 @@ def _run(args: list, binary: Optional[str], timeout: float) -> str:
     if "AI_HWACCEL_DATA_DIR" not in env:
         data_dir = _data_dir_for(exe)
         if data_dir is not None:
-            # Pass it as a CLI flag — the portable channel that also works on
-            # Windows PE, where the binary cannot read environment variables
-            # (no /proc/self/environ; cyrius exposes no GetEnvironmentVariable
-            # reroute), so --version/--cost would otherwise report "unknown" /
-            # empty on the bundled Windows wheel. Still export the env var for
-            # back-compat with consumers / older binaries that read it.
+            # Pass it as a CLI flag, which every binary honours: before 2.3.21
+            # the binary read environment variables only from
+            # /proc/self/environ, so on macOS and Windows --version/--cost
+            # ignored AI_HWACCEL_DATA_DIR. Still export the env var for
+            # consumers that read it.
             cmd += ["--data-dir", data_dir]
             env["AI_HWACCEL_DATA_DIR"] = data_dir
     cmd += args

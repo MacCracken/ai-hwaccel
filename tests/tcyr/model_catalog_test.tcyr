@@ -1,7 +1,7 @@
 # model_catalog_test.tcyr — load_models against the REAL shipped data file.
 #
 # Added 2.3.22 with the fix for
-# docs/development/issues/2026-07-30-load-models-misparses-its-own-data-file.md.
+# docs/development/issues/archived/2026-07-30-load-models-misparses-its-own-data-file.md.
 # The whole reason that defect survived three releases is that `load_models`
 # has no callers inside ai-hwaccel and had no test: the suite was green while
 # the function returned 1 model out of 26 to every downstream consumer.

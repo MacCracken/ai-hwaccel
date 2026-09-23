@@ -258,10 +258,13 @@ fn builder_with(mask, backend) { return mask | (1 << backend); }
 fn builder_without(mask, backend) { return mask & (~(1 << backend)); }
 fn builder_is_enabled(mask, backend) { return (mask >> backend) & 1; }
 
-# Mask of backends whose detectors are pure sysfs/syscall reads — no
-# subprocess spawning. Library consumers with a no-exec contract
-# (mihi's probe surface) call this then registry_detect_with(builder_no_exec()),
-# or use the convenience registry_detect_no_exec() entry point.
+# Mask of backends that can run without spawning a subprocess (sysfs,
+# syscalls, DXGI, sysctl). It selects backends; it does not forbid exec.
+# Library consumers with a no-exec contract (mihi's probe surface) call
+# registry_detect_no_exec(), or registry_detect_with_opts(mask, 0) with a
+# mask built from this one. registry_detect_with(builder_no_exec()) passes
+# allow_exec 1, so vulkaninfo, the system_profiler / wmic fallbacks and the
+# interconnect post-pass's nvidia-smi may still run.
 fn builder_no_exec() {
     var mask = 0;
     var b = 0;
@@ -394,8 +397,9 @@ fn profiles_dedup(profiles) {
 # registry's system_io, NOT the registry — through 2.3.24 the threaded and lazy
 # paths passed `r`, which pushed interconnects into profiles and storage into
 # warnings and replaced system_io with the environment struct, so serializing
-# that registry segfaulted. detect_interconnects shells out to ibstat /
-# nvidia-smi topo, so it runs only when `allow_exec` is 1.
+# that registry segfaulted. detect_interconnects runs `nvidia-smi nvlink -s`
+# (InfiniBand, NVSwitch and XGMI it reads from sysfs), so it runs only when
+# `allow_exec` is 1.
 fn registry_post_passes(r, allow_exec) {
     var profs = reg_profiles(r);
     var sio = reg_system_io(r);
@@ -422,8 +426,8 @@ fn registry_detect_with(builder_mask) {
 
 # No-subprocess detection — masks off exec-shelling backends (defense
 # in depth: even if the caller's mask had them set) and skips the only
-# exec-shaped post-pass (detect_interconnects, which calls ibstat /
-# nvidia-smi for fabric topology). Safe to call from contexts that
+# exec-shaped post-pass (detect_interconnects, which runs
+# `nvidia-smi nvlink -s`). Safe to call from contexts that
 # forbid process spawning, e.g. mihi probes. See backend_uses_exec()
 # in types.cyr for the per-backend classification.
 fn registry_detect_no_exec() {

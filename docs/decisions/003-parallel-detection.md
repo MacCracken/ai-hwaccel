@@ -2,7 +2,13 @@
 
 ## Status
 
-Accepted
+Amended. This record is from the Rust releases. In the Cyrius port,
+`registry_detect()` runs the backends one after another, and parallel
+detection is the opt-in `registry_detect_threaded()`, which runs the
+tool-based backends in threads. The Vulkan post-pass described under
+Trade-offs was lost in the port; since 2.4.0, `profiles_dedup` drops a Vulkan
+profile per device, when a CUDA or ROCm profile has the same PCI vendor and
+device ID, instead of dropping every Vulkan GPU.
 
 ## Context
 

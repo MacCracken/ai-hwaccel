@@ -5,6 +5,9 @@
 > with the AGNOS pathlen arity handled separately. Re-measured under
 > `qemu-aarch64`: `old syscall(83) = -9` -> `new sys_mkdir = 0`, directory
 > created. The qemu-aarch64 disk-cache CI test is **still open**.
+>
+> **Archived 2026-09-23.** The qemu-aarch64 test is tracked in the
+> [roadmap](../../roadmap.md).
 
 **Filed:** 2026-09-07 (found auditing the cyrius `6.5.36 → 6.6.0` bump for 2.3.21)
 **Severity:** Medium — `DiskCachedRegistry` never creates its directory and never

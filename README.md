@@ -12,37 +12,41 @@ decide how to quantize and shard a model across them.
 
 | Metric | Value |
 |--------|-------|
-| Binary size | **214 KB** (`CYRIUS_DCE=1`) |
+| Binary size | **236 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.6.6 |
 | Tests | 950 assertions (15 test units) |
 | Fuzz harnesses | 6 |
-| Dependencies | **0** |
+| Dependencies | **0** third-party (bayan's JSON sublib: first-party, optional) |
 | Hardware families | 18 |
-| Derived structs | 16 (every heap struct uses `#derive(accessors)`) |
+| Derived structs | 16 (`#derive(accessors)`) |
 
 ## Supported Hardware
 
 | Family | Variants | Detection method |
 |--------|----------|------------------|
-| NVIDIA CUDA | GeForce, Tesla, A100, H100, ... | `nvidia-smi` on `$PATH` |
+| NVIDIA CUDA | GeForce, Tesla, A100, H100, GH200, ... | `nvidia-smi` on `$PATH` (Linux) |
 | AMD ROCm | MI250, MI300, RX 7900 | `/sys/class/drm` sysfs |
 | Apple Metal | M-series GPU cores | `sysctl` (`system_profiler` fallback) |
 | Apple ANE | Neural Engine | `sysctl` (`system_profiler` fallback) |
 | Intel NPU | Meteor Lake+ | `/sys/class/misc/intel_npu` |
 | AMD XDNA | Ryzen AI NPU | `/sys/class/accel/*/device/driver` |
-| Google TPU | v4, v5e, v5p | `/dev/accel*` + sysfs version |
+| Google TPU | v4, v5e, v5p | `/sys/class/accel` (driver, `tpu_version`) |
 | Intel Gaudi | Gaudi 2, Gaudi 3 (Habana HPU) | `hl-smi` on `$PATH` |
-| AWS Inferentia | inf1, inf2 | `/dev/neuron*` or `neuron-ls` |
-| AWS Trainium | trn1 | `/dev/neuron*` + sysfs |
+| AWS Inferentia | inf1, inf2 | `neuron-ls`, or `/dev/neuron*` + DMI product name |
+| AWS Trainium | trn1 | `neuron-ls`, or `/dev/neuron*` + DMI product name |
 | Intel oneAPI | Arc, Data Center Max | `xpu-smi` on `$PATH` |
 | Qualcomm Cloud AI | AI 100 | `/dev/qaic_*` or `/sys/class/qaic` |
-| Cerebras WSE | Wafer-Scale Engine | `/dev/cerebras*` sysfs |
-| Graphcore IPU | IPU-POD | `gc-info` or sysfs |
-| Groq LPU | Language Processing Unit | `/dev/groq*` sysfs |
-| Samsung NPU | Exynos NPU | `/sys/class/npu` sysfs |
-| MediaTek APU | Dimensity APU | `/sys/class/misc/apusys` sysfs |
+| Cerebras WSE | Wafer-Scale Engine | `cerebras_cli`, or `/dev/cerebras*` |
+| Graphcore IPU | IPU-POD | `gc-info`, or `/dev/ipu*` |
+| Groq LPU | Language Processing Unit | `/dev/groq*` |
+| Samsung NPU | Exynos NPU | `/sys/class/misc/samsung_npu` |
+| MediaTek APU | Dimensity APU | `/sys/class/misc/mtk_apu` |
 | Vulkan Compute | Any Vulkan 1.1+ device | `vulkaninfo` on `$PATH`, a sysfs scan without it |
-| CPU | Always present | `/proc/meminfo` (16 GiB fallback) |
+| Windows GPU | Any hardware display adapter | DXGI adapter enumeration (`wmic` fallback) |
+| CPU | Always present | `/proc/meminfo`, `sysctl hw.memsize` (macOS), `GlobalMemoryStatusEx` (Windows); 16 GiB fallback |
+
+On Windows no vendor tool runs yet (the roadmap's `which()` item), so every
+GPU there, NVIDIA included, is a Windows GPU profile.
 
 ## Quick Start
 
@@ -54,26 +58,42 @@ cyrius build src/main.cyr build/ai-hwaccel
 ai-hwaccel                  # Full registry JSON
 ai-hwaccel --summary        # Compact summary JSON
 ai-hwaccel --table          # Human-readable table
-ai-hwaccel --cost 70B       # Cloud instance recommendation
+ai-hwaccel --plan 70B       # Sharding plan JSON (--quant int4, ...)
+ai-hwaccel --train 7B --method lora   # Training memory JSON
+ai-hwaccel --cost 70B       # Cloud instance recommendation (--json for JSON)
 ai-hwaccel --version        # Print version
+ai-hwaccel -v               # Log to stderr at debug level (-vv trace, -q silent)
 ```
+
+Every JSON output is described by [`docs/schema.json`](docs/schema.json).
+
+### From Python
+
+```sh
+pip install ai-hwaccel
+```
+
+The package wraps the binary and its JSON in typed dataclasses; see
+[`bindings/python/README.md`](bindings/python/README.md).
 
 ### Using as a library
 
 `cyrius distlib` bundles every non-CLI module into `dist/ai-hwaccel.cyr`,
-a single self-contained file consumers pull via `cyrius deps`. Bundle
-includes all 18 detection backends, the registry/profile surface, the
+a single self-contained file consumers pull via `cyrius deps`. The bundle
+includes every detection backend, the registry/profile surface, the
 sharding planner, the cost model, the training memory estimator, the
-model-format header parser, and (since 2.2.6) the JSON serializer.
+model-format header parser, and the JSON serializer.
 Only `src/main.cyr` (CLI argv parsing) is excluded. Library consumers
-that don't need JSON output get the serializer DCE'd for free.
+that don't need JSON output and build with `CYRIUS_DCE=1` get the
+serializer removed. `profile_from_json_str` needs bayan's JSON sublib,
+which the consumer supplies (it is optional here).
 
 Wire it from a consumer's `cyrius.cyml`:
 
 ```toml
 [deps.ai-hwaccel]
 git = "https://github.com/MacCracken/ai-hwaccel.git"
-tag = "2.2.6"
+tag = "2.4.0"
 modules = ["dist/ai-hwaccel.cyr"]
 ```
 
@@ -85,13 +105,13 @@ include "lib/ai-hwaccel.cyr"
 
 # Full detection — sysfs probes plus vendor CLIs (nvidia-smi, hl-smi,
 # neuron-ls, xpu-smi, cerebras_cli, gc-info) for the six EXEC backends,
-# vulkaninfo for Vulkan, and ibstat / nvidia-smi topo for the
-# interconnect post-pass.
+# vulkaninfo for Vulkan, and `nvidia-smi nvlink -s` for the interconnect
+# post-pass (InfiniBand, NVSwitch and XGMI come from sysfs).
 var r = registry_detect();
 # ... reg_profiles(r), reg_count(r), ...
 ```
 
-#### No-exec entry point (since 2.2.5)
+#### No-exec entry point
 
 Consumers with a no-subprocess contract — `mihi`'s probe surface, any
 read-only system-info library — call `registry_detect_no_exec()`
@@ -99,11 +119,10 @@ instead. It masks off the six exec-shelling backends (CUDA, Gaudi,
 Neuron, Intel oneAPI, Cerebras, Graphcore) and skips the
 `detect_interconnects` post-pass. The eleven native backends still run,
 along with the sysfs post-passes: ROCm, Intel NPU, AMD XDNA, TPU,
-Qualcomm, Groq, Samsung NPU, MediaTek APU, Windows (DXGI, since 2.3.25),
-Apple (sysctl on macOS and the device tree on Asahi Linux, since
-2.3.27) and Vulkan (a sysfs scan of the DRM cards, since 2.3.29; it
-leaves AMD cards to ROCm). Their `wmic` / `system_profiler` /
-`vulkaninfo` runs do not happen.
+Qualcomm, Groq, Samsung NPU, MediaTek APU, Windows (DXGI), Apple
+(sysctl on macOS, the device tree on Asahi Linux) and Vulkan (a sysfs
+scan of the DRM cards, which leaves AMD cards to ROCm). Their `wmic` /
+`system_profiler` / `vulkaninfo` runs do not happen.
 
 ```cyrius
 include "lib/ai-hwaccel.cyr"
@@ -113,21 +132,21 @@ include "lib/ai-hwaccel.cyr"
 var r = registry_detect_no_exec();
 ```
 
-The classification lives in `backend_uses_exec(b)` in `src/types.cyr`;
-`builder_no_exec()` is exposed if you want to compose your own mask
-(e.g. `builder_no_exec() & builder_without(builder_no_exec(), BACKEND_GROQ)`).
-
-Library consumers today: `mihi` v0.4.0 (M3 GPU probe, pending —
-drives the 2.2.5 no-exec contract). All consumers are listed in
-[Consumers](#consumers); historically every entry has been a binary
-consumer — library use begins with mihi.
+The classification lives in `backend_uses_exec(b)` in `src/types.cyr`.
+To compose your own mask and stay spawn-free, pass it to
+`registry_detect_with_opts(mask, 0)`, for example
+`registry_detect_with_opts(builder_without(builder_no_exec(), BACKEND_GROQ), 0)`.
+`registry_detect_with(mask)` allows exec whatever the mask: the Vulkan
+backend runs `vulkaninfo`, the Apple and Windows fallbacks may run
+`system_profiler` and `wmic`, and the interconnect post-pass runs
+`nvidia-smi`.
 
 ## Architecture
 
 ```
 src/
 ├── main.cyr                CLI entry point
-├── types.cyr               AcceleratorType (18 variants), AcceleratorFamily
+├── types.cyr               AcceleratorType (20 variants, CPU included), AcceleratorFamily
 ├── profile.cyr             Device profile (memory, capabilities, throughput)
 ├── registry.cyr            AcceleratorRegistry, DetectBuilder (bitmask), duplicate-device pass
 ├── plan.cyr                Sharding planner (tensor/pipeline/data parallel)
@@ -163,7 +182,8 @@ src/
     ├── environment.cyr      Runtime (Docker, K8s, cloud provider)
     ├── platform.cyr         sysfs/procfs helpers
     ├── command.cyr          Safe subprocess execution
-    └── amd_xdna.cyr         AMD XDNA NPU
+    ├── amd_xdna.cyr         AMD XDNA NPU
+    └── windows.cyr          Windows GPUs via DXGI, RAM via GlobalMemoryStatusEx
 ```
 
 ## Core Concepts
@@ -173,6 +193,7 @@ src/
 | Mode | Function | Use case |
 |------|----------|----------|
 | Synchronous | `registry_detect()` | Simple, single-threaded |
+| No-exec | `registry_detect_no_exec()` | No subprocess at all (see above) |
 | Threaded | `registry_detect_threaded()` | CLI backends run in parallel threads |
 | Cached | `cached_get(c)` | Long-running services, configurable TTL |
 | Lazy | `lazy_by_family(lr, FAMILY_GPU)` | Probe only what you need |
@@ -190,35 +211,42 @@ src/
 
 8 methods: full fine-tune, LoRA, QLoRA (4/8-bit), prefix tuning, DPO, RLHF,
 distillation. Per-component breakdown (model, optimizer, activations).
-Device-aware: GPU, TPU, Gaudi each have tuned multipliers.
+Device-aware: GPU, TPU, Gaudi and CPU each have tuned multipliers.
 
 ## How Detection Works
 
 All detection is best-effort and non-destructive:
 
 1. **sysfs probing** — reads `/sys/class/drm`, `/sys/class/misc`, etc.
-2. **`/dev` introspection** — checks for device nodes (`/dev/accel*`, `/dev/neuron*`)
-3. **`$PATH` tool execution** — runs `nvidia-smi`, `hl-smi`, `vulkaninfo`, `neuron-ls` when present
-4. **One profile per device** (since 2.4.0) — a GPU that Vulkan and CUDA or
+2. **`/dev` introspection** — checks for device nodes (`/dev/neuron*`, `/dev/groq*`)
+3. **Native OS APIs** — `sysctl` on macOS, DXGI and `GlobalMemoryStatusEx` on
+   Windows
+4. **`$PATH` tool execution** — runs `nvidia-smi`, `vulkaninfo`, `hl-smi`,
+   `neuron-ls`, `xpu-smi`, `cerebras_cli` and `gc-info` when present, without
+   a shell
+5. **One profile per device** — a GPU that Vulkan and CUDA or
    ROCm both report is listed once, as the CUDA/ROCm profile, matched on its
    PCI vendor and device ID. On Apple Silicon, a Vulkan (MoltenVK, Asahi)
    view of the Metal GPU is dropped.
 
-If a tool or sysfs path is absent the accelerator simply isn't registered — no errors, no crashes.
+If a tool or sysfs path is absent the accelerator simply isn't registered, and
+the `warnings` array names the missing tool. Detection itself doesn't fail.
 
 ## Development
 
 ```sh
 cyrius lib sync                                # Repopulate lib/ from the version-pinned stdlib snapshot
-cyrius deps                                    # Resolve non-stdlib [deps.*] entries (bayan)
-CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # Build (≈214 KB ELF, x86_64)
+cyrius deps                                    # Resolve non-stdlib [deps.*] entries (bayan) + transitive stdlib leaves
+CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # Build (≈236 KB ELF, x86_64)
 cyrius vet src/main.cyr                        # Include-graph audit
-cyrius lint src/main.cyr                       # Static analysis
-cyrius fmt src/main.cyr                        # Format check (diff against committed)
+for f in src/*.cyr src/detect/*.cyr; do cyrius lint --strict "$f"; done # Static analysis (fails on a warning)
+for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do cyrius fmt "$f" --check; done
+                                               # Format check (plain `cyrius fmt <file>` rewrites the file)
 
-# Test suite — 15 units under tests/tcyr/, 950 assertions total
+# Test suite — 15 units under tests/tcyr/, 950 assertions total. Run from the
+# repository root: some tests read tests/fixtures/.
 for t in tests/tcyr/*.tcyr; do
-    cyrius build "$t" "/tmp/$(basename $t .tcyr)"
+    CYRIUS_DCE=1 cyrius build "$t" "/tmp/$(basename $t .tcyr)"
     "/tmp/$(basename $t .tcyr)"
 done
 
@@ -247,17 +275,18 @@ done
 
 ### Pattern: derived struct accessors
 
-Every heap-allocated struct in the project uses `#derive(accessors)`. CI
-gates raw `load64(<param> + N)` / `store64(<param> + N, …)` on these
-structs outside their defining file. See `.github/workflows/ci.yml`'s
-`Raw-offset guard` step.
+Heap-allocated structs use `#derive(accessors)`. The two exceptions are small
+records: a warning (`src/error.cyr`) and a thread argument
+(`src/async_detect.cyr`). CI gates raw `load64(<param> + N)` /
+`store64(<param> + N, …)` on the derived structs outside their defining file.
+See `.github/workflows/ci.yml`'s `Raw-offset guard` step.
 
 ```cyrius
 #derive(accessors)
 struct profile {
     accel_type; device_id; available; memory_bytes;
     compute_cap; driver_version; device_name;
-    // ... 14 more fields
+    // ... 15 more fields
 }
 
 // Generated automatically:
@@ -269,12 +298,18 @@ struct profile {
 
 | Document | Description |
 |----------|-------------|
-| [Rust vs Cyrius benchmarks](docs/benchmarks-rust-v-cyrius.md) | Binary size, LOC, performance comparison |
-| [Architecture](docs/architecture/) | Module map, data flow |
-| [Roadmap](docs/development/roadmap.md) | Development plan |
-| [JSON schema](docs/schema.json) | Serialized registry format |
+| [Architecture](docs/architecture/overview.md) | Module map, detection flow |
+| [JSON schema](docs/schema.json) | Every JSON output: registry, summary, plan, training, cost |
+| [Production guide](docs/guides/production.md) | Deploying, logging, version compatibility |
+| [Testing guide](docs/guides/testing.md) | Running the tests, hardware setup |
+| [Framework integration](docs/guides/framework-integration.md) | Using the output from ML frameworks |
+| [Troubleshooting](docs/troubleshooting.md) | Common detection problems |
+| [Performance](docs/performance.md) | Benchmarks and cost of detection |
+| [Python bindings](bindings/python/README.md) | `pip install ai-hwaccel` |
+| [Roadmap](docs/development/roadmap.md) | Open work |
 | [Changelog](CHANGELOG.md) | Release history |
 | [Contributing](CONTRIBUTING.md) | How to contribute |
+| [Rust vs Cyrius benchmarks](docs/benchmarks-rust-v-cyrius.md) | The 2.0.0 port, compared with Rust 1.2.0 |
 
 ## Consumers
 

@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+Not implemented. Nothing in `src/` reads `CUDA`, `ROCM`, `TPU` or
+`NO_BACKENDS`, so a `-D` flag changes nothing and every backend is compiled
+in. Backends are selected at run time instead, with a builder mask
+(`builder_without(builder_all(), BACKEND_VULKAN)` passed to
+`registry_detect_with`). Implementing these gates, or retiring this record,
+is on the roadmap.
 
 ## Context
 

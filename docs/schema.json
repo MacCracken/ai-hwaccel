@@ -2,66 +2,200 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/MacCracken/ai-hwaccel/schema.json",
   "title": "AcceleratorRegistry",
-  "description": "Serialized output of ai-hwaccel hardware detection.",
+  "description": "The JSON that ai-hwaccel prints by default (and with --json): detected accelerators, detection warnings and system I/O. schema_version 6. Written by registry_to_json in src/json_out.cyr. The other JSON outputs are under $defs: Summary (--summary), ShardingPlan (--plan), TrainingMemory (--train) and CostReport (--cost --json). Every key in an object is listed; optional keys are omitted, never null, when a value is unknown or does not apply.",
   "type": "object",
-  "required": ["schema_version", "profiles"],
+  "required": ["schema_version", "profiles", "system_io"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "type": "integer",
-      "description": "Schema version for forward-compatibility. Currently 1.",
-      "const": 1
+      "description": "Bumped whenever the format gains or changes keys. 6 since 2.3.28 (shared_memory_bytes).",
+      "const": 6
     },
     "profiles": {
+      "description": "One profile per detected device, the CPU first. A device that two backends report is listed once (since 2.4.0).",
       "type": "array",
-      "description": "Detected accelerator profiles (always includes at least CPU).",
+      "minItems": 1,
       "items": { "$ref": "#/$defs/AcceleratorProfile" }
     },
     "warnings": {
+      "description": "Names of the vendor tools that were not found or failed (for example \"nvidia-smi\"), one per attempt. Omitted when there are none.",
       "type": "array",
-      "description": "Non-fatal detection warnings. Omitted when empty.",
-      "items": { "$ref": "#/$defs/DetectionError" }
+      "minItems": 1,
+      "items": { "type": "string" }
+    },
+    "system_io": {
+      "description": "Interconnects, storage and the runtime environment (since schema v4).",
+      "oneOf": [{ "$ref": "#/$defs/SystemIo" }, { "type": "null" }]
     }
   },
   "$defs": {
     "AcceleratorProfile": {
       "type": "object",
-      "required": ["accelerator", "available", "memory_bytes"],
+      "required": ["accelerator", "accel_type_id", "device_id", "available", "memory_bytes", "family"],
       "additionalProperties": false,
       "properties": {
-        "accelerator": { "$ref": "#/$defs/AcceleratorType" },
+        "accelerator": {
+          "description": "Display name of the accelerator type.",
+          "enum": ["CPU", "CUDA GPU", "ROCm GPU", "Metal GPU", "Vulkan GPU", "Intel NPU", "AMD XDNA NPU", "Apple Neural Engine", "TPU", "Intel Gaudi", "AWS Neuron", "Qualcomm Cloud AI 100", "Intel oneAPI GPU", "Cerebras WSE", "Graphcore IPU", "Groq LPU", "Samsung NPU", "MediaTek APU", "Windows GPU", "AGNOS GPU"]
+        },
+        "accel_type_id": {
+          "description": "The accelerator type as a number, the authoritative tag when a profile is read back (profile_from_json).",
+          "type": "integer", "minimum": 0, "maximum": 19
+        },
+        "device_id": { "description": "Index within the backend.", "type": "integer", "minimum": 0 },
         "available": { "type": "boolean" },
-        "memory_bytes": { "type": "integer", "minimum": 0 },
-        "compute_capability": { "type": ["string", "null"] },
-        "driver_version": { "type": ["string", "null"] }
+        "memory_bytes": { "description": "Memory the device can use. For a device on system RAM this includes the shared part below.", "type": "integer", "minimum": 0 },
+        "family": { "enum": ["CPU", "GPU", "NPU", "TPU", "AI ASIC"] },
+        "compute_capability": { "description": "CUDA compute capability (\"8.9\"), or the ROCm gfx target.", "type": "string" },
+        "driver_version": { "type": "string" },
+        "device_name": { "type": "string" },
+        "memory_used_bytes": { "type": "integer", "minimum": 0 },
+        "memory_free_bytes": { "type": "integer", "minimum": 0 },
+        "numa_node": { "type": "integer", "minimum": 0 },
+        "temperature_c": { "type": "integer" },
+        "gpu_utilization_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "mem_bandwidth_x1000": { "description": "Memory bandwidth, GB/s x 1000.", "type": "integer", "minimum": 0 },
+        "pcie_bandwidth_x1000": { "description": "PCIe link bandwidth, GB/s x 1000.", "type": "integer", "minimum": 0 },
+        "power_x1000": { "description": "Power draw, watts x 1000.", "type": "integer", "minimum": 0 },
+        "tpu_version": { "type": "integer", "minimum": 0 },
+        "tpu_chips": { "type": "integer", "minimum": 1 },
+        "gaudi_gen": { "type": "integer", "minimum": 0 },
+        "neuron_chip": { "type": "integer", "minimum": 0 },
+        "neuron_cores": { "type": "integer", "minimum": 1 },
+        "shared_memory_bytes": {
+          "description": "The part of memory_bytes that is system RAM, which the CPU profile already counts: all of it for Apple Silicon, the client NPUs and integrated GPUs on system RAM; 480 GiB on a GH200. Never on the CPU profile. Since schema v6.",
+          "type": "integer", "minimum": 1
+        }
       }
     },
-    "AcceleratorType": {
-      "description": "Tagged union. The variant name is the key, fields are the value.",
-      "oneOf": [
-        { "type": "string", "const": "Cpu" },
-        { "type": "object", "required": ["CudaGpu"], "properties": { "CudaGpu": { "type": "object", "properties": { "device_id": { "type": "integer" } } } } },
-        { "type": "object", "required": ["RocmGpu"], "properties": { "RocmGpu": { "type": "object", "properties": { "device_id": { "type": "integer" } } } } },
-        { "type": "string", "const": "MetalGpu" },
-        { "type": "object", "required": ["VulkanGpu"], "properties": { "VulkanGpu": { "type": "object", "properties": { "device_id": { "type": "integer" }, "device_name": { "type": "string" } } } } },
-        { "type": "string", "const": "IntelNpu" },
-        { "type": "object", "required": ["AmdXdnaNpu"], "properties": { "AmdXdnaNpu": { "type": "object", "properties": { "device_id": { "type": "integer" } } } } },
-        { "type": "string", "const": "AppleNpu" },
-        { "type": "object", "required": ["Tpu"], "properties": { "Tpu": { "type": "object", "properties": { "device_id": { "type": "integer" }, "chip_count": { "type": "integer" }, "version": { "type": "string", "enum": ["V4", "V5e", "V5p"] } } } } },
-        { "type": "object", "required": ["Gaudi"], "properties": { "Gaudi": { "type": "object", "properties": { "device_id": { "type": "integer" }, "generation": { "type": "string", "enum": ["Gaudi2", "Gaudi3"] } } } } },
-        { "type": "object", "required": ["AwsNeuron"], "properties": { "AwsNeuron": { "type": "object", "properties": { "device_id": { "type": "integer" }, "chip_type": { "type": "string", "enum": ["Inferentia", "Trainium"] }, "core_count": { "type": "integer" } } } } },
-        { "type": "object", "required": ["QualcommAi100"], "properties": { "QualcommAi100": { "type": "object", "properties": { "device_id": { "type": "integer" } } } } },
-        { "type": "object", "required": ["IntelOneApi"], "properties": { "IntelOneApi": { "type": "object", "properties": { "device_id": { "type": "integer" } } } } }
-      ]
+    "SystemIo": {
+      "type": "object",
+      "required": ["interconnects", "storage", "environment"],
+      "additionalProperties": false,
+      "properties": {
+        "interconnects": { "type": "array", "items": { "$ref": "#/$defs/Interconnect" } },
+        "storage": { "type": "array", "items": { "$ref": "#/$defs/Storage" } },
+        "environment": { "oneOf": [{ "$ref": "#/$defs/RuntimeEnvironment" }, { "type": "null" }] }
+      }
     },
-    "DetectionError": {
-      "description": "Non-fatal detection warning.",
-      "oneOf": [
-        { "type": "object", "required": ["ToolNotFound"], "properties": { "ToolNotFound": { "type": "object", "properties": { "tool": { "type": "string" } } } } },
-        { "type": "object", "required": ["ToolFailed"], "properties": { "ToolFailed": { "type": "object", "properties": { "tool": { "type": "string" }, "exit_code": { "type": ["integer", "null"] }, "stderr": { "type": "string" } } } } },
-        { "type": "object", "required": ["ParseError"], "properties": { "ParseError": { "type": "object", "properties": { "backend": { "type": "string" }, "message": { "type": "string" } } } } },
-        { "type": "object", "required": ["SysfsReadError"], "properties": { "SysfsReadError": { "type": "object", "properties": { "path": { "type": "string" }, "message": { "type": "string" } } } } }
-      ]
+    "Interconnect": {
+      "type": "object",
+      "required": ["kind", "name", "bandwidth_bytes_per_sec", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["InfiniBand", "RoCE", "RoCE v2", "NVLink", "NVSwitch", "XGMI", "ICI", "PCIe", "Unknown"] },
+        "name": { "type": "string" },
+        "bandwidth_bytes_per_sec": { "type": "integer", "minimum": 0 },
+        "state": { "type": "integer" }
+      }
+    },
+    "Storage": {
+      "type": "object",
+      "required": ["name", "kind", "bandwidth_bytes_per_sec"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "enum": ["NVMe", "SATA SSD", "HDD", "Unknown"] },
+        "bandwidth_bytes_per_sec": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "RuntimeEnvironment": {
+      "type": "object",
+      "required": ["is_docker", "is_k8s"],
+      "additionalProperties": false,
+      "properties": {
+        "is_docker": { "type": "boolean" },
+        "is_k8s": { "type": "boolean" },
+        "k8s_namespace": { "type": "string" },
+        "cloud_provider": { "type": "string" },
+        "instance_type": { "type": "string" },
+        "region": { "type": "string" },
+        "k8s_gpu_count": { "type": "integer", "minimum": 0 },
+        "k8s_gpu_source": { "type": "string" }
+      }
+    },
+    "Summary": {
+      "description": "ai-hwaccel --summary (registry_to_summary_json). Totals count system RAM once.",
+      "type": "object",
+      "required": ["device_count", "has_accelerator", "total_memory_bytes", "accelerator_memory_bytes", "gpu_count", "tpu_count", "npu_count", "warnings"],
+      "additionalProperties": false,
+      "properties": {
+        "device_count": { "type": "integer", "minimum": 1 },
+        "has_accelerator": { "type": "boolean" },
+        "total_memory_bytes": { "type": "integer", "minimum": 0 },
+        "accelerator_memory_bytes": { "type": "integer", "minimum": 0 },
+        "gpu_count": { "type": "integer", "minimum": 0 },
+        "tpu_count": { "type": "integer", "minimum": 0 },
+        "npu_count": { "type": "integer", "minimum": 0 },
+        "warnings": { "description": "The number of warnings.", "type": "integer", "minimum": 0 }
+      }
+    },
+    "ShardingPlan": {
+      "description": "ai-hwaccel --plan <model> [--quant <q>] (plan_to_json).",
+      "type": "object",
+      "required": ["strategy", "strategy_count", "total_memory_bytes", "shards"],
+      "additionalProperties": false,
+      "properties": {
+        "strategy": { "enum": ["None", "Pipeline Parallel", "Tensor Parallel", "Data Parallel", "Unknown"] },
+        "strategy_count": { "type": "integer", "minimum": 0 },
+        "total_memory_bytes": { "type": "integer", "minimum": 0 },
+        "est_tokens_per_sec_x1000": { "description": "Estimated throughput, tokens/s x 1000. Omitted when unknown.", "type": "integer", "minimum": 0 },
+        "shards": { "type": "array", "items": { "$ref": "#/$defs/Shard" } }
+      }
+    },
+    "Shard": {
+      "type": "object",
+      "required": ["id", "layer_start", "layer_end", "device", "device_id", "memory_bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "layer_start": { "type": "integer", "minimum": 0 },
+        "layer_end": { "type": "integer", "minimum": 0 },
+        "device": { "$ref": "#/$defs/AcceleratorProfile/properties/accelerator" },
+        "device_id": { "type": "integer", "minimum": 0 },
+        "memory_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "TrainingMemory": {
+      "description": "ai-hwaccel --train <model> [--method <m>] (training_to_json). Each figure twice: bytes, and GiB x 1000.",
+      "type": "object",
+      "required": ["model_bytes", "model_gib_x1000", "optimizer_bytes", "optimizer_gib_x1000", "activation_bytes", "activation_gib_x1000", "total_bytes", "total_gib_x1000"],
+      "additionalProperties": false,
+      "properties": {
+        "model_bytes": { "type": "integer", "minimum": 0 },
+        "model_gib_x1000": { "type": "integer", "minimum": 0 },
+        "optimizer_bytes": { "type": "integer", "minimum": 0 },
+        "optimizer_gib_x1000": { "type": "integer", "minimum": 0 },
+        "activation_bytes": { "type": "integer", "minimum": 0 },
+        "activation_gib_x1000": { "type": "integer", "minimum": 0 },
+        "total_bytes": { "type": "integer", "minimum": 0 },
+        "total_gib_x1000": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "CostReport": {
+      "description": "ai-hwaccel --cost <model> [--quant <q>] --json (cost_to_json in src/cost.cyr).",
+      "type": "object",
+      "required": ["model", "quantization", "memory_required_bytes", "recommendations"],
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string" },
+        "quantization": { "enum": ["FP32", "FP16", "BF16", "INT8", "INT4", "Unknown"] },
+        "memory_required_bytes": { "type": "integer", "minimum": 0 },
+        "recommendations": { "type": "array", "items": { "$ref": "#/$defs/CostRecommendation" } }
+      }
+    },
+    "CostRecommendation": {
+      "type": "object",
+      "required": ["instance", "provider", "gpu", "gpu_count", "total_memory_gb", "price_per_hour_usd_x100"],
+      "additionalProperties": false,
+      "properties": {
+        "instance": { "type": "string" },
+        "provider": { "type": "string" },
+        "gpu": { "type": "string" },
+        "gpu_count": { "type": "integer", "minimum": 0 },
+        "total_memory_gb": { "type": "integer", "minimum": 0 },
+        "price_per_hour_usd_x100": { "description": "Price per hour, US cents.", "type": "integer", "minimum": 0 }
+      }
     }
   }
 }

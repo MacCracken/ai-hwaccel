@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Since then, Windows (DXGI, `GlobalMemoryStatusEx`) and macOS
+(`sysctl`) are probed through OS APIs, which is still no vendor SDK.
 
 ## Context
 
@@ -21,8 +22,8 @@ We use approach 2: sysfs + CLI tools.
 
 **Benefits:**
 
-- Zero compile-time dependencies on vendor toolchains. The crate builds on any
-  system regardless of what drivers are installed.
+- Zero compile-time dependencies on vendor toolchains. The project builds on
+  any system regardless of what drivers are installed.
 - Cross-compilation is trivial — no need to cross-link CUDA libraries.
 - Adding a new backend is a single file with no build system changes.
 - Works in containers and VMs where only the kernel driver (not the full SDK)
@@ -39,6 +40,7 @@ We use approach 2: sysfs + CLI tools.
 
 **Mitigations:**
 
-- Structured `DetectionError` warnings let callers know when a tool is missing.
+- Warnings (the `warnings` array in the JSON) let callers know when a tool is
+  missing or failed.
 - Input validation rejects out-of-range values from malformed output.
 - Each backend is isolated in its own module so parser fixes don't affect others.

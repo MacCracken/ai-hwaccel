@@ -2,7 +2,10 @@
 
 ## Status
 
-Superseded — switched to SemVer at v0.19.3.
+Accepted, and in effect: SemVer since 0.19.3 (the Rust crate). The Rust
+releases reached 1.2.0, and the Cyrius port started at 2.0.0. `VERSION` is the
+single source of the version: `cyrius.cyml` reads it, and `release.yml`
+rejects a tag that is not `x.y.z` or does not match it.
 
 ## Context
 

@@ -1,151 +1,158 @@
 # Framework Integration Guide
 
-> **Note**: This guide documents integration patterns from the **Rust era**
-> (crates.io consumers). The project has since been ported to Cyrius.
-> The detection concepts and sharding logic remain the same, but the Rust API
-> examples below (using `AcceleratorRegistry::detect()`, serde, etc.) reflect
-> the former Rust library interface, not the current Cyrius codebase where
-> `registry_detect()` is the entry point and JSON is handled via `str_builder`.
-
 `ai-hwaccel` detects hardware and plans model deployment. It does **not** run
 inference or training — that's the job of your ML framework. This guide shows
-how to bridge the gap.
+how to bridge the gap. Most ML frameworks are driven from Python, so the
+examples use the Python package (`pip install ai-hwaccel`). Any other language
+can run the binary and parse its JSON ([docs/schema.json](../schema.json)).
 
 ## General pattern
 
-```rust
-use ai_hwaccel::{AcceleratorRegistry, AcceleratorFamily, QuantizationLevel};
+```python
+import ai_hwaccel
 
-let registry = AcceleratorRegistry::detect();
-let quant = registry.suggest_quantization(model_params);
-let plan = registry.plan_sharding(model_params, &quant);
+reg = ai_hwaccel.detect()                 # every accelerator, one profile per device
+kinds = {p.accelerator for p in reg.profiles if p.available}
+plan = ai_hwaccel.plan("70B", quant="bf16")
 
-// Use plan.strategy, plan.shards, and device info to configure your framework.
+# Use kinds, plan.strategy and plan.shards to configure your framework.
 ```
+
+`p.accelerator` is one of the names in the schema: `"CUDA GPU"`,
+`"ROCm GPU"`, `"Metal GPU"`, `"Vulkan GPU"`, `"Windows GPU"`, `"TPU"`,
+`"Intel NPU"`, and so on. `p.family` groups them: `"CPU"`, `"GPU"`, `"NPU"`,
+`"TPU"`, `"AI ASIC"`.
 
 ---
 
-## candle
+## PyTorch
 
-[candle](https://github.com/huggingface/candle) selects a device at model load
-time. Use `ai-hwaccel` to pick the right one:
+```python
+import torch
+import ai_hwaccel
 
-```rust,ignore
-use ai_hwaccel::{AcceleratorRegistry, AcceleratorType};
-use candle_core::Device;
+kinds = {p.accelerator for p in ai_hwaccel.detect().profiles if p.available}
 
-let registry = AcceleratorRegistry::detect();
-let best = registry.best_available().unwrap();
-
-let device = match &best.accelerator {
-    AcceleratorType::CudaGpu { device_id } => Device::cuda(*device_id as usize)?,
-    AcceleratorType::MetalGpu => Device::metal(0)?,
-    _ => Device::Cpu,
-};
-// Load model onto `device`...
+if "CUDA GPU" in kinds or "ROCm GPU" in kinds:
+    device = torch.device("cuda", 0)   # ROCm builds of PyTorch use "cuda" too
+elif "Metal GPU" in kinds:
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 ```
 
-## burn
+A CUDA profile's `device_id` is `nvidia-smi`'s index, which follows PCI bus
+order. PyTorch numbers CUDA devices fastest-first unless you set
+`CUDA_DEVICE_ORDER=PCI_BUS_ID`, so set it before mapping one onto the other.
 
-[burn](https://github.com/tracel-ai/burn) uses backend types at compile time,
-but device selection is runtime. Use `ai-hwaccel` to pick the backend device:
+## JAX
 
-```rust,ignore
-use ai_hwaccel::{AcceleratorRegistry, AcceleratorFamily};
+JAX picks its platform when it initializes, from `JAX_PLATFORMS`:
 
-let registry = AcceleratorRegistry::detect();
+```python
+import os
+import ai_hwaccel
 
-if registry.by_family(AcceleratorFamily::Gpu).next().is_some() {
-    // Use burn's WGPU or CUDA backend
-    println!("GPU available — use burn-wgpu or burn-cuda");
-} else {
-    // Fall back to CPU
-    println!("CPU only — use burn-ndarray");
-}
+kinds = {p.accelerator for p in ai_hwaccel.detect().profiles if p.available}
+if "TPU" in kinds:
+    os.environ["JAX_PLATFORMS"] = "tpu"
+elif "CUDA GPU" in kinds:
+    os.environ["JAX_PLATFORMS"] = "cuda"
+elif "ROCm GPU" in kinds:
+    os.environ["JAX_PLATFORMS"] = "rocm"
+else:
+    os.environ["JAX_PLATFORMS"] = "cpu"
+
+import jax   # after setting JAX_PLATFORMS
 ```
 
-## tch-rs (PyTorch bindings)
+## ONNX Runtime
 
-[tch-rs](https://github.com/LaurentMazare/tch-rs) wraps libtorch. Use
-`ai-hwaccel` to select the CUDA device:
+Order the execution providers by what is present; ONNX Runtime uses the first
+one its build supports:
 
-```rust,ignore
-use ai_hwaccel::{AcceleratorRegistry, AcceleratorType};
+```python
+import onnxruntime as ort
+import ai_hwaccel
 
-let registry = AcceleratorRegistry::detect();
+kinds = {p.accelerator for p in ai_hwaccel.detect().profiles if p.available}
+providers = []
+if "CUDA GPU" in kinds:
+    providers.append("CUDAExecutionProvider")
+if "ROCm GPU" in kinds:
+    providers.append("ROCMExecutionProvider")
+if "Metal GPU" in kinds or "Apple Neural Engine" in kinds:
+    providers.append("CoreMLExecutionProvider")
+if "Windows GPU" in kinds:
+    providers.append("DmlExecutionProvider")          # DirectML
+if "Intel NPU" in kinds or "Intel oneAPI GPU" in kinds:
+    providers.append("OpenVINOExecutionProvider")
+providers.append("CPUExecutionProvider")
 
-let device = registry
-    .best_available()
-    .and_then(|p| match &p.accelerator {
-        AcceleratorType::CudaGpu { device_id } => {
-            Some(tch::Device::Cuda(*device_id as usize))
-        }
-        _ => None,
-    })
-    .unwrap_or(tch::Device::Cpu);
-```
-
-## ort (ONNX Runtime)
-
-[ort](https://github.com/pykeio/ort) supports multiple execution providers.
-Use `ai-hwaccel` to pick the best one:
-
-```rust,ignore
-use ai_hwaccel::{AcceleratorRegistry, AcceleratorFamily};
-
-let registry = AcceleratorRegistry::detect();
-
-let provider = if registry.by_family(AcceleratorFamily::Gpu).next().is_some() {
-    "CUDAExecutionProvider" // or "ROCMExecutionProvider" / "CoreMLExecutionProvider"
-} else if registry.by_family(AcceleratorFamily::Npu).next().is_some() {
-    "QNNExecutionProvider"
-} else {
-    "CPUExecutionProvider"
-};
+session = ort.InferenceSession("model.onnx", providers=providers)
 ```
 
 ---
 
 ## Multi-device sharding
 
-For models that don't fit on a single device, use the sharding plan:
+For a model that doesn't fit on one device, use the sharding plan:
 
-```rust,ignore
-use ai_hwaccel::{AcceleratorRegistry, QuantizationLevel, ShardingStrategy};
+```python
+import ai_hwaccel
 
-let registry = AcceleratorRegistry::detect();
-let plan = registry.plan_sharding(70_000_000_000, &QuantizationLevel::BFloat16);
+plan = ai_hwaccel.plan("70B", quant="bf16")
 
-match &plan.strategy {
-    ShardingStrategy::None => {
-        // Load entire model on plan.shards[0].device
-    }
-    ShardingStrategy::PipelineParallel { num_stages } => {
-        for shard in &plan.shards {
-            // Load layers shard.layer_range on shard.device
-        }
-    }
-    ShardingStrategy::TensorParallel { num_devices } => {
-        // Split tensors across devices (framework-specific)
-    }
-    _ => {}
-}
+if plan.strategy == "None":
+    shard = plan.shards[0]            # the whole model on one device
+elif plan.strategy == "Pipeline Parallel":
+    for s in plan.shards:             # layers s.layer_start..s.layer_end on s.device
+        print(s.id, s.device, s.device_id, s.layer_start, s.layer_end, s.memory_bytes)
+elif plan.strategy == "Tensor Parallel":
+    pass                              # split tensors across plan.strategy_count devices
 ```
+
+`plan.est_tokens_per_sec` is an estimate, or `None` when there is none.
 
 ## Training memory budgeting
 
-Before launching a fine-tuning job, check if you have enough memory:
+Before launching a fine-tuning job, check that it fits:
 
-```rust,ignore
-use ai_hwaccel::*;
+```python
+import ai_hwaccel
 
-let registry = AcceleratorRegistry::detect();
-let est = estimate_training_memory(7000, TrainingMethod::LoRA, TrainingTarget::Gpu);
+need = ai_hwaccel.training_memory("7B", method="lora")
+have = ai_hwaccel.summary()["accelerator_memory_bytes"]
 
-let available_gb = registry.total_accelerator_memory() as f64 / (1024.0 * 1024.0 * 1024.0);
-if est.total_gb > available_gb {
-    eprintln!("Need {:.1} GB but only {:.1} GB available", est.total_gb, available_gb);
-    eprintln!("Try QLoRA: {:.1} GB",
-        estimate_training_memory(7000, TrainingMethod::QLoRA { bits: 4 }, TrainingTarget::Gpu).total_gb);
-}
+if need.total_bytes > have:
+    qlora = ai_hwaccel.training_memory("7B", method="qlora-4bit")
+    print(f"LoRA needs {need.total_gib:.1f} GiB, "
+          f"QLoRA 4-bit {qlora.total_gib:.1f} GiB, "
+          f"{have / 2**30:.1f} GiB available")
+```
+
+The methods are `full`, `lora`, `qlora-4bit`, `qlora-8bit`, `prefix`, `dpo`,
+`rlhf` and `distillation`.
+
+---
+
+## Other languages
+
+Run the CLI and parse its JSON: `ai-hwaccel` (the registry), `--summary`,
+`--plan 70B`, `--train 7B --method lora` and `--cost 70B --json`.
+[docs/schema.json](../schema.json) describes each one.
+
+## Cyrius
+
+Cyrius programs use the library bundle directly (see the README's *Using as a
+library*):
+
+```cyrius
+include "lib/ai-hwaccel.cyr"
+
+var r = registry_detect();
+var best = reg_best_available(r);                  # highest-ranked available profile
+var q = reg_suggest_quant(r, 70000000000);         # a QUANT_* level for 70B parameters
+var plan = reg_plan_sharding(r, 70000000000, q);
+var json = registry_to_json(r);
 ```

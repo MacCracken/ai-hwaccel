@@ -5,9 +5,10 @@ Python bindings for [ai-hwaccel](https://github.com/MacCracken/ai-hwaccel)
 sharding, training-memory estimation).
 
 These bindings are a thin, **dependency-free** wrapper over the compiled
-`ai-hwaccel` binary. There is no FFI (the cyrius toolchain emits
-executables only); each call shells out to the binary and parses its
-JSON (schema v6) into typed dataclasses.
+`ai-hwaccel` binary. There is no FFI: each call runs the binary as a
+subprocess and parses its JSON (schema v6,
+[docs/schema.json](https://github.com/MacCracken/ai-hwaccel/blob/main/docs/schema.json))
+into typed dataclasses.
 
 ## Install
 
@@ -62,7 +63,11 @@ df = reg.to_dataframe()          # requires ai-hwaccel[pandas]
 | `cost(model, quant=)` | `CostReport` | cloud instance recommendations |
 | `version()` | `str` | binary's self-reported version |
 
-All accept `binary=<path>` and `timeout=<seconds>`.
+All accept `binary=<path>` and `timeout=<seconds>` (30 by default). The
+binary puts no time limit on the vendor tools it runs, so `timeout` is what
+bounds a hung `nvidia-smi`. `TrainingMemory`, `ShardingPlan` and
+`CostRecommendation` also expose the fixed-point fields as floats (`total_gib`,
+`est_tokens_per_sec`, `price_per_hour_usd`).
 
 `summary()`'s `total_memory_bytes` and `accelerator_memory_bytes` count system
 RAM once. On Apple Silicon the Metal GPU and Neural Engine use the CPU's RAM,
@@ -72,13 +77,13 @@ says how much of its `memory_bytes` is system RAM, and
 
 ## Data files & working directory
 
-`--version` reads `VERSION` and `cost()` reads `data/cloud_pricing.json`.
-The binary honors the **`AI_HWACCEL_DATA_DIR`** environment variable to
-locate them (falling back to cwd-relative if unset):
+`version()` reads `VERSION` and `cost()` reads `data/cloud_pricing.json`.
+The binary looks for them in the directory given by `--data-dir`, else in
+**`AI_HWACCEL_DATA_DIR`**, else relative to the working directory:
 
-- **Bundled wheel binary**: the wrapper sets `AI_HWACCEL_DATA_DIR`
-  automatically to the bundled directory, so `version()` and `cost()`
-  work from any working directory (2.3.3+).
+- **Bundled wheel binary**: unless you set `AI_HWACCEL_DATA_DIR` yourself,
+  the wrapper points the binary at the bundled directory (with `--data-dir`),
+  so `version()` and `cost()` work from any working directory.
 - **A binary you supply** (via `binary=`, `AI_HWACCEL_BIN`, or `PATH`):
   set `AI_HWACCEL_DATA_DIR` to a directory containing `VERSION` and
   `data/cloud_pricing.json`, or run from a directory that has them.

@@ -6,6 +6,9 @@
 > `HWA_ERR_PARSE` so the logged set is byte-identical to before. No detector
 > reachable from a thread body calls `hwlog_*` any more. Exercising the
 > threaded path on real Apple Silicon is **still open**.
+>
+> **Archived 2026-09-23.** It ran on `ecb` in 2.3.27 (3 profiles, and the
+> registry serializes). A CI run waits on the roadmap's `macos-smoke` job.
 
 **Filed:** 2026-09-07 (found auditing the cyrius `6.5.36 → 6.6.0` bump for 2.3.21)
 **Severity:** Medium — a data race on the logger's shared state, reachable only
