@@ -29,6 +29,20 @@ if [ -x "$PINNED_BIN" ]; then CYBIN="$PINNED_BIN"; else CYBIN="cyrius"; fi
 EXE_NAME="ai-hwaccel"
 case "${EXTRA_ARGS[*]:-}" in *--aarch64*) TAG="aarch64";; *) TAG="native";; esac
 
+# cyrius >= 6.6.4 hashes the pinned stdlib snapshot against cyrius.lock before
+# the build vendors ./lib, runs `/usr/bin/env sha256sum <file>` to do it, and
+# fails the build when that tool is missing. The GitHub macos-14 runner has only
+# `shasum`, so supply `sha256sum` as `shasum -a 256` (same "<hex>  <path>"
+# output) when the real one is absent.
+if ! command -v sha256sum >/dev/null 2>&1 && command -v shasum >/dev/null 2>&1; then
+    SHA_SHIM_DIR="$(mktemp -d)"
+    trap 'rm -rf "$SHA_SHIM_DIR"' EXIT
+    printf '#!/bin/sh\nexec shasum -a 256 "$@"\n' > "$SHA_SHIM_DIR/sha256sum"
+    chmod +x "$SHA_SHIM_DIR/sha256sum"
+    export PATH="$SHA_SHIM_DIR:$PATH"
+    echo "No sha256sum on PATH; using shasum -a 256 for cyrius's lock check."
+fi
+
 echo "Staging ai-hwaccel ($TAG) with $CYBIN into $BIN_DIR"
 mkdir -p "$BIN_DIR/data"
 # Drop any stray Windows EXE so a native wheel bundles only the ELF/Mach-O.

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [Unreleased]
+
+### Fixed
+
+- **The macOS wheel job failed under the 2.3.24 toolchain** with 46 × `cannot
+  hash the pinned snapshot (sha256sum missing?)`. Since 2.3.24, `cyrius.lock`
+  records the pin, and cyrius ≥ 6.6.4 then hashes every stdlib file in the
+  pinned snapshot with `/usr/bin/env sha256sum` before `cyrius build` will
+  vendor it, refusing the build if it cannot. The GitHub `macos-14` runner has
+  only `shasum`. Under 6.6.2 there was no such check, so the job passed.
+  `bindings/python/scripts/stage_binary.sh` now supplies `sha256sum` as
+  `shasum -a 256` when the real tool is absent. It prints the same
+  `<hex>  <path>` line, and cyrius reads only the 64-character digest.
+  Reproduced on Linux with `sha256sum` removed from `PATH`: the same 46
+  refusals before the fix, and after it a binary byte-identical to the normal
+  build. All 47 stdlib hashes in the lock also match the macOS 6.6.6 release
+  tarball's snapshot, so nothing else stands between the job and a build. No
+  binary changes; the Linux and Windows jobs never take the shim.
+
 ## [2.3.24] — 2026-09-22 — cyrius 6.6.6, bayan 1.5.6
 
 A toolchain and dependency bump with **no source change**: cyrius `6.6.2 → 6.6.6`
