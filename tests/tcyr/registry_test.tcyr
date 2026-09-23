@@ -146,17 +146,18 @@ fn test_builder_selective() {
 # --- 2.2.5: no-exec contract ---
 
 fn test_backend_uses_exec() {
-    # Seven backends shell out to vendor CLIs
+    # Six backends shell out to vendor CLIs
     assert_eq(backend_uses_exec(BACKEND_CUDA), 1, "cuda exec");
-    assert_eq(backend_uses_exec(BACKEND_VULKAN), 1, "vulkan exec");
     assert_eq(backend_uses_exec(BACKEND_GAUDI), 1, "gaudi exec");
     assert_eq(backend_uses_exec(BACKEND_NEURON), 1, "neuron exec");
     assert_eq(backend_uses_exec(BACKEND_INTEL_ONEAPI), 1, "intel-oneapi exec");
     assert_eq(backend_uses_exec(BACKEND_CEREBRAS), 1, "cerebras exec");
     assert_eq(backend_uses_exec(BACKEND_GRAPHCORE), 1, "graphcore exec");
 
-    # Ten backends spawn nothing (sysfs/syscall, DXGI on Windows, sysctl on
-    # macOS)
+    # Eleven backends spawn nothing (sysfs/syscall, DXGI on Windows, sysctl on
+    # macOS). Vulkan's sysfs scan is native since 2.3.29; vulkaninfo runs only
+    # with exec.
+    assert_eq(backend_uses_exec(BACKEND_VULKAN), 0, "vulkan native (sysfs scan)");
     assert_eq(backend_uses_exec(BACKEND_WINDOWS), 0, "windows native (dxgi)");
     assert_eq(backend_uses_exec(BACKEND_APPLE), 0, "apple native (sysctl)");
     assert_eq(backend_uses_exec(BACKEND_ROCM), 0, "rocm sysfs");
@@ -177,6 +178,7 @@ fn test_builder_no_exec_mask() {
     # registry_detect_no_exec() (DXGI spawns nothing)
     assert_eq(builder_is_enabled(mask, BACKEND_WINDOWS), 1, "windows in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_APPLE), 1, "apple in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_VULKAN), 1, "vulkan in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_ROCM), 1, "rocm in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_INTEL_NPU), 1, "npu in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_AMD_XDNA), 1, "xdna in mask");
@@ -188,7 +190,6 @@ fn test_builder_no_exec_mask() {
 
     # Every exec backend absent
     assert_eq(builder_is_enabled(mask, BACKEND_CUDA), 0, "cuda excluded");
-    assert_eq(builder_is_enabled(mask, BACKEND_VULKAN), 0, "vulkan excluded");
     assert_eq(builder_is_enabled(mask, BACKEND_GAUDI), 0, "gaudi excluded");
     assert_eq(builder_is_enabled(mask, BACKEND_NEURON), 0, "neuron excluded");
     assert_eq(builder_is_enabled(mask, BACKEND_INTEL_ONEAPI), 0, "oneapi excluded");
@@ -253,6 +254,31 @@ fn check_registry_shape(r, label) {
     var js = registry_to_json(r);
     assert_eq(memeq(str_data(js), "{\"schema_version\":", 18), 1, label);
     assert_eq(load8(str_data(js) + str_len(js) - 1), 125, label);
+    return 0;
+}
+
+# No-exec mode runs Vulkan's sysfs scan (2.3.29), which leaves amdgpu devices
+# to ROCm, since ROCm reads the same nodes. On any host the scan with that rule
+# reports exactly ROCm's devices fewer: the dev host's one APU, or none where
+# no amdgpu device exists.
+fn test_vulkan_sysfs_leaves_amdgpu() {
+    var all = vec_new();
+    _detect_vulkan_sysfs(all, 0);
+    var left = vec_new();
+    _detect_vulkan_sysfs(left, 1);
+    var rocm = vec_new();
+    detect_rocm(rocm, vec_new());
+    assert_eq(vec_len(all) - vec_len(left), vec_len(rocm), "scan leaves exactly ROCm's devices");
+    # registry_detect_no_exec() holds exactly those Vulkan profiles: no
+    # vulkaninfo run, and no second profile for an AMD GPU.
+    var profs = reg_profiles(registry_detect_no_exec());
+    var vk = 0;
+    var i = 0;
+    while (i < vec_len(profs)) {
+        if (profile_accel_type(vec_get(profs, i)) == ACCEL_VULKAN) { vk = vk + 1; }
+        i = i + 1;
+    }
+    assert_eq(vk, vec_len(left), "no-exec: the scan's Vulkan profiles only");
     return 0;
 }
 
@@ -324,6 +350,32 @@ fn test_totals_no_cpu_and_unavailable() {
     var r2 = _reg(profile_cpu(16 * BYTES_PER_GIB), off, 0);
     assert_eq(reg_total_memory(r2) / BYTES_PER_GIB, 16, "unavailable ignored");
     assert_eq(reg_total_accel_memory(r2), 0, "unavailable accel ignored");
+    return 0;
+}
+
+# cass's Intel UHD 600 seen through Vulkan (the real vulkaninfo captures in
+# tests/fixtures/vulkaninfo/, read from the repository root): its heap is half
+# of cass's RAM and all of it system RAM, so the total is the RAM once. Through
+# 2.3.28 the GPU's 4 GiB estimate was added on top.
+fn _fixture(path) {
+    var cap = 262144;
+    var buf = alloc(cap);
+    var n = file_read_all(path, buf, cap - 1);
+    assert_gt(n, 0, path);
+    if (n <= 0) { return str_from(""); }
+    store8(buf + n, 0);
+    return str_new(buf, n);
+}
+
+fn test_totals_vulkan_igpu() {
+    var v = vec_new();
+    vec_push(v, profile_cpu(8405598208));
+    var ids = vec_new();
+    _parse_vulkaninfo_ids(_fixture("tests/fixtures/vulkaninfo/uhd600-windows-summary.txt"), v, ids);
+    vulkan_size_shared(v, 1, ids, _fixture("tests/fixtures/vulkaninfo/uhd600-windows-full.txt"));
+    var r = registry_from_profiles(v);
+    assert_eq(reg_total_memory(r), 8405598208, "igpu: total is the RAM once");
+    assert_eq(reg_total_accel_memory(r), 4202799104, "igpu: accel is its heap");
     return 0;
 }
 
@@ -435,12 +487,14 @@ test_builder_no_exec_mask();
 test_no_exec_strips_exec_bits();
 test_no_exec_memory();
 test_detection_entry_points();
+test_vulkan_sysfs_leaves_amdgpu();
 test_totals_apple_unified();
 test_totals_gh200();
 test_totals_npu_laptop();
 test_totals_mixed();
 test_totals_no_cpu_and_unavailable();
 test_totals_clamped();
+test_totals_vulkan_igpu();
 test_suggest_quant_gpu_small();
 test_suggest_quant_gpu_large();
 test_suggest_quant_tpu();

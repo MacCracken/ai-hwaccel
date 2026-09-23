@@ -5,6 +5,233 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.29] — 2026-09-23 — integrated GPUs through Vulkan: real size, counted once, found without exec
+
+Every Vulkan GPU carried a 4 GiB estimate and counted as memory of its own.
+An integrated GPU's memory is system RAM, apart from an AMD APU's carve-out, so
+on a Linux host with an Intel iGPU the totals counted RAM a second time. Now
+integrated GPUs report their real memory. An Intel (or any non-AMD) iGPU
+reports its largest device-local heap from `vulkaninfo`, all of it shared; an
+AMD APU reports its BIOS carve-out from sysfs. Software implementations
+(lavapipe) are no longer reported as GPUs. `registry_detect_no_exec()` now
+runs the Vulkan backend's sysfs scan, so on Linux it finds the Intel and NVIDIA
+GPUs it used to miss. Discrete GPUs are unchanged. Schema stays v6.
+
+### Fixed
+
+- **An integrated GPU seen through Vulkan counted system RAM a second time.**
+  `vulkaninfo --summary` prints no memory, so every Vulkan GPU got a 4 GiB
+  estimate and a `shared_memory_bytes` of 0. `src/detect/vulkan.cyr` now
+  reads each device's `vendorID`, `deviceID` and `deviceType`:
+  - An integrated GPU of any vendor but AMD has no memory of its own. Its
+    profile is all shared. It is sized from its largest device-local heap in
+    the full `vulkaninfo` output, a second run made only when such a GPU is
+    present. The full output runs to 60 KB (the UHD 600) and 84 KB (the dev
+    host's APU) for a single device, and `run_tool` keeps 1 MiB, so it cannot
+    replace `--summary` for naming every device on a many-GPU host.
+  - An AMD APU's own memory is its BIOS carve-out, which is outside
+    `MemTotal`. It is read from sysfs `mem_info_vram_total`, the figure ROCm
+    reports. RADV's heaps on an APU split carve-out plus GTT 2:1, so they do
+    not give it: on the dev host the device-local heap is 23.61 GiB for an
+    8 GiB carve-out.
+  - The exec-less fallback (no `vulkaninfo`) marks an Intel GPU at PCI
+    `0000:00:02.0` shared. That is where Intel has put its integrated GPU
+    since 2008; Arc cards sit behind a root port.
+
+  Checked end to end on the dev host, with the real detection code and a
+  stand-in `vulkaninfo` first on `PATH` that serves `cass`'s real captures
+  (Intel UHD 600, Intel's Windows driver):
+
+  | | 2.3.28 | 2.3.29 |
+  |---|---:|---:|
+  | UHD 600 profile | 4 294 967 296, not shared | 4 202 799 104 (its heap, half of `cass`'s RAM), all shared |
+  | `total_memory_bytes` | 71 765 090 304 | 67 470 123 008 (the host's RAM plus its ROCm GPU, nothing twice) |
+
+  `registry_detect`, `registry_detect_threaded` and `lazy_into_registry`
+  agree. The stand-in logged two runs per entry point with an integrated GPU
+  and one without.
+- **Software Vulkan implementations were reported as GPUs.** lavapipe
+  (`llvmpipe`) and SwiftShader have `deviceType` CPU. Each was a 4 GiB "Vulkan
+  GPU", so a CPU-only host with Mesa's Vulkan drivers installed reported
+  `has_accelerator: true`. They are skipped now, as DXGI's Basic Render Driver
+  is. With the stand-in serving the UHD 600 plus a lavapipe device, 2.3.28
+  reports both (total 76 060 057 600); 2.3.29 reports the GPU alone.
+- **`registry_detect_no_exec()` found no Intel or NVIDIA GPU on Linux.** The
+  Vulkan backend was classed exec, so no-exec mode dropped it, and nothing
+  else reports those GPUs without a subprocess. `BACKEND_VULKAN` is native now,
+  as Windows and Apple are. `detect_vulkan_opts(profiles, warnings,
+  allow_exec, leave_amdgpu)` runs `vulkaninfo` only with exec and the sysfs
+  scan otherwise. In no-exec mode the scan leaves `amdgpu` devices to ROCm,
+  which reads the same sysfs nodes, so no-exec mode gains no second profile for
+  an AMD GPU. On the dev host the no-exec registry is identical to 2.3.28's,
+  and the logging stand-in recorded no `vulkaninfo` run from it.
+- **The docs promised a dedup that the Cyrius port does not have.**
+  `docs/troubleshooting.md` said a GPU found by both Vulkan and CUDA/ROCm "is
+  automatically removed" from Vulkan, and `docs/architecture/overview.md`
+  listed a "dedup vulkan vs cuda/rocm" pass. The Rust releases dropped every
+  Vulkan GPU whenever any CUDA or ROCm GPU was found, a separate iGPU included.
+  The port never did even that: `src/` has no dedup, and the dev host lists its
+  one APU twice. Both pages now describe what happens, and the roadmap's
+  duplicate-device item records the history.
+
+### Changed
+
+- **An AMD APU's Vulkan profile reports its carve-out, not 4 GiB.** On the dev
+  host that is 8 GiB, the figure its ROCm profile has always reported. The same
+  iGPU is still listed twice, once by ROCm and once by Vulkan (the 2.4.x
+  duplicate-device item). So its `accelerator_memory_bytes` rises from 12 to
+  16 GiB, and `total_memory_bytes` from 71 765 090 304 to 76 060 057 600. On an
+  APU with the common 512 MB – 2 GiB carve-out, the double count shrinks
+  instead.
+- **New functions:**
+  - `detect_vulkan_opts`. `detect_vulkan` keeps its signature and allows exec.
+  - `vulkan_device_type` and `vulkan_uses_system_memory`.
+  - `vulkan_local_heap_bytes`, `vulkan_size_shared` and
+    `_parse_vulkaninfo_ids`.
+  - `pci_slot_is_intel_igpu`.
+
+  The parser's `heapSize` lookahead is gone. `vulkaninfo` has no such key, so
+  it never matched.
+- **Tests: 791 → 894 assertions in 15 units.**
+  - `gpu_parser_test` 44 → 141. The Vulkan parser, the heap scan and the
+    sizing run against real `vulkaninfo` captures, now in
+    `tests/fixtures/vulkaninfo/`: the dev host's APU under RADV (LF) and
+    `cass`'s UHD 600 under Intel's Windows driver (CRLF, kept byte-exact by a
+    new `.gitattributes`). Hand-written inputs cover lavapipe, 1.1-era
+    `vulkaninfo`, NVIDIA's overlapping BAR heap, a heap above the estimate,
+    and nested structs that repeat the identity fields.
+  - `registry_test` 107 → 113:
+    - totals with the UHD 600 sized from its captures;
+    - Vulkan native, and in the no-exec mask;
+    - no-exec mode leaving exactly ROCm's devices, with no `vulkaninfo` run.
+
+  Each of 22 single-point mutations of the new code fails at least one
+  assertion or the fuzz harness.
+- **Fuzz:** `fuzz/vulkan_parser.fcyr` now damages every byte of a summary
+  block and a heap block in turn, with each of nine structural bytes, and
+  also cuts each input short there. Nothing may crash, and the results must
+  stay bounded.
+- **Benchmarks: 15 → 17 rows.** `parse_vulkan_summary_renoir` parses the dev
+  host's real `--summary` output (batch-timed), and `vulkan_heaps_uhd600` scans
+  `cass`'s 60 KB full output. Both read the fixtures from the repository root
+  and skip themselves elsewhere.
+- **Docs:** the README's backend table, module tree, no-exec section (six exec
+  backends, eleven native) and test table; the architecture overview's
+  detection flow; `docs/troubleshooting.md`; `docs/performance.md`;
+  `docs/guides/testing.md`.
+- **Roadmap:** the Vulkan iGPU item is closed. The duplicate-device item now
+  names the PCI bus address that full `vulkaninfo` output carries. One item is
+  new: no vendor tool ever runs on Windows. `which()` splits `PATH` on `:` and
+  looks for the bare name, so `nvidia-smi` and `vulkaninfo` (which `cass` has,
+  in `System32`) report "tool not found".
+
+### Known, not changed here
+
+- **Discrete GPUs through Vulkan keep the 4 GiB estimate.** CUDA and ROCm
+  report the same cards. Which profile survives, with which memory figure, is
+  the 2.4.x duplicate-device item. Giving them real sizes first would make
+  every NVIDIA host with `vulkan-tools` count its VRAM twice.
+- **The Windows and macOS binaries never run `vulkaninfo`.** Windows cannot
+  find it (the `which()` item above), and macOS has no `/sys` for the scan.
+  Their output is unchanged.
+
+### Performance
+
+**15 neutral, 0 regressions** (2.3.28 → 2.3.29). The method is 2.3.28's.
+Each arm was built at 5 code layouts, and the three floor-bound rows were
+batch-timed (†). There were two independent 30-round passes, shuffled and
+pinned to one CPU; the table combines them (60 rounds).
+
+| row | 2.3.28 | 2.3.29 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 13.65 µs | 13.70 µs | +0.4% | 0.29 | neutral |
+| `parse_vulkan_2gpu` | 2.55 µs | 2.55 µs | 0.0% | 1.00 | neutral |
+| `parse_neuron_2dev` | 1.58 µs | 1.62 µs | +2.0% | 0.05 | neutral (layout) |
+| `detect_safetensors` † | 420.1 ns | 396.2 ns | −5.7% | <0.01 | neutral (placement) |
+| `detect_gguf` † | 37.6 ns | 37.5 ns | −0.3% | 0.27 | neutral |
+| `best_available_13dev` † | 169.7 ns | 170.2 ns | +0.3% | 0.67 | neutral |
+| `total_memory_13dev` | 102.8 ns | 102.8 ns | 0.0% | 1.00 | neutral |
+| `has_accelerator_13dev` | 18.2 ns | 18.2 ns | 0.0% | 0.73 | neutral |
+| `plan_70B_bf16_4gpu` | 1.43 µs | 1.42 µs | −0.4% | 0.25 | neutral |
+| `count_family_gpu_13dev` | 243.0 ns | 241.8 ns | −0.5% | 0.11 | neutral |
+| `json_serialize_13dev` | 22.83 µs | 22.83 µs | 0.0% | 0.89 | neutral |
+| `json_summary_13dev` | 3.15 µs | 3.16 µs | +0.2% | 0.29 | neutral |
+| `json_system_io` | 5.12 µs | 5.12 µs | 0.0% | 0.96 | neutral |
+| `json_plan` | 16.99 µs | 16.96 µs | −0.2% | 0.08 | neutral |
+| `json_training` | 2.46 µs | 2.46 µs | +0.2% | 0.49 | neutral |
+
+A verdict needs p < 0.01 and |Δ| > 1%. Neither flagged row runs changed code,
+and each shift is reproduced by 2.3.28's own code laid out like 2.3.29's:
+
+- **`detect_safetensors`, −5.7%, is not a win.** It runs only
+  `model_format.cyr` and the stdlib, and neither changed. The new Vulkan code
+  (10 056 bytes) sits in front of `model_format.cyr`. This is 2.3.28's +7% in
+  reverse. 2.3.28 plus a never-called function of that size at the end of
+  `vulkan.cyr` (within 8 bytes either way) runs it 6.3% and 5.3% faster; the
+  candidate runs it 5.6% faster.
+- **`parse_neuron_2dev`, +2.0% (p = 0.05), is below the bar and is layout
+  too.** The new code also moves every global and string after `vulkan.cyr`:
+  its 8 enum constants take 64 bytes of `.bss`, and its strings add 163 bytes
+  of `.rodata`. A code-only pad does not reproduce that move, and measured
+  ±0.1%. A second control copied the whole layout: 2.3.28 with the same
+  `types.cyr` edit and a dead pad of 8 enum constants, a 163-byte string and
+  dead code. Its text size and its `.bss` and `.rodata` addresses match the
+  candidate's byte for byte. It runs the row 1.2% slower. The candidate runs
+  it 1.3% slower with 2.3.28's bench file, and 1.7% slower as shipped.
+- **`parse_vulkan_2gpu`, 0.0%:** on the bench's small hand-written input, the
+  new parser costs what the old one did.
+- **New rows (2.3.29 only)**, as means of per-layout medians:
+  `parse_vulkan_summary_renoir` 14.92 µs, `vulkan_heaps_uhd600` 619 µs. The
+  heap scan runs once per detection, only on a host with an integrated non-AMD
+  GPU, beside a `vulkaninfo` run of about 20 ms.
+
+In `bench-history.csv`, the `e95322b` rows at 17:09:40Z are 2.3.28, measured
+on the clean tree before any change. The `e95322b-dirty` rows at 17:32:15Z
+are 2.3.29.
+
+| binary | 2.3.28 | 2.3.29 | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 219 480 | 231 960 | +12 480 (text +10 224) |
+| x86_64 ELF, no DCE | 444 760 | 457 240 | +12 480 (text +10 128) |
+| ELF-aarch64 | 739 496 | 805 224 | +65 728 (text +11 584) |
+| PE, as shipped (no DCE) | 518 656 | 529 920 | +11 264 |
+| agnos, `CYRIUS_DCE=1` | 221 240 | 229 624 | +8 384 (text +10 280) |
+| Mach-O arm64 (cross-built, as verified) | 721 332 | 721 332 | 0 |
+
+The aarch64 text crossed a 64 KiB boundary, so its data segment moved to the
+next 64 KiB page.
+
+### Verified
+
+- **Tests:** 894 assertions in 15 units pass through CI's loop; fuzz 6/6.
+- **CI gates:** fmt, lint (0 warnings in `src/`), vet, raw-offset guard,
+  `cyrius.lock` current, DCE build. `dist/ai-hwaccel.cyr` differs from
+  2.3.28's only in its version line and the three changed modules (`types`,
+  `vulkan`, `registry`), and `distlib` is deterministic.
+- **Linux CLI output identical to 2.3.28** on 18 invocations covering every
+  flag, except the dev host's APU: its Vulkan profile's memory (4 → 8 GiB) and
+  the summary totals that follow from it. **ELF-aarch64** under
+  `qemu-aarch64` matches x86_64 on 8 invocations. **agnos** builds.
+- **The dev host's real AMD APU** (real `vulkaninfo`, real sysfs): the Vulkan
+  profile carries the 8 GiB `mem_info_vram_total`, not shared, and the
+  no-exec registry matches 2.3.28's.
+- **Stand-in `vulkaninfo`** (a script first on `PATH` that logs each run and
+  serves the fixtures), through the probe of every entry point:
+  - `cass`'s UHD 600: sized from its heap and all shared, as in the table under
+    *Fixed*;
+  - the UHD 600 plus lavapipe: the lavapipe device is dropped;
+  - a discrete NVIDIA: unchanged, with one run per entry point;
+  - `registry_detect_no_exec()`: no run in any scenario.
+- **Windows on `cass`:** the EXE exactly as `stage_win_cross.sh` builds it
+  passes `windows-smoke` (a)–(d). Its JSON and `--summary` match 2.3.28's EXE.
+- **macOS on `ecb`** (Apple M5 Pro), cross-built as in 2.3.27: JSON and
+  `--summary` match 2.3.28. All five detection paths run and hold the Metal GPU
+  and Neural Engine. `--version` reports 2.3.29.
+- **Not verified:** a Linux host with an Intel iGPU, or with lavapipe, on real
+  hardware. The parser and sizing are tested on `cass`'s real Intel output and
+  exercised end to end through the stand-in, but ANV (Mesa's Linux Intel
+  driver) was not run.
+
 ## [2.3.28] — 2026-09-23 — unified memory counted once in the totals
 
 The registry totals counted system RAM again for every profile that reported

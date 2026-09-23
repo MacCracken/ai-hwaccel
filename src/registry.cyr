@@ -341,7 +341,15 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
     if (builder_is_enabled(builder_mask, BACKEND_APPLE) == 1) {
         detect_apple_opts(profs, warns, allow_exec);
     }
-    if (builder_is_enabled(builder_mask, BACKEND_VULKAN) == 1) { detect_vulkan(profs, warns); }
+    if (builder_is_enabled(builder_mask, BACKEND_VULKAN) == 1) {
+        # vulkaninfo only with exec; otherwise the sysfs scan. With exec off it
+        # leaves amdgpu devices to ROCm when ROCm runs too, so no-exec mode
+        # gains the Intel and NVIDIA GPUs it lacked without a second AMD
+        # profile.
+        var leave_amd = 0;
+        if (allow_exec == 0) { leave_amd = builder_is_enabled(builder_mask, BACKEND_ROCM); }
+        detect_vulkan_opts(profs, warns, allow_exec, leave_amd);
+    }
     if (builder_is_enabled(builder_mask, BACKEND_INTEL_NPU) == 1) {
         detect_intel_npu(profs, warns);
     }

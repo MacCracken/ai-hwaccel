@@ -1,0 +1,1372 @@
+==========
+VULKANINFO
+==========
+
+Vulkan Instance Version: 1.3.301
+
+
+Instance Extensions: count = 13
+===============================
+	VK_EXT_debug_report                    : extension revision 10
+	VK_EXT_debug_utils                     : extension revision 2
+	VK_EXT_swapchain_colorspace            : extension revision 4
+	VK_KHR_device_group_creation           : extension revision 1
+	VK_KHR_external_fence_capabilities     : extension revision 1
+	VK_KHR_external_memory_capabilities    : extension revision 1
+	VK_KHR_external_semaphore_capabilities : extension revision 1
+	VK_KHR_get_physical_device_properties2 : extension revision 2
+	VK_KHR_get_surface_capabilities2       : extension revision 1
+	VK_KHR_portability_enumeration         : extension revision 1
+	VK_KHR_surface                         : extension revision 25
+	VK_KHR_win32_surface                   : extension revision 6
+	VK_LUNARG_direct_driver_loading        : extension revision 1
+
+Layers:
+=======
+Presentable Surfaces:
+=====================
+GPU id : 0 (Intel(R) UHD Graphics 600):
+	Surface type = VK_KHR_win32_surface
+	Formats: count = 4
+		SurfaceFormat[0]:
+			format = FORMAT_B8G8R8A8_UNORM
+			colorSpace = COLOR_SPACE_SRGB_NONLINEAR_KHR
+		SurfaceFormat[1]:
+			format = FORMAT_B8G8R8A8_SRGB
+			colorSpace = COLOR_SPACE_SRGB_NONLINEAR_KHR
+		SurfaceFormat[2]:
+			format = FORMAT_R8G8B8A8_UNORM
+			colorSpace = COLOR_SPACE_SRGB_NONLINEAR_KHR
+		SurfaceFormat[3]:
+			format = FORMAT_R8G8B8A8_SRGB
+			colorSpace = COLOR_SPACE_SRGB_NONLINEAR_KHR
+	Present Modes: count = 2
+		PRESENT_MODE_IMMEDIATE_KHR
+		PRESENT_MODE_FIFO_KHR
+	VkSurfaceCapabilitiesKHR:
+	-------------------------
+		minImageCount = 2
+		maxImageCount = 64
+		currentExtent:
+			width  = 256
+			height = 256
+		minImageExtent:
+			width  = 256
+			height = 256
+		maxImageExtent:
+			width  = 256
+			height = 256
+		maxImageArrayLayers = 2048
+		supportedTransforms: count = 1
+			SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+		currentTransform = SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+		supportedCompositeAlpha: count = 2
+			COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+			COMPOSITE_ALPHA_INHERIT_BIT_KHR
+		supportedUsageFlags: count = 5
+			IMAGE_USAGE_TRANSFER_SRC_BIT
+			IMAGE_USAGE_TRANSFER_DST_BIT
+			IMAGE_USAGE_SAMPLED_BIT
+			IMAGE_USAGE_STORAGE_BIT
+			IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+	VkSurfaceCapabilitiesFullScreenExclusiveEXT:
+	--------------------------------------------
+		fullScreenExclusiveSupported = true
+
+
+
+Device Groups:
+==============
+Group 0:
+	Properties:
+		physicalDevices: count = 1
+			Intel(R) UHD Graphics 600 (ID: 0)
+		subsetAllocation = 0
+
+	Present Capabilities:
+		Intel(R) UHD Graphics 600 (ID: 0):
+			Can present images from the following devices: count = 1
+				Intel(R) UHD Graphics 600 (ID: 0)
+		Present modes: count = 1
+			DEVICE_GROUP_PRESENT_MODE_LOCAL_BIT_KHR
+
+
+Device Properties and Extensions:
+=================================
+GPU0:
+VkPhysicalDeviceProperties:
+---------------------------
+	apiVersion        = 4206807 (1.3.215)
+	driverVersion     = 1656924 (0x19485c)
+	vendorID          = 0x8086
+	deviceID          = 0x3185
+	deviceType        = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+	deviceName        = Intel(R) UHD Graphics 600
+	pipelineCacheUUID = 6d3c6931-6931-5a32-653f-663161356301
+
+VkPhysicalDeviceLimits:
+-----------------------
+	maxImageDimension1D                             = 16384
+	maxImageDimension2D                             = 16384
+	maxImageDimension3D                             = 2048
+	maxImageDimensionCube                           = 16384
+	maxImageArrayLayers                             = 2048
+	maxTexelBufferElements                          = 134217728
+	maxUniformBufferRange                           = 134217724
+	maxStorageBufferRange                           = 1073741820
+	maxPushConstantsSize                            = 256
+	maxMemoryAllocationCount                        = 1058842
+	maxSamplerAllocationCount                       = 4000
+	bufferImageGranularity                          = 0x00000001
+	sparseAddressSpaceSize                          = 0xff000000000
+	maxBoundDescriptorSets                          = 32
+	maxPerStageDescriptorSamplers                   = 64
+	maxPerStageDescriptorUniformBuffers             = 200
+	maxPerStageDescriptorStorageBuffers             = 200
+	maxPerStageDescriptorSampledImages              = 200
+	maxPerStageDescriptorStorageImages              = 16
+	maxPerStageDescriptorInputAttachments           = 8
+	maxPerStageResources                            = 200
+	maxDescriptorSetSamplers                        = 576
+	maxDescriptorSetUniformBuffers                  = 1800
+	maxDescriptorSetUniformBuffersDynamic           = 16
+	maxDescriptorSetStorageBuffers                  = 1800
+	maxDescriptorSetStorageBuffersDynamic           = 16
+	maxDescriptorSetSampledImages                   = 1800
+	maxDescriptorSetStorageImages                   = 144
+	maxDescriptorSetInputAttachments                = 8
+	maxVertexInputAttributes                        = 32
+	maxVertexInputBindings                          = 32
+	maxVertexInputAttributeOffset                   = 2047
+	maxVertexInputBindingStride                     = 4095
+	maxVertexOutputComponents                       = 128
+	maxTessellationGenerationLevel                  = 64
+	maxTessellationPatchSize                        = 32
+	maxTessellationControlPerVertexInputComponents  = 128
+	maxTessellationControlPerVertexOutputComponents = 128
+	maxTessellationControlPerPatchOutputComponents  = 120
+	maxTessellationControlTotalOutputComponents     = 4096
+	maxTessellationEvaluationInputComponents        = 128
+	maxTessellationEvaluationOutputComponents       = 128
+	maxGeometryShaderInvocations                    = 32
+	maxGeometryInputComponents                      = 128
+	maxGeometryOutputComponents                     = 128
+	maxGeometryOutputVertices                       = 256
+	maxGeometryTotalOutputComponents                = 1024
+	maxFragmentInputComponents                      = 128
+	maxFragmentOutputAttachments                    = 8
+	maxFragmentDualSrcAttachments                   = 1
+	maxFragmentCombinedOutputResources              = 16
+	maxComputeSharedMemorySize                      = 32768
+	maxComputeWorkGroupCount: count = 3
+		65536
+		65536
+		65536
+	maxComputeWorkGroupInvocations                  = 1024
+	maxComputeWorkGroupSize: count = 3
+		1024
+		1024
+		64
+	subPixelPrecisionBits                           = 8
+	subTexelPrecisionBits                           = 8
+	mipmapPrecisionBits                             = 8
+	maxDrawIndexedIndexValue                        = 4294967295
+	maxDrawIndirectCount                            = 4294967295
+	maxSamplerLodBias                               = 16
+	maxSamplerAnisotropy                            = 16
+	maxViewports                                    = 16
+	maxViewportDimensions: count = 2
+		32768
+		32768
+	viewportBoundsRange: count = 2
+		-65536
+		65535
+	viewportSubPixelBits                            = 8
+	minMemoryMapAlignment                           = 64
+	minTexelBufferOffsetAlignment                   = 0x00000040
+	minUniformBufferOffsetAlignment                 = 0x00000040
+	minStorageBufferOffsetAlignment                 = 0x00000040
+	minTexelOffset                                  = -8
+	maxTexelOffset                                  = 7
+	minTexelGatherOffset                            = -32
+	maxTexelGatherOffset                            = 31
+	minInterpolationOffset                          = -0.5
+	maxInterpolationOffset                          = 0.4375
+	subPixelInterpolationOffsetBits                 = 4
+	maxFramebufferWidth                             = 16384
+	maxFramebufferHeight                            = 16384
+	maxFramebufferLayers                            = 2048
+	framebufferColorSampleCounts: count = 5
+		SAMPLE_COUNT_1_BIT
+		SAMPLE_COUNT_2_BIT
+		SAMPLE_COUNT_4_BIT
+		SAMPLE_COUNT_8_BIT
+		SAMPLE_COUNT_16_BIT
+	framebufferDepthSampleCounts: count = 5
+		SAMPLE_COUNT_1_BIT
+		SAMPLE_COUNT_2_BIT
+		SAMPLE_COUNT_4_BIT
+		SAMPLE_COUNT_8_BIT
+		SAMPLE_COUNT_16_BIT
+	framebufferStencilSampleCounts: count = 5
+		SAMPLE_COUNT_1_BIT
+		SAMPLE_COUNT_2_BIT
+		SAMPLE_COUNT_4_BIT
+		SAMPLE_COUNT_8_BIT
+		SAMPLE_COUNT_16_BIT
+	framebufferNoAttachmentsSampleCounts: count = 5
+		SAMPLE_COUNT_1_BIT
+		SAMPLE_COUNT_2_BIT
+		SAMPLE_COUNT_4_BIT
+		SAMPLE_COUNT_8_BIT
+		SAMPLE_COUNT_16_BIT
+	maxColorAttachments                             = 8
+	sampledImageColorSampleCounts: count = 5
+		SAMPLE_COUNT_1_BIT
+		SAMPLE_COUNT_2_BIT
+		SAMPLE_COUNT_4_BIT
+		SAMPLE_COUNT_8_BIT
+		SAMPLE_COUNT_16_BIT
+	sampledImageIntegerSampleCounts: count = 5
+		SAMPLE_COUNT_1_BIT
+		SAMPLE_COUNT_2_BIT
+		SAMPLE_COUNT_4_BIT
+		SAMPLE_COUNT_8_BIT
+		SAMPLE_COUNT_16_BIT
+	sampledImageDepthSampleCounts: count = 5
+		SAMPLE_COUNT_1_BIT
+		SAMPLE_COUNT_2_BIT
+		SAMPLE_COUNT_4_BIT
+		SAMPLE_COUNT_8_BIT
+		SAMPLE_COUNT_16_BIT
+	sampledImageStencilSampleCounts: count = 5
+		SAMPLE_COUNT_1_BIT
+		SAMPLE_COUNT_2_BIT
+		SAMPLE_COUNT_4_BIT
+		SAMPLE_COUNT_8_BIT
+		SAMPLE_COUNT_16_BIT
+	storageImageSampleCounts: count = 5
+		SAMPLE_COUNT_1_BIT
+		SAMPLE_COUNT_2_BIT
+		SAMPLE_COUNT_4_BIT
+		SAMPLE_COUNT_8_BIT
+		SAMPLE_COUNT_16_BIT
+	maxSampleMaskWords                              = 1
+	timestampComputeAndGraphics                     = true
+	timestampPeriod                                 = 52.083
+	maxClipDistances                                = 8
+	maxCullDistances                                = 8
+	maxCombinedClipAndCullDistances                 = 8
+	discreteQueuePriorities                         = 2
+	pointSizeRange: count = 2
+		0.125
+		255.875
+	lineWidthRange: count = 2
+		0
+		7.99219
+	pointSizeGranularity                            = 0.125
+	lineWidthGranularity                            = 0.0078125
+	strictLines                                     = false
+	standardSampleLocations                         = true
+	optimalBufferCopyOffsetAlignment                = 0x00000040
+	optimalBufferCopyRowPitchAlignment              = 0x00000040
+	nonCoherentAtomSize                             = 0x00000001
+
+VkPhysicalDeviceSparseProperties:
+---------------------------------
+	residencyStandard2DBlockShape            = true
+	residencyStandard2DMultisampleBlockShape = true
+	residencyStandard3DBlockShape            = true
+	residencyAlignedMipSize                  = false
+	residencyNonResidentStrict               = false
+
+VkPhysicalDeviceConservativeRasterizationPropertiesEXT:
+-------------------------------------------------------
+	primitiveOverestimationSize                 = 0.00195313
+	maxExtraPrimitiveOverestimationSize         = 0
+	extraPrimitiveOverestimationSizeGranularity = 0
+	primitiveUnderestimation                    = false
+	conservativePointAndLineRasterization       = false
+	degenerateTrianglesRasterized               = true
+	degenerateLinesRasterized                   = false
+	fullyCoveredFragmentShaderInputVariable     = true
+	conservativeRasterizationPostDepthCoverage  = false
+
+VkPhysicalDeviceCustomBorderColorPropertiesEXT:
+-----------------------------------------------
+	maxCustomBorderColorSamplers = 4096
+
+VkPhysicalDeviceDepthStencilResolveProperties:
+----------------------------------------------
+	supportedDepthResolveModes: count = 4
+		RESOLVE_MODE_SAMPLE_ZERO_BIT
+		RESOLVE_MODE_AVERAGE_BIT
+		RESOLVE_MODE_MIN_BIT
+		RESOLVE_MODE_MAX_BIT
+	supportedStencilResolveModes: count = 3
+		RESOLVE_MODE_SAMPLE_ZERO_BIT
+		RESOLVE_MODE_MIN_BIT
+		RESOLVE_MODE_MAX_BIT
+	independentResolveNone = true
+	independentResolve     = true
+
+VkPhysicalDeviceDescriptorIndexingProperties:
+---------------------------------------------
+	maxUpdateAfterBindDescriptorsInAllPools              = 1048576
+	shaderUniformBufferArrayNonUniformIndexingNative     = false
+	shaderSampledImageArrayNonUniformIndexingNative      = false
+	shaderStorageBufferArrayNonUniformIndexingNative     = false
+	shaderStorageImageArrayNonUniformIndexingNative      = false
+	shaderInputAttachmentArrayNonUniformIndexingNative   = false
+	robustBufferAccessUpdateAfterBind                    = true
+	quadDivergentImplicitLod                             = true
+	maxPerStageDescriptorUpdateAfterBindSamplers         = 1048576
+	maxPerStageDescriptorUpdateAfterBindUniformBuffers   = 1048576
+	maxPerStageDescriptorUpdateAfterBindStorageBuffers   = 1048576
+	maxPerStageDescriptorUpdateAfterBindSampledImages    = 1048576
+	maxPerStageDescriptorUpdateAfterBindStorageImages    = 1048576
+	maxPerStageDescriptorUpdateAfterBindInputAttachments = 1048576
+	maxPerStageUpdateAfterBindResources                  = 1048576
+	maxDescriptorSetUpdateAfterBindSamplers              = 1048576
+	maxDescriptorSetUpdateAfterBindUniformBuffers        = 1048576
+	maxDescriptorSetUpdateAfterBindUniformBuffersDynamic = 16
+	maxDescriptorSetUpdateAfterBindStorageBuffers        = 1048576
+	maxDescriptorSetUpdateAfterBindStorageBuffersDynamic = 16
+	maxDescriptorSetUpdateAfterBindSampledImages         = 1048576
+	maxDescriptorSetUpdateAfterBindStorageImages         = 1048576
+	maxDescriptorSetUpdateAfterBindInputAttachments      = 1048576
+
+VkPhysicalDeviceDriverProperties:
+---------------------------------
+	driverID           = DRIVER_ID_INTEL_PROPRIETARY_WINDOWS
+	driverName         = Intel Corporation
+	driverInfo         = Intel driver
+	conformanceVersion = 1.3.1.1
+
+VkPhysicalDeviceExternalMemoryHostPropertiesEXT:
+------------------------------------------------
+	minImportedHostPointerAlignment = 0x00001000
+
+VkPhysicalDeviceFloatControlsProperties:
+----------------------------------------
+	denormBehaviorIndependence            = SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL
+	roundingModeIndependence              = SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE
+	shaderSignedZeroInfNanPreserveFloat16 = true
+	shaderSignedZeroInfNanPreserveFloat32 = true
+	shaderSignedZeroInfNanPreserveFloat64 = true
+	shaderDenormPreserveFloat16           = true
+	shaderDenormPreserveFloat32           = true
+	shaderDenormPreserveFloat64           = true
+	shaderDenormFlushToZeroFloat16        = true
+	shaderDenormFlushToZeroFloat32        = true
+	shaderDenormFlushToZeroFloat64        = true
+	shaderRoundingModeRTEFloat16          = true
+	shaderRoundingModeRTEFloat32          = true
+	shaderRoundingModeRTEFloat64          = true
+	shaderRoundingModeRTZFloat16          = true
+	shaderRoundingModeRTZFloat32          = true
+	shaderRoundingModeRTZFloat64          = true
+
+VkPhysicalDeviceIDProperties:
+-----------------------------
+	deviceUUID      = 86808531-0600-0000-0000-000000000000
+	driverUUID      = 33312e30-2e31-3031-2e32-313430000000
+	deviceLUID      = 8a860000-00000000
+	deviceNodeMask  = 1
+	deviceLUIDValid = true
+
+VkPhysicalDeviceInlineUniformBlockProperties:
+---------------------------------------------
+	maxInlineUniformBlockSize                               = 256
+	maxPerStageDescriptorInlineUniformBlocks                = 4
+	maxPerStageDescriptorUpdateAfterBindInlineUniformBlocks = 4
+	maxDescriptorSetInlineUniformBlocks                     = 4
+	maxDescriptorSetUpdateAfterBindInlineUniformBlocks      = 4
+
+VkPhysicalDeviceLineRasterizationPropertiesEXT:
+-----------------------------------------------
+	lineSubPixelPrecisionBits = 8
+
+VkPhysicalDeviceMaintenance3Properties:
+---------------------------------------
+	maxPerSetDescriptors    = 6160
+	maxMemoryAllocationSize = 0xfa81a000
+
+VkPhysicalDeviceMaintenance4Properties:
+---------------------------------------
+	maxBufferSize = 0x100000000
+
+VkPhysicalDeviceMultiDrawPropertiesEXT:
+---------------------------------------
+	maxMultiDrawCount = 4294967295
+
+VkPhysicalDeviceMultiviewProperties:
+------------------------------------
+	maxMultiviewViewCount     = 16
+	maxMultiviewInstanceIndex = 268435454
+
+VkPhysicalDevicePerformanceQueryPropertiesKHR:
+----------------------------------------------
+	allowCommandBufferQueryCopies = false
+
+VkPhysicalDevicePointClippingProperties:
+----------------------------------------
+	pointClippingBehavior = POINT_CLIPPING_BEHAVIOR_USER_CLIP_PLANES_ONLY
+
+VkPhysicalDeviceProtectedMemoryProperties:
+------------------------------------------
+	protectedNoFault = false
+
+VkPhysicalDeviceProvokingVertexPropertiesEXT:
+---------------------------------------------
+	provokingVertexModePerPipeline                       = true
+	transformFeedbackPreservesTriangleFanProvokingVertex = false
+
+VkPhysicalDevicePushDescriptorPropertiesKHR:
+--------------------------------------------
+	maxPushDescriptors = 32
+
+VkPhysicalDeviceRobustness2PropertiesEXT:
+-----------------------------------------
+	robustStorageBufferAccessSizeAlignment = 0x00000004
+	robustUniformBufferAccessSizeAlignment = 0x00000010
+
+VkPhysicalDeviceSampleLocationsPropertiesEXT:
+---------------------------------------------
+	sampleLocationSampleCounts: count = 5
+		SAMPLE_COUNT_1_BIT
+		SAMPLE_COUNT_2_BIT
+		SAMPLE_COUNT_4_BIT
+		SAMPLE_COUNT_8_BIT
+		SAMPLE_COUNT_16_BIT
+	maxSampleLocationGridSize:
+		width  = 1
+		height = 1
+	sampleLocationCoordinateRange: count = 2
+		0
+		0.9375
+	sampleLocationSubPixelBits       = 4
+	variableSampleLocations          = false
+
+VkPhysicalDeviceSamplerFilterMinmaxProperties:
+----------------------------------------------
+	filterMinmaxSingleComponentFormats = true
+	filterMinmaxImageComponentMapping  = true
+
+VkPhysicalDeviceShaderIntegerDotProductProperties:
+--------------------------------------------------
+	integerDotProduct8BitUnsignedAccelerated                                      = false
+	integerDotProduct8BitSignedAccelerated                                        = false
+	integerDotProduct8BitMixedSignednessAccelerated                               = false
+	integerDotProduct4x8BitPackedUnsignedAccelerated                              = false
+	integerDotProduct4x8BitPackedSignedAccelerated                                = false
+	integerDotProduct4x8BitPackedMixedSignednessAccelerated                       = false
+	integerDotProduct16BitUnsignedAccelerated                                     = false
+	integerDotProduct16BitSignedAccelerated                                       = false
+	integerDotProduct16BitMixedSignednessAccelerated                              = false
+	integerDotProduct32BitUnsignedAccelerated                                     = false
+	integerDotProduct32BitSignedAccelerated                                       = false
+	integerDotProduct32BitMixedSignednessAccelerated                              = false
+	integerDotProduct64BitUnsignedAccelerated                                     = false
+	integerDotProduct64BitSignedAccelerated                                       = false
+	integerDotProduct64BitMixedSignednessAccelerated                              = false
+	integerDotProductAccumulatingSaturating8BitUnsignedAccelerated                = false
+	integerDotProductAccumulatingSaturating8BitSignedAccelerated                  = false
+	integerDotProductAccumulatingSaturating8BitMixedSignednessAccelerated         = false
+	integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated        = false
+	integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated          = false
+	integerDotProductAccumulatingSaturating4x8BitPackedMixedSignednessAccelerated = false
+	integerDotProductAccumulatingSaturating16BitUnsignedAccelerated               = false
+	integerDotProductAccumulatingSaturating16BitSignedAccelerated                 = false
+	integerDotProductAccumulatingSaturating16BitMixedSignednessAccelerated        = false
+	integerDotProductAccumulatingSaturating32BitUnsignedAccelerated               = false
+	integerDotProductAccumulatingSaturating32BitSignedAccelerated                 = false
+	integerDotProductAccumulatingSaturating32BitMixedSignednessAccelerated        = false
+	integerDotProductAccumulatingSaturating64BitUnsignedAccelerated               = false
+	integerDotProductAccumulatingSaturating64BitSignedAccelerated                 = false
+	integerDotProductAccumulatingSaturating64BitMixedSignednessAccelerated        = false
+
+VkPhysicalDeviceSubgroupProperties:
+-----------------------------------
+	subgroupSize              = 32
+	supportedStages: count = 8
+		SHADER_STAGE_VERTEX_BIT
+		SHADER_STAGE_TESSELLATION_CONTROL_BIT
+		SHADER_STAGE_TESSELLATION_EVALUATION_BIT
+		SHADER_STAGE_GEOMETRY_BIT
+		SHADER_STAGE_FRAGMENT_BIT
+		SHADER_STAGE_COMPUTE_BIT
+		SHADER_STAGE_ALL_GRAPHICS
+		SHADER_STAGE_ALL
+	supportedOperations: count = 8
+		SUBGROUP_FEATURE_BASIC_BIT
+		SUBGROUP_FEATURE_VOTE_BIT
+		SUBGROUP_FEATURE_ARITHMETIC_BIT
+		SUBGROUP_FEATURE_BALLOT_BIT
+		SUBGROUP_FEATURE_SHUFFLE_BIT
+		SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT
+		SUBGROUP_FEATURE_CLUSTERED_BIT
+		SUBGROUP_FEATURE_QUAD_BIT
+	quadOperationsInAllStages = true
+
+VkPhysicalDeviceSubgroupSizeControlProperties:
+----------------------------------------------
+	minSubgroupSize              = 8
+	maxSubgroupSize              = 32
+	maxComputeWorkgroupSubgroups = 36
+	requiredSubgroupSizeStages: count = 2
+		SHADER_STAGE_COMPUTE_BIT
+		SHADER_STAGE_ALL
+
+VkPhysicalDeviceTexelBufferAlignmentProperties:
+-----------------------------------------------
+	storageTexelBufferOffsetAlignmentBytes       = 0x00000010
+	storageTexelBufferOffsetSingleTexelAlignment = true
+	uniformTexelBufferOffsetAlignmentBytes       = 0x00000001
+	uniformTexelBufferOffsetSingleTexelAlignment = true
+
+VkPhysicalDeviceTimelineSemaphoreProperties:
+--------------------------------------------
+	maxTimelineSemaphoreValueDifference = 18446744073709551615
+
+VkPhysicalDeviceTransformFeedbackPropertiesEXT:
+-----------------------------------------------
+	maxTransformFeedbackStreams                = 4
+	maxTransformFeedbackBuffers                = 4
+	maxTransformFeedbackBufferSize             = 0x100000000
+	maxTransformFeedbackStreamDataSize         = 512
+	maxTransformFeedbackBufferDataSize         = 512
+	maxTransformFeedbackBufferDataStride       = 2048
+	transformFeedbackQueries                   = true
+	transformFeedbackStreamsLinesTriangles     = false
+	transformFeedbackRasterizationStreamSelect = true
+	transformFeedbackDraw                      = true
+
+VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT:
+----------------------------------------------------
+	maxVertexAttribDivisor = 268435455
+
+VkPhysicalDeviceVulkan11Properties:
+-----------------------------------
+	deviceUUID                        = 86808531-0600-0000-0000-000000000000
+	driverUUID                        = 33312e30-2e31-3031-2e32-313430000000
+	deviceLUID                        = 8a860000-00000000
+	deviceNodeMask                    = 1
+	deviceLUIDValid                   = true
+	subgroupSize                      = 32
+	subgroupSupportedStages: count = 8
+		SHADER_STAGE_VERTEX_BIT
+		SHADER_STAGE_TESSELLATION_CONTROL_BIT
+		SHADER_STAGE_TESSELLATION_EVALUATION_BIT
+		SHADER_STAGE_GEOMETRY_BIT
+		SHADER_STAGE_FRAGMENT_BIT
+		SHADER_STAGE_COMPUTE_BIT
+		SHADER_STAGE_ALL_GRAPHICS
+		SHADER_STAGE_ALL
+	subgroupSupportedOperations: count = 8
+		SUBGROUP_FEATURE_BASIC_BIT
+		SUBGROUP_FEATURE_VOTE_BIT
+		SUBGROUP_FEATURE_ARITHMETIC_BIT
+		SUBGROUP_FEATURE_BALLOT_BIT
+		SUBGROUP_FEATURE_SHUFFLE_BIT
+		SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT
+		SUBGROUP_FEATURE_CLUSTERED_BIT
+		SUBGROUP_FEATURE_QUAD_BIT
+	subgroupQuadOperationsInAllStages = true
+	pointClippingBehavior             = POINT_CLIPPING_BEHAVIOR_USER_CLIP_PLANES_ONLY
+	maxMultiviewViewCount             = 16
+	maxMultiviewInstanceIndex         = 268435454
+	protectedNoFault                  = false
+	maxPerSetDescriptors              = 6160
+	maxMemoryAllocationSize           = 0xfa81a000
+
+VkPhysicalDeviceVulkan12Properties:
+-----------------------------------
+	driverID                                             = DRIVER_ID_INTEL_PROPRIETARY_WINDOWS
+	driverName                                           = Intel Corporation
+	driverInfo                                           = Intel driver
+	conformanceVersion                                   = 1.3.1.1
+	denormBehaviorIndependence                           = SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL
+	roundingModeIndependence                             = SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE
+	shaderSignedZeroInfNanPreserveFloat16                = true
+	shaderSignedZeroInfNanPreserveFloat32                = true
+	shaderSignedZeroInfNanPreserveFloat64                = true
+	shaderDenormPreserveFloat16                          = true
+	shaderDenormPreserveFloat32                          = true
+	shaderDenormPreserveFloat64                          = true
+	shaderDenormFlushToZeroFloat16                       = true
+	shaderDenormFlushToZeroFloat32                       = true
+	shaderDenormFlushToZeroFloat64                       = true
+	shaderRoundingModeRTEFloat16                         = true
+	shaderRoundingModeRTEFloat32                         = true
+	shaderRoundingModeRTEFloat64                         = true
+	shaderRoundingModeRTZFloat16                         = true
+	shaderRoundingModeRTZFloat32                         = true
+	shaderRoundingModeRTZFloat64                         = true
+	maxUpdateAfterBindDescriptorsInAllPools              = 1048576
+	shaderUniformBufferArrayNonUniformIndexingNative     = false
+	shaderSampledImageArrayNonUniformIndexingNative      = false
+	shaderStorageBufferArrayNonUniformIndexingNative     = false
+	shaderStorageImageArrayNonUniformIndexingNative      = false
+	shaderInputAttachmentArrayNonUniformIndexingNative   = false
+	robustBufferAccessUpdateAfterBind                    = true
+	quadDivergentImplicitLod                             = true
+	maxPerStageDescriptorUpdateAfterBindSamplers         = 1048576
+	maxPerStageDescriptorUpdateAfterBindUniformBuffers   = 1048576
+	maxPerStageDescriptorUpdateAfterBindStorageBuffers   = 1048576
+	maxPerStageDescriptorUpdateAfterBindSampledImages    = 1048576
+	maxPerStageDescriptorUpdateAfterBindStorageImages    = 1048576
+	maxPerStageDescriptorUpdateAfterBindInputAttachments = 1048576
+	maxPerStageUpdateAfterBindResources                  = 1048576
+	maxDescriptorSetUpdateAfterBindSamplers              = 1048576
+	maxDescriptorSetUpdateAfterBindUniformBuffers        = 1048576
+	maxDescriptorSetUpdateAfterBindUniformBuffersDynamic = 16
+	maxDescriptorSetUpdateAfterBindStorageBuffers        = 1048576
+	maxDescriptorSetUpdateAfterBindStorageBuffersDynamic = 16
+	maxDescriptorSetUpdateAfterBindSampledImages         = 1048576
+	maxDescriptorSetUpdateAfterBindStorageImages         = 1048576
+	maxDescriptorSetUpdateAfterBindInputAttachments      = 1048576
+	supportedDepthResolveModes: count = 4
+		RESOLVE_MODE_SAMPLE_ZERO_BIT
+		RESOLVE_MODE_AVERAGE_BIT
+		RESOLVE_MODE_MIN_BIT
+		RESOLVE_MODE_MAX_BIT
+	supportedStencilResolveModes: count = 3
+		RESOLVE_MODE_SAMPLE_ZERO_BIT
+		RESOLVE_MODE_MIN_BIT
+		RESOLVE_MODE_MAX_BIT
+	independentResolveNone                               = true
+	independentResolve                                   = true
+	filterMinmaxSingleComponentFormats                   = true
+	filterMinmaxImageComponentMapping                    = true
+	maxTimelineSemaphoreValueDifference                  = 18446744073709551615
+	framebufferIntegerColorSampleCounts: count = 5
+		SAMPLE_COUNT_1_BIT
+		SAMPLE_COUNT_2_BIT
+		SAMPLE_COUNT_4_BIT
+		SAMPLE_COUNT_8_BIT
+		SAMPLE_COUNT_16_BIT
+
+VkPhysicalDeviceVulkan13Properties:
+-----------------------------------
+	minSubgroupSize                                                               = 8
+	maxSubgroupSize                                                               = 32
+	maxComputeWorkgroupSubgroups                                                  = 36
+	requiredSubgroupSizeStages: count = 2
+		SHADER_STAGE_COMPUTE_BIT
+		SHADER_STAGE_ALL
+	maxInlineUniformBlockSize                                                     = 256
+	maxPerStageDescriptorInlineUniformBlocks                                      = 4
+	maxPerStageDescriptorUpdateAfterBindInlineUniformBlocks                       = 4
+	maxDescriptorSetInlineUniformBlocks                                           = 4
+	maxDescriptorSetUpdateAfterBindInlineUniformBlocks                            = 4
+	maxInlineUniformTotalSize                                                     = 9216
+	integerDotProduct8BitUnsignedAccelerated                                      = false
+	integerDotProduct8BitSignedAccelerated                                        = false
+	integerDotProduct8BitMixedSignednessAccelerated                               = false
+	integerDotProduct4x8BitPackedUnsignedAccelerated                              = false
+	integerDotProduct4x8BitPackedSignedAccelerated                                = false
+	integerDotProduct4x8BitPackedMixedSignednessAccelerated                       = false
+	integerDotProduct16BitUnsignedAccelerated                                     = false
+	integerDotProduct16BitSignedAccelerated                                       = false
+	integerDotProduct16BitMixedSignednessAccelerated                              = false
+	integerDotProduct32BitUnsignedAccelerated                                     = false
+	integerDotProduct32BitSignedAccelerated                                       = false
+	integerDotProduct32BitMixedSignednessAccelerated                              = false
+	integerDotProduct64BitUnsignedAccelerated                                     = false
+	integerDotProduct64BitSignedAccelerated                                       = false
+	integerDotProduct64BitMixedSignednessAccelerated                              = false
+	integerDotProductAccumulatingSaturating8BitUnsignedAccelerated                = false
+	integerDotProductAccumulatingSaturating8BitSignedAccelerated                  = false
+	integerDotProductAccumulatingSaturating8BitMixedSignednessAccelerated         = false
+	integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated        = false
+	integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated          = false
+	integerDotProductAccumulatingSaturating4x8BitPackedMixedSignednessAccelerated = false
+	integerDotProductAccumulatingSaturating16BitUnsignedAccelerated               = false
+	integerDotProductAccumulatingSaturating16BitSignedAccelerated                 = false
+	integerDotProductAccumulatingSaturating16BitMixedSignednessAccelerated        = false
+	integerDotProductAccumulatingSaturating32BitUnsignedAccelerated               = false
+	integerDotProductAccumulatingSaturating32BitSignedAccelerated                 = false
+	integerDotProductAccumulatingSaturating32BitMixedSignednessAccelerated        = false
+	integerDotProductAccumulatingSaturating64BitUnsignedAccelerated               = false
+	integerDotProductAccumulatingSaturating64BitSignedAccelerated                 = false
+	integerDotProductAccumulatingSaturating64BitMixedSignednessAccelerated        = false
+	storageTexelBufferOffsetAlignmentBytes                                        = 0x00000010
+	storageTexelBufferOffsetSingleTexelAlignment                                  = true
+	uniformTexelBufferOffsetAlignmentBytes                                        = 0x00000001
+	uniformTexelBufferOffsetSingleTexelAlignment                                  = true
+	maxBufferSize                                                                 = 0x100000000
+
+
+Device Extensions: count = 109
+	VK_EXT_4444_formats                         : extension revision 1
+	VK_EXT_buffer_device_address                : extension revision 2
+	VK_EXT_calibrated_timestamps                : extension revision 1
+	VK_EXT_color_write_enable                   : extension revision 1
+	VK_EXT_conditional_rendering                : extension revision 2
+	VK_EXT_conservative_rasterization           : extension revision 1
+	VK_EXT_custom_border_color                  : extension revision 12
+	VK_EXT_depth_clip_control                   : extension revision 1
+	VK_EXT_depth_clip_enable                    : extension revision 1
+	VK_EXT_descriptor_indexing                  : extension revision 2
+	VK_EXT_extended_dynamic_state               : extension revision 1
+	VK_EXT_extended_dynamic_state2              : extension revision 1
+	VK_EXT_external_memory_host                 : extension revision 1
+	VK_EXT_fragment_shader_interlock            : extension revision 1
+	VK_EXT_full_screen_exclusive                : extension revision 4
+	VK_EXT_global_priority                      : extension revision 2
+	VK_EXT_global_priority_query                : extension revision 1
+	VK_EXT_hdr_metadata                         : extension revision 2
+	VK_EXT_host_query_reset                     : extension revision 1
+	VK_EXT_image_2d_view_of_3d                  : extension revision 1
+	VK_EXT_image_robustness                     : extension revision 1
+	VK_EXT_index_type_uint8                     : extension revision 1
+	VK_EXT_inline_uniform_block                 : extension revision 1
+	VK_EXT_line_rasterization                   : extension revision 1
+	VK_EXT_memory_budget                        : extension revision 1
+	VK_EXT_memory_priority                      : extension revision 1
+	VK_EXT_multi_draw                           : extension revision 1
+	VK_EXT_pipeline_creation_cache_control      : extension revision 3
+	VK_EXT_pipeline_creation_feedback           : extension revision 1
+	VK_EXT_post_depth_coverage                  : extension revision 1
+	VK_EXT_primitive_topology_list_restart      : extension revision 1
+	VK_EXT_private_data                         : extension revision 1
+	VK_EXT_provoking_vertex                     : extension revision 1
+	VK_EXT_robustness2                          : extension revision 1
+	VK_EXT_sample_locations                     : extension revision 1
+	VK_EXT_sampler_filter_minmax                : extension revision 2
+	VK_EXT_scalar_block_layout                  : extension revision 1
+	VK_EXT_separate_stencil_usage               : extension revision 1
+	VK_EXT_shader_atomic_float                  : extension revision 1
+	VK_EXT_shader_atomic_float2                 : extension revision 1
+	VK_EXT_shader_demote_to_helper_invocation   : extension revision 1
+	VK_EXT_shader_stencil_export                : extension revision 1
+	VK_EXT_shader_subgroup_ballot               : extension revision 1
+	VK_EXT_shader_subgroup_vote                 : extension revision 1
+	VK_EXT_shader_viewport_index_layer          : extension revision 1
+	VK_EXT_subgroup_size_control                : extension revision 2
+	VK_EXT_texel_buffer_alignment               : extension revision 1
+	VK_EXT_transform_feedback                   : extension revision 1
+	VK_EXT_vertex_attribute_divisor             : extension revision 3
+	VK_EXT_vertex_input_dynamic_state           : extension revision 2
+	VK_EXT_ycbcr_2plane_444_formats             : extension revision 1
+	VK_INTEL_performance_query                  : extension revision 2
+	VK_KHR_16bit_storage                        : extension revision 1
+	VK_KHR_8bit_storage                         : extension revision 1
+	VK_KHR_bind_memory2                         : extension revision 1
+	VK_KHR_buffer_device_address                : extension revision 1
+	VK_KHR_copy_commands2                       : extension revision 1
+	VK_KHR_create_renderpass2                   : extension revision 1
+	VK_KHR_dedicated_allocation                 : extension revision 1
+	VK_KHR_depth_stencil_resolve                : extension revision 1
+	VK_KHR_descriptor_update_template           : extension revision 1
+	VK_KHR_device_group                         : extension revision 4
+	VK_KHR_draw_indirect_count                  : extension revision 1
+	VK_KHR_driver_properties                    : extension revision 1
+	VK_KHR_dynamic_rendering                    : extension revision 1
+	VK_KHR_external_fence                       : extension revision 1
+	VK_KHR_external_fence_win32                 : extension revision 1
+	VK_KHR_external_memory                      : extension revision 1
+	VK_KHR_external_memory_win32                : extension revision 1
+	VK_KHR_external_semaphore                   : extension revision 1
+	VK_KHR_external_semaphore_win32             : extension revision 1
+	VK_KHR_format_feature_flags2                : extension revision 1
+	VK_KHR_get_memory_requirements2             : extension revision 1
+	VK_KHR_global_priority                      : extension revision 1
+	VK_KHR_image_format_list                    : extension revision 1
+	VK_KHR_imageless_framebuffer                : extension revision 1
+	VK_KHR_maintenance1                         : extension revision 1
+	VK_KHR_maintenance2                         : extension revision 1
+	VK_KHR_maintenance3                         : extension revision 1
+	VK_KHR_maintenance4                         : extension revision 2
+	VK_KHR_multiview                            : extension revision 1
+	VK_KHR_performance_query                    : extension revision 1
+	VK_KHR_pipeline_executable_properties       : extension revision 1
+	VK_KHR_push_descriptor                      : extension revision 1
+	VK_KHR_relaxed_block_layout                 : extension revision 1
+	VK_KHR_sampler_mirror_clamp_to_edge         : extension revision 3
+	VK_KHR_separate_depth_stencil_layouts       : extension revision 1
+	VK_KHR_shader_clock                         : extension revision 1
+	VK_KHR_shader_draw_parameters               : extension revision 1
+	VK_KHR_shader_float16_int8                  : extension revision 1
+	VK_KHR_shader_float_controls                : extension revision 4
+	VK_KHR_shader_integer_dot_product           : extension revision 1
+	VK_KHR_shader_non_semantic_info             : extension revision 1
+	VK_KHR_shader_subgroup_extended_types       : extension revision 1
+	VK_KHR_shader_subgroup_uniform_control_flow : extension revision 1
+	VK_KHR_shader_terminate_invocation          : extension revision 1
+	VK_KHR_spirv_1_4                            : extension revision 1
+	VK_KHR_storage_buffer_storage_class         : extension revision 1
+	VK_KHR_swapchain                            : extension revision 70
+	VK_KHR_swapchain_mutable_format             : extension revision 1
+	VK_KHR_synchronization2                     : extension revision 1
+	VK_KHR_timeline_semaphore                   : extension revision 2
+	VK_KHR_uniform_buffer_standard_layout       : extension revision 1
+	VK_KHR_variable_pointers                    : extension revision 1
+	VK_KHR_vulkan_memory_model                  : extension revision 3
+	VK_KHR_win32_keyed_mutex                    : extension revision 1
+	VK_KHR_workgroup_memory_explicit_layout     : extension revision 1
+	VK_KHR_zero_initialize_workgroup_memory     : extension revision 1
+	VK_NV_device_diagnostic_checkpoints         : extension revision 2
+
+VkQueueFamilyProperties:
+========================
+	queueProperties[0]:
+	-------------------
+		minImageTransferGranularity = (1,1,1)
+		queueCount                  = 1
+		queueFlags                  = QUEUE_GRAPHICS | QUEUE_COMPUTE | QUEUE_TRANSFER | QUEUE_SPARSE_BINDING
+		timestampValidBits          = 36
+		present support             = true
+		VkQueueFamilyGlobalPriorityPropertiesKHR:
+		-----------------------------------------
+			priorityCount  = 4
+			priorities: count = 16
+				128
+				256
+				512
+				1024
+				0
+				0
+				0
+				0
+				0
+				0
+				0
+				0
+				0
+				0
+				0
+				0
+
+
+VkPhysicalDeviceMemoryProperties:
+=================================
+memoryHeaps: count = 1
+	memoryHeaps[0]:
+		size   = 4202799104 (0xfa81a000) (3.91 GiB)
+		budget = 3782519194 (0xe174a99a) (3.52 GiB)
+		usage  = 0 (0x00000000) (0.00 B)
+		flags: count = 1
+			MEMORY_HEAP_DEVICE_LOCAL_BIT
+memoryTypes: count = 3
+	memoryTypes[0]:
+		heapIndex     = 0
+		propertyFlags = 0x0001: count = 1
+			MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		usable for:
+			IMAGE_TILING_OPTIMAL:
+				color images
+				FORMAT_D16_UNORM
+				FORMAT_X8_D24_UNORM_PACK32
+				FORMAT_D32_SFLOAT
+				FORMAT_D24_UNORM_S8_UINT
+				FORMAT_D32_SFLOAT_S8_UINT
+			IMAGE_TILING_LINEAR:
+				color images
+	memoryTypes[1]:
+		heapIndex     = 0
+		propertyFlags = 0x0007: count = 3
+			MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+			MEMORY_PROPERTY_HOST_VISIBLE_BIT
+			MEMORY_PROPERTY_HOST_COHERENT_BIT
+		usable for:
+			IMAGE_TILING_OPTIMAL:
+				color images
+				FORMAT_D16_UNORM
+				FORMAT_X8_D24_UNORM_PACK32
+				FORMAT_D32_SFLOAT
+				FORMAT_D24_UNORM_S8_UINT
+				FORMAT_D32_SFLOAT_S8_UINT
+			IMAGE_TILING_LINEAR:
+				color images
+	memoryTypes[2]:
+		heapIndex     = 0
+		propertyFlags = 0x000f: count = 4
+			MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+			MEMORY_PROPERTY_HOST_VISIBLE_BIT
+			MEMORY_PROPERTY_HOST_COHERENT_BIT
+			MEMORY_PROPERTY_HOST_CACHED_BIT
+		usable for:
+			IMAGE_TILING_OPTIMAL:
+				color images
+				FORMAT_D16_UNORM
+				FORMAT_X8_D24_UNORM_PACK32
+				FORMAT_D32_SFLOAT
+				FORMAT_D24_UNORM_S8_UINT
+				FORMAT_D32_SFLOAT_S8_UINT
+			IMAGE_TILING_LINEAR:
+				color images
+
+VkPhysicalDeviceFeatures:
+=========================
+	robustBufferAccess                      = true
+	fullDrawIndexUint32                     = true
+	imageCubeArray                          = true
+	independentBlend                        = true
+	geometryShader                          = true
+	tessellationShader                      = true
+	sampleRateShading                       = true
+	dualSrcBlend                            = true
+	logicOp                                 = true
+	multiDrawIndirect                       = true
+	drawIndirectFirstInstance               = true
+	depthClamp                              = true
+	depthBiasClamp                          = true
+	fillModeNonSolid                        = true
+	depthBounds                             = false
+	wideLines                               = true
+	largePoints                             = true
+	alphaToOne                              = true
+	multiViewport                           = true
+	samplerAnisotropy                       = true
+	textureCompressionETC2                  = true
+	textureCompressionASTC_LDR              = true
+	textureCompressionBC                    = true
+	occlusionQueryPrecise                   = true
+	pipelineStatisticsQuery                 = true
+	vertexPipelineStoresAndAtomics          = true
+	fragmentStoresAndAtomics                = true
+	shaderTessellationAndGeometryPointSize  = true
+	shaderImageGatherExtended               = true
+	shaderStorageImageExtendedFormats       = true
+	shaderStorageImageMultisample           = true
+	shaderStorageImageReadWithoutFormat     = false
+	shaderStorageImageWriteWithoutFormat    = true
+	shaderUniformBufferArrayDynamicIndexing = true
+	shaderSampledImageArrayDynamicIndexing  = true
+	shaderStorageBufferArrayDynamicIndexing = true
+	shaderStorageImageArrayDynamicIndexing  = true
+	shaderClipDistance                      = true
+	shaderCullDistance                      = true
+	shaderFloat64                           = false
+	shaderInt64                             = false
+	shaderInt16                             = true
+	shaderResourceResidency                 = true
+	shaderResourceMinLod                    = false
+	sparseBinding                           = true
+	sparseResidencyBuffer                   = true
+	sparseResidencyImage2D                  = true
+	sparseResidencyImage3D                  = true
+	sparseResidency2Samples                 = true
+	sparseResidency4Samples                 = true
+	sparseResidency8Samples                 = true
+	sparseResidency16Samples                = true
+	sparseResidencyAliased                  = true
+	variableMultisampleRate                 = true
+	inheritedQueries                        = true
+
+VkPhysicalDevice16BitStorageFeatures:
+-------------------------------------
+	storageBuffer16BitAccess           = true
+	uniformAndStorageBuffer16BitAccess = true
+	storagePushConstant16              = true
+	storageInputOutput16               = true
+
+VkPhysicalDevice4444FormatsFeaturesEXT:
+---------------------------------------
+	formatA4R4G4B4 = true
+	formatA4B4G4R4 = false
+
+VkPhysicalDevice8BitStorageFeatures:
+------------------------------------
+	storageBuffer8BitAccess           = true
+	uniformAndStorageBuffer8BitAccess = true
+	storagePushConstant8              = true
+
+VkPhysicalDeviceBufferDeviceAddressFeatures:
+--------------------------------------------
+	bufferDeviceAddress              = true
+	bufferDeviceAddressCaptureReplay = true
+	bufferDeviceAddressMultiDevice   = true
+
+VkPhysicalDeviceBufferDeviceAddressFeaturesEXT:
+-----------------------------------------------
+	bufferDeviceAddress              = true
+	bufferDeviceAddressCaptureReplay = true
+	bufferDeviceAddressMultiDevice   = true
+
+VkPhysicalDeviceColorWriteEnableFeaturesEXT:
+--------------------------------------------
+	colorWriteEnable = true
+
+VkPhysicalDeviceConditionalRenderingFeaturesEXT:
+------------------------------------------------
+	conditionalRendering          = true
+	inheritedConditionalRendering = true
+
+VkPhysicalDeviceCustomBorderColorFeaturesEXT:
+---------------------------------------------
+	customBorderColors             = true
+	customBorderColorWithoutFormat = true
+
+VkPhysicalDeviceDepthClipControlFeaturesEXT:
+--------------------------------------------
+	depthClipControl = true
+
+VkPhysicalDeviceDepthClipEnableFeaturesEXT:
+-------------------------------------------
+	depthClipEnable = true
+
+VkPhysicalDeviceDescriptorIndexingFeatures:
+-------------------------------------------
+	shaderInputAttachmentArrayDynamicIndexing          = true
+	shaderUniformTexelBufferArrayDynamicIndexing       = true
+	shaderStorageTexelBufferArrayDynamicIndexing       = true
+	shaderUniformBufferArrayNonUniformIndexing         = true
+	shaderSampledImageArrayNonUniformIndexing          = true
+	shaderStorageBufferArrayNonUniformIndexing         = true
+	shaderStorageImageArrayNonUniformIndexing          = true
+	shaderInputAttachmentArrayNonUniformIndexing       = false
+	shaderUniformTexelBufferArrayNonUniformIndexing    = true
+	shaderStorageTexelBufferArrayNonUniformIndexing    = true
+	descriptorBindingUniformBufferUpdateAfterBind      = true
+	descriptorBindingSampledImageUpdateAfterBind       = true
+	descriptorBindingStorageImageUpdateAfterBind       = true
+	descriptorBindingStorageBufferUpdateAfterBind      = true
+	descriptorBindingUniformTexelBufferUpdateAfterBind = true
+	descriptorBindingStorageTexelBufferUpdateAfterBind = true
+	descriptorBindingUpdateUnusedWhilePending          = true
+	descriptorBindingPartiallyBound                    = true
+	descriptorBindingVariableDescriptorCount           = true
+	runtimeDescriptorArray                             = true
+
+VkPhysicalDeviceDynamicRenderingFeatures:
+-----------------------------------------
+	dynamicRendering = true
+
+VkPhysicalDeviceExtendedDynamicState2FeaturesEXT:
+-------------------------------------------------
+	extendedDynamicState2                   = true
+	extendedDynamicState2LogicOp            = true
+	extendedDynamicState2PatchControlPoints = false
+
+VkPhysicalDeviceExtendedDynamicStateFeaturesEXT:
+------------------------------------------------
+	extendedDynamicState = true
+
+VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT:
+---------------------------------------------------
+	fragmentShaderSampleInterlock      = true
+	fragmentShaderPixelInterlock       = true
+	fragmentShaderShadingRateInterlock = false
+
+VkPhysicalDeviceGlobalPriorityQueryFeaturesKHR:
+-----------------------------------------------
+	globalPriorityQuery = true
+
+VkPhysicalDeviceHostQueryResetFeatures:
+---------------------------------------
+	hostQueryReset = true
+
+VkPhysicalDeviceImageRobustnessFeatures:
+----------------------------------------
+	robustImageAccess = true
+
+VkPhysicalDeviceImagelessFramebufferFeatures:
+---------------------------------------------
+	imagelessFramebuffer = true
+
+VkPhysicalDeviceIndexTypeUint8FeaturesEXT:
+------------------------------------------
+	indexTypeUint8 = true
+
+VkPhysicalDeviceInlineUniformBlockFeatures:
+-------------------------------------------
+	inlineUniformBlock                                 = true
+	descriptorBindingInlineUniformBlockUpdateAfterBind = true
+
+VkPhysicalDeviceLineRasterizationFeaturesEXT:
+---------------------------------------------
+	rectangularLines         = false
+	bresenhamLines           = true
+	smoothLines              = false
+	stippledRectangularLines = false
+	stippledBresenhamLines   = true
+	stippledSmoothLines      = false
+
+VkPhysicalDeviceMaintenance4Features:
+-------------------------------------
+	maintenance4 = true
+
+VkPhysicalDeviceMemoryPriorityFeaturesEXT:
+------------------------------------------
+	memoryPriority = true
+
+VkPhysicalDeviceMultiDrawFeaturesEXT:
+-------------------------------------
+	multiDraw = true
+
+VkPhysicalDeviceMultiviewFeatures:
+----------------------------------
+	multiview                   = true
+	multiviewGeometryShader     = true
+	multiviewTessellationShader = true
+
+VkPhysicalDevicePerformanceQueryFeaturesKHR:
+--------------------------------------------
+	performanceCounterQueryPools         = true
+	performanceCounterMultipleQueryPools = false
+
+VkPhysicalDevicePipelineCreationCacheControlFeatures:
+-----------------------------------------------------
+	pipelineCreationCacheControl = true
+
+VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR:
+--------------------------------------------------------
+	pipelineExecutableInfo = true
+
+VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT:
+--------------------------------------------------------
+	primitiveTopologyListRestart      = true
+	primitiveTopologyPatchListRestart = true
+
+VkPhysicalDevicePrivateDataFeatures:
+------------------------------------
+	privateData = true
+
+VkPhysicalDeviceProtectedMemoryFeatures:
+----------------------------------------
+	protectedMemory = false
+
+VkPhysicalDeviceProvokingVertexFeaturesEXT:
+-------------------------------------------
+	provokingVertexLast                       = true
+	transformFeedbackPreservesProvokingVertex = true
+
+VkPhysicalDeviceRobustness2FeaturesEXT:
+---------------------------------------
+	robustBufferAccess2 = true
+	robustImageAccess2  = true
+	nullDescriptor      = true
+
+VkPhysicalDeviceSamplerYcbcrConversionFeatures:
+-----------------------------------------------
+	samplerYcbcrConversion = false
+
+VkPhysicalDeviceScalarBlockLayoutFeatures:
+------------------------------------------
+	scalarBlockLayout = true
+
+VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures:
+----------------------------------------------------
+	separateDepthStencilLayouts = true
+
+VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT:
+----------------------------------------------
+	shaderBufferFloat16Atomics      = false
+	shaderBufferFloat16AtomicAdd    = false
+	shaderBufferFloat16AtomicMinMax = false
+	shaderBufferFloat32AtomicMinMax = true
+	shaderBufferFloat64AtomicMinMax = false
+	shaderSharedFloat16Atomics      = false
+	shaderSharedFloat16AtomicAdd    = false
+	shaderSharedFloat16AtomicMinMax = false
+	shaderSharedFloat32AtomicMinMax = true
+	shaderSharedFloat64AtomicMinMax = false
+	shaderImageFloat32AtomicMinMax  = false
+	sparseImageFloat32AtomicMinMax  = false
+
+VkPhysicalDeviceShaderAtomicFloatFeaturesEXT:
+---------------------------------------------
+	shaderBufferFloat32Atomics   = true
+	shaderBufferFloat32AtomicAdd = false
+	shaderBufferFloat64Atomics   = false
+	shaderBufferFloat64AtomicAdd = false
+	shaderSharedFloat32Atomics   = true
+	shaderSharedFloat32AtomicAdd = false
+	shaderSharedFloat64Atomics   = false
+	shaderSharedFloat64AtomicAdd = false
+	shaderImageFloat32Atomics    = true
+	shaderImageFloat32AtomicAdd  = false
+	sparseImageFloat32Atomics    = true
+	sparseImageFloat32AtomicAdd  = false
+
+VkPhysicalDeviceShaderAtomicInt64Features:
+------------------------------------------
+	shaderBufferInt64Atomics = false
+	shaderSharedInt64Atomics = false
+
+VkPhysicalDeviceShaderClockFeaturesKHR:
+---------------------------------------
+	shaderSubgroupClock = true
+	shaderDeviceClock   = false
+
+VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures:
+-------------------------------------------------------
+	shaderDemoteToHelperInvocation = true
+
+VkPhysicalDeviceShaderDrawParametersFeatures:
+---------------------------------------------
+	shaderDrawParameters = true
+
+VkPhysicalDeviceShaderFloat16Int8Features:
+------------------------------------------
+	shaderFloat16 = true
+	shaderInt8    = true
+
+VkPhysicalDeviceShaderIntegerDotProductFeatures:
+------------------------------------------------
+	shaderIntegerDotProduct = true
+
+VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures:
+----------------------------------------------------
+	shaderSubgroupExtendedTypes = true
+
+VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR:
+------------------------------------------------------------
+	shaderSubgroupUniformControlFlow = true
+
+VkPhysicalDeviceShaderTerminateInvocationFeatures:
+--------------------------------------------------
+	shaderTerminateInvocation = true
+
+VkPhysicalDeviceSubgroupSizeControlFeatures:
+--------------------------------------------
+	subgroupSizeControl  = true
+	computeFullSubgroups = true
+
+VkPhysicalDeviceSynchronization2Features:
+-----------------------------------------
+	synchronization2 = true
+
+VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT:
+------------------------------------------------
+	texelBufferAlignment = true
+
+VkPhysicalDeviceTextureCompressionASTCHDRFeatures:
+--------------------------------------------------
+	textureCompressionASTC_HDR = false
+
+VkPhysicalDeviceTimelineSemaphoreFeatures:
+------------------------------------------
+	timelineSemaphore = true
+
+VkPhysicalDeviceTransformFeedbackFeaturesEXT:
+---------------------------------------------
+	transformFeedback = true
+	geometryStreams   = true
+
+VkPhysicalDeviceUniformBufferStandardLayoutFeatures:
+----------------------------------------------------
+	uniformBufferStandardLayout = true
+
+VkPhysicalDeviceVariablePointersFeatures:
+-----------------------------------------
+	variablePointersStorageBuffer = true
+	variablePointers              = true
+
+VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT:
+--------------------------------------------------
+	vertexAttributeInstanceRateDivisor     = true
+	vertexAttributeInstanceRateZeroDivisor = true
+
+VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT:
+---------------------------------------------------
+	vertexInputDynamicState = true
+
+VkPhysicalDeviceVulkan11Features:
+---------------------------------
+	storageBuffer16BitAccess           = true
+	uniformAndStorageBuffer16BitAccess = true
+	storagePushConstant16              = true
+	storageInputOutput16               = true
+	multiview                          = true
+	multiviewGeometryShader            = true
+	multiviewTessellationShader        = true
+	variablePointersStorageBuffer      = true
+	variablePointers                   = true
+	protectedMemory                    = false
+	samplerYcbcrConversion             = false
+	shaderDrawParameters               = true
+
+VkPhysicalDeviceVulkan12Features:
+---------------------------------
+	samplerMirrorClampToEdge                           = true
+	drawIndirectCount                                  = true
+	storageBuffer8BitAccess                            = true
+	uniformAndStorageBuffer8BitAccess                  = true
+	storagePushConstant8                               = true
+	shaderBufferInt64Atomics                           = false
+	shaderSharedInt64Atomics                           = false
+	shaderFloat16                                      = true
+	shaderInt8                                         = true
+	descriptorIndexing                                 = true
+	shaderInputAttachmentArrayDynamicIndexing          = true
+	shaderUniformTexelBufferArrayDynamicIndexing       = true
+	shaderStorageTexelBufferArrayDynamicIndexing       = true
+	shaderUniformBufferArrayNonUniformIndexing         = true
+	shaderSampledImageArrayNonUniformIndexing          = true
+	shaderStorageBufferArrayNonUniformIndexing         = true
+	shaderStorageImageArrayNonUniformIndexing          = true
+	shaderInputAttachmentArrayNonUniformIndexing       = false
+	shaderUniformTexelBufferArrayNonUniformIndexing    = true
+	shaderStorageTexelBufferArrayNonUniformIndexing    = true
+	descriptorBindingUniformBufferUpdateAfterBind      = true
+	descriptorBindingSampledImageUpdateAfterBind       = true
+	descriptorBindingStorageImageUpdateAfterBind       = true
+	descriptorBindingStorageBufferUpdateAfterBind      = true
+	descriptorBindingUniformTexelBufferUpdateAfterBind = true
+	descriptorBindingStorageTexelBufferUpdateAfterBind = true
+	descriptorBindingUpdateUnusedWhilePending          = true
+	descriptorBindingPartiallyBound                    = true
+	descriptorBindingVariableDescriptorCount           = true
+	runtimeDescriptorArray                             = true
+	samplerFilterMinmax                                = true
+	scalarBlockLayout                                  = true
+	imagelessFramebuffer                               = true
+	uniformBufferStandardLayout                        = true
+	shaderSubgroupExtendedTypes                        = true
+	separateDepthStencilLayouts                        = true
+	hostQueryReset                                     = true
+	timelineSemaphore                                  = true
+	bufferDeviceAddress                                = true
+	bufferDeviceAddressCaptureReplay                   = true
+	bufferDeviceAddressMultiDevice                     = true
+	vulkanMemoryModel                                  = true
+	vulkanMemoryModelDeviceScope                       = true
+	vulkanMemoryModelAvailabilityVisibilityChains      = true
+	shaderOutputViewportIndex                          = true
+	shaderOutputLayer                                  = true
+	subgroupBroadcastDynamicId                         = true
+
+VkPhysicalDeviceVulkan13Features:
+---------------------------------
+	robustImageAccess                                  = true
+	inlineUniformBlock                                 = true
+	descriptorBindingInlineUniformBlockUpdateAfterBind = true
+	pipelineCreationCacheControl                       = true
+	privateData                                        = true
+	shaderDemoteToHelperInvocation                     = true
+	shaderTerminateInvocation                          = true
+	subgroupSizeControl                                = true
+	computeFullSubgroups                               = true
+	synchronization2                                   = true
+	textureCompressionASTC_HDR                         = false
+	shaderZeroInitializeWorkgroupMemory                = true
+	dynamicRendering                                   = true
+	shaderIntegerDotProduct                            = true
+	maintenance4                                       = true
+
+VkPhysicalDeviceVulkanMemoryModelFeatures:
+------------------------------------------
+	vulkanMemoryModel                             = true
+	vulkanMemoryModelDeviceScope                  = true
+	vulkanMemoryModelAvailabilityVisibilityChains = true
+
+VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR:
+---------------------------------------------------------
+	workgroupMemoryExplicitLayout                  = true
+	workgroupMemoryExplicitLayoutScalarBlockLayout = true
+	workgroupMemoryExplicitLayout8BitAccess        = true
+	workgroupMemoryExplicitLayout16BitAccess       = true
+
+VkPhysicalDeviceYcbcr2Plane444FormatsFeaturesEXT:
+-------------------------------------------------
+	ycbcr2plane444Formats = true
+
+VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeatures:
+------------------------------------------------------
+	shaderZeroInitializeWorkgroupMemory = true
+
+

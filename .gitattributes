@@ -1,0 +1,2 @@
+# Keep the Windows vulkaninfo captures byte-for-byte (CRLF) on every client.
+tests/fixtures/vulkaninfo/*-windows-*.txt -text

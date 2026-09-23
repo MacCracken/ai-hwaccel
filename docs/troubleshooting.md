@@ -33,11 +33,16 @@ cyrius build src/main.cyr build/ai-hwaccel -DCUDA
 
 ---
 
-## "Vulkan GPU listed instead of CUDA/ROCm GPU"
+## "Vulkan GPU listed instead of, or next to, a CUDA/ROCm GPU"
 
-**Expected behavior**: When both Vulkan and a dedicated backend (CUDA or ROCm)
-detect the same GPU, the Vulkan duplicate is automatically removed. If you only
-see Vulkan, it means the dedicated backend failed.
+**Expected behavior**: A GPU that both Vulkan and a dedicated backend (CUDA or
+ROCm) detect is listed twice, once per backend, and both count in the
+totals. ai-hwaccel does not merge them yet. The Rust releases dropped every
+Vulkan GPU whenever a CUDA or ROCm GPU was found; the Cyrius port lost that,
+and this page said otherwise until 2.3.29. Merging them is
+planned for 2.4.x (see the roadmap's "One physical device, one profile"). The
+CUDA or ROCm profile is the fuller one, with driver, temperature and
+utilization. If you see only the Vulkan profile, the dedicated backend failed.
 
 **Fix**: Check that `nvidia-smi` or `/sys/class/drm/card*/device/driver` is
 working. Run with `--debug` to see detection diagnostics:

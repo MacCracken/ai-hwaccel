@@ -1,0 +1,41 @@
+==========
+VULKANINFO
+==========
+
+Vulkan Instance Version: 1.3.301
+
+
+Instance Extensions: count = 13
+-------------------------------
+VK_EXT_debug_report                    : extension revision 10
+VK_EXT_debug_utils                     : extension revision 2
+VK_EXT_swapchain_colorspace            : extension revision 4
+VK_KHR_device_group_creation           : extension revision 1
+VK_KHR_external_fence_capabilities     : extension revision 1
+VK_KHR_external_memory_capabilities    : extension revision 1
+VK_KHR_external_semaphore_capabilities : extension revision 1
+VK_KHR_get_physical_device_properties2 : extension revision 2
+VK_KHR_get_surface_capabilities2       : extension revision 1
+VK_KHR_portability_enumeration         : extension revision 1
+VK_KHR_surface                         : extension revision 25
+VK_KHR_win32_surface                   : extension revision 6
+VK_LUNARG_direct_driver_loading        : extension revision 1
+
+Instance Layers:
+----------------
+
+Devices:
+========
+GPU0:
+	apiVersion         = 4206807 (1.3.215)
+	driverVersion      = 1656924 (0x19485c)
+	vendorID           = 0x8086
+	deviceID           = 0x3185
+	deviceType         = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+	deviceName         = Intel(R) UHD Graphics 600
+	driverID           = DRIVER_ID_INTEL_PROPRIETARY_WINDOWS
+	driverName         = Intel Corporation
+	driverInfo         = Intel driver
+	conformanceVersion = 1.3.1.1
+	deviceUUID         = 86808531-0600-0000-0000-000000000000
+	driverUUID         = 33312e30-2e31-3031-2e32-313430000000

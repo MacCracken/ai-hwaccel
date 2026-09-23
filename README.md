@@ -14,7 +14,7 @@ decide how to quantize and shard a model across them.
 |--------|-------|
 | Binary size | **214 KB** (`CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.6.6 |
-| Tests | 791 assertions (15 test units) |
+| Tests | 894 assertions (15 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** |
 | Hardware families | 18 |
@@ -41,7 +41,7 @@ decide how to quantize and shard a model across them.
 | Groq LPU | Language Processing Unit | `/dev/groq*` sysfs |
 | Samsung NPU | Exynos NPU | `/sys/class/npu` sysfs |
 | MediaTek APU | Dimensity APU | `/sys/class/misc/apusys` sysfs |
-| Vulkan Compute | Any Vulkan 1.1+ device | `vulkaninfo` on `$PATH` |
+| Vulkan Compute | Any Vulkan 1.1+ device | `vulkaninfo` on `$PATH`, a sysfs scan without it |
 | CPU | Always present | `/proc/meminfo` (16 GiB fallback) |
 
 ## Quick Start
@@ -83,9 +83,9 @@ consumer's `lib/`. Include it like any other dep:
 ```cyrius
 include "lib/ai-hwaccel.cyr"
 
-# Full detection — sysfs probes plus vendor CLIs (nvidia-smi,
-# vulkaninfo, hl-smi, neuron-ls, xpu-smi, cerebras_cli, gc-info) for
-# the seven EXEC backends, and ibstat / nvidia-smi topo for the
+# Full detection — sysfs probes plus vendor CLIs (nvidia-smi, hl-smi,
+# neuron-ls, xpu-smi, cerebras_cli, gc-info) for the six EXEC backends,
+# vulkaninfo for Vulkan, and ibstat / nvidia-smi topo for the
 # interconnect post-pass.
 var r = registry_detect();
 # ... reg_profiles(r), reg_count(r), ...
@@ -95,13 +95,15 @@ var r = registry_detect();
 
 Consumers with a no-subprocess contract — `mihi`'s probe surface, any
 read-only system-info library — call `registry_detect_no_exec()`
-instead. It masks off the seven exec-shelling backends (CUDA, Vulkan,
-Gaudi, Neuron, Intel oneAPI, Cerebras, Graphcore) and skips the
-`detect_interconnects` post-pass. The ten native backends still run,
+instead. It masks off the six exec-shelling backends (CUDA, Gaudi,
+Neuron, Intel oneAPI, Cerebras, Graphcore) and skips the
+`detect_interconnects` post-pass. The eleven native backends still run,
 along with the sysfs post-passes: ROCm, Intel NPU, AMD XDNA, TPU,
-Qualcomm, Groq, Samsung NPU, MediaTek APU, Windows (DXGI, since 2.3.25)
-and Apple (sysctl on macOS and the device tree on Asahi Linux, since
-2.3.27). Their `wmic` / `system_profiler` fallbacks do not run.
+Qualcomm, Groq, Samsung NPU, MediaTek APU, Windows (DXGI, since 2.3.25),
+Apple (sysctl on macOS and the device tree on Asahi Linux, since
+2.3.27) and Vulkan (a sysfs scan of the DRM cards, since 2.3.29; it
+leaves AMD cards to ROCm). Their `wmic` / `system_profiler` /
+`vulkaninfo` runs do not happen.
 
 ```cyrius
 include "lib/ai-hwaccel.cyr"
@@ -146,7 +148,7 @@ src/
     ├── cuda.cyr             NVIDIA via nvidia-smi
     ├── rocm.cyr             AMD via sysfs
     ├── apple.cyr            Metal + ANE via sysctl
-    ├── vulkan.cyr           Vulkan via vulkaninfo
+    ├── vulkan.cyr           Vulkan via vulkaninfo + sysfs scan
     ├── tpu.cyr              Google TPU via sysfs
     ├── gaudi.cyr            Intel Gaudi via hl-smi
     ├── neuron.cyr           AWS Neuron via neuron-ls
@@ -210,7 +212,7 @@ cyrius vet src/main.cyr                        # Include-graph audit
 cyrius lint src/main.cyr                       # Static analysis
 cyrius fmt src/main.cyr                        # Format check (diff against committed)
 
-# Test suite — 15 units under tests/tcyr/, 791 assertions total
+# Test suite — 15 units under tests/tcyr/, 894 assertions total
 for t in tests/tcyr/*.tcyr; do
     cyrius build "$t" "/tmp/$(basename $t .tcyr)"
     "/tmp/$(basename $t .tcyr)"
@@ -227,7 +229,7 @@ done
 | `profile_test.tcyr` | profile struct construction, throughput, rank |
 | `registry_test.tcyr` | registry + detection builder + suggest_quant + memory totals + every detection entry point, end to end |
 | `requirement_test.tcyr` | accelerator requirement matching |
-| `gpu_parser_test.tcyr` | CUDA / Gaudi / Neuron output parsing |
+| `gpu_parser_test.tcyr` | CUDA / Gaudi / Neuron output parsing; Vulkan against real `vulkaninfo` captures (`tests/fixtures/vulkaninfo/`) |
 | `backend_test.tcyr` | Apple / Intel / AMD XDNA / cloud ASIC / edge |
 | `io_test.tcyr` | `which`, `run_tool`, CSV / sysfs / path helpers |
 | `topology_test.tcyr` | interconnect / bandwidth / PCIe / storage / NVSwitch |

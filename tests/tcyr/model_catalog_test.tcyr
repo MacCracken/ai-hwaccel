@@ -42,7 +42,7 @@ include "src/model.cyr"
 fn detect_cuda(p, w) { return 0; }
 fn detect_rocm(p, w) { return 0; }
 fn detect_apple_opts(p, w, a) { return 0; }
-fn detect_vulkan(p, w) { return 0; }
+fn detect_vulkan_opts(p, w, a, l) { return 0; }
 fn detect_intel_npu(p, w) { return 0; }
 fn detect_amd_xdna(p, w) { return 0; }
 fn detect_tpu(p, w) { return 0; }

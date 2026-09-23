@@ -40,7 +40,7 @@ fn _stub(profiles, backend, atype) {
 
 fn detect_cuda(p, w) { return _stub(p, BACKEND_CUDA, ACCEL_CUDA); }
 fn detect_rocm(p, w) { return _stub(p, BACKEND_ROCM, ACCEL_ROCM); }
-fn detect_vulkan(p, w) { return _stub(p, BACKEND_VULKAN, ACCEL_VULKAN); }
+fn detect_vulkan_opts(p, w, a, l) { return _stub(p, BACKEND_VULKAN, ACCEL_VULKAN); }
 fn detect_intel_npu(p, w) { return _stub(p, BACKEND_INTEL_NPU, ACCEL_INTEL_NPU); }
 fn detect_amd_xdna(p, w) { return _stub(p, BACKEND_AMD_XDNA, ACCEL_AMD_XDNA); }
 fn detect_tpu(p, w) { return _stub(p, BACKEND_TPU, ACCEL_TPU); }

@@ -65,7 +65,7 @@ specific hardware is present.
 | `cuda` | ~200 lines | Yes (`nvidia-smi`) |
 | `rocm` | ~60 lines | No (sysfs only) |
 | `apple` | ~160 lines | No (sysctl; `system_profiler` only as a fallback) |
-| `vulkan` | ~140 lines | Yes (`vulkaninfo`) |
+| `vulkan` | ~560 lines | Yes (`vulkaninfo`; a sysfs scan without it, and in no-exec mode) |
 | `tpu` | ~80 lines | No (sysfs only) |
 | `gaudi` | ~75 lines | Yes (`hl-smi`) |
 | `aws-neuron` | ~95 lines | Yes (`neuron-ls`) |

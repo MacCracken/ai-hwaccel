@@ -196,6 +196,326 @@ fn test_detector_names() {
     return 0;
 }
 
+# --- Vulkan parsing tests (2.3.29) ---
+#
+# The fixtures are real vulkaninfo captures (tests/fixtures/vulkaninfo/): the
+# dev host's AMD APU under Mesa RADV, and cass's Intel UHD 600 under Intel's
+# Windows driver, CRLF line endings included. Paths are relative to the
+# repository root, where CI runs the tests.
+
+fn _vk_fixture(path) {
+    var cap = 262144;
+    var buf = alloc(cap);
+    var n = file_read_all(path, buf, cap - 1);
+    assert_gt(n, 0, path);
+    if (n <= 0) { return str_from(""); }
+    store8(buf + n, 0);
+    return str_new(buf, n);
+}
+
+# `lines` (a vec of cstrs) joined with newlines: hand-written vulkaninfo, one
+# output line per source line.
+fn _vk_join(lines) {
+    var sb = str_builder_new();
+    var i = 0;
+    while (i < vec_len(lines)) {
+        str_builder_add_cstr(sb, vec_get(lines, i));
+        str_builder_putc(sb, 10);
+        i = i + 1;
+    }
+    return str_builder_build(sb);
+}
+
+fn test_vulkan_helpers() {
+    assert_eq(_vk_hex(str_from("0x8086")), 0x8086, "hex vendor");
+    assert_eq(_vk_hex(str_from(" 0x10DE\n")), 0x10DE, "hex: blanks, capitals, newline");
+    assert_eq(_vk_hex(str_from("0x10005")), 0x10005, "hex: Mesa's vendor id");
+    assert_eq(_vk_hex(str_from("0x")), 0 - 1, "hex without digits");
+    assert_eq(_vk_hex(str_from("8086")), 0 - 1, "hex without 0x");
+    assert_eq(_vk_hex(str_from("0x1234567890abcdef0")), 0 - 1, "hex too long");
+    assert_eq(_vk_hex(0), 0 - 1, "hex of nothing");
+    assert_eq(_vk_leading_int(str_from("4202799104 (0xfa81a000) (3.91 GiB)")), 4202799104, "leading int");
+    assert_eq(_vk_leading_int(str_from("(3.91 GiB)")), 0, "no leading int");
+    assert_eq(_vk_is_gpu_header(str_from("GPU0:")), 1, "header");
+    assert_eq(_vk_is_gpu_header(str_from("GPU12:\r")), 1, "header with CR");
+    assert_eq(_vk_is_gpu_header(str_from("GPU1")), 1, "old header");
+    assert_eq(_vk_is_gpu_header(str_from("GPU id : 0 (Intel(R) UHD Graphics 600):")), 0, "surface line");
+    assert_eq(_vk_is_gpu_header(str_from("\t\tGPU id = 0 (AMD Radeon Graphics (RADV RENOIR))")), 0, "group line");
+    assert_eq(_vk_is_gpu_header(str_from("GPU")), 0, "bare GPU");
+    assert_eq(_vk_is_gpu_header(str_from("GPU:")), 0, "GPU without a number");
+    assert_eq(_vk_key_is(str_from("\tdeviceName         = X"), "deviceName"), 1, "key");
+    assert_eq(_vk_key_is(str_from("\tdeviceNameX = X"), "deviceName"), 0, "longer key");
+    assert_eq(_vk_key_is(str_from("\t\tsize   = 1"), "size"), 1, "size key");
+    assert_eq(_vk_key_is(str_from("\tmaxBufferSize = 1"), "size"), 0, "not the size key");
+    return 0;
+}
+
+fn test_vulkan_device_type() {
+    assert_eq(vulkan_device_type(str_from("PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU")), VK_DEV_INTEGRATED, "integrated");
+    assert_eq(vulkan_device_type(str_from("PHYSICAL_DEVICE_TYPE_DISCRETE_GPU")), VK_DEV_DISCRETE, "discrete");
+    assert_eq(vulkan_device_type(str_from("DISCRETE_GPU")), VK_DEV_DISCRETE, "old discrete");
+    assert_eq(vulkan_device_type(str_from("PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU")), VK_DEV_VIRTUAL, "virtual");
+    assert_eq(vulkan_device_type(str_from("PHYSICAL_DEVICE_TYPE_CPU")), VK_DEV_CPU, "cpu");
+    assert_eq(vulkan_device_type(str_from("4 (VK_PHYSICAL_DEVICE_TYPE_CPU)")), VK_DEV_CPU, "old cpu");
+    assert_eq(vulkan_device_type(str_from("PHYSICAL_DEVICE_TYPE_OTHER")), VK_DEV_OTHER, "other");
+    assert_eq(vulkan_device_type(0), VK_DEV_OTHER, "no type");
+    assert_eq(vulkan_uses_system_memory(VK_DEV_INTEGRATED, PCI_VENDOR_INTEL), 1, "intel igpu: system RAM");
+    assert_eq(vulkan_uses_system_memory(VK_DEV_INTEGRATED, 0x5143), 1, "adreno: system RAM");
+    assert_eq(vulkan_uses_system_memory(VK_DEV_INTEGRATED, PCI_VENDOR_AMD), 0, "amd apu: carve-out");
+    assert_eq(vulkan_uses_system_memory(VK_DEV_DISCRETE, PCI_VENDOR_INTEL), 0, "arc: own memory");
+    return 0;
+}
+
+# cass's Intel UHD 600, verbatim: integrated, so all of its memory is system
+# RAM.
+fn test_vulkan_summary_uhd600() {
+    var profiles = vec_new();
+    var ids = vec_new();
+    _parse_vulkaninfo_ids(_vk_fixture("tests/fixtures/vulkaninfo/uhd600-windows-summary.txt"), profiles, ids);
+    assert_eq(vec_len(profiles), 1, "uhd600: one device");
+    if (vec_len(profiles) != 1) { return 0; }
+    var p = vec_get(profiles, 0);
+    assert(streq(profile_device_name(p), "Intel(R) UHD Graphics 600") == 1, "uhd600: name, without the CR");
+    assert_eq(profile_accel_type(p), ACCEL_VULKAN, "uhd600: vulkan");
+    assert_eq(profile_shared_bytes(p), profile_memory_bytes(p), "uhd600: all shared");
+    assert_eq(vec_get(ids, 0), 0x8086, "uhd600: vendor");
+    assert_eq(vec_get(ids, 1), 0x3185, "uhd600: device");
+    assert_eq(vec_get(ids, 2), VK_DEV_INTEGRATED, "uhd600: integrated");
+    return 0;
+}
+
+# The dev host's AMD APU: integrated, but its own memory is the BIOS
+# carve-out, not system RAM.
+fn test_vulkan_summary_renoir() {
+    var profiles = vec_new();
+    var ids = vec_new();
+    _parse_vulkaninfo_ids(_vk_fixture("tests/fixtures/vulkaninfo/renoir-linux-summary.txt"), profiles, ids);
+    assert_eq(vec_len(profiles), 1, "renoir: one device");
+    if (vec_len(profiles) != 1) { return 0; }
+    var p = vec_get(profiles, 0);
+    assert(streq(profile_device_name(p), "AMD Radeon Graphics (RADV RENOIR)") == 1, "renoir: name");
+    assert_eq(profile_shared_bytes(p), 0, "renoir: not shared");
+    assert_eq(vec_get(ids, 0), PCI_VENDOR_AMD, "renoir: vendor");
+    assert_eq(vec_get(ids, 1), 0x1638, "renoir: device");
+    assert_eq(vec_get(ids, 2), VK_DEV_INTEGRATED, "renoir: integrated");
+    return 0;
+}
+
+# A software implementation is not a GPU. cass's UHD 600, then a lavapipe
+# device in the same layout (hand-written: none of our hosts has lavapipe).
+fn test_vulkan_lavapipe_skipped() {
+    var sb = str_builder_new();
+    str_builder_add(sb, _vk_fixture("tests/fixtures/vulkaninfo/uhd600-windows-summary.txt"));
+    var lvp = vec_new();
+    vec_push(lvp, "GPU1:");
+    vec_push(lvp, "\tapiVersion         = 1.3.289");
+    vec_push(lvp, "\tvendorID           = 0x10005");
+    vec_push(lvp, "\tdeviceID           = 0x0000");
+    vec_push(lvp, "\tdeviceType         = PHYSICAL_DEVICE_TYPE_CPU");
+    vec_push(lvp, "\tdeviceName         = llvmpipe (LLVM 19.1.1, 256 bits)");
+    vec_push(lvp, "\tdriverName         = llvmpipe");
+    str_builder_add(sb, _vk_join(lvp));
+    var profiles = vec_new();
+    var ids = vec_new();
+    _parse_vulkaninfo_ids(str_builder_build(sb), profiles, ids);
+    assert_eq(vec_len(profiles), 1, "lavapipe not reported");
+    assert_eq(vec_len(ids), 3, "one ids triple");
+    if (vec_len(profiles) != 1) { return 0; }
+    assert(streq(profile_device_name(vec_get(profiles, 0)), "Intel(R) UHD Graphics 600") == 1, "the GPU kept");
+    return 0;
+}
+
+# A discrete GPU keeps the estimate and shares nothing. Header-less input (the
+# bench's) starts a device at each deviceName.
+fn test_vulkan_discrete_headerless() {
+    var ln = vec_new();
+    vec_push(ln, "VkPhysicalDeviceProperties:");
+    vec_push(ln, "  deviceName = NVIDIA GeForce RTX 4090");
+    vec_push(ln, "  deviceType = DISCRETE_GPU");
+    vec_push(ln, "VkPhysicalDeviceProperties:");
+    vec_push(ln, "  deviceName = NVIDIA GeForce RTX 3080");
+    vec_push(ln, "  deviceType = DISCRETE_GPU");
+    var out = _vk_join(ln);
+    var profiles = vec_new();
+    var ids = vec_new();
+    _parse_vulkaninfo_ids(out, profiles, ids);
+    assert_eq(vec_len(profiles), 2, "two discrete");
+    if (vec_len(profiles) != 2) { return 0; }
+    assert_eq(profile_shared_bytes(vec_get(profiles, 0)), 0, "discrete shares nothing");
+    assert_eq(profile_memory_bytes(vec_get(profiles, 1)), 4 * BYTES_PER_GIB, "discrete: estimate");
+    assert(streq(profile_device_name(vec_get(profiles, 1)), "NVIDIA GeForce RTX 3080") == 1, "second name");
+    assert_eq(vec_get(ids, 2), VK_DEV_DISCRETE, "first discrete");
+    assert_eq(vec_get(ids, 5), VK_DEV_DISCRETE, "second discrete");
+    return 0;
+}
+
+# Heaps in the full output. The UHD 600's one device-local heap is half of
+# cass's RAM. The APU's device-local heap is RADV's 2/3 of carve-out plus GTT,
+# which is why AMD is sized from sysfs instead.
+fn test_vulkan_local_heap() {
+    var uhd = _vk_fixture("tests/fixtures/vulkaninfo/uhd600-windows-full.txt");
+    assert_eq(vulkan_local_heap_bytes(uhd, 0x8086, 0x3185, "Intel(R) UHD Graphics 600"), 4202799104, "uhd600 heap");
+    assert_eq(vulkan_local_heap_bytes(uhd, 0x8086, 0x3185, 0), 4202799104, "uhd600 heap, any name");
+    assert_eq(vulkan_local_heap_bytes(uhd, 0x8086, 0x3186, 0), 0, "another device id");
+    assert_eq(vulkan_local_heap_bytes(uhd, 0x8086, 0x3185, "Intel(R) UHD Graphics 620"), 0, "another name");
+    var renoir = _vk_fixture("tests/fixtures/vulkaninfo/renoir-linux-full.txt");
+    var apu = "AMD Radeon Graphics (RADV RENOIR)";
+    assert_eq(vulkan_local_heap_bytes(renoir, 0x1002, 0x1638, apu), 25353355264, "renoir device-local heap");
+    var summary = _vk_fixture("tests/fixtures/vulkaninfo/uhd600-windows-summary.txt");
+    assert_eq(vulkan_local_heap_bytes(summary, 0x8086, 0x3185, 0), 0, "the summary lists no heaps");
+    return 0;
+}
+
+# 1.1-era vulkaninfo: "GPU0" without the colon, memoryHeapCount, VK_-prefixed
+# flags (hand-written in that layout).
+fn test_vulkan_old_layout() {
+    var ln = vec_new();
+    vec_push(ln, "GPU0");
+    vec_push(ln, "VkPhysicalDeviceProperties:");
+    vec_push(ln, "\tvendorID       = 0x8086");
+    vec_push(ln, "\tdeviceID       = 0x5917");
+    vec_push(ln, "\tdeviceType     = INTEGRATED_GPU");
+    vec_push(ln, "\tdeviceName     = Intel(R) UHD Graphics 620 (Kabylake GT2)");
+    vec_push(ln, "VkPhysicalDeviceMemoryProperties:");
+    vec_push(ln, "\tmemoryHeapCount       = 1");
+    vec_push(ln, "\tmemoryHeaps[0] :");
+    vec_push(ln, "\t\tsize          = 6182666240 (0x1708ea000) (5.76 GiB)");
+    vec_push(ln, "\t\tflags:");
+    vec_push(ln, "\t\t\tVK_MEMORY_HEAP_DEVICE_LOCAL_BIT");
+    vec_push(ln, "\tmemoryTypeCount       = 1");
+    vec_push(ln, "\tmemoryTypes[0] :");
+    vec_push(ln, "\t\theapIndex     = 0");
+    var out = _vk_join(ln);
+    var nm = "Intel(R) UHD Graphics 620 (Kabylake GT2)";
+    assert_eq(vulkan_local_heap_bytes(out, 0x8086, 0x5917, nm), 6182666240, "old-layout heap");
+    var profiles = vec_new();
+    _parse_vulkaninfo(out, profiles);
+    assert_eq(vec_len(profiles), 1, "old layout: one device");
+    if (vec_len(profiles) != 1) { return 0; }
+    assert_eq(profile_shared_bytes(vec_get(profiles, 0)), 4 * BYTES_PER_GIB, "old layout: integrated, shared");
+    return 0;
+}
+
+# The full output names the same one device: what the summary parser gets from
+# an older vulkaninfo that prints everything whatever the arguments.
+fn test_vulkan_full_output_parses() {
+    var profiles = vec_new();
+    var ids = vec_new();
+    _parse_vulkaninfo_ids(_vk_fixture("tests/fixtures/vulkaninfo/renoir-linux-full.txt"), profiles, ids);
+    _parse_vulkaninfo_ids(_vk_fixture("tests/fixtures/vulkaninfo/uhd600-windows-full.txt"), profiles, ids);
+    assert_eq(vec_len(profiles), 2, "one device per full output");
+    if (vec_len(profiles) != 2) { return 0; }
+    assert(streq(profile_device_name(vec_get(profiles, 0)), "AMD Radeon Graphics (RADV RENOIR)") == 1, "renoir name");
+    assert(streq(profile_device_name(vec_get(profiles, 1)), "Intel(R) UHD Graphics 600") == 1, "uhd600 name");
+    assert_eq(vec_get(ids, 1), 0x1638, "renoir device");
+    assert_eq(vec_get(ids, 4), 0x3185, "uhd600 device");
+    assert_eq(vec_get(ids, 5), VK_DEV_INTEGRATED, "uhd600 integrated");
+    return 0;
+}
+
+# Inside one device the first vendorID, deviceID, deviceType and deviceName
+# count: a later struct such as VkPhysicalDeviceLayeredApiPropertiesKHR repeats
+# some of them for the API it layers on (hand-written in that shape).
+fn test_vulkan_nested_fields() {
+    var ln = vec_new();
+    vec_push(ln, "GPU0:");
+    vec_push(ln, "\tvendorID   = 0x8086");
+    vec_push(ln, "\tdeviceID   = 0x3185");
+    vec_push(ln, "\tdeviceType = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU");
+    vec_push(ln, "\tdeviceName = Intel(R) UHD Graphics 600");
+    vec_push(ln, "VkPhysicalDeviceLayeredApiPropertiesKHR:");
+    vec_push(ln, "\tvendorID   = 0x1414");
+    vec_push(ln, "\tdeviceID   = 0x008c");
+    vec_push(ln, "\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU");
+    vec_push(ln, "\tdeviceName = Microsoft Direct3D12");
+    var profiles = vec_new();
+    var ids = vec_new();
+    _parse_vulkaninfo_ids(_vk_join(ln), profiles, ids);
+    assert_eq(vec_len(profiles), 1, "nested: one device");
+    if (vec_len(profiles) != 1) { return 0; }
+    assert(streq(profile_device_name(vec_get(profiles, 0)), "Intel(R) UHD Graphics 600") == 1, "nested: first name");
+    assert_eq(vec_get(ids, 0), 0x8086, "nested: first vendor");
+    assert_eq(vec_get(ids, 1), 0x3185, "nested: first device");
+    assert_eq(vec_get(ids, 2), VK_DEV_INTEGRATED, "nested: first type");
+    return 0;
+}
+
+# NVIDIA lists its BAR window as a second device-local heap inside the first:
+# the largest counts, not the sum, and never the host heap.
+fn test_vulkan_local_heap_largest() {
+    var ln = vec_new();
+    vec_push(ln, "GPU0:");
+    vec_push(ln, "\tvendorID = 0x10de");
+    vec_push(ln, "\tdeviceID = 0x2206");
+    vec_push(ln, "\tdeviceName = NVIDIA GeForce RTX 3080");
+    vec_push(ln, "memoryHeaps: count = 3");
+    vec_push(ln, "\tmemoryHeaps[0]:");
+    vec_push(ln, "\t\tsize   = 10737418240 (0x280000000) (10.00 GiB)");
+    vec_push(ln, "\t\tflags: count = 1");
+    vec_push(ln, "\t\t\tMEMORY_HEAP_DEVICE_LOCAL_BIT");
+    vec_push(ln, "\tmemoryHeaps[1]:");
+    vec_push(ln, "\t\tsize   = 16722354176 (0x3e4c00000) (15.57 GiB)");
+    vec_push(ln, "\t\tflags:");
+    vec_push(ln, "\t\t\tNone");
+    vec_push(ln, "\tmemoryHeaps[2]:");
+    vec_push(ln, "\t\tsize   = 257949696 (0x0f600000) (246.00 MiB)");
+    vec_push(ln, "\t\tflags: count = 1");
+    vec_push(ln, "\t\t\tMEMORY_HEAP_DEVICE_LOCAL_BIT");
+    vec_push(ln, "memoryTypes: count = 1");
+    var out = _vk_join(ln);
+    assert_eq(vulkan_local_heap_bytes(out, 0x10DE, 0x2206, 0), 10737418240, "largest device-local heap");
+    return 0;
+}
+
+# The whole path on cass's captures: the summary names the UHD 600, the full
+# output sizes it; memory and shared part are its heap.
+fn test_vulkan_size_shared() {
+    var profiles = vec_new();
+    var ids = vec_new();
+    _parse_vulkaninfo_ids(_vk_fixture("tests/fixtures/vulkaninfo/uhd600-windows-summary.txt"), profiles, ids);
+    vulkan_size_shared(profiles, 0, ids, _vk_fixture("tests/fixtures/vulkaninfo/uhd600-windows-full.txt"));
+    assert_eq(vec_len(profiles), 1, "sized: one device");
+    if (vec_len(profiles) != 1) { return 0; }
+    var p = vec_get(profiles, 0);
+    assert_eq(profile_memory_bytes(p), 4202799104, "sized: the heap");
+    assert_eq(profile_shared_bytes(p), 4202799104, "sized: all shared");
+    # An AMD APU is not sized from heaps (sysfs gives its carve-out).
+    var ap = vec_new();
+    var aids = vec_new();
+    _parse_vulkaninfo_ids(_vk_fixture("tests/fixtures/vulkaninfo/renoir-linux-summary.txt"), ap, aids);
+    vulkan_size_shared(ap, 0, aids, _vk_fixture("tests/fixtures/vulkaninfo/renoir-linux-full.txt"));
+    assert_eq(profile_memory_bytes(vec_get(ap, 0)), 4 * BYTES_PER_GIB, "apu: not heap-sized");
+    # A heap above the 4 GiB estimate: all of it shared, not just the estimate.
+    var ln = vec_new();
+    vec_push(ln, "GPU0:");
+    vec_push(ln, "\tvendorID = 0x8086");
+    vec_push(ln, "\tdeviceID = 0x46a6");
+    vec_push(ln, "\tdeviceType = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU");
+    vec_push(ln, "\tdeviceName = Intel(R) Graphics (ADL GT2)");
+    vec_push(ln, "memoryHeaps: count = 1");
+    vec_push(ln, "\tmemoryHeaps[0]:");
+    vec_push(ln, "\t\tsize   = 25769803776 (0x600000000) (24.00 GiB)");
+    vec_push(ln, "\t\tflags: count = 1");
+    vec_push(ln, "\t\t\tMEMORY_HEAP_DEVICE_LOCAL_BIT");
+    vec_push(ln, "memoryTypes: count = 1");
+    var big = _vk_join(ln);
+    var bp = vec_new();
+    var bids = vec_new();
+    _parse_vulkaninfo_ids(big, bp, bids);
+    vulkan_size_shared(bp, 0, bids, big);
+    assert_eq(profile_memory_bytes(vec_get(bp, 0)), 25769803776, "24 GiB heap");
+    assert_eq(profile_shared_bytes(vec_get(bp, 0)), 25769803776, "24 GiB heap, all shared");
+    return 0;
+}
+
+fn test_vulkan_sysfs_helpers() {
+    assert_eq(pci_slot_is_intel_igpu(str_from("0000:00:02.0")), 1, "intel igpu slot");
+    assert_eq(pci_slot_is_intel_igpu(str_from("0000:03:00.0")), 0, "arc slot");
+    assert_eq(pci_slot_is_intel_igpu(0), 0, "no slot");
+    assert_eq(_vulkan_sysfs_vram(PCI_VENDOR_AMD, 0xFFFF), 0, "no such card");
+    return 0;
+}
+
 # --- Run all tests ---
 
 alloc_init();
@@ -211,6 +531,19 @@ test_gaudi_gen_detection();
 test_neuron_json_parse();
 test_neuron_inferentia();
 test_detector_names();
+test_vulkan_helpers();
+test_vulkan_device_type();
+test_vulkan_summary_uhd600();
+test_vulkan_summary_renoir();
+test_vulkan_lavapipe_skipped();
+test_vulkan_discrete_headerless();
+test_vulkan_local_heap();
+test_vulkan_old_layout();
+test_vulkan_full_output_parses();
+test_vulkan_nested_fields();
+test_vulkan_local_heap_largest();
+test_vulkan_size_shared();
+test_vulkan_sysfs_helpers();
 
 var fails = assert_summary();
 syscall(60, fails);

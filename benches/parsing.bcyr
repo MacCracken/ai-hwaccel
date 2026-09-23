@@ -128,4 +128,60 @@ while (ri < 1000) {
 }
 bench_report(b5);
 
+# --- Vulkan on real vulkaninfo captures (2.3.29) ---
+# The fixtures in tests/fixtures/vulkaninfo/, read relative to the repository
+# root, where bench-history.sh runs. A row whose file is missing is skipped.
+# parse_vulkan_summary_renoir is the --summary parse every Vulkan host runs;
+# vulkan_heaps_uhd600 is the full-output heap scan an integrated GPU adds.
+
+fn bench_fixture(path) {
+    var cap = 262144;
+    var buf = alloc(cap);
+    var n = file_read_all(path, buf, cap - 1);
+    if (n <= 0) { return 0; }
+    store8(buf + n, 0);
+    return str_new(buf, n);
+}
+
+# Batch-timed: one parse is ~14 us, close to the clock's own error per window.
+fn bench_vk_summary(s) {
+    var b = bench_new("parse_vulkan_summary_renoir");
+    bench_batch_start(b);
+    var i = 0;
+    while (i < 2000) {
+        var p = vec_new();
+        _parse_vulkaninfo(s, p);
+        i = i + 1;
+    }
+    bench_batch_stop(b, 2000);
+    bench_report(b);
+    return 0;
+}
+
+fn bench_vk_heaps(s) {
+    var b = bench_new("vulkan_heaps_uhd600");
+    var i = 0;
+    while (i < 100) {
+        bench_start(b);
+        vulkan_local_heap_bytes(s, 0x8086, 0x3185, "Intel(R) UHD Graphics 600");
+        bench_stop(b);
+        i = i + 1;
+    }
+    bench_report(b);
+    return 0;
+}
+
+var vk_sum = bench_fixture("tests/fixtures/vulkaninfo/renoir-linux-summary.txt");
+if (vk_sum != 0) {
+    bench_vk_summary(vk_sum);
+} else {
+    println("  parse_vulkan_summary_renoir: skipped, fixture not found");
+}
+var vk_full = bench_fixture("tests/fixtures/vulkaninfo/uhd600-windows-full.txt");
+if (vk_full != 0) {
+    bench_vk_heaps(vk_full);
+} else {
+    println("  vulkan_heaps_uhd600: skipped, fixture not found");
+}
+
 syscall(60, 0);

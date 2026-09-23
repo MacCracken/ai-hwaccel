@@ -42,5 +42,130 @@ _parse_vulkaninfo(str_from("some random\noutput lines\n"), p3);
 var p4 = vec_new();
 var out4 = str_from("deviceName = GPU-A\ndeviceName = GPU-B\n");
 _parse_vulkaninfo(out4, p4);
+if (vec_len(p4) != 2) { syscall(60, 4); }
+
+# --- 2.3.29: headers, types, heaps ---
+
+# `lines` (a vec of cstrs) joined with `eol` (a cstr), as a fresh cstr.
+fn fz_join(lines, eol) {
+    var sb = str_builder_new();
+    var i = 0;
+    while (i < vec_len(lines)) {
+        str_builder_add_cstr(sb, vec_get(lines, i));
+        str_builder_add_cstr(sb, eol);
+        i = i + 1;
+    }
+    return str_cstr(str_builder_build(sb));
+}
+
+# A --summary device block (CRLF, as vulkaninfo.exe prints it) and the start
+# of a memory-properties block, the inputs the sweep below damages.
+var sl = vec_new();
+vec_push(sl, "GPU0:");
+vec_push(sl, "\tvendorID           = 0x8086");
+vec_push(sl, "\tdeviceID           = 0x3185");
+vec_push(sl, "\tdeviceType         = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU");
+vec_push(sl, "\tdeviceName         = Intel(R) UHD Graphics 600");
+vec_push(sl, "GPU1:");
+vec_push(sl, "\tvendorID           = 0x10005");
+vec_push(sl, "\tdeviceType         = PHYSICAL_DEVICE_TYPE_CPU");
+vec_push(sl, "\tdeviceName         = llvmpipe");
+var sum = fz_join(sl, "\r\n");
+var hl = vec_new();
+vec_push(hl, "GPU0:");
+vec_push(hl, "\tvendorID = 0x8086");
+vec_push(hl, "\tdeviceID = 0x3185");
+vec_push(hl, "\tdeviceName = X");
+vec_push(hl, "memoryHeaps: count = 2");
+vec_push(hl, "\tmemoryHeaps[0]:");
+vec_push(hl, "\t\tsize   = 4202799104 (0xfa81a000) (3.91 GiB)");
+vec_push(hl, "\t\tflags: count = 1");
+vec_push(hl, "\t\t\tMEMORY_HEAP_DEVICE_LOCAL_BIT");
+vec_push(hl, "\tmemoryHeaps[1]:");
+vec_push(hl, "\t\tsize   = 12 (0xc)");
+vec_push(hl, "\t\tflags:");
+vec_push(hl, "\t\t\tNone");
+vec_push(hl, "memoryTypes: count = 1");
+var heaps = fz_join(hl, "\n");
+
+# Undamaged: the GPU is kept, lavapipe dropped, the iGPU all shared; the heap
+# is found.
+var p5 = vec_new();
+var ids5 = vec_new();
+_parse_vulkaninfo_ids(str_from(sum), p5, ids5);
+if (vec_len(p5) != 1) { syscall(60, 5); }
+if (vec_len(ids5) != 3) { syscall(60, 5); }
+if (profile_shared_bytes(vec_get(p5, 0)) != profile_memory_bytes(vec_get(p5, 0))) { syscall(60, 5); }
+if (vulkan_local_heap_bytes(str_from(heaps), 0x8086, 0x3185, "X") != 4202799104) { syscall(60, 6); }
+
+# Every byte of both inputs replaced in turn by each of a few structural
+# bytes, then cut short there: nothing may crash, a profile count never
+# exceeds the headers, and a heap is never negative.
+var subs = "=\n :G0x[\r";
+var nsub = strlen(subs);
+var inputs = vec_new();
+vec_push(inputs, sum);
+vec_push(inputs, heaps);
+var ii = 0;
+while (ii < 2) {
+    var src = vec_get(inputs, ii);
+    var slen = strlen(src);
+    var pos = 0;
+    while (pos < slen) {
+        var si = 0;
+        while (si < nsub) {
+            var buf = alloc(slen + 1);
+            memcpy(buf, src, slen);
+            store8(buf + slen, 0);
+            store8(buf + pos, load8(subs + si));
+            var pm = vec_new();
+            _parse_vulkaninfo_ids(str_new(buf, slen), pm, vec_new());
+            if (vec_len(pm) > 3) { syscall(60, 7); }
+            if (vulkan_local_heap_bytes(str_new(buf, slen), 0x8086, 0x3185, 0) < 0) { syscall(60, 8); }
+            var pc = vec_new();
+            _parse_vulkaninfo(str_new(buf, pos), pc);
+            if (vulkan_local_heap_bytes(str_new(buf, pos), 0x8086, 0x3185, "X") < 0) { syscall(60, 8); }
+            si = si + 1;
+        }
+        pos = pos + 1;
+    }
+    ii = ii + 1;
+}
+
+# Malformed fields: no value, bad hex, huge numbers, a header with no digits.
+var ml = vec_new();
+vec_push(ml, "GPU0:");
+vec_push(ml, "\tvendorID =");
+vec_push(ml, "\tdeviceID = 0xZZ");
+vec_push(ml, "\tdeviceType = ");
+vec_push(ml, "\tdeviceName =");
+vec_push(ml, "GPU99999999999999999999:");
+vec_push(ml, "\tdeviceName = A");
+vec_push(ml, "GPU");
+vec_push(ml, "\tdeviceName = B");
+var p9 = vec_new();
+_parse_vulkaninfo(str_from(fz_join(ml, "\n")), p9);
+var big = "memoryHeaps[0]:\n\tsize = 99999999999999999999999\nMEMORY_HEAP_DEVICE_LOCAL_BIT\n";
+if (vulkan_local_heap_bytes(str_from(big), 0 - 1, 0 - 1, 0) < 0) { syscall(60, 9); }
+
+# A nested deviceName inside a headed device is not a second device.
+var p10 = vec_new();
+_parse_vulkaninfo(str_from("GPU0:\n\tdeviceName = A\n\tdeviceName = B (layered)\n"), p10);
+if (vec_len(p10) != 1) { syscall(60, 10); }
+
+# Many devices.
+var sb11 = str_builder_new();
+var di = 0;
+while (di < 100) {
+    str_builder_add_cstr(sb11, "GPU");
+    str_builder_add_int(sb11, di);
+    str_builder_add_cstr(sb11, ":\n\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU\n\tdeviceName = GPU-");
+    str_builder_add_int(sb11, di);
+    str_builder_add_cstr(sb11, "\n");
+    di = di + 1;
+}
+var p11 = vec_new();
+_parse_vulkaninfo(str_builder_build(sb11), p11);
+if (vec_len(p11) != 100) { syscall(60, 11); }
 
 syscall(60, 0);

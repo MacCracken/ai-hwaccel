@@ -1,74 +1,504 @@
-# vulkan.cyr — Vulkan GPU detection via vulkaninfo + sysfs fallback
+# vulkan.cyr — Vulkan GPU detection via vulkaninfo + a sysfs scan
+#
+# `vulkaninfo --summary` names each Vulkan physical device with its vendorID,
+# deviceID and deviceType. What a device's memory is depends on the type
+# (2.3.29):
+#   - An integrated GPU of any vendor but AMD has no memory of its own: its
+#     heap is system RAM, which the CPU profile already counts. Its profile is
+#     all shared (profile.cyr's shared_mem), sized from the largest
+#     device-local heap in the full vulkaninfo output. That second run happens
+#     only when such a GPU is present: the full output is 60-85 KB for one
+#     device and run_tool keeps 1 MiB, so it cannot replace --summary for
+#     naming every device on a many-GPU host.
+#   - An AMD APU's own memory is its BIOS carve-out, which is outside
+#     MemTotal. It is read from sysfs mem_info_vram_total, the figure ROCm
+#     reports. RADV's heaps on an APU split carve-out plus GTT 2:1, so they
+#     do not give it.
+#   - A software implementation (deviceType CPU: lavapipe, SwiftShader) is not
+#     a GPU and is not reported, as DXGI's Basic Render Driver is not.
+#   - Discrete and virtual GPUs keep the 4 GiB estimate. CUDA and ROCm report
+#     the same cards; which profile survives, with which memory figure, is the
+#     duplicate-device work (roadmap 2.4.x).
+# Without vulkaninfo, and in no-exec mode, a sysfs scan of the DRM cards finds
+# the GPUs by PCI vendor instead. Through 2.3.28 every Vulkan GPU carried the
+# 4 GiB estimate and counted as memory of its own.
 
-fn detect_vulkan(profiles, warnings) {
-    # Try vulkaninfo --summary first
-    var result = run_tool1("vulkaninfo", "--summary", warnings);
-    if (result != 0) {
-        if (str_len(result) > 10) {
-            _parse_vulkaninfo(result, profiles);
-            return 0;
+# vulkaninfo's deviceType, as vulkan_device_type() classifies it.
+enum VulkanDevType {
+    VK_DEV_OTHER = 0;
+    VK_DEV_INTEGRATED = 1;
+    VK_DEV_DISCRETE = 2;
+    VK_DEV_VIRTUAL = 3;
+    VK_DEV_CPU = 4;
+}
+
+# PCI vendor IDs, as vulkaninfo's vendorID and sysfs's device/vendor give them.
+enum PciVendor {
+    PCI_VENDOR_AMD = 0x1002;
+    PCI_VENDOR_INTEL = 0x8086;
+    PCI_VENDOR_NVIDIA = 0x10DE;
+}
+
+# Detect Vulkan GPUs. With `allow_exec` 1, vulkaninfo --summary names them and
+# _vulkan_size_integrated sizes the integrated ones; otherwise, or when
+# vulkaninfo is missing, the sysfs scan finds them. `leave_amdgpu` 1 makes the
+# sysfs scan skip devices bound to amdgpu, which ROCm reports from the same
+# sysfs nodes; registry_detect_with_opts sets it in no-exec mode when ROCm runs
+# too.
+fn detect_vulkan_opts(profiles, warnings, allow_exec, leave_amdgpu) {
+    if (allow_exec == 1) {
+        var result = run_tool1("vulkaninfo", "--summary", warnings);
+        if (result != 0) {
+            if (str_len(result) > 10) {
+                var first = vec_len(profiles);
+                var ids = vec_new();
+                _parse_vulkaninfo_ids(result, profiles, ids);
+                _vulkan_size_integrated(profiles, first, ids);
+                return 0;
+            }
         }
     }
-
-    # Fallback: sysfs PCI device scan
-    _detect_vulkan_sysfs(profiles);
+    _detect_vulkan_sysfs(profiles, leave_amdgpu);
     return 0;
 }
 
-# Parse vulkaninfo --summary output
-fn _parse_vulkaninfo(output, profiles) {
+# detect_vulkan_opts with exec allowed and every sysfs device reported.
+fn detect_vulkan(profiles, warnings) {
+    return detect_vulkan_opts(profiles, warnings, 1, 0);
+}
+
+# --- vulkaninfo text ---
+
+# 1 if `line` (a Str) is `key = value` for exactly `key` (a cstr): blanks, the
+# key, then a blank or '='. Allocates nothing. Pure.
+fn _vk_key_is(line, key) {
+    var d = str_data(line);
+    var n = str_len(line);
+    var i = 0;
+    while (i < n) {
+        var c = load8(d + i);
+        if (c != 32 && c != 9) { break; }
+        i = i + 1;
+    }
+    var kl = strlen(key);
+    if (i + kl >= n) { return 0; }
+    if (memeq(d + i, key, kl) != 1) { return 0; }
+    var after = load8(d + i + kl);
+    if (after == 32 || after == 9 || after == 61) { return 1; }
+    return 0;
+}
+
+# The trimmed text after the first '=' in `line` (a Str), or 0. Pure.
+fn _vk_value(line) {
+    var eq = str_index_of(line, 61);
+    if (eq < 0) { return 0; }
+    return str_trim(str_sub(line, eq + 1, str_len(line) - eq - 1));
+}
+
+# A "0x…" hex field (a Str, or 0) as an int, or -1: vulkaninfo's
+# "vendorID = 0x8086" and sysfs's "0x8086". Leading blanks and anything after
+# the digits are ignored. At most 15 digits (the IDs are 32-bit). Pure.
+fn _vk_hex(s) {
+    if (s == 0) { return 0 - 1; }
+    var d = str_data(s);
+    var n = str_len(s);
+    var i = 0;
+    while (i < n) {
+        var c = load8(d + i);
+        if (c != 32 && c != 9) { break; }
+        i = i + 1;
+    }
+    if (i + 2 >= n) { return 0 - 1; }
+    if (load8(d + i) != 48) { return 0 - 1; }
+    var x = load8(d + i + 1);
+    if (x != 120 && x != 88) { return 0 - 1; }
+    i = i + 2;
+    var v = 0;
+    var digits = 0;
+    while (i < n) {
+        var h = load8(d + i);
+        var dv = 0 - 1;
+        if (h >= 48 && h <= 57) { dv = h - 48; }
+        elif (h >= 97 && h <= 102) { dv = h - 87; }
+        elif (h >= 65 && h <= 70) { dv = h - 55; }
+        if (dv < 0) { break; }
+        if (digits >= 15) { return 0 - 1; }
+        v = v * 16 + dv;
+        digits = digits + 1;
+        i = i + 1;
+    }
+    if (digits == 0) { return 0 - 1; }
+    return v;
+}
+
+# The decimal number that `s` (a Str, or 0) starts with, after blanks:
+# "4202799104 (0xfa81a000) (3.91 GiB)" gives 4202799104. 0 if there is none
+# or it runs past 18 digits. str_to_int cannot do this: it gathers every digit
+# in the string. Pure.
+fn _vk_leading_int(s) {
+    if (s == 0) { return 0; }
+    var d = str_data(s);
+    var n = str_len(s);
+    var i = 0;
+    while (i < n) {
+        var c = load8(d + i);
+        if (c != 32 && c != 9) { break; }
+        i = i + 1;
+    }
+    var v = 0;
+    var digits = 0;
+    while (i < n) {
+        var c2 = load8(d + i);
+        if (c2 < 48 || c2 > 57) { break; }
+        if (digits >= 18) { return 0; }
+        v = v * 10 + c2 - 48;
+        digits = digits + 1;
+        i = i + 1;
+    }
+    return v;
+}
+
+# 1 if `line` (a Str) opens a device: "GPU0:", or "GPU0" in old vulkaninfo.
+# The presentable-surface and device-group lines ("GPU id : 0 (…)",
+# "GPU id = 0 (…)") do not. Pure.
+fn _vk_is_gpu_header(line) {
+    var d = str_data(line);
+    var n = str_len(line);
+    var i = 0;
+    while (i < n) {
+        var c = load8(d + i);
+        if (c != 32 && c != 9) { break; }
+        i = i + 1;
+    }
+    if (i + 3 >= n) { return 0; }
+    if (memeq(d + i, "GPU", 3) != 1) { return 0; }
+    i = i + 3;
+    var digits = 0;
+    while (i < n) {
+        var c2 = load8(d + i);
+        if (c2 < 48 || c2 > 57) { break; }
+        digits = digits + 1;
+        i = i + 1;
+    }
+    if (digits == 0) { return 0; }
+    if (i < n) {
+        if (load8(d + i) == 58) { i = i + 1; }
+    }
+    while (i < n) {
+        var c3 = load8(d + i);
+        if (c3 != 32 && c3 != 9 && c3 != 13) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+# vulkaninfo's deviceType value (a Str, or 0) as a VK_DEV_* constant:
+# "PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU", and older vulkaninfo's
+# "INTEGRATED_GPU" and "VK_PHYSICAL_DEVICE_TYPE_…" forms. Pure.
+fn vulkan_device_type(v) {
+    if (v == 0) { return VK_DEV_OTHER; }
+    if (str_contains_cstr(v, "INTEGRATED") == 1) { return VK_DEV_INTEGRATED; }
+    if (str_contains_cstr(v, "DISCRETE") == 1) { return VK_DEV_DISCRETE; }
+    if (str_contains_cstr(v, "VIRTUAL") == 1) { return VK_DEV_VIRTUAL; }
+    if (str_contains_cstr(v, "TYPE_CPU") == 1) { return VK_DEV_CPU; }
+    if (str_eq_cstr(v, "CPU") == 1) { return VK_DEV_CPU; }
+    return VK_DEV_OTHER;
+}
+
+# 1 if a Vulkan device of this type and PCI vendor draws its memory from system
+# RAM: an integrated GPU of any vendor but AMD, whose APUs carve their own
+# memory out of RAM at boot, outside MemTotal. Pure.
+fn vulkan_uses_system_memory(dev_type, vendor) {
+    if (dev_type != VK_DEV_INTEGRATED) { return 0; }
+    if (vendor == PCI_VENDOR_AMD) { return 0; }
+    return 1;
+}
+
+# Push the device parsed so far: a profile with the 4 GiB estimate, all shared
+# when vulkan_uses_system_memory holds, and, when `ids` is not 0, its vendor,
+# device and type. A software implementation (VK_DEV_CPU) or a nameless record
+# pushes nothing. Returns the number of profiles pushed (0 or 1).
+fn _vk_emit(profiles, ids, dev_id, name, vendor, device, dev_type) {
+    if (name == 0) { return 0; }
+    if (dev_type == VK_DEV_CPU) { return 0; }
+    var p = profile_new(ACCEL_VULKAN, dev_id, 4 * BYTES_PER_GIB);
+    profile_set_device_name(p, str_cstr(name));
+    if (vulkan_uses_system_memory(dev_type, vendor) == 1) {
+        profile_set_shared_mem(p, profile_memory_bytes(p));
+    }
+    vec_push(profiles, p);
+    if (ids != 0) {
+        vec_push(ids, vendor);
+        vec_push(ids, device);
+        vec_push(ids, dev_type);
+    }
+    return 1;
+}
+
+# Parse `vulkaninfo --summary` output into `profiles`. When `ids` is not 0,
+# push vendor, device and type for each profile (three entries each), which
+# _vulkan_size_integrated needs. A device runs from its "GPU<n>:" header to
+# the next; the first vendorID, deviceID, deviceType and deviceName in it
+# count. Input without headers (older or hand-written output) starts a device
+# at each deviceName instead. Pure.
+fn _parse_vulkaninfo_ids(output, profiles, ids) {
     var lines = str_split(output, 10);
     var nlines = vec_len(lines);
     var dev_id = 0;
-    var li = 0;
+    var headers = 0;
+    var name = 0;
+    var vendor = 0 - 1;
+    var device = 0 - 1;
+    var dev_type = VK_DEV_OTHER;
 
+    var li = 0;
     while (li < nlines) {
         var line = vec_get(lines, li);
         li = li + 1;
 
-        # Look for "deviceName" lines
-        if (str_contains_cstr(line, "deviceName") != 1) { continue; }
+        if (_vk_is_gpu_header(line) == 1) {
+            dev_id = dev_id + _vk_emit(profiles, ids, dev_id, name, vendor, device, dev_type);
+            headers = 1;
+            name = 0;
+            vendor = 0 - 1;
+            device = 0 - 1;
+            dev_type = VK_DEV_OTHER;
+            continue;
+        }
+        if (_vk_key_is(line, "deviceName") == 1) {
+            var nm = _vk_value(line);
+            if (nm == 0) { continue; }
+            if (str_len(nm) == 0) { continue; }
+            if (name != 0) {
+                # A second name inside one headed device is a nested struct's.
+                if (headers == 1) { continue; }
+                dev_id = dev_id + _vk_emit(profiles, ids, dev_id, name, vendor, device, dev_type);
+                vendor = 0 - 1;
+                device = 0 - 1;
+                dev_type = VK_DEV_OTHER;
+            }
+            name = nm;
+            continue;
+        }
+        if (_vk_key_is(line, "vendorID") == 1) {
+            if (vendor < 0) { vendor = _vk_hex(_vk_value(line)); }
+            continue;
+        }
+        if (_vk_key_is(line, "deviceID") == 1) {
+            if (device < 0) { device = _vk_hex(_vk_value(line)); }
+            continue;
+        }
+        if (_vk_key_is(line, "deviceType") == 1) {
+            if (dev_type == VK_DEV_OTHER) { dev_type = vulkan_device_type(_vk_value(line)); }
+            continue;
+        }
+    }
+    _vk_emit(profiles, ids, dev_id, name, vendor, device, dev_type);
+    return 0;
+}
 
-        # Extract device name after "= "
-        var eq_pos = str_index_of(line, 61);
-        if (eq_pos < 0) { continue; }
-        var name_part = str_trim(str_sub(line, eq_pos + 1, str_len(line) - eq_pos - 1));
-        if (str_len(name_part) == 0) { continue; }
+# Parse `vulkaninfo --summary` output into `profiles`. Pure.
+fn _parse_vulkaninfo(output, profiles) {
+    return _parse_vulkaninfo_ids(output, profiles, 0);
+}
 
-        # Create profile with estimated VRAM
-        var p = profile_new(ACCEL_VULKAN, dev_id, 4 * BYTES_PER_GIB);
+# The largest MEMORY_HEAP_DEVICE_LOCAL_BIT heap, in bytes, of the device in
+# full `vulkaninfo` output whose vendorID, deviceID and deviceName (a cstr, or
+# 0 for any) match; 0 if no device matches or it lists no such heap. Heaps are
+# the "memoryHeaps[i]" entries before the memoryTypes list, each with a "size"
+# line and its flags, in vulkaninfo 1.2+ and older alike. The largest, not the
+# sum: NVIDIA lists its BAR window as a second device-local heap inside the
+# first. Pure.
+fn vulkan_local_heap_bytes(full, vendor, device, name) {
+    var lines = str_split(full, 10);
+    var nlines = vec_len(lines);
+    var s_vendor = 0 - 1;
+    var s_device = 0 - 1;
+    var s_name = 0 - 1;
+    var in_heaps = 0;
+    var hsize = 0;
+    var is_local = 0;
+    var best = 0;
 
-        profile_set_device_name(p, str_cstr(name_part));
+    var li = 0;
+    while (li <= nlines) {
+        var line = 0;
+        if (li < nlines) { line = vec_get(lines, li); }
+        li = li + 1;
 
-        # Look for memory size in nearby lines
-        var mi = li;
-        var mem_end = li + 10;
-        if (mem_end > nlines) { mem_end = nlines; }
-        while (mi < mem_end) {
-            var mline = vec_get(lines, mi);
-            mi = mi + 1;
-            if (str_contains_cstr(mline, "heapSize") == 1) {
-                # Extract number after "= "
-                var meq = str_index_of(mline, 61);
-                if (meq >= 0) {
-                    var mval = str_trim(str_sub(mline, meq + 1, str_len(mline) - meq - 1));
-                    var mem_bytes = str_to_int(mval);
-                    if (mem_bytes > 0) {
-                        profile_set_memory_bytes(p, mem_bytes);
-                        break;
-                    }
+        # A header or the end closes the device: return its heap if it matched.
+        var closing = 0;
+        if (line == 0) { closing = 1; }
+        elif (_vk_is_gpu_header(line) == 1) { closing = 1; }
+        if (closing == 1) {
+            if (in_heaps == 1) {
+                if (is_local == 1 && hsize > best) { best = hsize; }
+            }
+            if (s_vendor == vendor && s_device == device) {
+                # A given name must be the device's own; 0 matches any.
+                if (name == 0 || s_name == 1) {
+                    if (best > 0) { return best; }
                 }
             }
+            s_vendor = 0 - 1;
+            s_device = 0 - 1;
+            s_name = 0 - 1;
+            in_heaps = 0;
+            hsize = 0;
+            is_local = 0;
+            best = 0;
+            continue;
         }
 
-        vec_push(profiles, p);
-        dev_id = dev_id + 1;
+        if (str_contains_cstr(line, "memoryHeaps[") == 1) {
+            if (in_heaps == 1) {
+                if (is_local == 1 && hsize > best) { best = hsize; }
+            }
+            in_heaps = 1;
+            hsize = 0;
+            is_local = 0;
+            continue;
+        }
+        if (in_heaps == 1) {
+            if (str_contains_cstr(line, "memoryType") == 1) {
+                if (is_local == 1 && hsize > best) { best = hsize; }
+                in_heaps = 0;
+                continue;
+            }
+            if (_vk_key_is(line, "size") == 1) {
+                hsize = _vk_leading_int(_vk_value(line));
+                continue;
+            }
+            if (str_contains_cstr(line, "MEMORY_HEAP_DEVICE_LOCAL_BIT") == 1) {
+                is_local = 1;
+            }
+            continue;
+        }
+
+        if (_vk_key_is(line, "vendorID") == 1) {
+            if (s_vendor < 0) { s_vendor = _vk_hex(_vk_value(line)); }
+            continue;
+        }
+        if (_vk_key_is(line, "deviceID") == 1) {
+            if (s_device < 0) { s_device = _vk_hex(_vk_value(line)); }
+            continue;
+        }
+        if (_vk_key_is(line, "deviceName") == 1) {
+            if (s_name < 0) {
+                s_name = 1;
+                if (name != 0) {
+                    var nm = _vk_value(line);
+                    if (nm == 0) { s_name = 0; }
+                    elif (str_eq_cstr(nm, name) != 1) { s_name = 0; }
+                }
+            }
+            continue;
+        }
     }
     return 0;
 }
 
-# Sysfs fallback: scan /sys/class/drm/card*/device/{vendor,device}
-fn _detect_vulkan_sysfs(profiles) {
+# Size the integrated GPUs whose memory is system RAM (vulkan_uses_system_memory)
+# among the profiles from index `first` on, with a vendor/device/type triple
+# each in `ids`, from `full` vulkaninfo output: memory and shared part both
+# become the device's largest device-local heap. A device the output does not
+# size keeps its estimate, still all shared. Pure.
+fn vulkan_size_shared(profiles, first, ids, full) {
+    var n = vec_len(profiles) - first;
+    var k = 0;
+    while (k < n) {
+        var vendor = vec_get(ids, k * 3);
+        var device = vec_get(ids, k * 3 + 1);
+        if (vulkan_uses_system_memory(vec_get(ids, k * 3 + 2), vendor) == 1) {
+            var p = vec_get(profiles, first + k);
+            var heap = vulkan_local_heap_bytes(full, vendor, device, profile_device_name(p));
+            if (heap > 0) {
+                profile_set_memory_bytes(p, heap);
+                profile_set_shared_mem(p, heap);
+            }
+        }
+        k = k + 1;
+    }
+    return 0;
+}
+
+# Size the integrated GPUs that _parse_vulkaninfo_ids just pushed (profiles
+# from index `first` on, a vendor/device/type triple each in `ids`). An AMD
+# APU gets its sysfs carve-out. The others are sized by vulkan_size_shared from
+# one run of the full vulkaninfo, made only when such a GPU is present.
+fn _vulkan_size_integrated(profiles, first, ids) {
+    var n = vec_len(profiles) - first;
+    var need_full = 0;
+    var k = 0;
+    while (k < n) {
+        var dev_type = vec_get(ids, k * 3 + 2);
+        var vendor = vec_get(ids, k * 3);
+        if (dev_type == VK_DEV_INTEGRATED && vendor == PCI_VENDOR_AMD) {
+            var vram = _vulkan_sysfs_vram(vendor, vec_get(ids, k * 3 + 1));
+            if (vram > 0) { profile_set_memory_bytes(vec_get(profiles, first + k), vram); }
+        }
+        if (vulkan_uses_system_memory(dev_type, vendor) == 1) { need_full = 1; }
+        k = k + 1;
+    }
+    if (need_full == 1) {
+        # The --summary run already warned if vulkaninfo is missing.
+        var full = run_tool("vulkaninfo", vec_new(), 0);
+        if (full != 0) { vulkan_size_shared(profiles, first, ids, full); }
+    }
+    return 0;
+}
+
+# --- sysfs ---
+
+# mem_info_vram_total of the DRM card with these PCI vendor and device IDs, or
+# 0 (no such card, or not amdgpu).
+fn _vulkan_sysfs_vram(vendor, device) {
+    var entries = dir_list(str_from("/sys/class/drm"));
+    var nent = vec_len(entries);
+    var ei = 0;
+    while (ei < nent) {
+        var name = vec_get(entries, ei);
+        ei = ei + 1;
+        if (str_starts_with(name, "card") != 1) { continue; }
+        if (str_index_of(name, 45) >= 0) { continue; }
+        var v = _vk_hex(sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/vendor")));
+        if (v != vendor) { continue; }
+        var d = _vk_hex(sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/device")));
+        if (d != device) { continue; }
+        var vram = sysfs_read_int(sysfs_path_str("/sys/class/drm", name, "device/mem_info_vram_total"));
+        if (vram > 0) { return vram; }
+    }
+    return 0;
+}
+
+# The PCI address of DRM card `card` (a Str such as "card0"), such as
+# "0000:00:02.0", as a Str, or 0.
+fn _drm_pci_slot(card) {
+    var link = read_symlink(sysfs_path_str("/sys/class/drm", card, "device"));
+    if (link == 0) { return 0; }
+    return path_basename(link);
+}
+
+# 1 if DRM card `card` (a Str) is bound to the kernel driver `drv` (a cstr).
+fn _drm_driver_is(card, drv) {
+    var link = read_symlink(sysfs_path_str("/sys/class/drm", card, "device/driver"));
+    if (link == 0) { return 0; }
+    return str_eq_cstr(path_basename(link), drv);
+}
+
+# 1 if `slot` (a Str PCI address, or 0) is where Intel puts its integrated
+# GPU: device 2 on the root bus, on every platform since 2008. Arc cards sit
+# behind a root port. Pure.
+fn pci_slot_is_intel_igpu(slot) {
+    if (slot == 0) { return 0; }
+    return str_eq_cstr(slot, "0000:00:02.0");
+}
+
+# Sysfs scan: /sys/class/drm/card*/device/{vendor,device}. The fallback when
+# vulkaninfo is missing, and the whole backend in no-exec mode. An Intel
+# integrated GPU is all shared; `leave_amdgpu` 1 skips amdgpu devices, which
+# ROCm reports.
+fn _detect_vulkan_sysfs(profiles, leave_amdgpu) {
     var drm_dir = str_from("/sys/class/drm");
     var entries = dir_list(drm_dir);
     var nent = vec_len(entries);
@@ -86,9 +516,8 @@ fn _detect_vulkan_sysfs(profiles) {
         if (vendor_str == 0) { continue; }
 
         # Check for known GPU vendors
-        var vdata = str_data(vendor_str);
-        var vlen = str_len(vendor_str);
         var is_gpu = 0;
+        var igpu = 0;
         var gpu_name = "Unknown GPU";
         var est_vram = 4 * BYTES_PER_GIB;
 
@@ -99,6 +528,9 @@ fn _detect_vulkan_sysfs(profiles) {
         }
         # AMD: 0x1002
         elif (str_contains_cstr(vendor_str, "0x1002") == 1) {
+            if (leave_amdgpu == 1) {
+                if (_drm_driver_is(name, "amdgpu") == 1) { continue; }
+            }
             is_gpu = 1;
             gpu_name = "AMD GPU (Vulkan)";
             # Try reading actual VRAM
@@ -111,11 +543,13 @@ fn _detect_vulkan_sysfs(profiles) {
             is_gpu = 1;
             gpu_name = "Intel GPU (Vulkan)";
             est_vram = 2 * BYTES_PER_GIB;
+            igpu = pci_slot_is_intel_igpu(_drm_pci_slot(name));
         }
 
         if (is_gpu == 1) {
             var p = profile_new(ACCEL_VULKAN, dev_id, est_vram);
             profile_set_device_name(p, gpu_name);
+            if (igpu == 1) { profile_set_shared_mem(p, est_vram); }
             vec_push(profiles, p);
             dev_id = dev_id + 1;
         }

@@ -26,7 +26,7 @@ correctness and platform validation come first.
 | 2.3.8 – 2.3.12 | 2026-06-05 → 06-15 | Windows DXGI VRAM + structured logging, `windows-smoke` CI gate, `--data-dir`; cyrius 6.0.70 → 6.2.11 |
 | 2.3.13 – 2.3.20 | 2026-07-13 → 08-30 | cyrius 6.4.62 → 6.5.x, symbol namespacing (`HWA_ERR_*`, `hw_registry_new`, kavach clashes), profile JSON round-trip, focused bayan dep |
 | 2.3.21 – 2.3.24 | 2026-09-07 → 09-22 | cyrius 6.6.x + bayan 1.5.x, the five defects cyrius 6.6.0 surfaced, issue-folder triage |
-| 2.3.25 – 2.3.28 | 2026-09-23 | Windows detection without wmic, Windows GPUs from every detection entry point, lazy NPU queries find the Apple Neural Engine, macOS real RAM and Apple Silicon via sysctl (no `system_profiler`; found in no-exec mode), unified memory counted once in totals (schema v6) |
+| 2.3.25 – 2.3.29 | 2026-09-23 | Windows detection without wmic, Windows GPUs from every detection entry point, lazy NPU queries find the Apple Neural Engine, macOS real RAM and Apple Silicon via sysctl (no `system_profiler`; found in no-exec mode), unified memory counted once in totals (schema v6), integrated GPUs through Vulkan sized and shared, no lavapipe, Vulkan in no-exec mode |
 
 ---
 
@@ -40,26 +40,31 @@ which is why the series starts at 2.4.0.
 
 - [ ] **One physical device, one profile.** Several backends can report the
   same GPU. On the Linux dev host, a single AMD Cezanne iGPU (one `lspci` VGA
-  entry) comes back twice: as a ROCm GPU with 8 GiB and as a Vulkan GPU with
-  4 GiB. So `gpu_count` is 2 and `accelerator_memory_bytes` counts 12 GiB.
-  CUDA + Vulkan on Linux and CUDA + DXGI on Windows likely overlap the same
-  way (not verified: no such host). This needs a stable device key (PCI bus
-  address; vendor:device + LUID on Windows), a rule for which backend's profile
-  survives, and a rule for which memory figure it keeps.
+  entry) comes back twice, as a ROCm GPU and as a Vulkan GPU, 8 GiB each since
+  2.3.29 (the Vulkan profile had a 4 GiB estimate before). So `gpu_count` is 2
+  and `accelerator_memory_bytes` counts 16 GiB. CUDA + Vulkan on Linux and
+  CUDA + DXGI on Windows likely overlap the same way (not verified: no such
+  host). The Rust releases dropped every Vulkan GPU whenever any CUDA or ROCm
+  GPU was found, which also dropped a separate Intel iGPU. The Cyrius port lost
+  even that, and `docs/troubleshooting.md` still promised it until 2.3.29. This
+  needs a stable device key, a rule for which backend's profile survives, and
+  a rule for which memory figure it keeps. The key can be the PCI bus address:
+  full `vulkaninfo` output carries it (`VkPhysicalDevicePCIBusInfoPropertiesEXT`),
+  as sysfs does; on Windows it is vendor:device + LUID. Shared-memory profiles
+  already count once in the totals (2.3.28, 2.3.29), so only dedicated memory
+  is double counted.
 - [x] **Unified memory is counted twice in totals.** On Apple Silicon the CPU
   and the Metal GPU profiles describe the same RAM, and `total_memory_bytes`
   summed every profile: on `ecb` (48 GB) 2.3.27 reported 100 GiB. **Fixed in
   2.3.28:** profiles carry `shared_memory_bytes` (schema v6), and totals count
   system RAM once. This covers Apple Silicon, the client NPUs and GH200.
-- [ ] **Integrated GPUs seen through Vulkan count as memory of their own.**
-  `vulkaninfo --summary` gives no heap size, so such a GPU gets the 4 GiB
-  estimate with `shared_memory_bytes` 0. An Intel iGPU's memory is system RAM,
-  so on such a host the totals count it twice, as Apple Silicon's did until
-  2.3.28. An AMD APU's BIOS carve-out is not in `MemTotal`, so counting it is
-  right. Parse `deviceType` and `vendorID` from `vulkaninfo`, mark an Intel
-  integrated GPU shared, and take the real size from the full `vulkaninfo`
-  output (or sysfs) rather than the estimate. Windows is not affected: DXGI
-  profiles report dedicated video memory only.
+- [x] **Integrated GPUs seen through Vulkan count as memory of their own.**
+  Every Vulkan GPU carried a 4 GiB estimate, so an Intel iGPU's system RAM
+  counted twice. **Fixed in 2.3.29:** `vulkaninfo`'s `deviceType` and `vendorID`
+  are parsed. An integrated GPU other than AMD is all shared, sized from its
+  largest device-local heap in the full output. An AMD APU is sized from its
+  sysfs carve-out. Software implementations (lavapipe) are no longer reported
+  as GPUs, and the sysfs scan runs in no-exec mode.
 - [ ] **Lazy queries should run only the detectors they need.** Every lazy
   family probe goes through `registry_detect_with`, so it runs the post-passes
   too, and `detect_interconnects` spawns `nvidia-smi nvlink -s` whenever no
@@ -79,7 +84,16 @@ which is why the series starts at 2.4.0.
   (128 MiB on an Intel UHD 600), not the shared system memory it can also use
   (`SharedSystemMemory`, typically half of RAM). Reporting the shared budget
   needs an integrated-vs-discrete signal, which `DXGI_ADAPTER_DESC1` does not
-  carry.
+  carry. `vulkaninfo` has both the signal (`deviceType`) and the size (the
+  device-local heap: 4 202 799 104 bytes on `cass`, half its RAM), once tools
+  run on Windows at all (next item).
+- [ ] **No vendor tool ever runs on Windows.** `which()` (`src/detect/command.cyr`)
+  splits `PATH` on `:` and looks for the bare name. Windows separates with `;`,
+  has drive letters and needs `.exe`. So every `run_tool` backend reports
+  "tool not found" there: `nvidia-smi`, `vulkaninfo` (`cass` has
+  `C:\Windows\System32\vulkaninfo.exe`) and the rest. GPUs are still found,
+  through DXGI, but with no CUDA details. Fixing it adds CUDA and Vulkan
+  profiles next to the DXGI ones, so it waits on the duplicate-device item.
 
 ### Build and docs
 

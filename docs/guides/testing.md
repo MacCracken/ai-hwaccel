@@ -6,21 +6,23 @@ results.
 ## Quick start
 
 ```sh
-cyrius tests                         # run all 791 assertions (15 test units)
+cyrius tests                         # run all 894 assertions (15 test units)
 cyrius lint src/main.cyr             # lint (zero warnings)
 cyrius fmt src/main.cyr --check      # check formatting
 ```
 
 ## Test categories
 
-Tests are 15 `.tcyr` units under `tests/tcyr/`, with 791 assertions in total.
-The README's *Test units* table lists what each unit covers.
+Tests are 15 `.tcyr` units under `tests/tcyr/`, with 894 assertions in total.
+The README's *Test units* table lists what each unit covers. Real tool output
+used as fixtures lives in `tests/fixtures/` (read relative to the repository
+root, where CI runs the tests).
 
 | Suite | Location | What it tests |
 |---|---|---|
 | Unit tests | `tests/tcyr/*.tcyr` | Types, profiles, registry queries and totals, every detection entry point, parsers, planning, JSON output and round-trip, Windows, lazy detection |
 | Fuzz harnesses | `fuzz/*.fcyr` | The CUDA, Vulkan, Neuron, Gaudi, Apple and model-format parsers |
-| Benchmarks | `benches/*.bcyr` | 15 rows in two suites, `parsing` and `registry` |
+| Benchmarks | `benches/*.bcyr` | 17 rows in two suites, `parsing` and `registry` |
 
 ## Running benchmarks
 
@@ -103,7 +105,7 @@ build/ai-hwaccel --table --debug
 
 | Tool | Package | What it tests |
 |---|---|---|
-| `vulkaninfo` | `vulkan-tools` | Vulkan device name, memory heaps, API version, driver version |
+| `vulkaninfo` | `vulkan-tools` | Vulkan device name, type and vendor; an integrated GPU's memory heaps |
 | `nvidia-smi` | `nvidia-utils` | CUDA GPU detection, VRAM, compute capability, driver version |
 | `rocm-smi` | `rocm-smi-lib` | AMD GPU clock speeds, firmware, temperature |
 | `hl-smi` | Habana SDK | Intel Gaudi HPU detection |
