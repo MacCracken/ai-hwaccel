@@ -5,6 +5,193 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.24] — 2026-09-22 — cyrius 6.6.6, bayan 1.5.6
+
+A toolchain and dependency bump with **no source change**: cyrius `6.6.2 → 6.6.6`
+(four upstream repair releases), bayan `1.5.5 → 1.5.6`, `./lib/` re-vendored, and
+`cyrius.cyml` cut back to a manifest. The CLI prints the same output as 2.3.23 on
+every invocation compared, on Linux and on Windows, and all 629 assertions pass
+unchanged. Two parsers get faster; nothing gets slower.
+
+### Changed
+
+- **cyrius `6.6.2` → `6.6.6`.** `./lib/` was re-vendored from a deleted tree
+  (`rm -rf lib && cyrius lib sync && cyrius deps`). 20 of the 46 stdlib files
+  change and one is new: `lib/alloc_cx.cyr`, pulled in by `lib/alloc.cyr`'s new
+  cx-target arm. That makes 48 files: `lib sync` copies 39 and `cyrius deps`
+  adds the same 8 transitive leaves as before, plus bayan. Every vendored file is
+  byte-identical to the 6.6.6 snapshot or the bayan 1.5.6 dist.
+- **bayan `1.5.5` → `1.5.6`** (`c0500d9` → `fd46aa9`), a pin-only release
+  upstream. `dist/bayan-json.cyr` differs from 1.5.5 in its `# Version:` line
+  and nothing else.
+- **`cyrius.lock` regenerated.** It has 48 hashed entries (was 47). The file is
+  now sorted by path, because 6.6.3 fixed the writer that emitted readdir order.
+  It also ends with a `cyrius 6.6.6` trailer line, which 6.6.4's resolver uses to
+  refuse a stdlib file whose content changes under an unchanged pin. A
+  clean-tree `lib sync` + `deps` now reproduces the lock byte-for-byte.
+- **`cyrius.cyml` is a manifest again.** Over several releases it had filled up
+  with release history: a 2.2.6 note on `json_out.cyr`, the 2.3.19/2.3.20 bayan
+  move and its duplicate-definition incident, and 2.3.21's measured failures
+  for the two wrong bayan/toolchain pairings. All of it was already recorded in
+  this file. What remains is one short comment on `[lib]` (why module order
+  matters) and one on `[deps.bayan]` (why it is optional): 127 → 74 lines. A
+  stray trailing comma in `[deps].stdlib` is gone. The parsed leaf list is
+  unchanged: the same 18 leaves in the same order, as the byte-for-byte
+  reproduction of the wrapper's build input in *Performance* confirms.
+- **`scripts/bench-history.sh` labels rows measured on uncommitted changes
+  `<HEAD>-dirty`.** Before this, a release's baseline and its candidate were
+  both stamped with the same parent commit.
+- **CI's lock-gate comment corrected** (`ci.yml`, *Verify dep hashes*). It said
+  `cyrius deps` silently repairs a stale lock. Under 6.6.4+ it refuses instead,
+  naming the file. Measured: one corrupted `lib/vec.cyr` hash makes `deps` exit
+  1, `--verify` reports "47 verified, 1 failed", and the lock is left
+  untouched. A repointed bayan tag is refused the same way. The sorted
+  comparison stays in place for the one case `deps` still rewrites: a pin bump
+  committed without its re-stamped lock.
+
+### What the toolchain changes here
+
+Only the upstream changes that reach this repo, each checked against the tree:
+
+- **A failed read no longer looks like a short file** (`lib/io.cyr`, 6.6.6).
+  `file_read_all` used to return the bytes read before an error as if they were
+  the whole file. It now returns a negative errno. All seven callers in `src/`
+  already test `n <= 0` / `n > 0`, so a sysfs or procfs read that errors now
+  reads as "absent" rather than as a truncated value. `file_write_all`, which
+  the disk cache writes through, now loops until every byte lands instead of
+  reporting one short write as success.
+- **Probe tools no longer outlive ai-hwaccel on Linux** (`lib/process.cyr`,
+  6.6.6). `run_tool` spawns `nvidia-smi`, `rocm-smi`, `vulkaninfo`, `hl-smi`
+  and the rest through `exec_capture`, and every child it spawns now gets
+  `PR_SET_PDEATHSIG(SIGKILL)`. Killing ai-hwaccel no longer leaves a hung probe
+  running under PID 1. No deadline is set, because 6.6.6 makes deadlines
+  opt-in via `proc_set_timeout_ms`, so probes are still waited for exactly as
+  before.
+- **`O_TRUNC` truncates on Windows** (6.6.6). The pre-bump roadmap said the
+  Windows wheel had been corrupting the detection cache. It had not. The only
+  file writer in `src/` is the disk-cache API (`disk_cached_get`,
+  `src/cache.cyr:227`), `src/main.cyr` never calls it, and the wheel runs the
+  CLI. The exposure was library consumers of `dist/ai-hwaccel.cyr` who build
+  for Windows and use `disk_cached_*`: a shorter rewrite left the old tail in
+  the file. ai-hwaccel itself never parses that file back. Measured on `cass`
+  (Windows 11) by writing 130 bytes then 34 bytes through `file_write_all`:
+  the 6.6.2 build leaves 130 bytes on disk, the 6.6.6 build leaves 34.
+- **aarch64 binaries grow about 10%.** 6.6.5 renumbers raw syscalls through a
+  per-target translation chain, which upstream prices at about 224 B per call
+  site.
+- **The `CYRIUS_DCE=1` PE crash** ([our 2026-09-07 issue](docs/development/issues/2026-09-07-cyrius-dce-pe-access-violation.md))
+  **was fixed upstream in 6.6.1.** PE builds now decline compaction and
+  NOP-fill dead code instead, so the EXE is the same size either way. On
+  `cass` the 6.6.6 DCE EXE passes every `windows-smoke` assertion.
+  `stage_win_cross.sh` still omits the flag. Restoring it would shrink the
+  EXE inside the wheel from 77 534 to 43 684 B compressed (zip's default
+  deflate); that step is left open in the roadmap.
+- **`-D NAME` after the operands is honoured** (6.6.5 CLI). Nothing here
+  depends on it: nothing in `src/` reads the `CUDA`/`ROCM`/`TPU`/`NO_BACKENDS`
+  defines that ADR-004's recipes pass. That mismatch predates the bump and is
+  on the roadmap.
+
+### Verified
+
+- **Tests:** 629 assertions in 14 units, run both through CI's loop and through
+  `cyrius tests`, with the same compiler warnings as 2.3.23. Fuzz: 6/6
+  harnesses pass.
+- **CI gates:** every step of `ci.yml`'s build job passes on a fresh copy:
+  lock drift, vet, raw-offset guard, fmt, lint (0 warnings), distlib fresh and
+  deterministic, DCE build, benches. The format gate is real, not a no-op:
+  `cyrius fmt <file> --check` fails a misformatted copy.
+- **CLI output identical to 2.3.23** on 18 invocations covering every flag.
+  Live sensor readings and log timestamps are normalised before comparing.
+- **ELF-aarch64 under `qemu-aarch64`:** output identical to x86_64 on 8
+  invocations. **agnos** builds with and without DCE.
+- **Windows PE on `cass`** (Windows 11 10.0.26200), testing the EXE exactly as
+  `stage_win_cross.sh` stages it: all three `windows-smoke` assertions pass for
+  2.3.23, 2.3.24 and 2.3.24 with `CYRIUS_DCE=1`, and CLI output is identical
+  across the three on 10 invocations. The local wine run was not useful: wine
+  faults inside detection for 2.3.23 and 2.3.24 alike.
+- **Not verified:** macOS arm64 at runtime. `ecb` has cyrius ≤ 6.6.4, and the
+  `macos-14` wheel job builds the binary without running it.
+
+| binary | 2.3.23 (6.6.2) | 2.3.24 (6.6.6) | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 214 600 | 219 344 | +4 744 (+2.2%) |
+| x86_64 ELF, no DCE | 431 688 | 440 528 | +8 840 (+2.0%) |
+| ELF-aarch64 | 673 200 | 739 352 | +66 152 (+9.8%) |
+| PE, as shipped (no DCE) | 500 224 | 510 976 | +10 752 (+2.1%) |
+| agnos, `CYRIUS_DCE=1` | 216 488 | 217 008 | +520 (+0.2%) |
+
+### Performance
+
+**2 faster, 13 neutral, 0 regressions.** A plain before/after would have been
+misleading here, for three reasons, and each was handled:
+
+1. **The instrument changed under the benchmarks.** 6.6.5 rewrote
+   `lib/bench.cyr`: floor calibration, window netting, and how min and max are
+   reported. So for the comparison the 2.3.23 arm was built against the 6.6.6
+   `bench.cyr` too, by composing the compiler's input by hand and calling each
+   arm's own `cycc` directly. Built with the stock `bench.cyr`, the composed
+   input reproduces the wrapper's binaries byte-for-byte for both 6.6.2 and
+   6.6.6, which also confirms each arm really compiles with its pinned
+   toolchain.
+2. **Floor-bound rows measure the clock, not the function.**
+   `best_available_13dev`, `detect_safetensors` and `detect_gguf` time one op
+   per window against a ~1.34 µs hpet clock read. Timing them that way showed
+   `best_available` at +4.5%, but that came from the instrument code, which
+   each compiler builds differently. Those three were re-timed in batch
+   windows (20 000 ops per window) and are reported that way (†).
+3. **Layout alone moves some rows several percent.** A never-called function
+   inserted early in `src/` moved batch `detect_safetensors` by −4.9% on its
+   own (p < 0.0001). A single A/B pair had shown that row at +4.5%. So each
+   arm was measured at 4 or 5 code layouts, and the toolchain effect is judged
+   with Welch's t on the per-layout medians, which makes layout variation the
+   error term. 30 interleaved rounds, shuffled order, pinned to one CPU.
+
+| row | 2.3.23 | 2.3.24 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 14.30 µs | 13.68 µs | −4.3% | <0.0001 | **faster** |
+| `parse_vulkan_2gpu` | 2.60 µs | 2.52 µs | −3.0% | <0.0001 | **faster** |
+| `parse_neuron_2dev` | 1.58 µs | 1.57 µs | −0.7% | 0.53 | neutral |
+| `best_available_13dev` † | 172.3 ns | 170.4 ns | −1.1% | 0.11 | neutral |
+| `detect_safetensors` † | 402.1 ns | 410.8 ns | +2.2% | 0.36 | neutral |
+| `detect_gguf` † | 35.9 ns | 35.9 ns | 0.0% | 0.93 | neutral |
+| `total_memory_13dev` | 85.2 ns | 85.2 ns | 0.0% | 0.72 | neutral |
+| `has_accelerator_13dev` | 18.2 ns | 18.2 ns | 0.0% | 0.97 | neutral |
+| `plan_70B_bf16_4gpu` | 1.42 µs | 1.42 µs | +0.5% | 0.45 | neutral |
+| `count_family_gpu_13dev` | 243.9 ns | 243.6 ns | −0.1% | 0.36 | neutral |
+| `json_serialize_13dev` | 22.63 µs | 22.65 µs | +0.1% | 0.58 | neutral |
+| `json_summary_13dev` | 3.14 µs | 3.14 µs | +0.1% | 0.80 | neutral |
+| `json_system_io` | 5.14 µs | 5.14 µs | 0.0% | 0.97 | neutral |
+| `json_plan` | 17.02 µs | 17.03 µs | 0.0% | 0.81 | neutral |
+| `json_training` | 2.44 µs | 2.44 µs | −0.1% | 0.84 | neutral |
+
+Values are means of per-layout medians of `bench_avg_ns`. † = batch-timed.
+Verdict needs p < 0.01 and |Δ| > 1%. Both parser wins hold in batch timing too:
+`parse_cuda_8gpu` −3.0% (p = 0.0013), `parse_vulkan_2gpu` −2.4% (p = 0.0001).
+An earlier 80-round single-pair run on the stock benches agrees: −3.9% and
+−2.6%, with no other row outside the floor-bound three flagged.
+
+### Notes
+
+- **`bench-history.csv` changes meaning at this boundary.** Rows `825f724` are
+  2.3.23 on cyrius 6.6.2; rows `825f724-dirty` are this release on 6.6.6. Under
+  the 6.6.5 instrument, a per-window row's min only resolves when the clock's
+  error (floor plus tick, ~2.3 µs on this host) is at most 1% of the window. No
+  window here is that long, so the `min_ns` and `max_ns` columns now repeat the
+  mean for those rows. Averages are netted at read time instead of clamped per
+  window, which removes the old upward bias on floor-bound rows. Measured with
+  the same compiler and code, the instrument swap alone moves rows by up to
+  ±5%, and floor-bound `detect_gguf` by −24%. As always, a CSV row is one
+  run; the A/B above is the evidence.
+- **Lint:** 6.6.6's cyrlint also matches `for now`, so `src/cache.cyr:193` is
+  a fourth untracked deferral. CI's lint step is non-gating (`|| true`, no
+  `--strict-deferrals`), so nothing fails.
+- **Found while verifying, not caused by the bump:** `cass` no longer has
+  `wmic`, which Windows 11 24H2+ removes by default. Windows detection shells
+  out to it for both GPUs and total memory. There, 2.3.23 and 2.3.24 alike
+  report a CPU profile with the 16 GiB fallback on an 8 GB host and miss the
+  Intel UHD 600. `windows-smoke` still passes, because a CPU profile is always
+  present. Tracked in the roadmap.
+
 ## [2.3.23] — 2026-09-11 — cyrius 6.6.2
 
 ### Changed

@@ -671,38 +671,70 @@ setters through the inline-replay path — and every heap struct here is
 - [x] **Bench delta:** 0 regressions, 14 neutral, 1 marginal improvement, with a
   byte-identical `parsing` binary as the in-run noise floor (±2.3%).
 
+### 2.3.24 — Toolchain bump to cyrius 6.6.6 + bayan 1.5.6 (SHIPPED, 2026-09-22)
+
+**Why:** four upstream repair releases (6.6.3 → 6.6.6) past 2.3.23's 6.6.2, and
+bayan 1.5.6. No source change. This entry replaces the two "Moving the cyrius
+pin to 6.6.5 / 6.6.6" checklists that preceded the bump; each of their items
+is resolved below.
+
+- [x] **Pin 6.6.2 → 6.6.6, bayan 1.5.5 → 1.5.6.** `./lib/` re-vendored from a
+  deleted tree: 20 of the 46 stdlib files change and `lib/alloc_cx.cyr` arrives
+  (48 files); bayan's `dist/bayan-json.cyr` differs only in its version line.
+  `cyrius.lock` regenerated — path-sorted now, with a `cyrius 6.6.6` trailer.
+- [x] **`cyrius.cyml` stripped back to a manifest** — its per-release notes
+  (2.2.6, 2.3.19–2.3.21) were already in the CHANGELOG.
+- [x] **Re-ran `cyrius deps` at the bump** (6.6.5: the aarch64 peer moved
+  `SYS_UNLINKAT` 35 → 263). `lib/` and compiler move together; the aarch64
+  build runs under qemu with output identical to x86_64.
+- [x] **Windows `O_TRUNC` — the pre-bump note overstated it.** It said the
+  Windows wheel had been corrupting the detection cache. The only file writer
+  in `src/` is the disk-cache API (`disk_cached_get`, `src/cache.cyr:227`);
+  `src/main.cyr` never calls it, and the wheel runs the CLI. Library consumers
+  of `dist/ai-hwaccel.cyr` building for Windows were exposed. Verified on
+  `cass` with a `file_write_all` long-then-short probe: 6.6.2 leaves the old
+  tail (130 B on disk for a 34 B write), 6.6.6 truncates (34 B).
+- [x] **`stage_binary.sh` / `stage_win_cross.sh` do not swallow a failed
+  build** — both run under `set -euo pipefail`; the Windows one also checks the
+  `MZ` magic.
+- [x] **The "does not apply" list re-checked against the tree:** no `O_APPEND`
+  in `src/` and no caller of `lib/io.cyr`'s one user of it
+  (`file_append_locked`); no `async fn`, `operator`, `ret2`/`rethi` or SIMD; no
+  column-0 blocks; no `regression_*` calls; no `vec_*` of our own; 10
+  `file_exists`/`file_read_all` call sites. Build and 629 assertions clean
+  with no new diagnostics.
+- [x] **`windows-smoke` reproduced on `cass`** (Windows 11 10.0.26200) for
+  2.3.23, 2.3.24 and 2.3.24 + `CYRIUS_DCE=1`: all three assertions pass, CLI
+  output identical across the three on 10 invocations.
+- [x] **Bench delta, layout-controlled** (4–5 layouts per arm, instrument held
+  fixed, floor-bound rows re-timed in batch): `parse_cuda_8gpu` −4.3% (−3.0%
+  batch-timed), `parse_vulkan_2gpu` −3.0% (−2.4% batch-timed), every other row
+  neutral within layout spread, **0 regressions**. See CHANGELOG.
+- [ ] **ADR-004's `-D<BACKEND>` recipes** —
+  `docs/guides/production.md:16`, `docs/troubleshooting.md:31`,
+  `docs/performance.md:57`, `docs/guides/testing.md:38,41`,
+  `docs/decisions/004-feature-flags-per-backend.md:23,26`. 6.6.5 honours `-D`
+  after the operands, but nothing in `src/` reads `CUDA`/`ROCM`/`TPU`/
+  `NO_BACKENDS` (its only `#ifdef`s are `CYRIUS_TARGET_*`), so each recipe
+  builds every backend. Implement the gates or correct the docs and ADR-004's
+  status.
+- [ ] **Windows detection depends on `wmic`, which `cass` no longer has**
+  (removed from Windows 11 24H2+). 2.3.23 and 2.3.24 alike report CPU only,
+  with the 16 GiB fallback on an 8 GB host, and miss its Intel UHD 600;
+  `windows-smoke` passes regardless because a CPU profile is always present.
+  Pre-existing, not a bump regression.
+- [ ] **Retire the `CYRIUS_DCE=1` PE workaround** — fixed upstream in 6.6.1
+  (PE declines compaction; dead bodies are NOP-filled, so the file stays
+  510 976 B) and verified on `cass` under 6.6.6. It would shrink the EXE inside
+  the wheel from 77 534 to 43 684 B compressed (zip's default deflate). See
+  [the issue](issues/2026-09-07-cyrius-dce-pe-access-violation.md).
+- [ ] **macOS arm64 runtime not re-verified** — `ecb` has cyrius ≤ 6.6.4, and
+  the `macos-14` wheel job builds without running the binary.
+
 ### WASM / JS
 
 - [ ] **JS/TS bindings** — depends on cyrius WASM target (not in
   5.10.x; gate this on upstream readiness)
-
----
-
-## Moving the cyrius pin to 6.6.5
-
-Nothing breaks at this bump. cyrius 6.6.5 is not tagged yet, and nothing
-below can land against the pin until it is. The pin is 6.6.2 today, and this
-section lists only what 6.6.5 itself changes.
-
-- [ ] The feature-flag recipes put the define after the operands —
-  `cyrius build src/main.cyr build/ai-hwaccel -DCUDA` (`-DROCM`, `-DTPU`) at
-  `docs/guides/production.md:16`, `docs/troubleshooting.md:31`,
-  `docs/performance.md:57`, `docs/guides/testing.md:38` and
-  `docs/decisions/004-feature-flags-per-backend.md:23`, and `-DNO_BACKENDS`
-  at `docs/guides/testing.md:41` and `docs/decisions/004-feature-flags-per-backend.md:26`.
-  On ≤ 6.6.4 the CLI dropped a define written there; 6.6.5 honours `-D` in
-  every argument position. Neither changes the binary: nothing in `src/`
-  reads `CUDA`, `ROCM`, `TPU` or `NO_BACKENDS` (its only `#ifdef`s are
-  `CYRIUS_TARGET_*`, and `src/main.cyr` includes every `detect/*.cyr`
-  unconditionally), so each of those builds compiles all backends, the
-  default. The recipes and ADR-004 ("Each backend is gated behind a
-  `#ifdef` / `-D` compile-time flag") describe gating that does not exist.
-  Add the gates or correct the docs. Nothing in CI uses them. See the
-  cyrius CHANGELOG [6.6.5] entry "The whole CLI took flags as file names,
-  dropped flags written after the operand, and dropped extra operands".
-- [ ] At the bump, re-run `cyrius deps` — the aarch64 syscall peer moved
-  SYS_UNLINKAT 35 → 263, so an un-re-vendored peer's sys_unlink would run
-  nanosleep.
 
 ---
 
@@ -788,62 +820,3 @@ scale.
 - **Runtime execution** — detection and planning only, not inference/training
 - **Kernel driver management** — no installing or configuring drivers
 - **Cloud provisioning** — detect what's present, not what could be spun up
-
-## Moving the cyrius pin to 6.6.6
-
-Current pin: `cyrius = "6.6.2"` (`cyrius.cyml`).
-
-⛔ **The Windows wheel has been silently corrupting the detection cache, and the pin is the
-fix.** ai-hwaccel is the only repo in this group that actually ships a PE binary:
-`.github/workflows/wheels.yml` cross-builds PE32+ on Linux via `cyrius build --win` (the
-`windows` job) and runs the real EXE on a `windows-latest` runner (`windows-smoke`), and
-`CYRIUS_TARGET_WIN` is live in its own sources (`src/cache.cyr:41`, `src/detect/windows.cyr`,
-`src/detect/platform.cyr`, `src/types.cyr`, `src/main.cyr`, `src/registry.cyr`).
-
-The corruption path: `src/cache.cyr:227` calls `file_write_all(path, jdata, jlen)`, and the
-vendored `lib/io.cyr:484` opens with `O_WRONLY | O_CREAT | O_TRUNC`. Before 6.6.6 a PE build's
-`O_TRUNC` **did not truncate** — so every rewrite of the JSON detection cache that was shorter
-than the previous one left the old tail behind, producing trailing garbage after the closing
-brace. That is a silent data defect on the shipped wheel, not a build problem, and no source
-change is needed to fix it: re-pin and rebuild. Because the cache is written on Windows by a
-binary users install from PyPI, it is worth cutting a wheel promptly rather than waiting for
-the next feature release.
-
-Two more PE-only gains land with it:
-
-- **PE opens now honour the access mode** — an `O_RDONLY` handle refuses a write instead of
-  quietly accepting one.
-- **`file_exists` / `file_read_all` no longer request write access on PE**, so they now
-  SUCCEED on read-only files and read-only volumes where they used to fail. ai-hwaccel has 10
-  such call sites, and hardware detection routinely reads paths the invoking user cannot
-  write — this removes a class of false "not present" answers on locked-down Windows hosts.
-
-Also relevant to the build pipeline (item 7): `cyrius build` now exits 1 instead of 0 when its
-output rename fails. `bindings/python/scripts/stage_binary.sh` and `stage_win_cross.sh` will
-now see a real failure where a broken run previously "succeeded" with no artifact — check
-those scripts do not swallow the status, since a green-but-empty stage is exactly how a wheel
-ships without its binary. Separately, `cyrius build --target=js` now refuses off x86-64 Linux
-rather than writing a binary over the `.js`; the `macos-14` wheel job does not use it, so
-nothing there changes.
-
-What does **not** apply, and how that was checked:
-
-- **No `O_APPEND` anywhere**, in its own source or vendored `lib/` — so the append half of the
-  Windows fix is moot; only `O_TRUNC` reached this repo.
-- **None of the new compile errors in item 3.** No `async fn`, no `operator` fn, no
-  `ret2`/`rethi`, no SIMD intrinsics. The 16 `struct` declarations (`src/lazy.cyr`,
-  `src/system_io.cyr`, `src/cache.cyr`, `src/model.cyr`, `src/cost.cyr`, …) are all
-  accessor-style over heap offsets — there is not a single struct- or vector-typed parameter
-  or `var` declaration in `src/`, so struct/vector copies, pair returns and struct-valued
-  calls at top level have no sites here. Item 5's by-value-struct-param deep copy is likewise
-  a no-op.
-- **No top-level block `var`s** (item 4) — zero bare `{` blocks at column 0 in `src/`.
-- **No `regression_*` call sites** (item 8) and **no `vec_*` definition** of its own that
-  collides with the 14 names `lib/vec.cyr` exports (item 9), so `lib/assert.cyr`'s new
-  transitive `lib/vec.cyr` include is harmless here.
-- **No duplicated global declarations** relevant to item 6.
-
-After bumping, verify: the `windows-smoke` job still passes; then, on a real Windows host,
-write the detection cache twice with a shorter payload the second time and confirm the file
-ends at the closing brace with no trailing remnant — that is the specific defect 6.6.6 fixes
-and the one thing the `MZ`-magic check in the `windows` job cannot see.

@@ -57,31 +57,18 @@ jobs:
         run: cyrius deps
 
       - name: Verify dep hashes
-        # `cyrius.lock` pins the bayan commit and a SHA-256 for each of
-        # the 46 vendored lib files.
+        # `cyrius.lock` pins the bayan commit, a SHA-256 for each of the 48
+        # vendored lib files, and the cyrius pin (its last line).
         #
-        # ⚠ `cyrius deps --verify` ALONE CANNOT CATCH A STALE COMMITTED
-        # LOCK IN THIS JOB, because the step above already rewrote it.
-        # Measured on 2026-09-07 (ai-hwaccel 2.3.21): corrupt a hash in
-        # cyrius.lock, run `cyrius deps` then `cyrius deps --verify` and
-        # you get "46 verified, 0 failed" — `deps` silently repaired the
-        # file first. Run standalone against this release's pre-bump lock
-        # it correctly reports "30 verified, 15 failed", exit 1. So the
-        # hash check below is a lib/-integrity assertion, NOT a
-        # lock-drift gate.
-        #
-        # The drift gate is the SORTED comparison below: if what `cyrius
-        # deps` just wrote differs in CONTENT from the committed lock,
-        # the commit shipped a stale one. Same shape as the distlib-drift
-        # gate.
-        #
-        # ⚠ Compared SORTED, and that is not cosmetic. `cyrius deps`
-        # emits the hash lines in hash-map iteration order, which is
-        # stable for repeated runs over an existing ./lib/ but NOT across
-        # a clean-tree `lib sync` + `deps` — exactly what this job does.
-        # A plain `git diff --exit-code cyrius.lock` here goes red on line
-        # order alone. Verified 2026-09-07: five successive `deps` runs
-        # byte-identical, one clean rebuild reordered 6 lines.
+        # A stale lock already fails the step above: since cyrius 6.6.4,
+        # `cyrius deps` refuses, by name, a stdlib file whose hash disagrees
+        # with the lock under an unchanged pin instead of rewriting the lock
+        # to match (a bayan tag that no longer resolves to the locked commit
+        # has been refused since 6.2.30). What `deps` still rewrites is the
+        # lock of a pin bump, since a new pin legitimately re-locks; the
+        # comparison below catches a bump committed without its re-stamped
+        # lock. The lock is path-sorted since cyrius 6.6.3; the sort keeps
+        # the gate independent of that.
         run: |
           cyrius deps --verify
           git show HEAD:cyrius.lock | sort > /tmp/lock.committed
@@ -91,7 +78,7 @@ jobs:
             echo "Run 'cyrius lib sync && cyrius deps' locally and commit cyrius.lock."
             exit 1
           fi
-          echo "cyrius.lock is current (46 entries, content-compared)."
+          echo "cyrius.lock is current (48 entries, content-compared)."
 
       - name: Include-graph audit
         # `cyrius vet` walks every `include` from src/main.cyr and

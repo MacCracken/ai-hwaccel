@@ -12,9 +12,9 @@ decide how to quantize and shard a model across them.
 
 | Metric | Value |
 |--------|-------|
-| Binary size | **210 KB** (`CYRIUS_DCE=1`) |
-| Compiler | Cyrius cycc 6.6.0 |
-| Tests | 623 assertions (13 test units) |
+| Binary size | **214 KB** (`CYRIUS_DCE=1`) |
+| Compiler | Cyrius cycc 6.6.6 |
+| Tests | 629 assertions (14 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** |
 | Hardware families | 18 |
@@ -203,7 +203,7 @@ If a tool or sysfs path is absent the accelerator simply isn't registered — no
 ```sh
 cyrius lib sync                                # Repopulate lib/ from the version-pinned stdlib snapshot
 cyrius deps                                    # Resolve non-stdlib [deps.*] entries (bayan)
-CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # Build (≈210 KB ELF, x86_64)
+CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # Build (≈214 KB ELF, x86_64)
 cyrius vet src/main.cyr                        # Include-graph audit
 cyrius lint src/main.cyr                       # Static analysis
 cyrius fmt src/main.cyr                        # Format check (diff against committed)

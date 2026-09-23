@@ -10,6 +10,12 @@ set -euo pipefail
 HISTORY_FILE="${1:-bench-history.csv}"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+# Rows measured on uncommitted changes are labelled `<HEAD>-dirty`, so they
+# cannot be mistaken for rows measured on HEAD itself (a release's baseline and
+# its candidate are otherwise both stamped with the same parent commit).
+if [ "$COMMIT" != "unknown" ] && ! git diff --quiet HEAD -- . ':(exclude)bench-history.csv' 2>/dev/null; then
+    COMMIT="${COMMIT}-dirty"
+fi
 BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
 
 if [ ! -f "$HISTORY_FILE" ]; then

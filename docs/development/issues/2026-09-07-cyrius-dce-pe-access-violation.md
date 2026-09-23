@@ -1,5 +1,19 @@
 # cyrius 6.6.0: `CYRIUS_DCE=1` produces a PE that dies at startup with `0xC0000005`
 
+> **FIXED UPSTREAM in cyrius 6.6.1; verified on `cass` under 6.6.6 (ai-hwaccel
+> 2.3.24, 2026-09-22). One step left to close this: restore the flag.**
+> Upstream's root cause: `_pe_layout` ran off the pre-elimination code length, so
+> after compaction the section headers and the IAT RVA described a layout the code
+> no longer had. Every import resolved to 0. PE and x86 Mach-O now decline
+> compaction: dead bodies are NOP-filled in place, so the EXE is the same size
+> with or without the flag (510 976 B at 2.3.24). On `cass`, the
+> `CYRIUS_DCE=1 cyrius build --win` EXE passes all three `windows-smoke`
+> assertions and prints output identical to the flagless build on 10
+> invocations. The only gain from restoring the flag is compression: the zeroed
+> bodies deflate the EXE to 43 684 B instead of 77 534 B (−44%, zip's default
+> level), which is what the wheel ships.
+> `bindings/python/scripts/stage_win_cross.sh` still builds without the flag.
+
 **Filed:** 2026-09-07
 **Severity:** HIGH — it broke the `windows-smoke` CI gate and would have shipped a
 Windows wheel whose bundled EXE crashes on launch.
