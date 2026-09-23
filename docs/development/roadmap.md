@@ -1,871 +1,305 @@
 # Roadmap
 
-Completed items are in [CHANGELOG.md](../../CHANGELOG.md).
+Open work, grouped by the release it is planned for. What shipped is
+summarized in one table below; the details are in
+[CHANGELOG.md](../../CHANGELOG.md).
 
-The project numbering inherited the Rust roadmap; the Cyrius port shipped
-as 2.0.0, so what the original plan called "1.3 / 1.4 / 1.5 / 2.0" has
-been re-shelved as 2.2 / 2.3 / 2.4 / 2.5 below. Scope is preserved.
-
----
-
-## 2.0.1 — Toolchain modernization (SHIPPED, 2026-05-10)
-
-See CHANGELOG. Pure mechanical bump from cyrius 3.10.0 → 5.10.34. Sets
-up everything the 2.1.0 adoption arc needs (cc5 IR, manifest interpolation,
-`cyrius deps` / `cyrius.lock`, modernized CI, fmt-clean tree).
+The numbering inherited the Rust roadmap. The Cyrius port shipped as 2.0.0,
+so the Rust plan's "1.3 / 1.4 / 1.5 / 2.0" became 2.2 / 2.3 / 2.4 / 2.5 here.
+The 2026-09-23 review moved Multi-node to 2.6 and Fleet to 2.7, so that
+correctness and platform validation come first.
 
 ---
 
-## 2.1.x — cc5 adoption arc (SHIPPED, 2026-05-10 → 2026-05-11)
+## Shipped
 
-Closed at 2.1.7 (P(-1) scaffold hardening). Seven slots:
-- **2.1.0** — test reorg + CI tighten
-- **2.1.1** — Rust parity audit
-- **2.1.2** — defer audit, chrono rejected, build/ untrack
-- **2.1.3** — `#derive(accessors)` on meta + storage
-- **2.1.4** — ic + plan + est
-- **2.1.5** — reg + model
-- **2.1.6** — profile (the big one)
-- **2.1.7** — P(-1) close-out: remaining 8 structs derived (env, sio,
-  shard, cloud_inst, rec, cached, disk_cached, lazy). Every heap struct
-  in the project is now on the accessor surface. CI gate at 15 entries
-  (10 cross-file + 5 field-count bound).
-
----
-
-## 2.3.0 — Toolchain 6.0.25 + serialization/dedup audit (SHIPPED, 2026-06-01)
-
-A toolchain-modernization + audit release, in the same vein as 2.0.1 and
-the 2.1.x arc. The "Ecosystem" scope (Python/WASM bindings) that the
-Rust roadmap had penciled in for this slot moves to 2.3.1 (below) — it's
-a separate effort and ships after this release. Contents:
-
-- **Pin: cyrius 6.0.0 → 6.0.25**, stdlib re-synced into `./lib/`,
-  drift warning gone.
-- **JSON serializer hot path** — single-byte structural punctuation
-  moved from `str_builder_add_cstr` to `str_builder_putc`.
-  `json_serialize_13dev` **−8.7%** (26946 → 24602 ns, min-of-6 @ 2000
-  iters); `json_summary_13dev` flat (within noise — too few single-byte
-  appends to move). Byte-identical output.
-- **`Str` → owned cstr dedup** — the hand-inlined
-  `alloc + memcpy + NUL` idiom consolidated onto stdlib `str_cstr`
-  across 11 detectors / 16 sites. DCE binary −1592 bytes, dist bundle
-  −76 lines, perf-neutral on parsing benches.
-- **Bench harness** — `registry.bcyr` JSON benches now print
-  nanosecond averages (the µs-truncated `bench_report` hid the delta).
-- All gates green: 11 test units / 518 assertions, 6 fuzz harnesses,
-  `vet`, raw-offset guard, distlib determinism.
-
-Per the (now mandatory — see CLAUDE.md) benchmarking policy, the
-before/after deltas are recorded in `bench-history.csv` and the
-CHANGELOG 2.3.0 table.
+| Releases | Dates | What shipped |
+|---|---|---|
+| 2.0.0 | 2026-04-13 | Rewrite from Rust to Cyrius |
+| 2.0.1 | 2026-05-10 | Toolchain modernization (cyrius 3.10 → 5.10) |
+| 2.1.0 – 2.1.7 | 2026-05-10 → 05-11 | cc5 adoption arc: test reorg, CI tightening, Rust-parity check, `#derive(accessors)` on every heap struct |
+| 2.2.0 – 2.2.3 | 2026-05-11 → 05-19 | Test-rename fix, cyrius 5.11.8, Windows backend skeleton, `cycc` rename |
+| 2.2.4 – 2.2.6 | 2026-05-19 | Library consumers: `[lib]` + `cyrius distlib` bundle, the no-exec detection contract, mihi follow-ups |
+| 2.3.0 | 2026-06-01 | cyrius 6.0.25, JSON serializer hot path, dedup audit |
+| 2.3.1 – 2.3.4 | 2026-06-01 | JSON schema v4, Python bindings, cwd-independent data files, Linux wheels |
+| 2.3.5 – 2.3.7 | 2026-06-01 → 06-03 | cyrius 6.0.30, macOS arm64 wheel, Windows wheel |
+| 2.3.8 – 2.3.12 | 2026-06-05 → 06-15 | Windows DXGI VRAM + structured logging, `windows-smoke` CI gate, `--data-dir`; cyrius 6.0.70 → 6.2.11 |
+| 2.3.13 – 2.3.20 | 2026-07-13 → 08-30 | cyrius 6.4.62 → 6.5.x, symbol namespacing (`HWA_ERR_*`, `hw_registry_new`, kavach clashes), profile JSON round-trip, focused bayan dep |
+| 2.3.21 – 2.3.24 | 2026-09-07 → 09-22 | cyrius 6.6.x + bayan 1.5.x, the five defects cyrius 6.6.0 surfaced, issue-folder triage |
+| 2.3.25 – 2.3.27 | 2026-09-23 | Windows detection without wmic, Windows GPUs from every detection entry point, lazy NPU queries find the Apple Neural Engine, macOS real RAM and Apple Silicon via sysctl (no `system_profiler`; found in no-exec mode) |
 
 ---
 
-## 2.1.0 — cc5 adoption arc
-
-The toolchain bump in 2.0.1 was mechanical only — no source changed. 2.1.0
-adopts the cc5-era features where they remove boilerplate, plug a real
-gap, or tighten the CI gate. Each item is independent; ship in any order.
-
-### Language features (adopt where they earn their keep)
-
-- [x] **`#derive(accessors)` on the major struct types — DONE in 2.1.6.**
-  All 8 derivable structs are now on the accessor surface; the CI gate
-  registers 5 cross-file `check_struct` guards and 4 field-count bound
-  checks. See `.github/workflows/ci.yml`'s `Raw-offset guard` step.
-  - [x] `meta` (`src/model_format.cyr`) — 5 fields. **2.1.3.**
-  - [x] `storage` (`src/system_io.cyr`) — 3 fields, first cross-file
-    raw-offset CI gate (param `sd` unambiguous). **2.1.3.**
-  - [x] `ic` (interconnect, `src/system_io.cyr`) — 4 fields. **2.1.4.**
-  - [x] `plan` (sharding, `src/system_io.cyr`) — 5 fields. **2.1.4.**
-  - [x] `est` (MemoryEstimate, `src/training.cyr`) — 4 fields, field-count
-    bound (param `e` shared with `runtime_env`). **2.1.4.**
-  - [x] `reg` (accelerator_registry, `src/registry.cyr`) — 4 fields.
-    Cleaned up 9 internal `load64(r)` shortcuts. **2.1.5.**
-  - [x] `model` (`src/model.cyr`) — 4 fields, field-count bound (param
-    `m` shared with `meta`). **2.1.5.**
-  - [x] `profile` (`src/profile.cyr`) — **20 fields**, biggest struct
-    in the codebase. Param `p` unambiguous — cross-file `check_struct`.
-    Converted 4 cross-file raw `store64(p + 24, …)` writes (cuda /
-    rocm / vulkan / gaudi memory_bytes overrides) to
-    `profile_set_memory_bytes(p, …)`. **2.1.6.**
-- [x] **Multi-return `(value, error)` in detect/* — investigated, doesn't
-  fit.** Closed in 2.1.3 review without code change. The detect/ entry
-  points are `detect_<backend>(profiles, warnings)` — both vec
-  OUT-params — that push 0..N profiles and 0..M warnings, then return
-  an unused 0. There is no single value to multi-return, and errors are
-  already accumulated into `warnings` as structured entries (not
-  collapsed to a sentinel int). The 2.1.0 entry assumed a `() →
-  profile_or_sentinel` shape that doesn't match the codebase. Keeping
-  the out-param-vec pattern as canonical.
-- [ ] **`case N: { ... }` switch blocks** for the enum dispatch tables —
-  `accel_name()`, `family_name()`, `format_name()`,
-  `_gguf_file_type_name()`, `requirement_satisfied()`. Currently long
-  if/else-if chains; switch blocks compile to a jump table and document
-  intent better. *Attempted 2.1.2-pre; reverted*: cc5 5.10.x's
-  `PARSE_CASE` accepts numeric literals only — enum identifiers like
-  `case FAMILY_CPU:` fail with `expected number, got identifier`. The
-  v5.10.48 enum-const-fold landed for `PARSE_ARRAY` / `PARSE_GVAR_ARR`
-  only. Revisit after an upstream patch extends fold to case labels;
-  using `case 0:` with enum-name comments was rejected as too brittle
-  to enum renumbering.
-- [ ] **Defer-on-all-paths** — audit `system_io.cyr` and the file-handle
-  paths in `cache.cyr` for missed close-on-error. cc4+ runs defers on
-  every exit including early returns; some current code returns without
-  closing on the error branch.
-
-### CI / tooling tighten-up
-
-- [x] **`cyrius vet`** — include-graph audit. Added as CI step in slot 1
-  (reports `36 deps, 0 untrusted, 0 missing` for the current tree).
-- [ ] **`cyrius capacity --check`** — global-var ceiling gate. *Stalled on
-  toolchain*: cc5 5.10.x's `cyrius capacity` doesn't honour the manifest
-  `[deps].stdlib` auto-prepend, so it warns on every stdlib symbol when
-  src/main.cyr relies on the implicit include path. Reach out upstream
-  or re-evaluate after a cc5 patch; revisit when the warning floor is 0.
-- [ ] **`cyrius.lock` committed + `cyrius deps --verify` enforced** —
-  *not applicable while stdlib-only*: cyrius only writes a lockfile for
-  `[deps.<git>]` entries. The CI step stays in place so it engages the
-  moment a git dep gets added (e.g. an agnosys / libro pin for some
-  future feature). The "soft-skip" wording was renamed to
-  "no cyrius.lock (stdlib-only project) — nothing to verify".
-- [x] **fmt drift gate** — expanded to cover `tests/tcyr/*.tcyr`,
-  `fuzz/*.fcyr`, `benches/*.bcyr` in slot 1.
-
-### Test infrastructure
-
-- [x] **`tests/test_phase{1..11}.cyr` → `tests/tcyr/<descriptive>_test.tcyr`**
-  — shipped in 2.1.0; **6 of 11 names corrected in 2.2.0** after audit
-  revealed the original rename assumed phase numbers mapped 1:1 to
-  subjects, which several didn't. Corrected mapping:
-  - `foundation_test.tcyr`     (errors, accel types, units, quantization)
-  - `profile_test.tcyr`        (profile construction + accessors + throughput)
-  - `requirement_test.tcyr`    (accelerator requirement matching)
-  - `json_output_test.tcyr`    (JSON serialization)
-  - `model_format_test.tcyr`   (SafeTensors / GGUF / ONNX / PyTorch)
-  - `registry_test.tcyr`       (registry + builder + suggest_quant — *was system_io_test*)
-  - `io_test.tcyr`             (which / run_tool / CSV / sysfs — *was registry_test*)
-  - `gpu_parser_test.tcyr`     (CUDA + Gaudi + Neuron parsing — *was detect_gaudi_test*)
-  - `backend_test.tcyr`        (Apple + Intel + AMD XDNA + cloud ASIC — *was detect_neuron_test*)
-  - `topology_test.tcyr`       (interconnect / bandwidth / PCIe / storage — *was sharding_test*)
-  - `planning_test.tcyr`       (sharding plans + training memory + model — *was cost_model_test*)
-- [ ] **Adopt `lib/test.cyr`** stdlib module — drops the local `assert`
-  helpers in favor of the toolchain-tracked surface. Test summary
-  format ("0 failed") is what CI greps for; `lib/test` already emits it.
-
-### New stdlib adoption (where the win is concrete)
-
-- [x] **`lib/regex.cyr` for parser output — investigated, no fit.** Closed
-  in 2.1.3 review. The detect/ parsers don't actually hand-roll
-  string scanning that regex would replace — they go `run_tool` →
-  `str_split` (lines) → `parse_csv_line` (fields) →
-  `str_contains_cstr` (single-token substring checks like `"GH200"`,
-  `"gaudi3"`). Substring checks aren't what regex is for; the CSV
-  helpers are already idiomatic. Regex would be a sledgehammer for
-  cases that are already a finishing nail.
-- [x] **`lib/chrono.cyr` for cache TTL — investigated, rejected.** Shipped
-  as a no-op in 2.1.2. The local `syscall(228, CLOCK_MONOTONIC, &ts)`
-  in `cache.cyr` is 4 lines; replacing with `clock_now_ms() / 1000`
-  adds chrono as a `[deps].stdlib` entry for a 3-line save. Cost / benefit
-  doesn't justify the dep. (Revisit if any future code wants chrono's
-  ISO-8601 / duration / sleep_ms surface — then the chrono dep pays for
-  itself and this monotonic helper rides along.)
-- [ ] **`lib/json.cyr` audit** — we already use it (stdlib dep). Verify
-  the cc5-era version's API matches what `json_out.cyr` is doing; the
-  `str_builder` pattern may now have a more direct
-  `json_writer` surface upstream.
-- [x] **`lib/test.cyr` adoption — closed, was a misread.** Looked at in
-  2.1.2 review. `lib/test.cyr` is a `test_each` parameterised-test
-  helper, not an alternative assertion framework. The tests already
-  use stdlib `lib/assert.cyr` (the `assert`, `assert_eq`,
-  `assert_summary` surface). Nothing to migrate.
-
-### Dist bundle — promoted to 2.2.4
-
-- [x] **`[lib]` section + `cyrius distlib`** — promoted to its own
-  release slot at **2.2.4** (2026-05-19) after `mihi` arrived as the
-  first library-shaped consumer: mihi's no-exec rule forbids shelling
-  out to the binary, so the GPU surface mihi needs (M3 in mihi's own
-  roadmap) is gated on this reshape. See 2.2.4 below for the
-  acceptance criteria.
-
-### Out of scope (kept for 2.2+)
-
-- New hardware backends, new detection paths, new CLI subcommands,
-  changes to `--json` output schema. 2.1.0 is structural cleanup only.
-
----
-
-## 2.2.x — Platform Validation
-*(was 1.3.0 in the Rust roadmap; 2.2.0 itself shipped as a test-rename /
-README refresh slot — not a real Platform Validation release. The items
-below are **open and queued for pickup**, not deferred.)*
-
-The pattern for every item here: implement the detection / parsing path
-against a synthesized fixture first (no hardware needed — `tests/fixtures/`
-or inline test strings), then wire to real hardware as access becomes
-available. Hardware-access gating doesn't block the source-side work;
-the parser + struct construction can ship without ever booting the
-target device.
-
-### Cross-platform (no hardware needed for source work)
-
-- [~] **Windows: DXGI adapter enumeration** — DXGI `EnumAdapters1` →
-  adapter LUID, dedicated VRAM, shared memory, driver version. *In
-  progress*:
-  - [x] **2.2.2** — `src/detect/windows.cyr` skeleton behind
-    `#ifdef CYRIUS_TARGET_WIN`, wired into main.cyr include graph,
-    Linux build byte-identical.
-  - [ ] **2.2.3** — DXGI COM binding + `DXGI_ADAPTER_DESC1` parser,
-    Linux-side fixture tests under `tests/fixtures/windows/`.
-  - [ ] **CI cross-build + cass smoke** — re-verify against
-    `cycc_win` 6.0.0 (legacy name `cc5_win`). The 5.11.5-era PE
-    emit regression documented in
-    `memory/feedback_cc5_win_exit_propagation.md` may already be
-    closed by the 6.0.0 toolchain; smoke probe required before
-    declaring this unblocked. Linux-hosted fixture tests in 2.2.3
-    don't depend on this either way.
-
-### 2.2.4 — `[lib]` reshape (mihi unblock) — SHIPPED 2026-05-19
-
-Promoted out of the 2.1.0 "Dist bundle (defer until consumer demand)"
-slot now that a real library consumer landed. `mihi` v0.3.0 (released
-2026-05-19) needs the GPU primitives via `include`, not `exec` — its
-CLAUDE.md forbids spawning processes from probes. This release adds
-the `[lib].modules` surface and the `cyrius distlib` output so mihi
-(and any future library consumer) can pin against ai-hwaccel from
-their own `cyrius.cyml`.
-
-- [x] **`[lib].modules` declared in `cyrius.cyml`** — 35 modules in
-  `src/main.cyr` include order. Excluded: `src/main.cyr` (CLI argv
-  parsing), `src/json_out.cyr` (binary output formatting — consumers
-  do their own). Every detection backend, registry/profile/plan
-  surface, the cost / training / model-format / requirement /
-  async / cache / lazy modules all ride along.
-- [x] **`cyrius distlib` produces deterministic `dist/ai-hwaccel.cyr`**
-  — 5392 lines / 168 KiB at 2.2.4. Two sequential invocations sha256
-  to the same digest. Bundle is committed at the tag so consumer
-  `cyrius deps` resolves at git-archive-fetch.
-- [x] **Consumer-facing entry shim + README example** —
-  `[deps.ai-hwaccel]` block plus an `include "lib/ai-hwaccel.cyr"`
-  call site in the README "Using as a library" subsection. `cyrius
-  deps` lands the bundle at `lib/ai-hwaccel.cyr` (filename verified
-  empirically against the cyrius 6.0.0 toolchain).
-- [x] **No CLI regression** — `build/ai-hwaccel` rebuilds to 287096
-  bytes (byte-identical to 2.2.3); all 11 test units pass with 518
-  assertions clean post-`[lib]` addition.
-- [x] **Determinism + freshness guard in CI** — new `distlib drift +
-  determinism` step regenerates the bundle, diffs against the
-  committed copy, then re-runs and sha256-compares. Sits between
-  `Lint` and `Build (DCE)`. Mirrors the libro / mihi / yukti gates.
-- [ ] **`mihi-side smoke`** — after 2.2.4 publishes, mihi M3 lands
-  `mihi_gpu_vendor` / `mihi_gpu_model` against the new `[lib]`
-  surface; smoke on archaemenid (Ryzen 7 5800H with Radeon Graphics)
-  prints non-null GPU lines. *External — tracked in mihi's roadmap.*
-
-**Acceptance**: a consumer manifest with
-`[deps.ai-hwaccel] tag = "2.2.4" modules = ["dist/ai-hwaccel.cyr"]`
-resolves via `cyrius deps`, the consumer can
-`include "lib/ai-hwaccel.cyr"`, and the detection entry points are
-callable without invoking the CLI binary. **Met for the in-repo
-deliverables; mihi-side verification queues for v0.4.0.**
-
-### Hardware validation (fixture-first, hardware-second)
-
-- [ ] **NVIDIA H100 / A100 / GH200** — capture real `nvidia-smi`
-  CSV from AWS p5 / GCP a3-high instances → `tests/fixtures/cuda/`,
-  add fixture tests that exercise `parse_cuda_output`. GH200's unified
-  memory (`mem_bytes + 480 GiB`) is already coded — fixture locks it in.
-- [ ] **AMD MI300X / MI250** — capture `/sys/class/drm/*/device/*`
-  contents → `tests/fixtures/rocm/`. CXL memory path (`mem_info_vis_vram_total`)
-  is already coded — fixture locks in the MI300X case.
-- [ ] **Google TPU v5e / v5p** — capture `/sys/class/accel/*` contents
-  on a GCE v5 slice → `tests/fixtures/tpu/`. Multi-host pod slice
-  testing carries to the second-pass slot.
-- [ ] **AWS Neuron trn1 / inf2** — capture `neuron-ls --json` from
-  trn1.32xlarge → `tests/fixtures/neuron/`. Multi-device fixture
-  covers the per-core count math.
-- [ ] **Intel Gaudi 3** — capture `hl-smi --query-aip` on Gaudi3
-  (AWS DL2) → `tests/fixtures/gaudi/`. HL-325 device-name override
-  path locks in here.
-
-### Untested backends (open — implement parser against fixture, then
-verify on hardware when access happens)
-
-- [ ] **Cerebras WSE** — `/dev/cerebras*` + sysfs. Fixture capture
-  needed (sample from Cerebras docs or contributor with access).
-- [ ] **Graphcore IPU** — `gc-info` output → fixture. Synthesizable
-  from public Graphcore SDK documentation.
-- [ ] **Groq LPU** — `/dev/groq*` sysfs. Driver isn't on public Linux
-  distros today, but the sysfs format is documented; fixture-first
-  is still viable.
-- [ ] **Samsung NPU** — `/sys/class/npu` on Galaxy S24+ (Exynos).
-  Fixture from a Samsung dev portal capture.
-- [ ] **MediaTek APU** — `/sys/class/misc/apusys` on Dimensity.
-  Fixture from MediaTek NeuroPilot docs.
-
-### Supporting infrastructure (any slot)
-
-- [ ] **`tests/fixtures/` directory** — move the inline sample tool
-  outputs in `gpu_parser_test.tcyr` / `backend_test.tcyr` into per-
-  backend fixture files. Establishes the contribution pattern for
-  every backend item above ("here's a capture of `<tool> <args>` on
-  `<hardware>` — add it to fixtures/").
-- [ ] **`cyrius vet` widened to tests/tcyr/** — currently scans only
-  `src/main.cyr`. Each test unit is its own compilation root with
-  its own include graph; vetting tests too closes a coverage gap.
-
----
-
-## 2.3.x — Ecosystem
-*(was 1.4.0 in the Rust roadmap, penciled in as 2.3.0; bumped because the
-2.3.0 slot shipped as the toolchain 6.0.25 + serialization/dedup audit on
-2026-06-01 — see the SHIPPED section above. Sequenced across patches: the
-compiled binary + its JSON contract is the language-neutral substrate;
-Python is the first binding, an AgnosAI / agnos-kernel target follows.)*
-
-Bindings and packaging.
-
-### 2.3.1 — JSON surface extension (SHIPPED, 2026-06-01)
-
-The data layer every binding consumes. Schema bumped v3 → v4.
-
-- [x] **Full detection surface reachable as JSON** — `system_io`
-  (interconnects / storage / runtime environment) added to the default
-  registry JSON; new `--plan` (ShardingPlan), `--train` (training
-  memory), and `--cost --json` modes. Serializers in `src/json_out.cyr`
-  + `cost_to_json` in `src/cost.cyr`. 36 JSON assertions; ns-resolution
-  benches for each new serializer.
-
-### 2.3.2 — Python bindings (SHIPPED, 2026-06-01)
-
-`bindings/python/` — a thin, dependency-free wrapper over the binary +
-schema-v4 JSON. No `.cyr` changed (binary identical to 2.3.1).
-
-- [x] **Complete API surface** — typed dataclasses for `Registry`,
-  `AcceleratorProfile`, `SystemIo`, `Interconnect`, `StorageDevice`,
-  `RuntimeEnvironment`, `ShardingPlan`, `ModelShard`, `TrainingMemory`,
-  `CostReport`. API: `detect / summary / plan / training_memory / cost /
-  version`. Binary discovery via arg / `AI_HWACCEL_BIN` / bundled / PATH.
-- [x] **Python-native ergonomics** — dataclasses, fixed-point
-  convenience properties, optional pandas `to_dataframe()`. 15-test
-  `unittest` suite (9 model + 6 e2e).
-- Known limitation tracked for 2.3.3: binary reads `VERSION` /
-  `data/cloud_pricing.json` cwd-relative.
-
-### 2.3.3 — Working-dir-independent data files (SHIPPED, 2026-06-01)
-
-- [x] **`AI_HWACCEL_DATA_DIR` resolution** — binary locates `VERSION` +
-  `data/cloud_pricing.json` via the env var (cwd fallback preserved);
-  the Python wrapper sets it for the bundled binary. `version()` /
-  `cost()` now work regardless of cwd. `scripts/stage_binary.sh` stages
-  `_bin/{binary, VERSION, data/}`; `version-bump.sh` made dist-aware.
-  Closes the 2.3.2 known limitation.
-
-### 2.3.4 — Linux wheels + machinery (SHIPPED, 2026-06-01)
-
-- [x] **`pip install ai-hwaccel` (Linux)** — platform wheels bundling a
-  static `ai-hwaccel` binary + data (subprocess + JSON; no FFI).
-  `manylinux2014_x86_64` (built + venv-validated) and
-  `manylinux2014_aarch64` (cross-built). `setup.py` tags
-  `py3-none-<plat>`; `scripts/{stage_binary,build_wheel,build_remote}.sh`;
-  CI `wheels.yml` matrix. Extensible to an **agnos-kernel** target.
-
-### 2.3.5 — Toolchain pin 6.0.25 → 6.0.30 (SHIPPED, 2026-06-01)
-
-- [x] **Pin bump** — resolves the wrapper drift; stdlib re-synced from
-  the 6.0.30 snapshot. No `.cyr` changed. Benches confirm no regression
-  (`json_serialize_13dev` 25535 → 25245 ns, noise). All gates green on
-  6.0.30.
-
-### 2.3.6 — macOS wheel (SHIPPED, 2026-06-02)
-
-- [x] **macOS arm64 wheel** — `ai_hwaccel-2.3.6-py3-none-macosx_11_0_arm64`.
-  Arc: 6.0.30 shipped no Darwin compiler; 6.0.38 shipped the arm64
-  compiler but surfaced a new blocker (`cyrius build` false-negatived the
-  install check on `cyrius = "<pin>"` + `[deps] stdlib`); **cyrius
-  6.0.40–6.0.43 fixed it** (three stacked Darwin-ABI defects — see cyrius
-  issue `2026-06-02-macos-arm64-deps-stdlib-pin-check.md`, RESOLVED). Pin
-  bumped 6.0.30 → 6.0.43. Built on `ecb` via `build_remote.sh ecb
-  macosx_11_0_arm64`; verified end-to-end (Mach-O arm64, stdlib executes,
-  all subcommands run). CI `wheels.yml` `macos` job enabled. `lib sync`
-  on Darwin is bypassed (still-unported getdents64 surface) — `cyrius
-  build` resolves `[deps] stdlib` directly. universal2 deferred until the
-  backend also emits x86_64 Mach-O (see the sibling x86 issue).
-
-### 2.3.7 — Windows wheel (SHIPPED, 2026-06-03)
-
-- [x] **Windows x86_64 wheel** — `ai_hwaccel-2.3.7-py3-none-win_amd64`,
-  with real CPU + GPU detection. Verified end-to-end on `cass` (Win 11):
-  real total RAM + Intel UHD Graphics 600 detected, all subcommands run.
-  - **Cross-built on Linux** — `cycc_win` (Linux-hosted, emits PE32+); no
-    Windows runner. `stage_win_cross.sh` pipes `[deps] stdlib` +
-    `src/main.cyr` → `cycc_win`. `wheels.yml` `windows` job on
-    `ubuntu-latest`, enabled.
-  - **cyrius unblocked it:** 6.0.50 unfroze `cycc_win` (was `cc5_win`
-    5.11.69; fixed the PROT_READ build break); 6.0.51 routed Win32
-    process creation (CreateProcessW) so detection's subprocess spawns
-    work — cyrius issue
-    `2026-06-03-windows-pe-syscall-surface-blocks-detection.md` (RESOLVED).
-  - **Our side:** implemented `detect_windows` (wmic Win32_VideoController
-    → `ACCEL_WIN_GPU`) + a Windows `detect_system_memory` branch (wmic
-    ComputerSystem), replacing the DXGI stub / 16 GiB fallback. Pin →
-    6.0.54.
-  - **Follow-up (2.3.8):** native DXGI for precise VRAM (WMI AdapterRAM
-    caps at 4 GiB) — gated on cyrius PE COM-vtable + dxgi.dll IAT (filed:
-    `cyrius/docs/development/issues/2026-06-03-windows-pe-com-vtable-dxgi-for-gpu-enum.md`).
-
-### 2.3.8 — Toolchain 6.0.70 (SHIPPED, 2026-06-05)
-
-- [x] **Pin 6.0.54 → 6.0.70**, stdlib re-synced (89 files). Builds clean,
-  12/12 test units pass. Accepted a ~5–10 % allocation-path cost from
-  cyrius 6.0.64's global allocator spinlock — a heap-corruption fix the
-  threaded `async_detect` path needs (justified in CHANGELOG 2.3.8).
-- [~] **DXGI precise VRAM → deferred to 2.3.9.** 6.0.70 lands the
-  foundation (`callptr`/`IR_CALL_INDIRECT`, `dxgi.dll!CreateDXGIFactory1`
-  import + S_OK on cass, COM-vtable dispatch capability) but the real
-  Win64 COM callee (`EnumAdapters`/`GetDesc` VRAM read) corrupts the
-  caller frame on cass — fixed upstream in **6.0.71** (cyrius issue
-  `2026-06-05-windows-com-vtable-real-callee-frame-corruption.md`).
-
-### 2.3.9 — Windows DXGI precise VRAM + structured logging (cyrius 6.1.18)
-
-- [x] **Pin 6.1.5 → 6.1.18**, stdlib re-synced (94 files; sakshi
-  v2.2.6 → **v2.2.10** + new `fs_win.cyr` Windows `dir_list` port). The
-  **compiler** bump is a pure codegen no-op: cycc 6.1.15 and 6.1.18 emit a
-  **byte-identical** 370,776 B Linux binary (same bytes as the 6.1.5
-  baseline). The synced **stdlib** adds **+16 B** (370,776 → 370,792 B),
-  entirely sakshi 2.2.10 source content linked through `log.cyr` — not a
-  hot path. 13/13 test units (606 assertions) pass;
-  `fmt`/`lint`/`vet`/distlib-determinism
-  gates clean; benchmark delta within noise (see CHANGELOG /
-  bench-history.csv).
-- [x] **DXGI precise VRAM enabled by default.** The `.rdata`-corruption
-  residual that kept the DXGI pass gated behind `-D AI_HWACCEL_DXGI` was
-  fixed upstream in **cyrius 6.1.7** (m128 array-padding / PE `.rdata`
-  layout divergence; GPU-confirmed on cass via ai-hwaccel's own
-  `str_builder_add_cstr("true")` repro). `src/detect/windows.cyr` un-gated:
-  `detect_windows` parses WMI then enriches with `EnumAdapters1 → GetDesc1
-  → DedicatedVideoMemory`, reporting `max(WMI, DXGI)`. **Verified on cass**
-  (Windows 10.0.26200): clean, uncorrupted JSON; Intel UHD 600 reports
-  1 GiB (WMI's shared figure correctly kept — integrated GPUs have ~0
-  *dedicated* VRAM). Discrete precise-VRAM override path GPU-confirmed
-  upstream.
-- [x] **Structured logging** (`src/log.cyr` over stdlib `sakshi`) — now
-  works on **Linux/macOS *and* Windows PE.** It was previously silently
-  dropped on PE: sakshi holds syscall numbers in `var` slots, and cyrius's
-  PE syscall reroute only fired for a **compile-time-literal** number, so
-  `syscall(_SK_SYS_WRITE, …)` fell through to a non-functional raw `0F 05`
-  and wrote nothing (no fault, exit 0). **Fixed in cyrius 6.1.18**: the PE
-  reroute now resolves a `var`-held syscall number to its constant value,
-  so `n=1` (write) routes to `WriteFile` (the original blockers —
-  `cyrius/.../2026-06-09-pe-syscall-variable-number-not-rerouted.md` and
-  `sakshi/.../2026-06-09-windows-pe-var-syscall-no-reroute.md`, sakshi
-  roadmap **W1** — are resolved/archived). **Verified on cass** (Windows
-  10.0.26200) with the synced sakshi v2.2.10: `detect -vv` (stdout→NUL)
-  emits the full span on stderr — `[ENTER] detect`, `[DEBUG]
-  detect: builder_mask=…`, `[DEBUG] windows: dxgi vram below wmi, kept wmi
-  (bytes) 1073741824`, `[INFO] detect: profiles=2`, `[EXIT] detect`; the
-  default WARN level stays correctly silent on success. stdout remains
-  byte-clean for JSON consumers; no measurable hot-path cost. Bundle
-  consumers must add `sakshi` to their `[deps] stdlib`. *Cosmetic residual:*
-  the trace-id prefix is `[0]` on PE because `getpid` (syscall 39) isn't in
-  the reroute whitelist; delivery is unaffected.
-- Windows runtime CI gate → **deferred to 2.3.11** (the PE feature surface
-  is only manually cass-smoked today; see below).
-
-### 2.3.10 — Toolchain bump to cyrius 6.2.11 (json → bayan stdlib reorg)
-
-- [x] **Pin 6.1.18 → 6.2.11**, stdlib re-synced (97 files). Headline is a
-  stdlib reorganization: the standalone `lib/json.cyr` is gone, folded
-  (with `base64`/`csv`/`u128`/`bigint`/`toml`/`cyml`) into the new
-  `lib/bayan.cyr` distribution bundle; its functions renamed `json_*` →
-  `bayan_json_*`. ai-hwaccel never called the stdlib JSON parser
-  (`src/json_out.cyr` is a hand-rolled `str_builder` serializer;
-  `src/model_format.cyr` does its own byte-level safetensors header parse),
-  so the now-dangling `"json"` entry in `[deps] stdlib` was **dropped**
-  rather than re-pointed at `bayan`. No `src/` changes.
-- [x] **Benchmark-neutral, no regression.** Full suite A/B'd 6.1.18 vs
-  6.2.11, same machine/iters. All moves within run-to-run noise (confirmed
-  across 3× re-runs of the deterministic sub-µs rows — `total_memory_13dev`
-  new 141–157 ns vs baseline 144–149 ns overlap). 12/12 test units pass,
-  6/6 fuzz harnesses build, binary smoke-tested. See CHANGELOG /
-  bench-history.csv.
-
-### 2.3.11 — Windows runtime CI gate (sakshi roadmap W2)
-
-**Why:** `wheels.yml` cross-builds the PE but only asserts the `MZ` magic, so
-a silently-broken *runtime* feature ships green. 2.3.9 proved the risk is
-real — both the DXGI `.rdata` corruption and the dropped PE logging were
-caught **only** by manual `ssh cass` smoke, never by CI. The PE is the one
-target with no automated runtime coverage. Close that gap.
-
-- [x] **Added a PE runtime smoke leg** — the `windows-smoke` job in
-  `wheels.yml` (`needs: windows`). Downloads the `wheels-windows` artifact,
-  extracts the bundled `_bin/ai-hwaccel.exe`, and asserts on a real Windows
-  execution:
-  - [x] **(a) Detection** — bare `ai-hwaccel.exe` exits 0 and emits
-    **well-formed JSON** (`schema_version` + non-empty `profiles[]`; a CPU
-    profile is always present). Regression gate for the COM/`.rdata`
-    corruption class. *(The CLI is flag-based — no `detect` subcommand; bare
-    invocation is the full registry JSON.)*
-  - [x] **(b) Structured logging** — `ai-hwaccel.exe -vv` writes the
-    `[ENTER]`/`[EXIT] detect` span to **stderr** while stdout stays clean,
-    and the **default level stays silent**. Regression gate for the PE
-    var-syscall reroute (W1).
-- [x] **Execution venue chosen: `windows-latest` ephemeral runner** — the
-  preferred option (self-contained, no secrets, no self-hosted wiring).
-  `ssh cass` remains the documented fallback if the cross-built PE ever
-  fails to run cleanly on the GH runner.
-- [x] **`VERSION` resolution checked** — `ai-hwaccel.exe --version`, run from
-  `_bin/` (where the wheel co-locates VERSION beside the EXE), reports the
-  bundled version (not `unknown`). The smoke runs it cwd-relative because of
-  the PE env-var limitation below.
-
-**Follow-up surfaced by this gate — `AI_HWACCEL_DATA_DIR` is a no-op on PE.**
-`cmd_getenv` (`src/detect/command.cyr`) reads `/proc/self/environ`, which
-doesn't exist on Windows, so the env var the Python `_runner` sets to point
-the bundled binary at its data files is silently ignored on PE — `--version`
-/ `--cost` fall back to **cwd-relative** resolution there. Detection (the
-primary path) is unaffected. **→ Resolved in 2.3.12 (below) via a
-`--data-dir` flag**, since the planned `GetEnvironmentVariable` path is
-blocked on a cyrius reroute we can't add.
-
-### 2.3.12 — `--data-dir` flag (PE-safe data-file resolution)
-
-**Why:** the 2.3.11 gate confirmed `AI_HWACCEL_DATA_DIR` is unreadable on PE
-(no `/proc/self/environ`; no `GetEnvironmentVariable` reroute in cyrius
-6.2.11), so the bundled Windows wheel's `--version`/`--cost` were
-cwd-dependent. The env channel can't be fixed in-repo. Route the data dir
-through argv instead — readable on PE (`GetCommandLineW`/`CommandLineToArgvW`,
-already wired).
-
-- [x] **`--data-dir <path>` CLI flag** (`cmd_data_dir_arg()` in
-  `command.cyr`). `data_file_path` precedence is **flag → env → cwd**;
-  self-contained argv scan (works on PE and before main's parser). In
-  `--help`.
-- [x] **Python `_runner`** passes `--data-dir <bundled _bin>` on the argv
-  for the bundled binary (env var still exported for back-compat;
-  caller-set env still respected). `version()`/`cost()` now work on the
-  Windows wheel from any cwd.
-- [x] **Tests** — `test_bundled.py`: flag resolves VERSION with env stripped
-  + foreign cwd; runner places `--data-dir` on argv. 20/20 Python + 12/12
-  cyrius units pass; benchmark-neutral (no hot path touched).
-- [ ] **Upstream (cyrius), drafted not filed:** add a PE environment-read
-  reroute (`GetEnvironmentVariableW`) so `cmd_getenv` / stdlib `getenv`
-  work on PE and the env channel reaches parity. ai-hwaccel no longer
-  depends on it; tracked for completeness.
-
-*Out of scope (upstream, not ours):* the `[0]` trace-id prefix on PE —
-`getpid` (syscall 39) isn't in cyrius's PE reroute whitelist. Log a cyrius
-issue if we want real trace ids on Windows; log delivery is unaffected.
-
-### 2.3.13 — Toolchain bump to cyrius 6.4.62 + `DetectionError` namespacing
-
-**Why:** two-minor toolchain bump (6.2.11 → 6.4.62). The codegen win is
-real and broad; more importantly, 6.4.62's linker now *reports* duplicate
-global symbols, promoting a pre-existing collision to an in-tree warning.
-
-- [x] **Pin 6.2.11 → 6.4.62**, stdlib re-synced from the 6.4.62 snapshot
-  (`cyrius lib sync` → 37-file `[deps].stdlib` subset; every `include`d
-  module verified byte-identical). Drift warning cleared.
-- [x] **`DetectionError` enum `ERR_* → HWA_ERR_*`** (all six members +
-  refs + 3 test units). `sakshi` — the logging lib, in **every** build via
-  `src/log.cyr` — owns bare `ERR_TIMEOUT = 5`; our bare `ERR_TIMEOUT = 3`
-  collided under last-def-wins (enum members are global constants). Values
-  unchanged; no bare aliases (they'd reintroduce the collision). This is
-  the ai-hwaccel-owned half of the 2026-06-23 collision issue, pulled
-  ahead of 2.4.0. **`registry_new → hw_registry_new` also landed on main
-  (2026-07-13), pending version bump** — see the 2026-06-11 issue; the
-  sibling function-namespace rename, done for the same last-def-wins
-  reason (bote-core's 24-byte `registry_new`), no alias.
-- [x] **Bench A/B, min-of-8 raw-ns, DCE.** 8 wins (3.7%–36.7%; headline
-  `parse_cuda_8gpu` −36.7%, `plan_70B_bf16_4gpu` −35.0%), 7 neutral,
-  **0 regressions**. 594 assertions / 12 units, 6/6 fuzz; vet/lint/fmt/
-  raw-offset/distlib all clean. See CHANGELOG / bench-history.csv.
-- [x] **`scripts/bench-history.sh` parser fixed** for 6.4.x decimal
-  `bench_report` units (`19.460us`) — the old grep captured the fractional
-  digits and would have written garbage µs rows from here on.
-
-### 2.3.21 — Toolchain bump to cyrius 6.6.0 + bayan 1.5.5 (SHIPPED, 2026-09-07)
-
-**Why:** 38 upstream releases (6.5.36 → 6.6.0). Two of them land directly on
-ai-hwaccel's shape: 6.5.72 makes `CYRIUS_DCE=1` actually eliminate dead code
-instead of NOP-padding it, and 6.5.71 routes `#derive(accessors)` getters and
-setters through the inline-replay path — and every heap struct here is
-`#derive(accessors)`.
-
-- [x] **Pin 6.5.36 → 6.6.0**, `./lib/` re-synced (38 declared leaves, 16 files
-  changed) and `cyrius.lock` regenerated (45 → 46 entries; `lib/hashseed.cyr`
-  arrives via `cyrius deps`, not `lib sync`). Drift warning cleared.
-- [x] **bayan `1.5.2` → `1.5.5`** — forced, and atomic with the pin. The
-  `Result` arity gate lives in the vendored `lib/result.cyr`: 1.5.2 + the new
-  `lib/` is a hard compile error, 1.5.5 + the old `lib/` compiles and corrupts
-  silently. Neither half is landable alone.
-- [x] **Five defects fixed** — four repo-side portability bugs (cmd_getenv
-  /proc-only; cache.cyr raw x86_64 mkdir/unlink on aarch64; _monotonic_secs
-  unguarded; detector threads logging through single-threaded sakshi) and one
-  upstream: `CYRIUS_DCE=1` emits a PE that dies with 0xC0000005, so the flag is
-  dropped on the `--win` build only. 623 assertions / 13 units, 6/6 fuzz, vet /
-  lint / fmt / raw-offset guard / distlib all clean.
-- [x] **Bench A/B**, per-arm shadow `CYRIUS_HOME` with a drift guard (both arms
-  otherwise resolve the same `cycc` and the A/B measures nothing), 9 interleaved
-  build rounds + 40 alternating executions, Mann-Whitney over the distributions.
-  **12 wins (2.3%–55.8%), 3 neutral, 0 regressions.** See CHANGELOG /
-  bench-history.csv.
-- [x] **Binary size:** x86_64 ELF 419 360 → 214 504 B (**−48.9%**) with
-  `CYRIUS_DCE=1`. PE 497 152 B (now built without DCE), Mach-O arm64 691 808 B,
-  aarch64 673 096 B — only the x86_64 backend reclaims today.
-- [x] **Verified on all four targets**, not just Linux: Windows PE on `cass`
-  (all three `windows-smoke` assertions, real CPU+GPU detection), arm64 macOS on
-  `ecb`, ELF-aarch64 under `qemu-aarch64`, x86_64 Linux native.
-- [x] **Inherited user-visible:** `AI_HWACCEL_LOG` now honoured on the macOS and
-  Windows wheels (a silent no-op there since 2.3.8); arm64-macOS threading and
-  mutexes become real.
-- [x] **Doc rot cleared** where the bump made a claim false — README key numbers
-  and the retired `cyrius deps` recipe, CLAUDE.md pins and counts, ci.yml's
-  "stdlib-only, nothing to verify" comments, `.gitignore`, CONTRIBUTING and
-  docs/guides/testing.md counts.
-- [x] **Repaired the `cyrius.lock` drift gate** — `cyrius deps` ran before
-  `cyrius deps --verify`, so verify only ever checked the file it had just
-  rewritten and could never fail. Now a sorted content comparison against
-  `git show HEAD:cyrius.lock` (sorted because `deps` line order is not stable
-  across a clean-tree rebuild); tested in both directions.
-- [x] **All four filed defects fixed in 2.3.21's follow-up, 2.3.21** — see that
-  CHANGELOG section. Remaining in each issue: the cross-host / qemu tests that
-  would have caught them.
-- [x] **Filed in 2.3.21, fixed in 2.3.21:**
-  [`cmd_getenv` is /proc-only](issues/2026-09-07-cmd-getenv-proc-only.md),
-  [`_monotonic_secs` unguarded on macOS/Windows](issues/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md),
-  [threaded detection logs through single-threaded sakshi](issues/2026-09-07-threaded-detect-vs-single-threaded-sakshi.md),
-  [`cache.cyr` raw syscalls wrong on aarch64](issues/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md).
-- [x] **`cmd_getenv` -> stdlib `getenv`** — `AI_HWACCEL_DATA_DIR`, `$PATH`
-- [x] **`cache.cyr` mkdir/unlink via per-target `sys_*` peers** — disk cache
-- [x] **`_monotonic_secs` target-branched** — cache TTL is no longer an
-- [x] **Parse-warning logging hoisted to the main thread** — closes the sakshi
-- [x] **Bench delta** — 0 algorithmic regressions; one layout-attributable
-- [ ] **Still open:** qemu-aarch64 disk-cache test, threaded path on real Apple
-- [ ] **Backfill 2.3.14–2.3.20** — this file's last SHIPPED entry before 2.3.21
-  was 2.3.13; the CHANGELOG has them, the roadmap does not.
-
-### 2.3.22 — Issue-folder triage (SHIPPED, 2026-09-07)
-
-**Why:** four issues predated the 2.3.21 work and none had been re-checked.
-
-- [x] **`load_models` returned 1 of 26 models** — the scanner brace-matched the
-  `{"models":[…]}` wrapper as a single object. Fixed via option (a) (teach the
-  loader the wrapper; shipped data file unchanged), plus the off-by-one NUL
-  write, the silent truncation, and a bare cwd-relative path where the sibling
-  loader already used `data_file_path()`.
-- [x] **Added `tests/tcyr/model_catalog_test.tcyr`** — asserts against
-  `data/models.json` as shipped. The absence of any test is why the defect
-  survived three releases; `load_models` has no in-repo callers.
-- [x] **Fixed a suite that could not fail** — `json_roundtrip_test.tcyr`
-  discarded `assert_summary()`'s return, so its failures exited 0. `cyrius tests`
-  now exits 1 on a broken assertion; confirmed by sabotage.
-- [x] **Closed three issues on verification** and archived them: `registry_new`
-  collision, `ERR_TIMEOUT` enum collision, and the agnos threading blocker — the
-  last resolved upstream (`lib/thread_agnos.cyr` + `lib/sync.cyr` agnos branches),
-  so no gating was added. `cyrius build --agnos` verified green.
-- [x] **Bench delta:** 0 regressions, 14 neutral, 1 marginal improvement, with a
-  byte-identical `parsing` binary as the in-run noise floor (±2.3%).
-
-### 2.3.24 — Toolchain bump to cyrius 6.6.6 + bayan 1.5.6 (SHIPPED, 2026-09-22)
-
-**Why:** four upstream repair releases (6.6.3 → 6.6.6) past 2.3.23's 6.6.2, and
-bayan 1.5.6. No source change. This entry replaces the two "Moving the cyrius
-pin to 6.6.5 / 6.6.6" checklists that preceded the bump; each of their items
-is resolved below.
-
-- [x] **Pin 6.6.2 → 6.6.6, bayan 1.5.5 → 1.5.6.** `./lib/` re-vendored from a
-  deleted tree: 20 of the 46 stdlib files change and `lib/alloc_cx.cyr` arrives
-  (48 files); bayan's `dist/bayan-json.cyr` differs only in its version line.
-  `cyrius.lock` regenerated — path-sorted now, with a `cyrius 6.6.6` trailer.
-- [x] **`cyrius.cyml` stripped back to a manifest** — its per-release notes
-  (2.2.6, 2.3.19–2.3.21) were already in the CHANGELOG.
-- [x] **Re-ran `cyrius deps` at the bump** (6.6.5: the aarch64 peer moved
-  `SYS_UNLINKAT` 35 → 263). `lib/` and compiler move together; the aarch64
-  build runs under qemu with output identical to x86_64.
-- [x] **Windows `O_TRUNC` — the pre-bump note overstated it.** It said the
-  Windows wheel had been corrupting the detection cache. The only file writer
-  in `src/` is the disk-cache API (`disk_cached_get`, `src/cache.cyr:227`);
-  `src/main.cyr` never calls it, and the wheel runs the CLI. Library consumers
-  of `dist/ai-hwaccel.cyr` building for Windows were exposed. Verified on
-  `cass` with a `file_write_all` long-then-short probe: 6.6.2 leaves the old
-  tail (130 B on disk for a 34 B write), 6.6.6 truncates (34 B).
-- [x] **`stage_binary.sh` / `stage_win_cross.sh` do not swallow a failed
-  build** — both run under `set -euo pipefail`; the Windows one also checks the
-  `MZ` magic.
-- [x] **The "does not apply" list re-checked against the tree:** no `O_APPEND`
-  in `src/` and no caller of `lib/io.cyr`'s one user of it
-  (`file_append_locked`); no `async fn`, `operator`, `ret2`/`rethi` or SIMD; no
-  column-0 blocks; no `regression_*` calls; no `vec_*` of our own; 10
-  `file_exists`/`file_read_all` call sites. Build and 629 assertions clean
-  with no new diagnostics.
-- [x] **`windows-smoke` reproduced on `cass`** (Windows 11 10.0.26200) for
-  2.3.23, 2.3.24 and 2.3.24 + `CYRIUS_DCE=1`: all three assertions pass, CLI
-  output identical across the three on 10 invocations.
-- [x] **Bench delta, layout-controlled** (4–5 layouts per arm, instrument held
-  fixed, floor-bound rows re-timed in batch): `parse_cuda_8gpu` −4.3% (−3.0%
-  batch-timed), `parse_vulkan_2gpu` −3.0% (−2.4% batch-timed), every other row
-  neutral within layout spread, **0 regressions**. See CHANGELOG.
-- [ ] **ADR-004's `-D<BACKEND>` recipes** —
-  `docs/guides/production.md:16`, `docs/troubleshooting.md:31`,
-  `docs/performance.md:57`, `docs/guides/testing.md:38,41`,
-  `docs/decisions/004-feature-flags-per-backend.md:23,26`. 6.6.5 honours `-D`
-  after the operands, but nothing in `src/` reads `CUDA`/`ROCM`/`TPU`/
-  `NO_BACKENDS` (its only `#ifdef`s are `CYRIUS_TARGET_*`), so each recipe
-  builds every backend. Implement the gates or correct the docs and ADR-004's
-  status.
-- [x] **Windows detection depends on `wmic`, which `cass` no longer has**
-  (removed from Windows 11 24H2+). 2.3.23 and 2.3.24 alike report CPU only,
-  with the 16 GiB fallback on an 8 GB host, and miss its Intel UHD 600;
-  `windows-smoke` passes regardless because a CPU profile is always present.
-  Pre-existing, not a bump regression. **Fixed in 2.3.25** (see below).
-- [ ] **Retire the `CYRIUS_DCE=1` PE workaround** — fixed upstream in 6.6.1
-  (PE declines compaction; dead bodies are NOP-filled, so the file stays
-  510 976 B) and verified on `cass` under 6.6.6. It would shrink the EXE inside
-  the wheel from 77 534 to 43 684 B compressed (zip's default deflate). See
-  [the issue](issues/2026-09-07-cyrius-dce-pe-access-violation.md).
-- [ ] **macOS arm64 runtime not re-verified** — `ecb` has cyrius ≤ 6.6.4, and
-  the `macos-14` wheel job builds without running the binary. *Partly covered
-  since 2.3.26:* the pinned toolchain's Linux-hosted `cycc_aarch64` with
-  `CYRIUS_MACHO_ARM=1` cross-builds a Mach-O arm64 binary from the same input
-  `stage_binary.sh` composes. Ad-hoc signed (`codesign -s - -f`) it runs on
-  `ecb`, and the 2.3.26 CLI passed there. The wheel's own native build still
-  goes unrun.
-
-### 2.3.25 — Windows detection without wmic; Windows GPUs on every entry point
-
-- [x] **GPUs from DXGI, RAM from `GlobalMemoryStatusEx`.** One `Windows GPU`
-  profile per hardware adapter (name + `DedicatedVideoMemory`), software
-  adapters skipped. `wmic` is only a fallback: for GPUs when DXGI itself is
-  unavailable, for RAM when `GlobalMemoryStatusEx` fails, and never without
-  exec.
-- [x] **No detection entry point skips Windows GPUs.**
-  `registry_detect_no_exec()` (the backend was classed exec),
-  `registry_detect_threaded()` (never called the detector) and
-  `lazy_by_family(…, FAMILY_GPU)` (missing from the probe mask) all detect them
-  now. Verified on `cass` from all four entry points.
-- [x] **Lazy GPU queries probe Intel oneAPI.** It sat in the AI_ASIC mask
-  although its profiles are GPU-family.
-- [x] **Threaded and lazy registries were corrupt.** Their post-passes got the
-  registry instead of its `system_io`, and `registry_to_json` segfaulted. One
-  shared `registry_post_passes` now serves all three entry points.
-- [x] **`windows-smoke` step (d)** checks RAM and GPUs against Windows' CIM
-  view. On `cass` the 2.3.24 EXE fails it and 2.3.25 passes.
-- [x] **Bench delta, layout-controlled:** 15 neutral, 0 regressions.
-- [ ] **Integrated GPUs report their dedicated carve-out.** An integrated
-  (UMA) adapter's `DedicatedVideoMemory` is its boot-time carve-out (128 MiB on
-  an Intel UHD 600), not the shared system memory it can also use
+## 2.4.x — Correct output, and CI that would notice
+
+Fix what ai-hwaccel reports wrong today, and close the CI gaps that let those
+bugs ship. The first item changes output (profile counts and memory totals),
+which is why the series starts at 2.4.0.
+
+### Detection output
+
+- [ ] **One physical device, one profile.** Several backends can report the
+  same GPU. On the Linux dev host, a single AMD Cezanne iGPU (one `lspci` VGA
+  entry) comes back twice: as a ROCm GPU with 8 GiB and as a Vulkan GPU with
+  4 GiB. So `gpu_count` is 2 and `accelerator_memory_bytes` counts 12 GiB.
+  CUDA + Vulkan on Linux and CUDA + DXGI on Windows likely overlap the same
+  way (not verified: no such host). This needs a stable device key (PCI bus
+  address; vendor:device + LUID on Windows), a rule for which backend's profile
+  survives, and a rule for which memory figure it keeps.
+- [ ] **Unified memory is counted twice in totals.** On Apple Silicon the CPU
+  and the Metal GPU profiles describe the same RAM, and `total_memory_bytes`
+  sums every profile. On `ecb` (48 GB) 2.3.27 reports 100 GiB: 48 CPU + 48 GPU
+  + 4 Neural Engine. Asahi Linux sums it the same way. Totals need to know
+  which profiles share memory; the same key as the duplicate-device item could
+  carry it.
+- [ ] **Lazy queries should run only the detectors they need.** Every lazy
+  family probe goes through `registry_detect_with`, so it runs the post-passes
+  too, and `detect_interconnects` spawns `nvidia-smi nvlink -s` whenever no
+  NVSwitch sysfs node exists. A TPU-only query therefore still starts
+  `nvidia-smi`, the exact spawn `lazy.cyr` exists to avoid, and
+  `lazy_into_registry` repeats the post-passes for every family. Run the
+  detectors per family and the post-passes once, in `lazy_into_registry`.
+  Consider also gating the NVLink probe on a CUDA profile being present.
+- [ ] **Make the no-exec contract match its documentation.** The comment on
+  `builder_no_exec()` offers `registry_detect_with(builder_no_exec())` as a
+  spawn-free path, but that path passes `allow_exec = 1`: `detect_interconnects`
+  still spawns `nvidia-smi`, and the Windows `wmic` fallback may run. Only
+  `registry_detect_no_exec()` is spawn-free. Fix the comment (and any consumer
+  guidance), or route the mask variant through `allow_exec = 0`.
+- [ ] **Integrated GPUs on Windows report their dedicated carve-out.** An
+  integrated (UMA) adapter's `DedicatedVideoMemory` is its boot-time carve-out
+  (128 MiB on an Intel UHD 600), not the shared system memory it can also use
   (`SharedSystemMemory`, typically half of RAM). Reporting the shared budget
-  for UMA adapters needs an integrated-vs-discrete signal, which
-  `DXGI_ADAPTER_DESC1` does not carry.
-- [x] **`lazy_by_family(lr, FAMILY_NPU)` misses the Apple Neural Engine**
-  unless the GPU family was probed first: `detect_apple` emits both the Metal
-  GPU and the ANE, but only the GPU mask probes it. Putting Apple in both masks
-  would push its profiles twice, so the lazy registry needs per-backend (not
-  per-family) probe tracking. **Fixed in 2.3.26** (see below).
+  needs an integrated-vs-discrete signal, which `DXGI_ADAPTER_DESC1` does not
+  carry.
 
-### 2.3.26 — lazy NPU queries find the Apple Neural Engine
+### Build and docs
 
-- [x] **Apple in the GPU and NPU lazy masks, with per-backend probe
-  tracking** (`backends` field on `lazy`), so an NPU query finds the Neural
-  Engine on a fresh registry and no query order runs Apple twice. Verified on
-  `ecb` (Apple M5 Pro): 2.3.25 returns no NPU, 2.3.26 returns the Neural
-  Engine, with no duplicate profiles.
-- [x] **`tests/tcyr/lazy_test.tcyr`:** stub detectors; lazy family queries
-  must equal full detection per family, and no backend may run twice.
-- [x] **Bench delta:** bench binaries byte-identical to 2.3.25 (15 neutral by
-  construction); the x86_64 Linux wheel binary is byte-identical too.
+- [ ] **ADR-004's `-D<BACKEND>` recipes build every backend.** The recipes are
+  in `docs/guides/production.md:16`, `docs/troubleshooting.md:31`,
+  `docs/performance.md:57`, `docs/guides/testing.md:38,41` and
+  `docs/decisions/004-feature-flags-per-backend.md:23,26`. cyrius 6.6.5 honours
+  `-D` after the operands, but nothing in `src/` reads `CUDA` / `ROCM` / `TPU` /
+  `NO_BACKENDS` (its only `#ifdef`s are `CYRIUS_TARGET_*`). Implement the gates,
+  or correct the docs and ADR-004's status.
+- [ ] **Retire the `CYRIUS_DCE=1` PE workaround** (your call). This was fixed
+  upstream in cyrius 6.6.1 (PE declines compaction and NOP-fills dead code) and
+  verified on `cass` under 6.6.6. Restoring the flag in `stage_win_cross.sh`
+  shrinks the EXE inside the wheel from 77 534 to 43 684 B compressed. See
+  [the issue](issues/2026-09-07-cyrius-dce-pe-access-violation.md).
+- [ ] **Archive the five resolved issue files** (`load_models`, resolved in
+  2.3.22, and the four 2026-09-07 portability defects, resolved in 2.3.21) by
+  moving them to `issues/archived/`. Their residuals are tracked in this file
+  now. The PE DCE issue stays open until the flag is restored.
 
-### WASM / JS
+### CI coverage — run what ships, on every target
 
-- [ ] **JS/TS bindings** — depends on cyrius WASM target (not in
-  5.10.x; gate this on upstream readiness)
+- [ ] **A `macos-smoke` job.** `wheels.yml`'s `macos` job builds the arm64
+  binary but never runs it, which is how the RAM bug fixed in 2.3.27 survived.
+  Mirror `windows-smoke`: JSON shape, stderr silent at the default level,
+  `--version`, CPU memory against `sysctl hw.memsize`, and a Metal GPU whenever
+  `system_profiler` lists one. Until then, the 2.3.26 path works: cross-build
+  with the pinned `cycc_aarch64` and `CYRIUS_MACHO_ARM=1`, then ad-hoc sign and
+  run on `ecb`.
+- [x] **Threaded detection on real Apple Silicon**
+  ([issue](issues/2026-09-07-threaded-detect-vs-single-threaded-sakshi.md)):
+  ran on `ecb` in 2.3.27 (cross-built): 3 profiles, and the registry
+  serializes. A CI run waits on `macos-smoke`.
+- [x] **`AI_HWACCEL_DATA_DIR` on macOS**
+  ([issue](issues/2026-09-07-cmd-getenv-proc-only.md), step 3): resolves
+  `VERSION` from `/` on `ecb` in 2.3.27, as `--data-dir` does. Windows was
+  already verified on `cass`.
+- [ ] **qemu-aarch64 disk-cache test**
+  ([issue](issues/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md)).
+- [ ] **A cache TTL test that does not assume Linux**
+  ([issue](issues/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md)).
+- [ ] **`cyrius capacity --check` as a CI gate.** It is no longer blocked: on
+  6.6.6 it passes against `src/main.cyr` (597 variable slots in use, every
+  table under 85%).
+- [ ] **`cyrius vet` over `tests/tcyr/`.** CI vets only `src/main.cyr`, and
+  each test unit is its own compilation root.
 
 ---
 
-## 2.4.0 — Multi-Node & Hot-Plug
-*(was 1.5.0 in the Rust roadmap)*
+## 2.5.x — Platform validation, fixture-first
+
+Implement or lock each detection path against a captured fixture first (no
+hardware needed: `tests/fixtures/` or inline strings), then confirm on real
+hardware when access happens. Missing hardware never blocks the source-side
+work.
+
+- [ ] **`tests/fixtures/`.** Move the inline tool outputs in
+  `gpu_parser_test.tcyr` / `backend_test.tcyr` into per-backend fixture files.
+  This sets the contribution pattern: "a capture of `<tool> <args>` on
+  `<hardware>`, added to `fixtures/`".
+- [ ] **Captures from real hardware:**
+  - [ ] NVIDIA H100 / A100 / GH200: `nvidia-smi` CSV (AWS p5 / GCP a3-high).
+    GH200's unified memory (`mem_bytes + 480 GiB`) is coded; a fixture locks
+    it in.
+  - [ ] AMD MI300X / MI250: `/sys/class/drm/*/device/*`. The MI300X CXL path
+    (`mem_info_vis_vram_total`) is coded.
+  - [ ] Google TPU v5e / v5p: `/sys/class/accel/*` on a GCE v5 slice.
+  - [ ] AWS Neuron trn1 / inf2: `neuron-ls --json` from trn1.32xlarge,
+    covering the per-core count math.
+  - [ ] Intel Gaudi 3: `hl-smi --query-aip` (AWS DL2), locking in the HL-325
+    device-name override.
+  - [ ] Intel Data Center GPU Max: HBM vs DDR memory tiers.
+- [ ] **Detectors no test ever runs.** `backend_test` covers these
+  accelerators' profiles, ranks and names, but nothing calls their `detect_*`
+  functions. Their parsing sits next to the tool and sysfs reads, so factor out
+  pure parsers first, then test them against fixtures (from vendor docs until
+  real captures exist):
+  - [ ] Cerebras WSE (`cloud_asic.cyr`): `/dev/cerebras*` + sysfs; a sample
+    from Cerebras docs or a contributor with access.
+  - [ ] Graphcore IPU (`cloud_asic.cyr`): `gc-info` output, which can be
+    synthesized from the public SDK documentation.
+  - [ ] Groq LPU (`cloud_asic.cyr`): `/dev/groq*` sysfs. The driver is not in
+    public distros, but the sysfs format is documented.
+  - [ ] Qualcomm Cloud AI 100 (`edge.cyr`).
+  - [ ] Samsung NPU (`edge.cyr`): `/sys/class/npu` on Exynos (Galaxy S24+);
+    a Samsung dev-portal capture.
+  - [ ] MediaTek APU (`edge.cyr`): `/sys/class/misc/apusys` on Dimensity;
+    NeuroPilot docs.
+- [ ] **An AGNOS GPU detector.** `BACKEND_AGNOS_GPU` / `ACCEL_AGNOS_GPU` are
+  declared (name, rank, throughput and training factor) but no detector exists,
+  so the backend never reports anything.
+
+---
+
+## 2.6.x — Multi-node and hot-plug
+
+*(2.4.0 before the 2026-09-23 review; 1.5.0 in the Rust roadmap)*
 
 ### Multi-node detection
 
-- [ ] **SSH probe** — `registry_detect_remote(hosts)`, merge into
-  cluster-wide registry
-- [ ] **Cluster-aware sharding** — distribute across nodes, consider
-  IB/RoCE bandwidth for pipeline vs data parallelism
+- [ ] **SSH probe** — `registry_detect_remote(hosts)`, merged into a
+  cluster-wide registry.
+- [ ] **Cluster-aware sharding** — distribute across nodes, weighing IB/RoCE
+  bandwidth for pipeline vs data parallelism.
 
-### Hot-plug support
+### Hot-plug
 
-- [ ] **`udev` watcher (Linux)** — `registry_watch()` returns
-  `DeviceEvent::Added` / `DeviceEvent::Removed` stream. cycc's defer
-  + `lib/thread.cyr` make this cleaner than the Rust plan assumed.
-- [ ] **Dynamic registry updates** — `CachedRegistry` auto-invalidates
-  on hot-plug events
-
-### Remaining platforms
-
-- [ ] **Android** — HAL `hwbinder` for NNAPI accelerator list
-- [ ] **FreeBSD** — DRM sysctl equivalents for GPU detection
-- [ ] **Intel oneAPI** — DC GPU Max HBM vs DDR tiers on real hardware
+- [ ] **`udev` watcher (Linux)** — `registry_watch()` returns a stream of
+  device-added / device-removed events. cycc's `defer` and `lib/thread.cyr`
+  make this simpler than the Rust plan assumed.
+- [ ] **Dynamic registry updates** — `CachedRegistry` invalidates itself on
+  hot-plug events.
 
 ---
 
-## 2.5.0 — Fleet & Scale
-*(was 2.0.0 in the Rust roadmap)*
+## 2.7.x — Fleet and scale
 
-Fleet-wide inventory, health monitoring, capacity planning at datacenter
+*(2.5.0 before the 2026-09-23 review; 2.0.0 in the Rust roadmap)*
+
+Fleet-wide inventory, health monitoring and capacity planning at datacenter
 scale.
 
 ### Fleet inventory
 
-- [ ] **Fleet registry** — `FleetRegistry` aggregates registries from
-  multiple nodes. Tracks hostname, IP, rack, zone
-- [ ] **Discovery protocols** — mDNS/DNS-SD, Consul, Kubernetes node labels
-- [ ] **Inventory persistence** — SQLite or JSON lines, diff against
-  previous scan
-- [ ] **Fleet CLI** — `ai-hwaccel fleet scan --subnet 10.0.0.0/24`
+- [ ] **Fleet registry** — `FleetRegistry` aggregates registries from many
+  nodes and tracks hostname, IP, rack and zone.
+- [ ] **Discovery** — mDNS/DNS-SD, Consul, Kubernetes node labels.
+- [ ] **Inventory persistence** — SQLite or JSON lines, diffed against the
+  previous scan.
+- [ ] **Fleet CLI** — `ai-hwaccel fleet scan --subnet 10.0.0.0/24`.
 
 ### Health monitoring
 
-- [ ] **Continuous health checks** — periodic re-detection, trend tracking
-- [ ] **Alert rules engine** — configurable thresholds, webhook/Slack/PagerDuty
-- [ ] **Dead GPU detection** — flag nodes with missing accelerators
-- [ ] **ECC error tracking** — nvidia-smi ECC, ROCm ras_features
+- [ ] **Continuous health checks** — periodic re-detection and trend tracking.
+- [ ] **Alert rules** — configurable thresholds; webhook / Slack / PagerDuty.
+- [ ] **Dead-GPU detection** — flag nodes whose accelerators went missing.
+- [ ] **ECC error tracking** — `nvidia-smi` ECC, ROCm `ras_features`.
 
 ### Capacity planning
 
-- [ ] **Fleet-wide sharding** — recommend nodes and distribution strategy
-- [ ] **Bin packing** — optimal multi-model placement across fleet
-- [ ] **Scaling recommendations** — "you need 3 more H100 nodes for 405B"
+- [ ] **Fleet-wide sharding** — recommend nodes and a distribution strategy.
+- [ ] **Bin packing** — place several models across the fleet.
+- [ ] **Scaling recommendations** — e.g. "405B needs 3 more H100 nodes".
 
-### Observability & export
+### Observability and export
 
-- [ ] **Prometheus metrics** — per-device gauges, fleet aggregates
-- [ ] **OpenTelemetry spans** — instrument detection with OTel traces
-- [ ] **Grafana dashboard template** — fleet GPU utilization heatmap
-- [ ] **Structured event log** — JSON lines for ELK/Loki/Datadog
+- [ ] **Prometheus metrics** — per-device gauges and fleet aggregates.
+- [ ] **OpenTelemetry spans** around detection.
+- [ ] **Grafana dashboard template** — fleet GPU-utilization heatmap.
+- [ ] **Structured event log** — JSON lines for ELK / Loki / Datadog.
 
 ### Multi-tenancy
 
-- [ ] **Device reservation** — `registry_reserve(device_id, owner)`
-- [ ] **Namespace isolation** — Kubernetes pod-scoped detection
-- [ ] **Quota management** — per-team GPU hour budgets
+- [ ] **Device reservation** — `registry_reserve(device_id, owner)`.
+- [ ] **Namespace isolation** — Kubernetes pod-scoped detection.
+- [ ] **Quota management** — per-team GPU-hour budgets.
 
 ---
 
-## Future
+## Later (2.x, not scheduled)
 
-- [ ] **Power budget planning** — recommend device mix for power cap
-- [ ] **Thermal throttling prediction** — warn on approaching thresholds
-- [ ] **Plugin system** — third-party backends via dynamic loading
+- [ ] **Android** — HAL `hwbinder` for the NNAPI accelerator list.
+- [ ] **FreeBSD** — DRM sysctl equivalents for GPU detection.
+- [ ] **JS/TS bindings, re-scoped.** The old plan waited for a cyrius WASM
+  target. cyrius 6.6.6 does have `--target js`, but it cannot build `src/`
+  ("ts lex error before emit"), and detection needs processes and the
+  filesystem anyway. A Node package can wrap the CLI and its JSON, exactly as
+  the Python binding does, with no compiler target at all.
+- [ ] **Power budget planning** — recommend a device mix for a power cap.
+- [ ] **Thermal throttling prediction** — warn as devices approach their
+  limits.
+- [ ] **Plugin system** — third-party backends via dynamic loading.
+
+### Blocked outside this repo
+
+- [ ] **`switch` dispatch for the enum tables** (`accel_name()`,
+  `family_name()`, `format_name()`, `_gguf_file_type_name()`,
+  `requirement_satisfied()`). cyrius still rejects an enum name as a `case`
+  label: 6.6.6 gives `expected number, got identifier`. `case 0:` with
+  comments was rejected as too brittle against renumbering.
+- [ ] **mihi-side smoke of the `[lib]` surface** — mihi M3
+  (`mihi_gpu_vendor` / `mihi_gpu_model` on a Ryzen 5800H); tracked in mihi's
+  roadmap.
+
+---
+
+## Considered and declined
+
+- **`lib/regex.cyr` for parser output** (2.1.3) — the parsers split lines,
+  split CSV fields and check single tokens; nothing there needs regex.
+- **`lib/chrono.cyr` for the cache TTL** (2.1.2) — a dependency for a
+  three-line saving. Revisit if something needs chrono's ISO-8601 / duration
+  surface anyway.
+- **Multi-return `(value, error)` in `detect/*`** (2.1.3) — detectors push
+  0..N profiles and 0..M warnings into out-param vectors; there is no single
+  value to return.
+- **Adopting `lib/test.cyr`** (2.1.2) — it is a parameterised-test helper, not
+  a replacement for `lib/assert.cyr`, which the tests already use.
+
+## Closed in the 2026-09-23 review
+
+Open items that were already done, obsolete or superseded, and why:
+
+- **`cyrius.lock` committed + `cyrius deps --verify`** — done. CI's *Verify
+  dep hashes* step compares the lock with `HEAD` (since 2.3.21).
+- **`lib/json.cyr` audit** — obsolete. `json.cyr` was folded into bayan in
+  cyrius 6.2.11. The serializer is hand-rolled, and parsing has used
+  `bayan-json` since 2.3.15.
+- **Second "adopt `lib/test.cyr`" entry** — duplicate of the declined item
+  above.
+- **Windows DXGI adapter enumeration and its cass smoke** (2.2.x) — done:
+  DXGI VRAM in 2.3.9, `windows-smoke` in 2.3.11, DXGI enumeration in 2.3.25.
+- **Upstream PE environment-read reroute** (2.3.12) — it exists
+  (`0xF015`, `GetEnvironmentVariableA`). `cmd_getenv` has used it through the
+  stdlib `getenv` since 2.3.21, verified on `cass`.
+- **Defer-on-all-paths audit of file handles** — moot. `src/` opens no file
+  handles; all file I/O goes through the stdlib's `file_read_all` /
+  `file_write_all`.
+- **Backfill 2.3.14 – 2.3.20 into the roadmap** — superseded by the Shipped
+  table, which covers every release in the CHANGELOG.
+- **`cyrius capacity --check`, "stalled on toolchain"** — unblocked; moved to
+  2.4.x.
 
 ---
 
 ## Non-goals
 
-- **Runtime execution** — detection and planning only, not inference/training
-- **Kernel driver management** — no installing or configuring drivers
-- **Cloud provisioning** — detect what's present, not what could be spun up
+- **Runtime execution** — detection and planning only, not inference or
+  training.
+- **Kernel driver management** — no installing or configuring drivers.
+- **Cloud provisioning** — detect what is present, not what could be spun up.

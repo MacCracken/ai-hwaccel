@@ -1,14 +1,95 @@
 # apple.cyr — Apple Metal GPU + Neural Engine detection
-# macOS: system_profiler parsing
-# Linux (Asahi): /proc/device-tree/compatible check
+#
+# macOS: sysctl, no subprocess. machdep.cpu.brand_string names the chip
+#   ("Apple M5 Pro") and hw.memsize sizes its unified memory, the same two
+#   facts `system_profiler SPHardwareDataType` prints as "Chip:" / "Memory:".
+#   Because nothing is spawned, registry_detect_no_exec() finds Apple Silicon
+#   too (through 2.3.26 it returned the CPU alone on a Mac). system_profiler
+#   is kept as the fallback for when sysctl cannot name an Apple Silicon chip,
+#   and runs only when exec is allowed.
+# Linux (Asahi): /proc/device-tree/compatible check, no subprocess.
 
-fn detect_apple(profiles, warnings) {
-    # Try macOS detection first
-    var hw = run_tool1("system_profiler", "SPHardwareDataType", warnings);
-    if (hw != 0) {
-        if (str_len(hw) > 0) {
-            _parse_apple_macos(hw, profiles);
+# Neural Engine memory estimate by chip generation. Chips newer than the
+# table (the M5 Pro on ecb) get the base 4 GiB. `chip` is a Str.
+fn _apple_ane_bytes(chip) {
+    if (str_contains_cstr(chip, "M4") == 1) { return 8 * BYTES_PER_GIB; }
+    if (str_contains_cstr(chip, "M3") == 1) { return 8 * BYTES_PER_GIB; }
+    if (str_contains_cstr(chip, "M2") == 1) { return 6 * BYTES_PER_GIB; }
+    return 4 * BYTES_PER_GIB;
+}
+
+# 1 if `brand` (a cstr from machdep.cpu.brand_string) names an Apple-designed
+# CPU: "Apple M1" … "Apple M5 Pro", or "Apple M1 (Virtual)" in a VM. An Intel
+# Mac reports "Intel(R) Core(TM) …". Pure.
+fn apple_is_silicon_brand(brand) {
+    if (brand == 0) { return 0; }
+    if (strlen(brand) < 7) { return 0; }
+    if (memeq(brand, "Apple ", 6) == 1) { return 1; }
+    return 0;
+}
+
+# Push the Metal GPU (named `chip`, a cstr, with `mem` bytes of unified
+# memory) and the Neural Engine for an Apple Silicon chip. Pure.
+fn apple_emit_silicon(profiles, chip, mem) {
+    var gpu = profile_new(ACCEL_METAL, 0, mem);
+    profile_set_device_name(gpu, chip);
+    vec_push(profiles, gpu);
+    var ane = profile_new(ACCEL_APPLE_NPU, 0, _apple_ane_bytes(str_from(chip)));
+    profile_set_device_name(ane, "Apple Neural Engine");
+    vec_push(profiles, ane);
+    return 0;
+}
+
+#ifdef CYRIUS_TARGET_MACOS
+# A string sysctl looked up by name (e.g. "machdep.cpu.brand_string"), as a
+# fresh cstr, or 0. A name without a fixed MIB is resolved through name2oid
+# ({0, 3}, with the name as `newp`) first, as lib/sys.cyr does for
+# vm.page_free_count. Darwin fails a read whose `oldlenp` is too short rather
+# than truncating it, so the buffer is generous; the returned length includes
+# the NUL.
+fn _mac_sysctl_string(name) {
+    var qmib[8];
+    store32(&qmib, 0);
+    store32(&qmib + 4, 3);
+    var oid[64];
+    var oidlen = 64;
+    var r = syscall(SYS_SYSCTL, &qmib, 2, &oid, &oidlen, name, strlen(name));
+    if (r < 0) { return 0; }
+    var cap = 256;
+    var buf = alloc(cap + 1);
+    var len = cap;
+    var r2 = syscall(SYS_SYSCTL, &oid, oidlen / 4, buf, &len, 0, 0);
+    if (r2 < 0) { return 0; }
+    if (len <= 0) { return 0; }
+    if (len > cap) { len = cap; }
+    store8(buf + len, 0);
+    return buf;
+}
+#endif
+
+# Detect Apple Silicon's Metal GPU and Neural Engine. On macOS, sysctl names
+# the chip and sizes its unified memory without a subprocess, so this runs in
+# registry_detect_no_exec() too; the system_profiler fallback runs only when
+# `allow_exec` is 1. On Linux the Asahi device-tree check needs no subprocess.
+fn detect_apple_opts(profiles, warnings, allow_exec) {
+    #ifdef CYRIUS_TARGET_MACOS
+    var brand = _mac_sysctl_string("machdep.cpu.brand_string");
+    if (apple_is_silicon_brand(brand) == 1) {
+        var mem = mac_total_phys_bytes();
+        if (mem > 0) {
+            apple_emit_silicon(profiles, brand, mem);
             return 0;
+        }
+    }
+    #endif
+
+    if (allow_exec == 1) {
+        var hw = run_tool1("system_profiler", "SPHardwareDataType", warnings);
+        if (hw != 0) {
+            if (str_len(hw) > 0) {
+                _parse_apple_macos(hw, profiles);
+                return 0;
+            }
         }
     }
 
@@ -32,12 +113,18 @@ fn detect_apple(profiles, warnings) {
     return 0;
 }
 
+# detect_apple_opts with exec allowed (the system_profiler fallback may run).
+fn detect_apple(profiles, warnings) {
+    return detect_apple_opts(profiles, warnings, 1);
+}
+
+# Parse `system_profiler SPHardwareDataType` output: "Chip: Apple M4 Pro" and
+# "Memory: 36 GB". Only the fallback uses it now; see detect_apple_opts.
 fn _parse_apple_macos(hw_output, profiles) {
     var lines = str_split(hw_output, 10);
     var nlines = vec_len(lines);
     var chip_name = "Apple Silicon";
     var mem_bytes = 8 * BYTES_PER_GIB;
-    var ane_mem = 4 * BYTES_PER_GIB;
 
     var li = 0;
     while (li < nlines) {
@@ -51,11 +138,6 @@ fn _parse_apple_macos(hw_output, profiles) {
                 var cn = str_trim(str_sub(line, col + 1, str_len(line) - col - 1));
                 if (str_len(cn) > 0) {
                     chip_name = str_cstr(cn);
-
-                    # ANE memory estimate by chip generation
-                    if (str_contains_cstr(cn, "M4") == 1) { ane_mem = 8 * BYTES_PER_GIB; }
-                    elif (str_contains_cstr(cn, "M3") == 1) { ane_mem = 8 * BYTES_PER_GIB; }
-                    elif (str_contains_cstr(cn, "M2") == 1) { ane_mem = 6 * BYTES_PER_GIB; }
                 }
             }
         }
@@ -71,12 +153,6 @@ fn _parse_apple_macos(hw_output, profiles) {
         }
     }
 
-    var gpu = profile_new(ACCEL_METAL, 0, mem_bytes);
-    profile_set_device_name(gpu, chip_name);
-    vec_push(profiles, gpu);
-
-    var ane = profile_new(ACCEL_APPLE_NPU, 0, ane_mem);
-    profile_set_device_name(ane, "Apple Neural Engine");
-    vec_push(profiles, ane);
+    apple_emit_silicon(profiles, chip_name, mem_bytes);
     return 0;
 }

@@ -144,10 +144,39 @@ fn win_total_phys_bytes() {
 }
 #endif
 
+#ifdef CYRIUS_TARGET_MACOS
+# sysctl MIB for hw.memsize: {CTL_HW, HW_MEMSIZE} from <sys/sysctl.h>.
+# Prefixed because lib/sys.cyr names them CTL_HW / HW_MEMSIZE, and a consumer
+# may include both.
+enum HwaMacSysctl {
+    HWA_CTL_HW = 6;
+    HWA_HW_MEMSIZE = 24;
+}
+
+# Total physical memory (bytes) from sysctl hw.memsize, or 0 on failure.
+# macOS has no /proc/meminfo, so through 2.3.26 every macOS build reported
+# the 16 GiB fallback. The MIB is two 32-bit ints, and the node is 8 bytes
+# wide: Darwin rejects a read at the wrong width, so `len` starts at 8.
+# SYS_SYSCTL is the syscalls peer's alias that the Mach-O backend translates
+# to BSD sysctl (the call lib/sys.cyr's sys_sysinfo makes).
+fn mac_total_phys_bytes() {
+    var mib[8];
+    store32(&mib, HWA_CTL_HW);
+    store32(&mib + 4, HWA_HW_MEMSIZE);
+    var total = 0;
+    var len = 8;
+    var r = syscall(SYS_SYSCTL, &mib, 2, &total, &len, 0, 0);
+    if (r < 0) { return 0; }
+    if (total < 0) { return 0; }
+    return total;
+}
+#endif
+
 # Get total system memory (in bytes). Windows: GlobalMemoryStatusEx, with a
 # `wmic computersystem` spawn only if that fails AND `allow_exec` is 1 (wmic
-# is absent on Windows 11 24H2+). Else: /proc/meminfo; `allow_exec` has no
-# effect there. Returns 0 on failure (caller substitutes a default).
+# is absent on Windows 11 24H2+). macOS: sysctl hw.memsize. Else:
+# /proc/meminfo. `allow_exec` matters only on Windows. Returns 0 on failure
+# (caller substitutes a default).
 fn detect_system_memory_opts(allow_exec) {
     #ifdef CYRIUS_TARGET_WIN
     var native = win_total_phys_bytes();
@@ -167,6 +196,9 @@ fn detect_system_memory_opts(allow_exec) {
         return win_parse_total_memory(str_new(wbuf, wn));
     }
     return 0;
+    #endif
+    #ifdef CYRIUS_TARGET_MACOS
+    return mac_total_phys_bytes();
     #endif
     var buf = alloc(4096);
     var n = file_read_all("/proc/meminfo", buf, 4096);

@@ -5,6 +5,174 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.27] — 2026-09-23 — macOS: real total RAM, and Apple Silicon without system_profiler
+
+Every macOS build so far reported the CPU at the 16 GiB fallback. It now
+reports the machine's real RAM, read from sysctl `hw.memsize`. Apple Silicon's
+Metal GPU and Neural Engine now come from sysctl too, not from spawning
+`system_profiler`. As a result, `registry_detect_no_exec()` finds them on a Mac
+(it returned the CPU alone before), and detection on the M5 Pro test host drops
+from 83 ms to 3 ms. Linux and Windows output is unchanged. The roadmap was
+reorganized.
+
+### Fixed
+
+- **macOS reported the CPU at the 16 GiB fallback.** `detect_system_memory`
+  had no macOS branch. It read `/proc/meminfo`, which macOS does not have, got
+  0, and the registry substituted 16 GiB. The tagged 2.3.6 and 2.3.24 sources
+  do the same, so every macOS wheel since the first had it. It now asks sysctl
+  for `hw.memsize` (`mac_total_phys_bytes`, in `src/detect/platform.cyr`). The
+  call is the one `lib/sys.cyr`'s `sys_sysinfo` makes: a two-int MIB
+  `{CTL_HW, HW_MEMSIZE}` read at width 8, through the syscalls peer's
+  `SYS_SYSCTL` alias. The build already includes that peer, so neither
+  ai-hwaccel nor its library consumers gain a stdlib dependency. On `ecb`
+  (Apple M5 Pro, 48 GB, `hw.memsize` 51 539 607 552), 2.3.26 reports
+  17 179 869 184 from all four detection entry points, and 2.3.27 reports
+  51 539 607 552 from all four. That is the macOS twin of the Windows RAM bug
+  fixed in 2.3.25.
+- **`registry_detect_no_exec()` on a Mac returned the CPU alone.** The Apple
+  backend found the Metal GPU and Neural Engine by spawning `system_profiler`,
+  so it was classed exec and the no-exec mask dropped it. It now reads the
+  same two facts natively (`detect_apple_opts`, `src/detect/apple.cyr`):
+  `machdep.cpu.brand_string` names the chip (resolved through sysctl's
+  name-to-OID lookup, as `lib/sys.cyr` does), and `hw.memsize` sizes its
+  unified memory. `system_profiler` stays as the fallback for when sysctl
+  cannot name an Apple chip, and runs only when exec is allowed. The Asahi
+  Linux device-tree check needed no subprocess and now runs in no-exec mode
+  too. `BACKEND_APPLE` is no longer classed exec. On `ecb` the no-exec registry
+  now holds 3 profiles (CPU, Metal GPU, Neural Engine), where it held 1.
+
+### Changed
+
+- **Apple Silicon detection reads sysctl, not `system_profiler`.** The profiles
+  are unchanged. The GPU is named after `machdep.cpu.brand_string` ("Apple M5
+  Pro", the string `system_profiler` prints as "Chip:") and sized by
+  `hw.memsize` ("Memory: 48 GB"). The Neural Engine estimate uses the same
+  per-generation table, now `_apple_ane_bytes`. On `ecb` the CLI's JSON is
+  byte-identical to 2.3.26 apart from the CPU `memory_bytes`. Detection time
+  drops from a median of 83.0 ms to 3.2 ms (15 interleaved runs), because
+  `system_profiler` was the one tool that actually ran there.
+- **New functions:** `mac_total_phys_bytes` (macOS only), `detect_apple_opts`,
+  `apple_is_silicon_brand` and `apple_emit_silicon`. `detect_apple` keeps its
+  signature and allows exec.
+- **Docs describe native Apple detection.** Updated: the README backend table
+  and module tree, `docs/architecture/overview.md`, `docs/guides/testing.md`
+  and `docs/performance.md`. The README's no-exec section was stale since
+  2.3.25 and is corrected: no-exec mode masks seven exec backends, not eight,
+  and runs ten native ones, Windows and Apple included.
+- **Tests: 725 → 746 assertions in 15 units.**
+  - `backend_test` 37 → 58: the brand test (an Intel Mac and a VM's "Apple M1
+    (Virtual)" included), what the native path emits for `ecb`, the Neural
+    Engine table, the native path matching the `system_profiler` parser field
+    for field, and no `system_profiler` attempt without exec.
+  - `registry_test`'s exec classification now has Apple on the native side.
+  - The stub units (`lazy_test`, `json_output_test`, `planning_test`,
+    `model_catalog_test`) stub `detect_apple_opts`, the function the registry
+    calls.
+
+  Each of 5 single-point mutations of the Apple code fails at least one
+  assertion.
+- **`docs/development/roadmap.md` reorganized** (871 → about 310 lines). It now
+  holds open work only, planned by release: 2.3.27 (macOS total RAM), 2.4.x
+  (correct output + CI coverage), 2.5.x (platform validation), 2.6.x
+  (multi-node and hot-plug, previously 2.4.0), 2.7.x (fleet and scale,
+  previously 2.5.0), and a *Later* list. Shipped history is one table; this
+  file keeps the details. Every open item was either carried forward or closed.
+  Seven were closed as done, obsolete or moot, with the reasons recorded in the
+  roadmap's *Closed in the 2026-09-23 review*. The toolchain-blocked items were
+  re-tested on cyrius 6.6.6: `cyrius capacity --check` now passes and moves to
+  2.4.x; `case` labels still reject enum names; `--target js` cannot build
+  `src/`.
+- **New roadmap items found during the review:**
+  - macOS wheels have always reported the CPU at the 16 GiB fallback (fixed
+    in this release, below).
+  - The Linux dev host's one AMD iGPU is reported twice (ROCm 8 GiB + Vulkan
+    4 GiB).
+  - Lazy family queries still spawn `nvidia-smi` through the interconnect
+    post-pass.
+  - `registry_detect_with(builder_no_exec())` is documented as spawn-free but
+    is not.
+
+### Known, not changed here
+
+- **Unified memory is counted twice in `total_memory_bytes`.** On Apple
+  Silicon the CPU and the Metal GPU profiles describe the same RAM, and the
+  total sums every profile. Now that the CPU is right, `ecb`'s total reads
+  100 GiB (48 CPU + 48 GPU + 4 Neural Engine) for 48 GB of RAM. With the old
+  fallback it read 68 GiB (16 + 48 + 4). Asahi Linux already summed it this
+  way. Added to the 2.4.x roadmap, next to the duplicate-device item.
+- **CI still never runs a macOS binary.** Everything above was verified on
+  `ecb` with a cross-built binary (next section); the `macos-smoke` job is on
+  the 2.4.x roadmap.
+
+### Performance
+
+**15 neutral, 0 regressions** (2.3.26 → 2.3.27). `apple.cyr`, `types.cyr` and
+`registry.cyr` are in both bench suites, so this used the layout-controlled
+A/B. Each arm was built at 5 code layouts, the three floor-bound rows were
+batch-timed (†), and there were two independent 30-round passes, shuffled and
+pinned to one CPU. The table combines both passes (60 rounds).
+
+| row | 2.3.26 | 2.3.27 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 13.38 µs | 13.38 µs | 0.0% | 0.96 | neutral |
+| `parse_vulkan_2gpu` | 2.47 µs | 2.49 µs | +0.8% | 0.18 | neutral |
+| `parse_neuron_2dev` | 1.58 µs | 1.57 µs | −0.2% | 0.79 | neutral |
+| `detect_safetensors` † | 374.4 ns | 379.0 ns | +1.2% | 0.21 | neutral |
+| `detect_gguf` † | 36.4 ns | 36.4 ns | 0.0% | 0.92 | neutral |
+| `best_available_13dev` † | 168.5 ns | 167.9 ns | −0.4% | 0.40 | neutral |
+| `total_memory_13dev` | 81.0 ns | 81.4 ns | +0.5% | 0.05 | neutral |
+| `has_accelerator_13dev` | 17.8 ns | 17.8 ns | 0.0% | 0.94 | neutral |
+| `plan_70B_bf16_4gpu` | 1.41 µs | 1.45 µs | +2.8% | 0.04 | neutral (layout) |
+| `count_family_gpu_13dev` | 233.1 ns | 233.3 ns | +0.1% | 0.55 | neutral |
+| `json_serialize_13dev` | 21.67 µs | 21.70 µs | +0.1% | 0.38 | neutral |
+| `json_summary_13dev` | 3.05 µs | 3.03 µs | −0.5% | 0.13 | neutral |
+| `json_system_io` | 4.93 µs | 4.93 µs | 0.0% | 0.88 | neutral |
+| `json_plan` | 16.27 µs | 16.16 µs | −0.7% | <0.01 | neutral |
+| `json_training` | 2.37 µs | 2.38 µs | +0.2% | 0.48 | neutral |
+
+A verdict needs p < 0.01 and |Δ| > 1%. `plan_70B_bf16_4gpu` meets neither, and
+its +2.8% comes from two of the five layouts (+5.3% and +6.1%); in the other
+three, 2.3.27 is within +0.6% to +1.4% of 2.3.26. The bench calls only
+`reg_plan_sharding`, which runs none of the changed code, so this is code
+placement. `bench-history.csv` rows `6b5af9b-dirty` at 15:21Z are 2.3.26
+(`src/` equal to `HEAD`, only docs dirty); those at 15:33Z are 2.3.27.
+
+| binary | 2.3.26 | 2.3.27 | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 219 448 | 219 448 | 0 (contents differ) |
+| x86_64 ELF, no DCE | 444 728 | 444 728 | 0 (contents differ) |
+| ELF-aarch64 | 739 456 | 739 464 | +8 |
+| PE, as shipped (no DCE) | 516 096 | 516 608 | +512 |
+| agnos, `CYRIUS_DCE=1` | 217 112 | 217 120 | +8 |
+
+### Verified
+
+- **Tests:** 746 assertions in 15 units pass through CI's loop; fuzz 6/6.
+- **CI gates:** fmt, lint (0 warnings), vet, raw-offset guard, DCE build.
+  `dist/ai-hwaccel.cyr` differs from 2.3.26's only in its version line and the
+  four changed modules.
+- **Linux CLI output identical to 2.3.26** on 18 invocations covering every
+  flag. **ELF-aarch64** under `qemu-aarch64` matches x86_64 on 8 invocations.
+  **agnos** builds.
+- **macOS on `ecb`** (Apple M5 Pro, macOS 27.0), with binaries cross-built by
+  the pinned toolchain's `cycc_aarch64` (`CYRIUS_MACHO_ARM=1`) from the input
+  `stage_binary.sh` composes on macOS, then ad-hoc signed:
+  - all four entry points report `hw.memsize` exactly;
+  - `registry_detect_no_exec()` holds the Metal GPU and Neural Engine;
+  - the CLI's JSON matches 2.3.26 apart from the CPU memory;
+  - stdout carries the JSON, and stderr is silent by default and carries the
+    `detect` span with `-vv`;
+  - `AI_HWACCEL_DATA_DIR` and `--data-dir` resolve `VERSION` from `/` (open
+    since 2.3.21);
+  - `registry_detect_threaded()` runs and serializes (its first run on Apple
+    Silicon).
+- **Windows on `cass`:** the EXE exactly as `stage_win_cross.sh` builds it
+  passes `windows-smoke` (a)–(d).
+- **Not verified:** the wheel's own `macos-14` build (a native build there,
+  never run in CI), Intel Macs (not a shipped target; they fall back to
+  `system_profiler` as before), and Asahi Linux.
+
 ## [2.3.26] — 2026-09-23 — lazy NPU queries find the Apple Neural Engine
 
 A lazy NPU query on a fresh `lazy` registry missed the Apple Neural Engine

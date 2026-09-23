@@ -17,7 +17,7 @@ main.cyr                 CLI binary (table, JSON, watch, cost, profile modes)
     platform.cyr         PlatformProbe trait + LivePlatform + MockPlatform
     cuda.cyr             NVIDIA via nvidia-smi CSV
     rocm.cyr             AMD via sysfs (/sys/class/drm)
-    apple.cyr            Metal/ANE via system_profiler + sysctl
+    apple.cyr            Metal/ANE via sysctl (system_profiler fallback)
     vulkan.cyr           Vulkan via vulkaninfo + sysfs fallback
     tpu.cyr              Google TPU via sysfs (/sys/class/accel)
     gaudi.cyr            Intel Gaudi via hl-smi CSV

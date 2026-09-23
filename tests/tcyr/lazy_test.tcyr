@@ -54,8 +54,9 @@ fn detect_groq(p, w) { return _stub(p, BACKEND_GROQ, ACCEL_GROQ); }
 fn detect_samsung_npu(p, w) { return _stub(p, BACKEND_SAMSUNG_NPU, ACCEL_SAMSUNG_NPU); }
 fn detect_mediatek_apu(p, w) { return _stub(p, BACKEND_MEDIATEK_APU, ACCEL_MEDIATEK_APU); }
 
-# Apple Silicon: the Metal GPU and the Neural Engine, from one probe.
-fn detect_apple(p, w) {
+# Apple Silicon: the Metal GPU and the Neural Engine, from one probe. The
+# registry calls the allow_exec-aware entry point.
+fn detect_apple_opts(p, w, a) {
     _stub(p, BACKEND_APPLE, ACCEL_METAL);
     vec_push(p, profile_new(ACCEL_APPLE_NPU, 0, 4 * BYTES_PER_GIB));
     return 0;

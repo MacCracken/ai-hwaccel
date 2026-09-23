@@ -110,7 +110,7 @@ build/ai-hwaccel --table --debug
 | `hl-smi` | Habana SDK | Intel Gaudi HPU detection |
 | `neuron-ls` | AWS Neuron SDK | Inferentia/Trainium detection |
 | `xpu-smi` | Intel oneAPI | Intel Arc / Data Center GPU Max |
-| `system_profiler` | macOS built-in | Apple Silicon chip name, unified memory |
+| `system_profiler` | macOS built-in | Fallback only: Apple chip name + memory when sysctl cannot name the chip |
 
 ### sysfs paths tested
 

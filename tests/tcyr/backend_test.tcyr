@@ -147,6 +147,84 @@ fn test_all_backend_names() {
     assert(streq(backend_name(BACKEND_MEDIATEK_APU), "mediatek-apu") == 1, "mediatek-apu");
     return 0;
 }
+# --- Apple Silicon from sysctl (the native macOS path) ---
+
+fn test_apple_silicon_brand() {
+    assert_eq(apple_is_silicon_brand("Apple M5 Pro"), 1, "M5 Pro is Apple Silicon");
+    assert_eq(apple_is_silicon_brand("Apple M1"), 1, "M1 is Apple Silicon");
+    assert_eq(apple_is_silicon_brand("Apple M1 (Virtual)"), 1, "M1 VM is Apple Silicon");
+    assert_eq(apple_is_silicon_brand("Intel(R) Core(TM) i9-9980HK CPU @ 2.40GHz"), 0, "Intel Mac is not");
+    assert_eq(apple_is_silicon_brand(""), 0, "empty brand");
+    assert_eq(apple_is_silicon_brand(0), 0, "no brand");
+    return 0;
+}
+
+# What the native path emits on ecb (sysctl: "Apple M5 Pro", hw.memsize
+# 51539607552), and the Neural Engine table by generation.
+fn test_apple_emit_silicon() {
+    var profiles = vec_new();
+    apple_emit_silicon(profiles, "Apple M5 Pro", 51539607552);
+    assert_eq(vec_len(profiles), 2, "metal gpu + neural engine");
+    var gpu = vec_get(profiles, 0);
+    assert_eq(profile_accel_type(gpu), ACCEL_METAL, "metal gpu");
+    assert(streq(profile_device_name(gpu), "Apple M5 Pro") == 1, "gpu named after the chip");
+    assert_eq(profile_memory_bytes(gpu), 51539607552, "gpu has the unified memory");
+    var ane = vec_get(profiles, 1);
+    assert_eq(profile_accel_type(ane), ACCEL_APPLE_NPU, "neural engine");
+    assert(streq(profile_device_name(ane), "Apple Neural Engine") == 1, "ane name");
+    assert_eq(profile_memory_bytes(ane), 4 * BYTES_PER_GIB, "M5 past the table: 4 GiB");
+    assert_eq(_apple_ane_bytes(str_from("Apple M4 Max")), 8 * BYTES_PER_GIB, "M4: 8 GiB");
+    assert_eq(_apple_ane_bytes(str_from("Apple M3")), 8 * BYTES_PER_GIB, "M3: 8 GiB");
+    assert_eq(_apple_ane_bytes(str_from("Apple M2 Ultra")), 6 * BYTES_PER_GIB, "M2: 6 GiB");
+    assert_eq(_apple_ane_bytes(str_from("Apple M1 Pro")), 4 * BYTES_PER_GIB, "M1: 4 GiB");
+    return 0;
+}
+
+# The native path and the system_profiler fallback describe the same machine
+# identically: same types, names and memory.
+fn test_apple_native_matches_system_profiler() {
+    var native = vec_new();
+    apple_emit_silicon(native, "Apple M4 Pro", 36 * BYTES_PER_GIB);
+    var parsed = vec_new();
+    _parse_apple_macos(str_from("  Chip: Apple M4 Pro\n  Memory: 36 GB\n"), parsed);
+    assert_eq(vec_len(parsed), vec_len(native), "same profile count");
+    var i = 0;
+    var diffs = 0;
+    while (i < vec_len(native)) {
+        var a = vec_get(native, i);
+        var b = vec_get(parsed, i);
+        if (profile_accel_type(a) != profile_accel_type(b)) { diffs = diffs + 1; }
+        if (profile_memory_bytes(a) != profile_memory_bytes(b)) { diffs = diffs + 1; }
+        if (streq(profile_device_name(a), profile_device_name(b)) != 1) { diffs = diffs + 1; }
+        i = i + 1;
+    }
+    assert_eq(diffs, 0, "native == system_profiler");
+    return 0;
+}
+
+# Count warnings about `tool` in vec `w`.
+fn _tool_warnings(w, tool) {
+    var c = 0;
+    var i = 0;
+    while (i < vec_len(w)) {
+        if (streq(warning_tool(vec_get(w, i)), tool) == 1) { c = c + 1; }
+        i = i + 1;
+    }
+    return c;
+}
+
+# Without exec, the system_profiler fallback is never attempted. With exec
+# it is (this unit runs on Linux, where system_profiler does not exist, so
+# the attempt shows up as a warning).
+fn test_apple_no_exec_spawns_nothing() {
+    var w0 = vec_new();
+    detect_apple_opts(vec_new(), w0, 0);
+    assert_eq(_tool_warnings(w0, "system_profiler"), 0, "no-exec: no system_profiler attempt");
+    var w1 = vec_new();
+    detect_apple_opts(vec_new(), w1, 1);
+    assert_eq(_tool_warnings(w1, "system_profiler"), 1, "exec: system_profiler attempted");
+    return 0;
+}
 
 # --- Run all tests ---
 
@@ -154,6 +232,10 @@ alloc_init();
 
 test_apple_macos_parse();
 test_apple_m2_ane();
+test_apple_silicon_brand();
+test_apple_emit_silicon();
+test_apple_native_matches_system_profiler();
+test_apple_no_exec_spawns_nothing();
 test_edge_defaults();
 test_cloud_asic_defaults();
 test_intel_profiles();

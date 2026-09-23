@@ -146,9 +146,8 @@ fn test_builder_selective() {
 # --- 2.2.5: no-exec contract ---
 
 fn test_backend_uses_exec() {
-    # Eight backends shell out to vendor CLIs
+    # Seven backends shell out to vendor CLIs
     assert_eq(backend_uses_exec(BACKEND_CUDA), 1, "cuda exec");
-    assert_eq(backend_uses_exec(BACKEND_APPLE), 1, "apple exec");
     assert_eq(backend_uses_exec(BACKEND_VULKAN), 1, "vulkan exec");
     assert_eq(backend_uses_exec(BACKEND_GAUDI), 1, "gaudi exec");
     assert_eq(backend_uses_exec(BACKEND_NEURON), 1, "neuron exec");
@@ -156,8 +155,10 @@ fn test_backend_uses_exec() {
     assert_eq(backend_uses_exec(BACKEND_CEREBRAS), 1, "cerebras exec");
     assert_eq(backend_uses_exec(BACKEND_GRAPHCORE), 1, "graphcore exec");
 
-    # Nine backends spawn nothing (sysfs/syscall, and DXGI on Windows)
+    # Ten backends spawn nothing (sysfs/syscall, DXGI on Windows, sysctl on
+    # macOS)
     assert_eq(backend_uses_exec(BACKEND_WINDOWS), 0, "windows native (dxgi)");
+    assert_eq(backend_uses_exec(BACKEND_APPLE), 0, "apple native (sysctl)");
     assert_eq(backend_uses_exec(BACKEND_ROCM), 0, "rocm sysfs");
     assert_eq(backend_uses_exec(BACKEND_INTEL_NPU), 0, "intel-npu sysfs");
     assert_eq(backend_uses_exec(BACKEND_AMD_XDNA), 0, "xdna sysfs");
@@ -175,6 +176,7 @@ fn test_builder_no_exec_mask() {
     # Every native backend present; Windows GPUs must not be skipped in
     # registry_detect_no_exec() (DXGI spawns nothing)
     assert_eq(builder_is_enabled(mask, BACKEND_WINDOWS), 1, "windows in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_APPLE), 1, "apple in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_ROCM), 1, "rocm in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_INTEL_NPU), 1, "npu in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_AMD_XDNA), 1, "xdna in mask");
@@ -186,7 +188,6 @@ fn test_builder_no_exec_mask() {
 
     # Every exec backend absent
     assert_eq(builder_is_enabled(mask, BACKEND_CUDA), 0, "cuda excluded");
-    assert_eq(builder_is_enabled(mask, BACKEND_APPLE), 0, "apple excluded");
     assert_eq(builder_is_enabled(mask, BACKEND_VULKAN), 0, "vulkan excluded");
     assert_eq(builder_is_enabled(mask, BACKEND_GAUDI), 0, "gaudi excluded");
     assert_eq(builder_is_enabled(mask, BACKEND_NEURON), 0, "neuron excluded");

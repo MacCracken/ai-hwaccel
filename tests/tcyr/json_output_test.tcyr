@@ -26,7 +26,7 @@ include "src/training.cyr"
 # Stubs for modules not needed
 fn detect_cuda(p, w) { return 0; }
 fn detect_rocm(p, w) { return 0; }
-fn detect_apple(p, w) { return 0; }
+fn detect_apple_opts(p, w, a) { return 0; }
 fn detect_vulkan(p, w) { return 0; }
 fn detect_intel_npu(p, w) { return 0; }
 fn detect_amd_xdna(p, w) { return 0; }

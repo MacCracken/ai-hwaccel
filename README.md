@@ -14,7 +14,7 @@ decide how to quantize and shard a model across them.
 |--------|-------|
 | Binary size | **214 KB** (`CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.6.6 |
-| Tests | 725 assertions (15 test units) |
+| Tests | 746 assertions (15 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** |
 | Hardware families | 18 |
@@ -26,8 +26,8 @@ decide how to quantize and shard a model across them.
 |--------|----------|------------------|
 | NVIDIA CUDA | GeForce, Tesla, A100, H100, ... | `nvidia-smi` on `$PATH` |
 | AMD ROCm | MI250, MI300, RX 7900 | `/sys/class/drm` sysfs |
-| Apple Metal | M1–M4 GPU cores | `system_profiler` / `sysctl` |
-| Apple ANE | Neural Engine | `system_profiler` / `sysctl` |
+| Apple Metal | M-series GPU cores | `sysctl` (`system_profiler` fallback) |
+| Apple ANE | Neural Engine | `sysctl` (`system_profiler` fallback) |
 | Intel NPU | Meteor Lake+ | `/sys/class/misc/intel_npu` |
 | AMD XDNA | Ryzen AI NPU | `/sys/class/accel/*/device/driver` |
 | Google TPU | v4, v5e, v5p | `/dev/accel*` + sysfs version |
@@ -84,9 +84,9 @@ consumer's `lib/`. Include it like any other dep:
 include "lib/ai-hwaccel.cyr"
 
 # Full detection — sysfs probes plus vendor CLIs (nvidia-smi,
-# system_profiler, vulkaninfo, hl-smi, neuron-ls, xpu-smi,
-# cerebras_cli, gc-info) for the eight EXEC backends, and ibstat /
-# nvidia-smi topo for the interconnect post-pass.
+# vulkaninfo, hl-smi, neuron-ls, xpu-smi, cerebras_cli, gc-info) for
+# the seven EXEC backends, and ibstat / nvidia-smi topo for the
+# interconnect post-pass.
 var r = registry_detect();
 # ... reg_profiles(r), reg_count(r), ...
 ```
@@ -95,17 +95,19 @@ var r = registry_detect();
 
 Consumers with a no-subprocess contract — `mihi`'s probe surface, any
 read-only system-info library — call `registry_detect_no_exec()`
-instead. It masks off the eight exec-shelling backends (CUDA, Apple,
-Vulkan, Gaudi, Neuron, Intel oneAPI, Cerebras, Graphcore) and skips
-the `detect_interconnects` post-pass. The remaining eight backends —
-ROCm, Intel NPU, AMD XDNA, TPU, Qualcomm, Groq, Samsung NPU, MediaTek
-APU — plus the sysfs post-passes still run.
+instead. It masks off the seven exec-shelling backends (CUDA, Vulkan,
+Gaudi, Neuron, Intel oneAPI, Cerebras, Graphcore) and skips the
+`detect_interconnects` post-pass. The ten native backends still run,
+along with the sysfs post-passes: ROCm, Intel NPU, AMD XDNA, TPU,
+Qualcomm, Groq, Samsung NPU, MediaTek APU, Windows (DXGI, since 2.3.25)
+and Apple (sysctl on macOS and the device tree on Asahi Linux, since
+2.3.27). Their `wmic` / `system_profiler` fallbacks do not run.
 
 ```cyrius
 include "lib/ai-hwaccel.cyr"
 
-# Pure sysfs/syscall reads — safe to call from probe contexts that
-# forbid spawning processes (e.g. mihi).
+# No subprocess (sysfs, syscalls, DXGI, sysctl) — safe to call from
+# probe contexts that forbid spawning processes (e.g. mihi).
 var r = registry_detect_no_exec();
 ```
 
@@ -143,7 +145,7 @@ src/
 └── detect/                 Hardware detection (20 modules)
     ├── cuda.cyr             NVIDIA via nvidia-smi
     ├── rocm.cyr             AMD via sysfs
-    ├── apple.cyr            Metal + ANE via system_profiler
+    ├── apple.cyr            Metal + ANE via sysctl
     ├── vulkan.cyr           Vulkan via vulkaninfo
     ├── tpu.cyr              Google TPU via sysfs
     ├── gaudi.cyr            Intel Gaudi via hl-smi
@@ -208,7 +210,7 @@ cyrius vet src/main.cyr                        # Include-graph audit
 cyrius lint src/main.cyr                       # Static analysis
 cyrius fmt src/main.cyr                        # Format check (diff against committed)
 
-# Test suite — 15 units under tests/tcyr/, 725 assertions total
+# Test suite — 15 units under tests/tcyr/, 746 assertions total
 for t in tests/tcyr/*.tcyr; do
     cyrius build "$t" "/tmp/$(basename $t .tcyr)"
     "/tmp/$(basename $t .tcyr)"
