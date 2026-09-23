@@ -71,5 +71,8 @@ var GBITS_PER_GBYTE = 8;
 # --- JSON schema version ---
 # v4 (2.3.1): registry_to_json gained the "system_io" object
 # (interconnects / storage / runtime environment).
+# v5 (2.3.15): lossless profiles (accel_type_id + the accelerator fields).
+# v6 (2.3.28): profiles carry "shared_memory_bytes", the part of their memory
+# that is system RAM, and the summary totals count that RAM once.
 
-var SCHEMA_VERSION = 5;
+var SCHEMA_VERSION = 6;

@@ -14,7 +14,7 @@ decide how to quantize and shard a model across them.
 |--------|-------|
 | Binary size | **214 KB** (`CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.6.6 |
-| Tests | 746 assertions (15 test units) |
+| Tests | 791 assertions (15 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** |
 | Hardware families | 18 |
@@ -210,7 +210,7 @@ cyrius vet src/main.cyr                        # Include-graph audit
 cyrius lint src/main.cyr                       # Static analysis
 cyrius fmt src/main.cyr                        # Format check (diff against committed)
 
-# Test suite — 15 units under tests/tcyr/, 746 assertions total
+# Test suite — 15 units under tests/tcyr/, 791 assertions total
 for t in tests/tcyr/*.tcyr; do
     cyrius build "$t" "/tmp/$(basename $t .tcyr)"
     "/tmp/$(basename $t .tcyr)"
@@ -225,7 +225,7 @@ done
 |------|---------|
 | `foundation_test.tcyr` | error codes, accel types, family classification |
 | `profile_test.tcyr` | profile struct construction, throughput, rank |
-| `registry_test.tcyr` | registry + detection builder + suggest_quant + every detection entry point, end to end |
+| `registry_test.tcyr` | registry + detection builder + suggest_quant + memory totals + every detection entry point, end to end |
 | `requirement_test.tcyr` | accelerator requirement matching |
 | `gpu_parser_test.tcyr` | CUDA / Gaudi / Neuron output parsing |
 | `backend_test.tcyr` | Apple / Intel / AMD XDNA / cloud ASIC / edge |
@@ -235,7 +235,7 @@ done
 | `model_format_test.tcyr` | SafeTensors / GGUF / ONNX / PyTorch headers |
 | `json_output_test.tcyr` | JSON serialization (registry, summary, profile) |
 | `json_roundtrip_test.tcyr` | profile JSON round-trip (`profile_from_json`) |
-| `model_catalog_test.tcyr` | `load_models` against the shipped `data/models.json` |
+| `model_catalog_test.tcyr` | `load_models` against the shipped `data/models.json`, `compatible_with_registry` |
 | `windows_test.tcyr` | Windows DXGI adapter descriptors + `wmic` fallback parsers |
 | `lazy_test.tcyr` | lazy registry: per-family queries vs full detection, no backend run twice |
 
@@ -251,7 +251,7 @@ structs outside their defining file. See `.github/workflows/ci.yml`'s
 struct profile {
     accel_type; device_id; available; memory_bytes;
     compute_cap; driver_version; device_name;
-    // ... 13 more fields
+    // ... 14 more fields
 }
 
 // Generated automatically:

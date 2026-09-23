@@ -177,6 +177,9 @@ fn test_apple_emit_silicon() {
     assert_eq(_apple_ane_bytes(str_from("Apple M3")), 8 * BYTES_PER_GIB, "M3: 8 GiB");
     assert_eq(_apple_ane_bytes(str_from("Apple M2 Ultra")), 6 * BYTES_PER_GIB, "M2: 6 GiB");
     assert_eq(_apple_ane_bytes(str_from("Apple M1 Pro")), 4 * BYTES_PER_GIB, "M1: 4 GiB");
+    # Both draw on unified memory, so totals count them once (2.3.28).
+    assert_eq(profile_shared_bytes(gpu), 51539607552, "gpu memory is unified");
+    assert_eq(profile_shared_bytes(ane), 4 * BYTES_PER_GIB, "ane memory is unified");
     return 0;
 }
 

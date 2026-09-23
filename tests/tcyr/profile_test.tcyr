@@ -107,6 +107,36 @@ fn test_profile_throughput() {
     return 0;
 }
 
+# shared_mem (2.3.28): profile_new marks all of a system-memory device's
+# memory shared and none of anyone else's; profile_shared_bytes clamps.
+fn test_profile_shared_mem() {
+    var cpu = profile_cpu(64 * BYTES_PER_GIB);
+    assert_eq(profile_shared_bytes(cpu), 64 * BYTES_PER_GIB, "cpu memory is the pool");
+    var metal = profile_new(ACCEL_METAL, 0, 48 * BYTES_PER_GIB);
+    assert_eq(profile_shared_bytes(metal), 48 * BYTES_PER_GIB, "metal: all unified");
+    var ane = profile_new(ACCEL_APPLE_NPU, 0, 4 * BYTES_PER_GIB);
+    assert_eq(profile_shared_bytes(ane), 4 * BYTES_PER_GIB, "neural engine: all unified");
+    var npu = profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB);
+    assert_eq(profile_shared_bytes(npu), 2 * BYTES_PER_GIB, "intel npu: system memory");
+    var gpu = profile_cuda(0, 24 * BYTES_PER_GIB);
+    assert_eq(profile_shared_bytes(gpu), 0, "cuda: its own memory");
+    var tpu = profile_tpu(0, 4, TPU_V5E);
+    assert_eq(profile_shared_bytes(tpu), 0, "tpu: its own memory");
+    # GH200-style partial share, then the clamp in both directions.
+    profile_set_shared_mem(gpu, 8 * BYTES_PER_GIB);
+    assert_eq(profile_shared_bytes(gpu), 8 * BYTES_PER_GIB, "explicit partial share");
+    profile_set_shared_mem(gpu, 99 * BYTES_PER_GIB);
+    assert_eq(profile_shared_bytes(gpu), 24 * BYTES_PER_GIB, "clamped to memory_bytes");
+    profile_set_shared_mem(gpu, 0 - 5);
+    assert_eq(profile_shared_bytes(gpu), 0, "negative clamps to 0");
+    # A type id outside the enum (foreign JSON) is not shared: 64 and -64
+    # would wrap profile_new's mask shift onto the CPU's bit.
+    assert_eq(profile_shared_mem(profile_new(64, 0, 1024)), 0, "type 64 not shared");
+    assert_eq(profile_shared_mem(profile_new(0 - 64, 0, 1024)), 0, "type -64 not shared");
+    assert_eq(profile_shared_mem(profile_new(ACCEL_MEDIATEK_APU + 1, 0, 1024)), 0, "type past the mask not shared");
+    return 0;
+}
+
 fn test_profile_rank() {
     var cuda = profile_cuda(0, 24 * BYTES_PER_GIB);
     var cpu = profile_cpu(16 * BYTES_PER_GIB);
@@ -270,6 +300,7 @@ fn test_sharding_plan() {
 alloc_init();
 
 test_profile_cpu();
+test_profile_shared_mem();
 test_profile_cuda();
 test_profile_tpu();
 test_profile_gaudi();

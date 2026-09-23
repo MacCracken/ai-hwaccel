@@ -117,8 +117,11 @@ fn parse_cuda_output(output, profiles, warnings) {
                 if (str_contains_cstr(gn, "GH200") == 1) {
                     if (mem_bytes > 80 * BYTES_PER_GIB) {
                         if (mem_bytes < 100 * BYTES_PER_GIB) {
-                            # Add 480 GB unified LPDDR5X
+                            # Add 480 GB unified LPDDR5X. That part is the
+                            # Grace CPU's memory, which the CPU profile also
+                            # counts, so it is marked shared (2.3.28).
                             profile_set_memory_bytes(p, mem_bytes + 480 * BYTES_PER_GIB);
+                            profile_set_shared_mem(p, 480 * BYTES_PER_GIB);
                         }
                     }
                 }

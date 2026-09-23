@@ -107,6 +107,31 @@ fn accel_is_ai_asic(a) {
     return 0;
 }
 
+# accel_uses_system_memory() as a bitmask (bit i set for type i), for
+# profile_new, which runs once per detected device. foundation_test checks
+# the two agree. CPU 0, METAL 3, INTEL_NPU 5, AMD_XDNA 6, APPLE_NPU 7,
+# SAMSUNG_NPU 16, MEDIATEK_APU 17.
+enum AccelSysMem {
+    ACCEL_SYSMEM_MASK = 0x300E9;
+}
+
+# 1 if every byte a device of this type reports is system RAM, the same pool
+# the CPU profile counts: the CPU itself, Apple Silicon's GPU and Neural
+# Engine (unified memory), and the client NPUs, which have no memory of their
+# own (Intel NPU, AMD XDNA, Samsung NPU, MediaTek APU). profile_new starts
+# such a profile with all of its memory marked shared. Qualcomm Cloud AI 100
+# is a card with its own LPDDR, so it is not listed.
+fn accel_uses_system_memory(a) {
+    if (a == ACCEL_CPU) { return 1; }
+    if (a == ACCEL_METAL) { return 1; }
+    if (a == ACCEL_APPLE_NPU) { return 1; }
+    if (a == ACCEL_INTEL_NPU) { return 1; }
+    if (a == ACCEL_AMD_XDNA) { return 1; }
+    if (a == ACCEL_SAMSUNG_NPU) { return 1; }
+    if (a == ACCEL_MEDIATEK_APU) { return 1; }
+    return 0;
+}
+
 fn accel_family(a) {
     if (a == ACCEL_CPU) { return FAMILY_CPU; }
     if (accel_is_gpu(a) == 1) { return FAMILY_GPU; }

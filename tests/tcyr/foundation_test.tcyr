@@ -157,7 +157,38 @@ fn test_units() {
     assert_eq(FP16_BYTES_PER_PARAM, 2, "FP16 2 bytes");
     assert_eq(ACTIVATION_OVERHEAD_DIVISOR, 5, "20% overhead");
     assert_eq(PARAMS_PER_LAYER_ESTIMATE, 250000000, "250M/layer");
-    assert_eq(SCHEMA_VERSION, 5, "schema v5");
+    assert_eq(SCHEMA_VERSION, 6, "schema v6");
+    return 0;
+}
+
+# --- Types whose memory is system RAM (2.3.28) ---
+
+# Exactly these types count as system RAM: the CPU, Apple Silicon's GPU and
+# Neural Engine, and the client NPUs. Every other type has memory of its own.
+fn test_uses_system_memory() {
+    var t = 0;
+    var wrong = 0;
+    while (t <= ACCEL_AGNOS_GPU) {
+        var want = 0;
+        if (t == ACCEL_CPU) { want = 1; }
+        if (t == ACCEL_METAL) { want = 1; }
+        if (t == ACCEL_APPLE_NPU) { want = 1; }
+        if (t == ACCEL_INTEL_NPU) { want = 1; }
+        if (t == ACCEL_AMD_XDNA) { want = 1; }
+        if (t == ACCEL_SAMSUNG_NPU) { want = 1; }
+        if (t == ACCEL_MEDIATEK_APU) { want = 1; }
+        if (accel_uses_system_memory(t) != want) { wrong = wrong + 1; }
+        t = t + 1;
+    }
+    assert_eq(wrong, 0, "system-memory types");
+    var t2 = 0;
+    var disagree = 0;
+    while (t2 <= ACCEL_AGNOS_GPU) {
+        if (((ACCEL_SYSMEM_MASK >> t2) & 1) != accel_uses_system_memory(t2)) { disagree = disagree + 1; }
+        t2 = t2 + 1;
+    }
+    assert_eq(disagree, 0, "ACCEL_SYSMEM_MASK matches accel_uses_system_memory");
+    assert_eq(accel_uses_system_memory(ACCEL_QUALCOMM), 0, "cloud ai 100 has its own memory");
     return 0;
 }
 
@@ -262,6 +293,7 @@ test_tpu_versions();
 test_gaudi_generations();
 test_neuron_chips();
 test_units();
+test_uses_system_memory();
 test_quant_bits();
 test_quant_reduction();
 test_quant_names();

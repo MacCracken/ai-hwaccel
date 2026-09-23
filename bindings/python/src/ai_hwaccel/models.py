@@ -1,4 +1,4 @@
-"""Typed model for the ai-hwaccel JSON contract (schema v4).
+"""Typed model for the ai-hwaccel JSON contract (schema v6).
 
 These dataclasses mirror the JSON emitted by the ``ai-hwaccel`` binary
 (see ``src/json_out.cyr`` in the cyrius core). They are intentionally a
@@ -14,7 +14,9 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 # JSON schema version this model targets. detect() warns on a mismatch.
-SCHEMA_VERSION = 4
+# The binary has emitted v5 since 2.3.15 and v6 since 2.3.28; this said 4
+# until 2.3.28, so detect() warned on every call from 2.3.15 to 2.3.27.
+SCHEMA_VERSION = 6
 
 
 def _select(cls: type, d: dict) -> dict:
@@ -41,10 +43,32 @@ class AcceleratorProfile:
     numa_node: Optional[int] = None
     temperature_c: Optional[int] = None
     gpu_utilization_percent: Optional[int] = None
+    # Schema v5 (2.3.15): the raw type tag and the accelerator-specific fields.
+    accel_type_id: Optional[int] = None
+    mem_bandwidth_x1000: Optional[int] = None
+    pcie_bandwidth_x1000: Optional[int] = None
+    power_x1000: Optional[int] = None
+    tpu_version: Optional[int] = None
+    tpu_chips: Optional[int] = None
+    gaudi_gen: Optional[int] = None
+    neuron_chip: Optional[int] = None
+    neuron_cores: Optional[int] = None
+    # Schema v6 (2.3.28): the part of memory_bytes that is system RAM (all of
+    # it for Apple Silicon's GPU and Neural Engine and for client NPUs; the
+    # Grace memory on a GH200). Absent means none, except on the CPU profile,
+    # whose memory is the system RAM itself.
+    shared_memory_bytes: Optional[int] = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "AcceleratorProfile":
         return cls(**_select(cls, d))
+
+    @property
+    def dedicated_memory_bytes(self) -> int:
+        """memory_bytes that is the device's own, not system RAM."""
+        if self.family == "CPU":
+            return 0
+        return self.memory_bytes - (self.shared_memory_bytes or 0)
 
 
 # --- System I/O topology --------------------------------------------

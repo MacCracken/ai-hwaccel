@@ -73,7 +73,9 @@ fn _json_opt_int_nz(sb, key, val) {
 # (raw AcceleratorType enum) is the authoritative type tag on the way back.
 # Accelerator-specific and perf fields are emitted only when set, so CPU/GPU
 # output is unchanged from the pre-2.3.15 shape apart from the new
-# `accel_type_id` key.
+# `accel_type_id` key. `shared_memory_bytes` (schema v6, 2.3.28) appears on an
+# accelerator whose memory is partly or wholly system RAM; the CPU's is all of
+# its memory, which the reader restores without the key.
 fn profile_to_json(sb, p) {
     str_builder_putc(sb, '{');
     _json_str(sb, "accelerator", accel_name(profile_accel_type(p)), 0);
@@ -100,6 +102,11 @@ fn profile_to_json(sb, p) {
     _json_opt_int(sb, "gaudi_gen", profile_gaudi_gen(p));
     _json_opt_int(sb, "neuron_chip", profile_neuron_chip(p));
     _json_opt_int_nz(sb, "neuron_cores", profile_neuron_cores(p));
+    if (profile_shared_mem(p) > 0) {
+        if (profile_accel_type(p) != ACCEL_CPU) {
+            _json_opt_int_nz(sb, "shared_memory_bytes", profile_shared_bytes(p));
+        }
+    }
     str_builder_putc(sb, '}');
     return 0;
 }
@@ -170,6 +177,8 @@ fn profile_from_json(v) {
     profile_set_gaudi_gen(p, _pj_int(v, "gaudi_gen", PROFILE_NONE));
     profile_set_neuron_chip(p, _pj_int(v, "neuron_chip", PROFILE_NONE));
     profile_set_neuron_cores(p, _pj_int(v, "neuron_cores", 0));
+    # Absent key: keep what profile_new derived from the type and memory.
+    profile_set_shared_mem(p, _pj_int(v, "shared_memory_bytes", profile_shared_mem(p)));
     return p;
 }
 

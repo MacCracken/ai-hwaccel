@@ -26,7 +26,7 @@ correctness and platform validation come first.
 | 2.3.8 – 2.3.12 | 2026-06-05 → 06-15 | Windows DXGI VRAM + structured logging, `windows-smoke` CI gate, `--data-dir`; cyrius 6.0.70 → 6.2.11 |
 | 2.3.13 – 2.3.20 | 2026-07-13 → 08-30 | cyrius 6.4.62 → 6.5.x, symbol namespacing (`HWA_ERR_*`, `hw_registry_new`, kavach clashes), profile JSON round-trip, focused bayan dep |
 | 2.3.21 – 2.3.24 | 2026-09-07 → 09-22 | cyrius 6.6.x + bayan 1.5.x, the five defects cyrius 6.6.0 surfaced, issue-folder triage |
-| 2.3.25 – 2.3.27 | 2026-09-23 | Windows detection without wmic, Windows GPUs from every detection entry point, lazy NPU queries find the Apple Neural Engine, macOS real RAM and Apple Silicon via sysctl (no `system_profiler`; found in no-exec mode) |
+| 2.3.25 – 2.3.28 | 2026-09-23 | Windows detection without wmic, Windows GPUs from every detection entry point, lazy NPU queries find the Apple Neural Engine, macOS real RAM and Apple Silicon via sysctl (no `system_profiler`; found in no-exec mode), unified memory counted once in totals (schema v6) |
 
 ---
 
@@ -46,12 +46,20 @@ which is why the series starts at 2.4.0.
   way (not verified: no such host). This needs a stable device key (PCI bus
   address; vendor:device + LUID on Windows), a rule for which backend's profile
   survives, and a rule for which memory figure it keeps.
-- [ ] **Unified memory is counted twice in totals.** On Apple Silicon the CPU
+- [x] **Unified memory is counted twice in totals.** On Apple Silicon the CPU
   and the Metal GPU profiles describe the same RAM, and `total_memory_bytes`
-  sums every profile. On `ecb` (48 GB) 2.3.27 reports 100 GiB: 48 CPU + 48 GPU
-  + 4 Neural Engine. Asahi Linux sums it the same way. Totals need to know
-  which profiles share memory; the same key as the duplicate-device item could
-  carry it.
+  summed every profile: on `ecb` (48 GB) 2.3.27 reported 100 GiB. **Fixed in
+  2.3.28:** profiles carry `shared_memory_bytes` (schema v6), and totals count
+  system RAM once. This covers Apple Silicon, the client NPUs and GH200.
+- [ ] **Integrated GPUs seen through Vulkan count as memory of their own.**
+  `vulkaninfo --summary` gives no heap size, so such a GPU gets the 4 GiB
+  estimate with `shared_memory_bytes` 0. An Intel iGPU's memory is system RAM,
+  so on such a host the totals count it twice, as Apple Silicon's did until
+  2.3.28. An AMD APU's BIOS carve-out is not in `MemTotal`, so counting it is
+  right. Parse `deviceType` and `vendorID` from `vulkaninfo`, mark an Intel
+  integrated GPU shared, and take the real size from the full `vulkaninfo`
+  output (or sysfs) rather than the estimate. Windows is not affected: DXGI
+  profiles report dedicated video memory only.
 - [ ] **Lazy queries should run only the detectors they need.** Every lazy
   family probe goes through `registry_detect_with`, so it runs the post-passes
   too, and `detect_interconnects` spawns `nvidia-smi nvlink -s` whenever no
@@ -75,6 +83,10 @@ which is why the series starts at 2.4.0.
 
 ### Build and docs
 
+- [ ] **`docs/schema.json` describes the Rust-era v1 output.** It pins
+  `schema_version` to 1 and a tagged-union `accelerator`, with
+  `additionalProperties: false`, so no current output (v6) validates against
+  it. Regenerate it from `src/json_out.cyr`'s actual shape, or drop it.
 - [ ] **ADR-004's `-D<BACKEND>` recipes build every backend.** The recipes are
   in `docs/guides/production.md:16`, `docs/troubleshooting.md:31`,
   `docs/performance.md:57`, `docs/guides/testing.md:38,41` and

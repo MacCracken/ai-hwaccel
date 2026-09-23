@@ -56,6 +56,25 @@ fn test_cuda_single_gpu() {
     return 0;
 }
 
+# GH200: nvidia-smi reports the 96 GiB HBM; the parser adds the 480 GiB of
+# Grace LPDDR5X the GPU addresses coherently, and marks that part shared,
+# because the CPU profile counts it too (2.3.28). The first test of this path.
+fn test_cuda_gh200_unified() {
+    var csv = str_from("0, 97871, 0, 97871, 9.0, 550.54, NVIDIA GH200 480GB, 30, 0, 100, 1980");
+    var profiles = vec_new();
+    var warnings = vec_new();
+    parse_cuda_output(csv, profiles, warnings);
+    assert_eq(vec_len(profiles), 1, "gh200 parsed");
+    var p = vec_get(profiles, 0);
+    assert_eq(profile_memory_bytes(p), 97871 * 1024 * 1024 + 480 * BYTES_PER_GIB, "hbm + grace");
+    assert_eq(profile_shared_bytes(p), 480 * BYTES_PER_GIB, "grace part shared");
+    var a100 = str_from("0, 81920, 512, 81408, 8.0, 470.82, A100-SXM4-80GB, 35, 60, 5, 1593");
+    var p2 = vec_new();
+    parse_cuda_output(a100, p2, warnings);
+    assert_eq(profile_shared_bytes(vec_get(p2, 0)), 0, "a100 shares nothing");
+    return 0;
+}
+
 fn test_cuda_multi_gpu() {
     var csv = str_from("0, 81920, 0, 81920, 8.0, 470.82, A100-SXM4-80GB, 35, 60, 0, 1593\n1, 81920, 512, 81408, 8.0, 470.82, A100-SXM4-80GB, 36, 62, 5, 1593");
     var profiles = vec_new();
@@ -182,6 +201,7 @@ fn test_detector_names() {
 alloc_init();
 
 test_cuda_single_gpu();
+test_cuda_gh200_unified();
 test_cuda_multi_gpu();
 test_cuda_bad_csv();
 test_cuda_empty_lines();

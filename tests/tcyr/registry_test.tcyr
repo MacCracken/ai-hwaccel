@@ -264,6 +264,90 @@ fn test_detection_entry_points() {
     return 0;
 }
 
+# --- Totals count system RAM once (2.3.28) ---
+
+fn _reg(a, b, c) {
+    var v = vec_new();
+    if (a != 0) { vec_push(v, a); }
+    if (b != 0) { vec_push(v, b); }
+    if (c != 0) { vec_push(v, c); }
+    return registry_from_profiles(v);
+}
+
+# ecb, a 48 GB Apple M5 Pro: CPU 48, Metal 48 and Neural Engine 4 all draw on
+# one 48 GiB pool. 2.3.27 reported 100 GiB total and 52 GiB accelerator.
+fn test_totals_apple_unified() {
+    var r = _reg(profile_cpu(48 * BYTES_PER_GIB),
+      profile_new(ACCEL_METAL, 0, 48 * BYTES_PER_GIB),
+      profile_new(ACCEL_APPLE_NPU, 0, 4 * BYTES_PER_GIB));
+    assert_eq(reg_total_memory(r) / BYTES_PER_GIB, 48, "mac total = RAM once");
+    assert_eq(reg_total_accel_memory(r) / BYTES_PER_GIB, 48, "mac accel = the unified pool");
+    return 0;
+}
+
+# GH200: 96 GiB HBM of its own plus 480 GiB of Grace memory, which is also
+# the CPU's. Total = 96 + 480, not 96 + 480 + 480.
+fn test_totals_gh200() {
+    var gpu = profile_cuda(0, 576 * BYTES_PER_GIB);
+    profile_set_shared_mem(gpu, 480 * BYTES_PER_GIB);
+    var r = _reg(profile_cpu(480 * BYTES_PER_GIB), gpu, 0);
+    assert_eq(reg_total_memory(r) / BYTES_PER_GIB, 576, "gh200 total");
+    assert_eq(reg_total_accel_memory(r) / BYTES_PER_GIB, 576, "gh200 accel");
+    return 0;
+}
+
+# A laptop NPU has no memory of its own: its 2 GiB estimate is system RAM.
+fn test_totals_npu_laptop() {
+    var r = _reg(profile_cpu(32 * BYTES_PER_GIB), profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB), 0);
+    assert_eq(reg_total_memory(r) / BYTES_PER_GIB, 32, "npu laptop total = RAM");
+    assert_eq(reg_total_accel_memory(r) / BYTES_PER_GIB, 2, "npu budget still counts as accel");
+    return 0;
+}
+
+# A discrete GPU keeps adding its own memory next to a shared-memory NPU.
+fn test_totals_mixed() {
+    var r = _reg(profile_cpu(64 * BYTES_PER_GIB), profile_cuda(0, 24 * BYTES_PER_GIB),
+      profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB));
+    assert_eq(reg_total_memory(r) / BYTES_PER_GIB, 88, "mixed total = RAM + VRAM");
+    assert_eq(reg_total_accel_memory(r) / BYTES_PER_GIB, 26, "mixed accel = VRAM + npu budget");
+    return 0;
+}
+
+# Without a CPU profile the pool still counts once; unavailable profiles
+# count nowhere.
+fn test_totals_no_cpu_and_unavailable() {
+    var r = _reg(profile_new(ACCEL_METAL, 0, 48 * BYTES_PER_GIB),
+      profile_new(ACCEL_APPLE_NPU, 0, 4 * BYTES_PER_GIB), 0);
+    assert_eq(reg_total_memory(r) / BYTES_PER_GIB, 48, "no cpu: pool once");
+    var off = profile_new(ACCEL_METAL, 0, 96 * BYTES_PER_GIB);
+    profile_set_available(off, 0);
+    var r2 = _reg(profile_cpu(16 * BYTES_PER_GIB), off, 0);
+    assert_eq(reg_total_memory(r2) / BYTES_PER_GIB, 16, "unavailable ignored");
+    assert_eq(reg_total_accel_memory(r2), 0, "unavailable accel ignored");
+    return 0;
+}
+
+# A shared_mem outside [0, memory_bytes] (a foreign shared_memory_bytes, or a
+# memory_bytes lowered after construction) is clamped as profile_shared_bytes
+# clamps it: a negative part counts as 0, one past memory_bytes as all of it.
+fn test_totals_clamped() {
+    var neg = profile_cuda(0, 24 * BYTES_PER_GIB);
+    profile_set_shared_mem(neg, 0 - 5 * BYTES_PER_GIB);
+    var over = profile_cuda(1, 16 * BYTES_PER_GIB);
+    profile_set_shared_mem(over, 99 * BYTES_PER_GIB);
+    var v = vec_new();
+    vec_push(v, profile_cpu(64 * BYTES_PER_GIB));
+    vec_push(v, neg);
+    vec_push(v, over);
+    vec_push(v, profile_new(ACCEL_INTEL_NPU, 0, 32 * BYTES_PER_GIB));
+    var r = registry_from_profiles(v);
+    # neg adds its 24; over is all shared; the pool is max(64, 16, 32).
+    assert_eq(reg_total_memory(r) / BYTES_PER_GIB, 88, "clamped total");
+    # Without the CPU the pool is the NPU's 32.
+    assert_eq(reg_total_accel_memory(r) / BYTES_PER_GIB, 56, "clamped accel");
+    return 0;
+}
+
 # --- Suggest quantization ---
 
 fn test_suggest_quant_gpu_small() {
@@ -351,6 +435,12 @@ test_builder_no_exec_mask();
 test_no_exec_strips_exec_bits();
 test_no_exec_memory();
 test_detection_entry_points();
+test_totals_apple_unified();
+test_totals_gh200();
+test_totals_npu_laptop();
+test_totals_mixed();
+test_totals_no_cpu_and_unavailable();
+test_totals_clamped();
 test_suggest_quant_gpu_small();
 test_suggest_quant_gpu_large();
 test_suggest_quant_tpu();

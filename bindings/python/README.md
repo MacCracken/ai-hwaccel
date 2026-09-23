@@ -7,7 +7,7 @@ sharding, training-memory estimation).
 These bindings are a thin, **dependency-free** wrapper over the compiled
 `ai-hwaccel` binary. There is no FFI (the cyrius toolchain emits
 executables only); each call shells out to the binary and parses its
-JSON (schema v4) into typed dataclasses.
+JSON (schema v6) into typed dataclasses.
 
 ## Install
 
@@ -63,6 +63,12 @@ df = reg.to_dataframe()          # requires ai-hwaccel[pandas]
 | `version()` | `str` | binary's self-reported version |
 
 All accept `binary=<path>` and `timeout=<seconds>`.
+
+`summary()`'s `total_memory_bytes` and `accelerator_memory_bytes` count system
+RAM once. On Apple Silicon the Metal GPU and Neural Engine use the CPU's RAM,
+so a 48 GB Mac totals 48 GiB. Each profile's `shared_memory_bytes` (schema v6)
+says how much of its `memory_bytes` is system RAM, and
+`AcceleratorProfile.dedicated_memory_bytes` is the rest.
 
 ## Data files & working directory
 

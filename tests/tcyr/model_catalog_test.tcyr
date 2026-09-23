@@ -94,6 +94,36 @@ fn test_catalog_entries_are_distinct() {
     return 0;
 }
 
+# compatible_with_registry budgets against reg_total_accel_memory, which counts
+# unified memory once since 2.3.28. On a 48 GB Apple Silicon Mac a 45B INT8
+# model (54e9 bytes with overhead, 50.3 GiB) no longer fits in "GPU 48 + Neural
+# Engine 4 = 52 GiB" of the same RAM; a 40B one (48e9 bytes, 44.7 GiB) does.
+fn _test_model(name, b_x1000) {
+    var m = alloc(MODEL_PROFILE_SIZE);
+    model_set_name(m, name);
+    model_set_family(m, "test");
+    model_set_params_b_x1000(m, b_x1000);
+    model_set_dtype(m, "int8");
+    return m;
+}
+
+fn test_compatible_with_registry_unified() {
+    var v = vec_new();
+    vec_push(v, profile_cpu(48 * BYTES_PER_GIB));
+    vec_push(v, profile_new(ACCEL_METAL, 0, 48 * BYTES_PER_GIB));
+    vec_push(v, profile_new(ACCEL_APPLE_NPU, 0, 4 * BYTES_PER_GIB));
+    var r = registry_from_profiles(v);
+    var models = vec_new();
+    vec_push(models, _test_model("fits-40b", 40000));
+    vec_push(models, _test_model("too-big-45b", 45000));
+    var ok = compatible_with_registry(models, r, QUANT_INT8);
+    assert_eq(vec_len(ok), 1, "one model fits the 48 GiB pool");
+    if (vec_len(ok) == 1) {
+        assert_eq(streq(model_name(vec_get(ok, 0)), "fits-40b"), 1, "the 40B model");
+    }
+    return 0;
+}
+
 fn main() {
     alloc_init();
     args_init();
@@ -101,6 +131,7 @@ fn main() {
     test_catalog_loads_every_model();
     test_catalog_first_and_last_parse();
     test_catalog_entries_are_distinct();
+    test_compatible_with_registry_unified();
     # Propagate the failure count so a regression actually fails `cyrius tests`.
     return assert_summary();
 }

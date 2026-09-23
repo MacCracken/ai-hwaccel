@@ -5,6 +5,227 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.28] — 2026-09-23 — unified memory counted once in the totals
+
+The registry totals counted system RAM again for every profile that reported
+it. On a 48 GB Apple M5 Pro, 2.3.27 reported `total_memory_bytes` as 100 GiB
+and `accelerator_memory_bytes` as 52 GiB. 2.3.28 reports 48 GiB for both.
+Profiles now say how much of their memory is system RAM, in a new
+`shared_memory_bytes` key (schema v6). The Python bindings now expect schema v6;
+they had warned on every `detect()` since 2.3.15. On a host without a
+shared-memory accelerator the totals do not change: the Linux dev host and
+`cass` produce the same JSON as 2.3.27 apart from `schema_version`.
+
+### Fixed
+
+- **System RAM was counted once per profile that reported it.**
+  `reg_total_memory` and `reg_total_accel_memory` summed `memory_bytes` over
+  every available profile. The CPU profile already counts system RAM, and
+  several accelerators report some or all of that same RAM:
+  - Apple Silicon's Metal GPU and Neural Engine (unified memory);
+  - the client NPUs, which have no memory of their own (Intel NPU, AMD XDNA,
+    Samsung NPU, MediaTek APU);
+  - GH200, whose 576 GiB includes the 480 GiB of Grace LPDDR5X that the CPU
+    also reports.
+
+  Each profile now records its shared part (`shared_mem`, `src/profile.cyr`).
+  `profile_new` sets it from the type: all of the memory for the types above
+  (`accel_uses_system_memory`, `src/types.cyr`), otherwise 0. The CUDA parser
+  sets 480 GiB for a GH200. The totals add each profile's own memory, plus the
+  largest shared part once (`src/registry.cyr`); a registry describes one host,
+  so the shared pool is a maximum, not a sum. A shared part outside
+  `[0, memory_bytes]`, such as a foreign `shared_memory_bytes`, is clamped.
+  `--summary` on `ecb` (Apple M5 Pro, 48 GB, `hw.memsize` 51 539 607 552):
+
+  | | 2.3.27 | 2.3.28 |
+  |---|---:|---:|
+  | `total_memory_bytes` | 107 374 182 400 (100 GiB) | 51 539 607 552 (48 GiB) |
+  | `accelerator_memory_bytes` | 55 834 574 848 (52 GiB) | 51 539 607 552 (48 GiB) |
+
+  `registry_detect`, `registry_detect_no_exec`, `registry_detect_threaded`,
+  `lazy_into_registry`, and a lazy NPU query followed by `lazy_into_registry`,
+  all report these totals on `ecb`. Asahi Linux (Metal GPU and Neural Engine
+  from the device tree) takes the same path; it is not verified, as there is no
+  such host.
+- **The Python bindings warned on every `detect()` since 2.3.15.**
+  `SCHEMA_VERSION` in `bindings/python/src/ai_hwaccel/models.py` still said 4
+  after the binary moved to schema v5 in 2.3.15. So `detect()` warned "binary
+  reports JSON schema v5, these bindings target v4" on every call, and the v5
+  fields were dropped as unknown keys. It is now 6. `AcceleratorProfile` gains
+  the v5 fields (`accel_type_id`, `mem_bandwidth_x1000`,
+  `pcie_bandwidth_x1000`, `power_x1000`, `tpu_version`, `tpu_chips`,
+  `gaudi_gen`, `neuron_chip`, `neuron_cores`), `shared_memory_bytes`, and a
+  `dedicated_memory_bytes` property (0 for the CPU).
+
+### Changed
+
+- **Schema v6: `shared_memory_bytes`.** A non-CPU profile whose memory is partly
+  or wholly system RAM carries the shared part, in bytes. The key is omitted on
+  the CPU (all of its memory is system RAM) and on devices that share nothing,
+  so their JSON is unchanged. `profile_from_json` reads the key. Without the
+  key, it keeps what `profile_new` derives from the type, so a v5 document
+  still parses. `SCHEMA_VERSION` is 6 (`src/units.cyr`).
+- **`compatible_with_registry` budgets against the corrected accelerator
+  total.** On `ecb` that is 48 GiB, not 52 GiB. So a model that needs 50.3 GiB
+  (45B at INT8, with the 20% activation overhead) no longer fits, and it did in
+  2.3.27. The CLI does not call this function; library consumers do.
+- **New functions and fields:** the profile's 21st field `shared_mem` (derived
+  accessors `profile_shared_mem` / `profile_set_shared_mem`; `PROFILE_SIZE`
+  168), `profile_shared_bytes` (the clamped shared part),
+  `accel_uses_system_memory`, and `ACCEL_SYSMEM_MASK`, which is the same set as
+  a bitmask so that `profile_new` makes no call per device.
+- **Docs.** `docs/guides/production.md`'s version-compatibility section said
+  `schema_version` was 1, and its example was Rust; it now describes the bump
+  rule with a Cyrius example. The bindings README describes schema v6 and the
+  totals. `docs/guides/testing.md` had the counts and test layout of an older
+  tree. The README profile listing and test counts are updated.
+- **Roadmap.** The unified-memory item is closed. One item is new:
+  `docs/schema.json` still describes the Rust-era v1 output, so no current
+  output validates against it.
+- **Tests: 746 → 791 assertions in 15 units.**
+  - `foundation_test` 122 → 125: schema v6; `accel_uses_system_memory` for
+    every type; `ACCEL_SYSMEM_MASK` agrees with it.
+  - `profile_test` 91 → 103: the shared part per type, the clamps, and type
+    ids outside the enum (`profile_from_json` accepts any integer).
+  - `registry_test` 94 → 107: totals for `ecb`'s profiles, a GH200, an NPU
+    laptop, a discrete GPU next to an NPU, no CPU profile, unavailable
+    profiles, and out-of-range shared parts.
+  - `gpu_parser_test` 40 → 44: the GH200 path of `parse_cuda_output` (its
+    first test) marks the 480 GiB shared; an A100 shares nothing.
+  - `json_output_test` 40 → 45: the key on Metal but not on the CPU or CUDA,
+    and `ecb`'s summary totals.
+  - `json_roundtrip_test` 28 → 32: the shared part survives the round trip.
+  - `backend_test` 58 → 60 and `model_catalog_test` 6 → 8:
+    `apple_emit_silicon`'s profiles are shared, and `compatible_with_registry`
+    on `ecb`'s profiles.
+
+  Each of 25 single-point mutations of the final code fails at least one
+  assertion:
+  - 12 in the two totals;
+  - 3 in `profile_new`'s type check;
+  - 9 across the clamp, the JSON key, the GH200 path, the type table and mask,
+    and the schema version;
+  - 1 in `compatible_with_registry`'s budget.
+
+### Known, not changed here
+
+- **Integrated GPUs seen through Vulkan are still counted as memory of their
+  own.** `vulkaninfo --summary` gives no heap size, so such a GPU gets the
+  4 GiB estimate. Whether that memory is part of the CPU's RAM depends on the
+  GPU: an AMD APU's BIOS carve-out is not in `MemTotal`, while an Intel iGPU
+  uses system RAM. Telling them apart needs `deviceType` and `vendorID` from
+  `vulkaninfo`. It is on the roadmap next to the duplicate-device item, which
+  is how the Linux dev host's one AMD iGPU still counts twice (ROCm 8 GiB +
+  Vulkan 4 GiB). Windows is not affected: DXGI profiles report dedicated video
+  memory, never `SharedSystemMemory`.
+
+### Performance
+
+**13 neutral, 2 slower, both explained below** (2.3.27 → 2.3.28). Method as in
+2.3.27: each arm built at 5 code layouts, the three floor-bound rows
+batch-timed (†), two independent 30-round passes, shuffled and pinned to one
+CPU; the table combines both (60 rounds). The host was running other work, so
+absolute times are higher than in 2.3.27's table; the arms were interleaved,
+so the deltas hold.
+
+| row | 2.3.27 | 2.3.28 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 14.24 µs | 14.31 µs | +0.5% | 0.20 | neutral |
+| `parse_vulkan_2gpu` | 2.76 µs | 2.79 µs | +1.0% | 0.03 | neutral |
+| `parse_neuron_2dev` | 1.66 µs | 1.65 µs | −1.0% | 0.13 | neutral |
+| `detect_safetensors` † | 412.6 ns | 441.4 ns | +7.0% | <0.01 | slower: code placement |
+| `detect_gguf` † | 39.2 ns | 39.5 ns | +0.9% | 0.02 | neutral |
+| `best_available_13dev` † | 179.4 ns | 179.0 ns | −0.2% | 0.70 | neutral |
+| `total_memory_13dev` | 89.0 ns | 108.0 ns | +21.3% | <0.01 | slower: the fix |
+| `has_accelerator_13dev` | 19.1 ns | 19.1 ns | +0.1% | 0.31 | neutral |
+| `plan_70B_bf16_4gpu` | 1.50 µs | 1.46 µs | −2.8% | 0.04 | neutral |
+| `count_family_gpu_13dev` | 255.0 ns | 255.0 ns | 0.0% | 1.00 | neutral |
+| `json_serialize_13dev` | 23.74 µs | 23.96 µs | +0.9% | <0.01 | neutral |
+| `json_summary_13dev` | 3.27 µs | 3.29 µs | +0.7% | 0.03 | neutral |
+| `json_system_io` | 5.36 µs | 5.34 µs | −0.3% | 0.09 | neutral |
+| `json_plan` | 17.66 µs | 17.83 µs | +1.0% | <0.01 | neutral |
+| `json_training` | 2.57 µs | 2.56 µs | −0.2% | 0.49 | neutral |
+
+A verdict needs p < 0.01 and |Δ| > 1%; `json_plan` is +0.95%.
+
+- **`total_memory_13dev`, +21.3% (+19 ns over 13 profiles): the fix.** The
+  function now reads each profile's shared part and folds shared RAM into one
+  pool. The first version called `profile_shared_bytes` per profile and cost
+  +70%. Inlining the clamp brought that to +31.5%. A path for devices that
+  share nothing brought it to +21%: such a device pays one load and one
+  compare, then adds its memory as before. That covers 11 of the bench's 13
+  profiles. The remaining cost is that load, plus the clamp on the two shared
+  profiles (the CPU and the Intel NPU). `json_summary_13dev` calls this
+  function and `reg_total_accel_memory`; it went from +3.5% to +0.7%.
+- **`detect_safetensors`, +7.0%: code placement, not the change.** It runs
+  only `model_format.cyr` and the stdlib, and neither changed. The parsing
+  suite includes `types`, `profile` and `cuda`, whose new code (1 016 bytes)
+  sits in front of `model_format.cyr`. The layout pads live in `log.cyr`, so
+  they move `model_format.cyr` and the bench driver together and do not
+  reproduce that shift. Two further arms settled it. Each was 2.3.27's code
+  plus a never-called function at the end of `profile.cyr`, sized to within
+  8 and 24 bytes of 2.3.28's text:
+
+  | arm (mean of per-layout medians, 60 rounds) | `detect_safetensors` |
+  |---|---:|
+  | 2.3.27 | 408.0 ns |
+  | 2.3.27 + dead pad (within 8 bytes) | 432.9 ns (+6.1%) |
+  | 2.3.27 + dead pad (within 24 bytes) | 435.0 ns (+6.6%) |
+  | 2.3.28 | 434.9 ns (+6.6%) |
+
+  So 2.3.27's own code is as slow as 2.3.28 once it is laid out like 2.3.28.
+  The heap is not the cause either: with the heap aligned to 2 MiB before the
+  bench's buffer, the delta was +6.5%. `detect_gguf`, in the same file, is
+  unaffected (38.9 / 38.9 / 39.1 / 39.1 ns).
+- `json_serialize_13dev` is +0.9% because the output grew: the bench's Intel
+  NPU now emits `"shared_memory_bytes":4294967296` (33 more bytes per call).
+  `json_plan` runs none of the changed code (`plan_to_json`, `_shard_to_json`);
+  it moved behind the larger `profile_to_json`.
+
+`bench-history.csv` holds a single-run pair measured back to back on the loaded
+host: `bf70273-dirty` at 16:45:12Z is 2.3.28, and `bf70273` at 16:45:40Z is
+2.3.27, measured from `git archive bf70273`.
+
+| binary | 2.3.27 | 2.3.28 | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 219 448 | 219 480 | +32 (text +1 336) |
+| x86_64 ELF, no DCE | 444 728 | 444 760 | +32 (text +1 960) |
+| ELF-aarch64 | 739 464 | 739 496 | +32 |
+| PE, as shipped (no DCE) | 516 608 | 518 656 | +2 048 |
+| agnos, `CYRIUS_DCE=1` | 217 120 | 221 240 | +4 120 |
+| Mach-O arm64 (cross-built, as verified) | 721 332 | 721 332 | 0 |
+
+The ELF files are page-padded, so they show only the data growth. The agnos
+text crossed 128 KiB, so its data segment moved to the next page.
+
+### Verified
+
+- **Tests:** 791 assertions in 15 units pass through CI's loop; fuzz 6/6.
+- **CI gates:** fmt, lint (0 warnings), vet, raw-offset guard, `cyrius.lock`
+  current, DCE build. `dist/ai-hwaccel.cyr` differs from 2.3.27's only in its
+  version line and the six changed modules (`units`, `types`, `profile`,
+  `cuda`, `registry`, `json_out`), and `distlib` is deterministic.
+- **Linux CLI output identical to 2.3.27** on 18 invocations covering every
+  flag, apart from `schema_version` and the version string. **ELF-aarch64**
+  under `qemu-aarch64` matches x86_64 on 8 invocations. **agnos** builds.
+- **Python bindings:** 24 tests pass, including the 5 that need a staged
+  binary. `detect()` against the 2.3.28 binary raises no warning; they ran
+  with `UserWarning` as an error.
+- **macOS on `ecb`** (Apple M5 Pro, macOS 27.0), cross-built as in 2.3.27:
+  - the totals above, from all five detection paths;
+  - the JSON matches 2.3.27 apart from `schema_version` and the new key, which
+    is on the Metal GPU (51 539 607 552) and the Neural Engine (4 294 967 296);
+  - stderr is silent by default and carries the `detect` span with `-vv`;
+  - `--version` reports 2.3.28;
+  - the Python bindings under the system Python 3.9.6 raise no schema warning
+    and report `dedicated_memory_bytes` 0 for all three profiles.
+- **Windows on `cass`:** the EXE exactly as `stage_win_cross.sh` builds it
+  passes `windows-smoke` (a)–(d). Its JSON and `--summary` match 2.3.27's EXE
+  apart from `schema_version`. The Intel UHD 600 reports its 128 MiB of
+  dedicated memory, so nothing on `cass` is shared.
+- **Not verified:** GH200 and the client NPUs on real hardware (the parser and
+  the totals are covered by tests), and Asahi Linux.
+
 ## [2.3.27] — 2026-09-23 — macOS: real total RAM, and Apple Silicon without system_profiler
 
 Every macOS build so far reported the CPU at the 16 GiB fallback. It now

@@ -47,6 +47,37 @@ class TestRegistry(unittest.TestCase):
         self.assertIsNone(cpu.compute_capability)
         self.assertIsNone(cpu.temperature_c)
 
+    def test_shared_memory_v6(self):
+        # What 2.3.28 reports on ecb (Apple M5 Pro, 48 GB): the Metal GPU and
+        # the Neural Engine draw on unified memory, the summary counts it once.
+        reg = Registry.from_dict({
+            "schema_version": 6,
+            "profiles": [
+                {"accelerator": "CPU", "accel_type_id": 0, "device_id": 0,
+                 "available": True, "memory_bytes": 51539607552, "family": "CPU"},
+                {"accelerator": "Metal GPU", "accel_type_id": 3, "device_id": 0,
+                 "available": True, "memory_bytes": 51539607552, "family": "GPU",
+                 "device_name": "Apple M5 Pro", "shared_memory_bytes": 51539607552},
+                {"accelerator": "Apple Neural Engine", "accel_type_id": 7,
+                 "device_id": 0, "available": True, "memory_bytes": 4294967296,
+                 "family": "NPU", "device_name": "Apple Neural Engine",
+                 "shared_memory_bytes": 4294967296},
+            ],
+        })
+        cpu, gpu, ane = reg.profiles
+        self.assertEqual(gpu.shared_memory_bytes, 51539607552)
+        self.assertEqual(gpu.dedicated_memory_bytes, 0)
+        self.assertEqual(ane.dedicated_memory_bytes, 0)
+        self.assertIsNone(cpu.shared_memory_bytes)
+        self.assertEqual(cpu.dedicated_memory_bytes, 0)
+        self.assertEqual(gpu.accel_type_id, 3)
+
+    def test_dedicated_without_shared_key(self):
+        reg = Registry.from_dict(_load("registry.json"))
+        gpus = [p for p in reg.profiles if p.family == "GPU"]
+        for g in gpus:
+            self.assertEqual(g.dedicated_memory_bytes, g.memory_bytes)
+
     def test_unknown_keys_ignored(self):
         reg = Registry.from_dict(
             {"schema_version": 4, "profiles": [], "future_key": 123}

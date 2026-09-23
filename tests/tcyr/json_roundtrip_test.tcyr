@@ -117,6 +117,20 @@ fn test_from_json_optional_perf_fields() {
     return 0;
 }
 
+# shared_mem (schema v6) survives the trip: a unified Metal GPU keeps all of
+# its memory shared, a GH200-style partial share keeps its 480 GiB, a CPU (no
+# key emitted) is restored to all-shared, a discrete GPU to none.
+fn test_roundtrip_shared_memory() {
+    var metal = _rt(profile_new(ACCEL_METAL, 0, 48 * BYTES_PER_GIB));
+    assert_eq(profile_shared_bytes(metal), 48 * BYTES_PER_GIB, "metal shared survives");
+    var gh = profile_cuda(0, 576 * BYTES_PER_GIB);
+    profile_set_shared_mem(gh, 480 * BYTES_PER_GIB);
+    assert_eq(profile_shared_bytes(_rt(gh)), 480 * BYTES_PER_GIB, "gh200 partial share survives");
+    assert_eq(profile_shared_bytes(_rt(profile_cpu(64 * BYTES_PER_GIB))), 64 * BYTES_PER_GIB, "cpu restored");
+    assert_eq(profile_shared_bytes(_rt(profile_cuda(1, 24 * BYTES_PER_GIB))), 0, "discrete stays 0");
+    return 0;
+}
+
 fn test_from_json_malformed() {
     assert_eq(profile_from_json_str("not json"), 0, "malformed -> 0");
     assert_eq(profile_from_json_str("[1,2,3]"), 0, "array root -> 0");
@@ -132,6 +146,7 @@ fn main() {
     test_roundtrip_gaudi();
     test_roundtrip_cpu_defaults();
     test_from_json_optional_perf_fields();
+    test_roundtrip_shared_memory();
     test_from_json_malformed();
     # 2.3.22: was `assert_summary(); return 0;` — which DISCARDED the failure
     # count, so `syscall(60, r)` below always exited 0 and a failing assertion

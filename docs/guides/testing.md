@@ -6,22 +6,21 @@ results.
 ## Quick start
 
 ```sh
-cyrius tests                         # run all 623 assertions (13 test units)
+cyrius tests                         # run all 791 assertions (15 test units)
 cyrius lint src/main.cyr             # lint (zero warnings)
 cyrius fmt src/main.cyr --check      # check formatting
 ```
 
 ## Test categories
 
-Tests are organized as `.tcyr` files across 11 test phases, with 518 total
-assertions:
+Tests are 15 `.tcyr` units under `tests/tcyr/`, with 791 assertions in total.
+The README's *Test units* table lists what each unit covers.
 
 | Suite | Location | What it tests |
 |---|---|---|
-| Unit tests | `src/tests/*.tcyr` | Types, classification, quantization, registry queries, sharding, training, JSON, display, builder, command runner, property-based |
-| Integration tests | `tests/*.tcyr` | End-to-end detect->query->plan pipeline |
-| Mock detection | `tests/mock_detection.tcyr` | Fake sysfs trees, JSON rejection, schema validation |
-| Benchmarks | `benches/` | Performance of detect, plan, estimate functions |
+| Unit tests | `tests/tcyr/*.tcyr` | Types, profiles, registry queries and totals, every detection entry point, parsers, planning, JSON output and round-trip, Windows, lazy detection |
+| Fuzz harnesses | `fuzz/*.fcyr` | The CUDA, Vulkan, Neuron, Gaudi, Apple and model-format parsers |
+| Benchmarks | `benches/*.bcyr` | 15 rows in two suites, `parsing` and `registry` |
 
 ## Running benchmarks
 

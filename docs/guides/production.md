@@ -208,10 +208,10 @@ cc -o myapp myapp.c -L build -lai_hwaccel
 
 ## Version compatibility
 
-The `schema_version` field in serialized output (currently `1`) allows you to
-detect breaking format changes:
+The `schema_version` field in serialized output (6 since 2.3.28) is bumped
+whenever the format gains or changes keys, so you can detect format changes:
 
 ```cyr
-let reg = registry_from_json(json);
-assert(reg.schema_version() == SCHEMA_VERSION);
+var r = registry_detect();
+assert(reg_schema(r) == SCHEMA_VERSION);
 ```

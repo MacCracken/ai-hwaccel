@@ -132,6 +132,29 @@ fn test_summary_json() {
     return 0;
 }
 
+# shared_memory_bytes appears on a shared-memory accelerator only, and the
+# summary for ecb (48 GB M5 Pro) counts the unified 48 GiB once.
+fn test_shared_memory_json() {
+    var sb = str_builder_new();
+    profile_to_json(sb, profile_new(ACCEL_METAL, 0, 48 * BYTES_PER_GIB));
+    var mj = str_builder_build(sb);
+    assert(str_contains_cstr(mj, "\"shared_memory_bytes\":51539607552") == 1, "metal carries shared_memory_bytes");
+    var sb2 = str_builder_new();
+    profile_to_json(sb2, profile_cpu(48 * BYTES_PER_GIB));
+    assert(str_contains_cstr(str_builder_build(sb2), "shared_memory_bytes") == 0, "cpu omits it");
+    var sb3 = str_builder_new();
+    profile_to_json(sb3, profile_cuda(0, 24 * BYTES_PER_GIB));
+    assert(str_contains_cstr(str_builder_build(sb3), "shared_memory_bytes") == 0, "discrete omits it");
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(48 * BYTES_PER_GIB));
+    vec_push(profiles, profile_new(ACCEL_METAL, 0, 48 * BYTES_PER_GIB));
+    vec_push(profiles, profile_new(ACCEL_APPLE_NPU, 0, 4 * BYTES_PER_GIB));
+    var js = registry_to_summary_json(registry_from_profiles(profiles));
+    assert(str_contains_cstr(js, "\"total_memory_bytes\":51539607552") == 1, "summary total = 48 GiB");
+    assert(str_contains_cstr(js, "\"accelerator_memory_bytes\":51539607552") == 1, "summary accel = 48 GiB");
+    return 0;
+}
+
 fn test_json_optional_fields() {
     # CPU profile — no optional fields set
     var p = profile_cpu(16 * BYTES_PER_GIB);
@@ -238,6 +261,7 @@ test_post_passes_get_system_io();
 test_profile_json();
 test_registry_json();
 test_summary_json();
+test_shared_memory_json();
 test_json_optional_fields();
 test_json_with_warnings();
 test_binary_size();

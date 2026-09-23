@@ -50,26 +50,50 @@ fn reg_num_warnings(r) {
     return vec_len(reg_warnings(r));
 }
 
-# Total memory across all available devices
+# Total memory across all available devices, counting system RAM once.
+#
+# A profile's `shared_mem` part is system RAM (see src/profile.cyr): all of the
+# CPU's memory, all of a unified-memory device's (Apple Silicon's GPU and
+# Neural Engine, the client NPUs), GH200's 480 GiB of Grace memory. Summing
+# memory_bytes counted that RAM once per profile: a 48 GB M5 Pro totalled
+# 100 GiB in 2.3.27 (CPU 48 + GPU 48 + Neural Engine 4). So the shared parts
+# fold into one pool, the largest of them, and only the rest adds up. With no
+# shared-memory device the pool is the CPU's RAM and the result is the plain
+# sum, as before. One host per registry: the pool is a max, not a sum.
 fn reg_total_memory(r) {
     var profs = reg_profiles(r);
     var total = 0;
+    var pool = 0;
     var n = vec_len(profs);
     var i = 0;
     while (i < n) {
         var p = vec_get(profs, i);
         i = i + 1;
         if (profile_available(p) == 1) {
-            total = total + profile_memory_bytes(p);
+            # profile_shared_bytes, inlined: a call per profile cost +70% on
+            # total_memory_13dev. A device that shares nothing adds its memory
+            # as before, for one extra load and compare.
+            if (profile_shared_mem(p) == 0) {
+                total = total + profile_memory_bytes(p);
+            } else {
+                var part = profile_shared_mem(p);
+                if (part > profile_memory_bytes(p)) { part = profile_memory_bytes(p); }
+                if (part < 0) { part = 0; }
+                if (part > pool) { pool = part; }
+                total = total + profile_memory_bytes(p) - part;
+            }
         }
     }
-    return total;
+    return total + pool;
 }
 
-# Total accelerator memory (excludes CPU)
+# Total accelerator memory (excludes CPU), counting shared system RAM once:
+# dedicated accelerator memory plus the largest shared part any accelerator
+# can address (48 GiB on that M5 Pro, not GPU 48 + Neural Engine 4).
 fn reg_total_accel_memory(r) {
     var profs = reg_profiles(r);
     var total = 0;
+    var pool = 0;
     var n = vec_len(profs);
     var i = 0;
     while (i < n) {
@@ -77,9 +101,17 @@ fn reg_total_accel_memory(r) {
         i = i + 1;
         if (profile_available(p) != 1) { continue; }
         if (profile_accel_type(p) == ACCEL_CPU) { continue; }
-        total = total + profile_memory_bytes(p);
+        if (profile_shared_mem(p) == 0) {
+            total = total + profile_memory_bytes(p);
+            continue;
+        }
+        var part = profile_shared_mem(p);
+        if (part > profile_memory_bytes(p)) { part = profile_memory_bytes(p); }
+        if (part < 0) { part = 0; }
+        if (part > pool) { pool = part; }
+        total = total + profile_memory_bytes(p) - part;
     }
-    return total;
+    return total + pool;
 }
 
 # Whether any non-CPU accelerator is available
