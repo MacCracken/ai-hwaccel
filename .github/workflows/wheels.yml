@@ -110,9 +110,10 @@ jobs:
     # logging) were caught ONLY by manual `ssh cass` smoke, never by CI. This
     # gate runs the actual cross-built EXE on an ephemeral windows-latest
     # runner (the roadmap's preferred venue: self-contained, no secrets, no
-    # self-hosted wiring) and asserts the three runtime contracts below. If
-    # the cross-built PE ever fails to *run* cleanly here (vs. on cass), the
-    # roadmap fallback is an `ssh cass` self-hosted leg.
+    # self-hosted wiring) and asserts the runtime contracts below: (a)-(c)
+    # since 2.3.11, (d) since the wmic-free detection. If the cross-built PE
+    # ever fails to *run* cleanly here (vs. on cass), the roadmap fallback is
+    # an `ssh cass` self-hosted leg.
     needs: windows
     runs-on: windows-latest
     timeout-minutes: 10
@@ -140,8 +141,10 @@ jobs:
         # Regression gate for the COM/`.rdata` corruption class. The CLI is
         # flag-based (no `detect` subcommand): bare invocation = full registry
         # JSON. A CPU profile is always present (registry.cyr always pushes
-        # one, 16 GiB fallback), so profiles[] is non-empty even on a
-        # GPU-less / wmic-less runner.
+        # one, 16 GiB fallback), so profiles[] is non-empty even when every
+        # detector failed. That is why this step alone let 2.3.23/2.3.24 pass
+        # while reporting CPU-only + 16 GiB on a wmic-less host; (d) below
+        # checks the detected values themselves.
         run: |
           set -euo pipefail
           out="$("$BIN_DIR/ai-hwaccel.exe")"
@@ -184,3 +187,43 @@ jobs:
           test "$got" = "$expected" \
             || { echo 'FAIL: --version did not resolve the bundled VERSION on PE'; exit 1; }
           echo 'OK version'
+      - name: (d) detected RAM and GPUs match what Windows itself reports
+        # Compares the EXE's answer with Windows' own CIM view (Get-CimInstance
+        # talks to WMI directly; no wmic.exe, which Windows 11 24H2+ removes).
+        # Through 2.3.24 detection shelled out to wmic, so on a wmic-less host
+        # it reported CPU-only with the 16 GiB fallback, and (a)-(c) still
+        # passed. Verified on cass (Windows 11 10.0.26200): the 2.3.24 EXE
+        # fails here, the DXGI/GlobalMemoryStatusEx EXE passes.
+        #   - RAM: the CPU profile's memory_bytes must not be the 16 GiB
+        #     fallback (17179869184) unless Windows reports exactly that, and
+        #     must be within 1% of Win32_ComputerSystem.TotalPhysicalMemory.
+        #     On cass the two are equal to the byte; the 1% only keeps the
+        #     gate from depending on that on other Windows builds. This half
+        #     binds on every runner.
+        #   - GPUs: a PCI display adapter on a vendor driver package must
+        #     surface as at least one GPU-family profile. Out-of-box driver
+        #     packages are published as oemNN.inf (cass: oem67.inf) and inbox
+        #     ones never are, so the Basic Display driver and a VM's synthetic
+        #     or emulated video adapters are not counted. On a GPU-less runner
+        #     this half has nothing to check; it binds on real hardware.
+        # Windows PowerShell 5.1 on purpose: it is the engine this script was
+        # verified with on cass, which has no pwsh.
+        shell: powershell
+        run: |
+          $exe = Join-Path (Resolve-Path $env:BIN_DIR) 'ai-hwaccel.exe'
+          $out = & $exe | Out-String
+          if ($LASTEXITCODE -ne 0) { "FAIL: ai-hwaccel.exe exited $LASTEXITCODE"; exit 1 }
+          $j = $out | ConvertFrom-Json
+          $cim = [uint64](Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
+          $cpu = @($j.profiles | Where-Object { $_.accelerator -eq 'CPU' })
+          if ($cpu.Count -ne 1) { "FAIL: expected one CPU profile, got $($cpu.Count)"; exit 1 }
+          $mem = [uint64]$cpu[0].memory_bytes
+          "CPU memory_bytes=$mem  Win32_ComputerSystem.TotalPhysicalMemory=$cim"
+          if ($mem -eq 17179869184 -and $cim -ne 17179869184) { 'FAIL: CPU memory_bytes is the 16 GiB detection fallback, not the RAM Windows reports'; exit 1 }
+          if ([math]::Abs([double]$mem - [double]$cim) -gt 0.01 * $cim) { 'FAIL: CPU memory_bytes is more than 1% away from the RAM Windows reports'; exit 1 }
+          $hw = @(Get-CimInstance Win32_VideoController | Where-Object { $_.PNPDeviceID -like 'PCI\*' -and $_.InfFilename -like 'oem*.inf' })
+          $gpu = @($j.profiles | Where-Object { $_.family -eq 'GPU' })
+          foreach ($a in $hw) { "Windows adapter: $($a.Name) [$($a.InfFilename)]" }
+          foreach ($g in $gpu) { "reported GPU: $($g.accelerator) / $($g.device_name) / $($g.memory_bytes) B" }
+          if ($hw.Count -gt 0 -and $gpu.Count -eq 0) { "FAIL: Windows lists $($hw.Count) GPU adapter(s) but no GPU profile was reported"; exit 1 }
+          "OK native detection: RAM matches Windows, $($gpu.Count) GPU profile(s) for $($hw.Count) adapter(s)"

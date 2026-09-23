@@ -103,7 +103,8 @@ fn has_dev_device(prefix) {
 
 # Parse `wmic computersystem get TotalPhysicalMemory` output (a
 # `TotalPhysicalMemory=<bytes>` line) into a byte count. 0 if absent.
-# Pure — Linux-testable. v2.3.7.
+# Pure — Linux-testable. v2.3.7. Only the fallback uses it now; see
+# detect_system_memory.
 fn win_parse_total_memory(out) {
     var lines = str_split(out, 10);
     var nl = vec_len(lines);
@@ -122,11 +123,35 @@ fn win_parse_total_memory(out) {
     return 0;
 }
 
-# Get total system memory (in bytes). Windows: `wmic computersystem`
-# via CreateProcessW spawn. Else: /proc/meminfo. Returns 0 on failure
-# (caller substitutes a default).
+#ifdef CYRIUS_TARGET_WIN
+# Total physical memory (bytes) from kernel32!GlobalMemoryStatusEx, or 0 on
+# failure. The PE backend has no reroute for it, so it is resolved at run
+# time: GetModuleHandleA("kernel32.dll") (syscall 0xF013) -> GetProcAddress
+# (0xF014) -> callptr. MEMORYSTATUSEX is 64 bytes: dwLength@0 must hold its
+# size on entry, ullTotalPhys@8. The result is the figure Windows reports as
+# Win32_ComputerSystem.TotalPhysicalMemory (8405598208 on cass for both).
+fn win_total_phys_bytes() {
+    var k32 = syscall(0xF013, "kernel32.dll");
+    if (k32 == 0) { return 0; }
+    var gmse = syscall(0xF014, k32, "GlobalMemoryStatusEx");
+    if (gmse == 0) { return 0; }
+    var memstat[64];
+    memset(&memstat, 0, 64);
+    store32(&memstat, 64);
+    var ok = callptr(gmse, &memstat);
+    if ((ok & 0xFFFFFFFF) == 0) { return 0; }
+    return load64(&memstat + 8);
+}
+#endif
+
+# Get total system memory (in bytes). Windows: GlobalMemoryStatusEx, with a
+# `wmic computersystem` spawn only if that fails (wmic is absent on Windows 11
+# 24H2+). Else: /proc/meminfo. Returns 0 on failure (caller substitutes a
+# default).
 fn detect_system_memory() {
     #ifdef CYRIUS_TARGET_WIN
+    var native = win_total_phys_bytes();
+    if (native > 0) { return native; }
     var wargs = vec_new();
     vec_push(wargs, "wmic");
     vec_push(wargs, "computersystem");
@@ -134,7 +159,8 @@ fn detect_system_memory() {
     vec_push(wargs, "TotalPhysicalMemory");
     vec_push(wargs, "/value");
     var wbuf = alloc(4096);
-    var wn = exec_capture(wargs, wbuf, 4096);
+    # One byte short of the buffer, so the NUL below always fits.
+    var wn = exec_capture(wargs, wbuf, 4095);
     if (wn > 0) {
         store8(wbuf + wn, 0);
         return win_parse_total_memory(str_new(wbuf, wn));

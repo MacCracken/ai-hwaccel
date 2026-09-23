@@ -718,11 +718,25 @@ is resolved below.
   `NO_BACKENDS` (its only `#ifdef`s are `CYRIUS_TARGET_*`), so each recipe
   builds every backend. Implement the gates or correct the docs and ADR-004's
   status.
-- [ ] **Windows detection depends on `wmic`, which `cass` no longer has**
+- [x] **Windows detection depends on `wmic`, which `cass` no longer has**
   (removed from Windows 11 24H2+). 2.3.23 and 2.3.24 alike report CPU only,
   with the 16 GiB fallback on an 8 GB host, and miss its Intel UHD 600;
   `windows-smoke` passes regardless because a CPU profile is always present.
-  Pre-existing, not a bump regression.
+  Pre-existing, not a bump regression. **Fixed (Unreleased):** GPUs now come
+  from DXGI adapter enumeration and RAM from `GlobalMemoryStatusEx`; wmic is
+  only the fallback where DXGI is unavailable. `windows-smoke` step (d) checks
+  RAM and GPUs against Windows' own CIM view. On `cass` the 2.3.24 EXE fails
+  (d) and the fixed EXE passes. See CHANGELOG.
+- [ ] **Integrated-GPU memory on Windows is the dedicated carve-out.** DXGI
+  reports the UHD 600's 128 MiB `DedicatedVideoMemory`. The wmic path used to
+  report the driver's 1 GiB `AdapterRAM`, which DXGI does not expose. If the
+  planner should see the shared budget instead, `SharedSystemMemory` is in the
+  same descriptor (half of RAM on `cass`); that needs an integrated-vs-discrete
+  test, which `DXGI_ADAPTER_DESC1` does not carry.
+- [ ] **`registry_detect_no_exec()` skips DXGI on Windows.** `BACKEND_WINDOWS`
+  is still classed exec, because the wmic fallback spawns, so the no-exec mask
+  drops the native path with it. Passing `allow_exec` into `detect_windows`
+  (DXGI always, wmic only when allowed) would keep it for no-exec callers.
 - [ ] **Retire the `CYRIUS_DCE=1` PE workaround** — fixed upstream in 6.6.1
   (PE declines compaction; dead bodies are NOP-filled, so the file stays
   510 976 B) and verified on `cass` under 6.6.6. It would shrink the EXE inside

@@ -1,7 +1,10 @@
 # windows_test.tcyr — Linux-hosted tests for the Windows detection
-# parsers (win_parse_videocontrollers, win_parse_total_memory). The
-# parsers are ungated; only the wmic spawn is CYRIUS_TARGET_WIN-only, so
-# the parse logic is fully exercised here without a Windows host. Runtime
+# helpers: the DXGI adapter-descriptor readers (win_dxgi_desc_*,
+# win_utf16_to_cstr) and the wmic fallback parsers
+# (win_parse_videocontrollers, win_parse_total_memory). All of them are
+# ungated; only the COM walk that fills a DXGI_ADAPTER_DESC1, the
+# GlobalMemoryStatusEx call and the wmic spawns are CYRIUS_TARGET_WIN-only,
+# so the parse logic is fully exercised here without a Windows host. Runtime
 # behaviour on real Windows is smoke-tested separately on `cass`.
 
 include "lib/string.cyr"
@@ -26,7 +29,190 @@ include "src/detect/platform.cyr"
 include "src/detect/command.cyr"
 include "src/detect/windows.cyr"
 
-# --- win_parse_videocontrollers ---
+# --- DXGI_ADAPTER_DESC1 fixtures ---
+
+# Build a DXGI_ADAPTER_DESC1 with ASCII `name` widened to UTF-16LE and the
+# fields detection reads. SharedSystemMemory (@288) is filled too, so a test
+# can prove it is NOT what gets reported.
+fn mk_desc(name, vendor, device, ded_video, ded_sys, shared_sys, flags) {
+    var d = alloc(WIN_DXGI_DESC_BUF);
+    memset(d, 0, WIN_DXGI_DESC_BUF);
+    var n = strlen(name);
+    var i = 0;
+    while (i < n) {
+        store8(d + WIN_DXGI_DESC_NAME + i * 2, load8(name + i));
+        i = i + 1;
+    }
+    store32(d + WIN_DXGI_DESC_VENDOR, vendor);
+    store32(d + WIN_DXGI_DESC_DEVICE, device);
+    store64(d + WIN_DXGI_DESC_DEDICATED_VIDEO, ded_video);
+    store64(d + WIN_DXGI_DESC_DEDICATED_SYSTEM, ded_sys);
+    store64(d + 288, shared_sys);
+    store32(d + WIN_DXGI_DESC_FLAGS, flags);
+    return d;
+}
+
+# Store UTF-16LE code unit `cu` at index `i` of the wide buffer `w`.
+fn put_wchar(w, i, cu) {
+    store8(w + i * 2, cu & 0xFF);
+    store8(w + i * 2 + 1, cu >> 8);
+}
+
+# --- DXGI adapter descriptors (win_dxgi_desc_*) ---
+
+# The Intel UHD 600 exactly as cass's DXGI reports it (Windows 11 build 26200,
+# probed 2026-09-23): 8086:3185, 128 MiB dedicated, half of RAM shared.
+fn test_dxgi_cass_uhd600() {
+    var d = mk_desc("Intel(R) UHD Graphics 600", 0x8086, 0x3185, 134217728, 0, 4202799104, 0);
+    var profiles = vec_new();
+    assert_eq(win_dxgi_desc_is_software(d), 0, "uhd600 is hardware");
+    assert_eq(win_dxgi_desc_emit(d, 0, profiles), 1, "uhd600 emitted");
+    assert_eq(vec_len(profiles), 1, "uhd600 one profile");
+    var p = vec_get(profiles, 0);
+    assert_eq(profile_accel_type(p), ACCEL_WIN_GPU, "uhd600 WIN_GPU type");
+    assert_eq(accel_is_gpu(profile_accel_type(p)), 1, "uhd600 is GPU");
+    assert_eq(profile_device_id(p), 0, "uhd600 device 0");
+    assert_eq(profile_memory_bytes(p), 134217728, "uhd600 dedicated 128 MiB, not shared");
+    assert_streq(profile_device_name(p), "Intel(R) UHD Graphics 600", "uhd600 name");
+}
+
+# The Microsoft Basic Render Driver as cass enumerates it: 1414:008C with
+# DXGI_ADAPTER_FLAG_SOFTWARE. Never a GPU profile.
+fn test_dxgi_basic_render_skipped() {
+    var d = mk_desc("Microsoft Basic Render Driver", 0x1414, 0x8C, 0, 0, 4202799104, 2);
+    var profiles = vec_new();
+    assert_eq(win_dxgi_desc_is_software(d), 1, "basic render is software");
+    assert_eq(win_dxgi_desc_emit(d, 0, profiles), 0, "basic render not emitted");
+    assert_eq(vec_len(profiles), 0, "basic render pushes nothing");
+}
+
+# The Basic Render Driver's IDs identify it even with the software flag
+# clear.
+fn test_dxgi_basic_render_ids_without_flag() {
+    var d = mk_desc("Microsoft Basic Render Driver", 0x1414, 0x8C, 0, 0, 0, 0);
+    assert_eq(win_dxgi_desc_is_software(d), 1, "1414:008C is software without the flag");
+}
+
+# The software flag alone is enough, whatever the vendor.
+fn test_dxgi_software_flag_any_vendor() {
+    var d = mk_desc("Software Rasterizer", 0x10DE, 0x1234, 0, 0, 0, 2);
+    assert_eq(win_dxgi_desc_is_software(d), 1, "software flag -> skipped");
+}
+
+# Only the Basic Render IDs match: another Microsoft-vendor device, carrying
+# just DXGI_ADAPTER_FLAG_REMOTE (1), is kept.
+fn test_dxgi_other_microsoft_device_kept() {
+    var d = mk_desc("Microsoft Other Adapter", 0x1414, 0x8D, 268435456, 0, 0, 1);
+    assert_eq(win_dxgi_desc_is_software(d), 0, "1414:008D + remote flag -> hardware");
+}
+
+# Discrete card: DedicatedVideoMemory is exact past 4 GiB, where wmic's
+# uint32 AdapterRAM capped. The caller's device id is used as given.
+fn test_dxgi_discrete_24g() {
+    var d = mk_desc("NVIDIA GeForce RTX 4090", 0x10DE, 0x2684, 25769803776, 0, 17179869184, 0);
+    var profiles = vec_new();
+    assert_eq(win_dxgi_desc_emit(d, 3, profiles), 1, "discrete emitted");
+    var p = vec_get(profiles, 0);
+    assert_eq(profile_memory_bytes(p), 25769803776, "discrete 24 GiB exact");
+    assert_eq(profile_device_id(p), 3, "discrete device id as passed");
+}
+
+# A driver that books its boot-time carve-out as DedicatedSystemMemory.
+fn test_dxgi_dedicated_system_fallback() {
+    var d = mk_desc("Integrated", 0x8086, 0x0166, 0, 67108864, 1073741824, 0);
+    assert_eq(win_dxgi_desc_vram(d), 67108864, "dedicated system used when video is 0");
+}
+
+# No dedicated memory of either kind -> 0; shared memory is never reported.
+fn test_dxgi_no_dedicated_memory() {
+    var d = mk_desc("No Dedicated", 0x8086, 0x0166, 0, 0, 1073741824, 0);
+    assert_eq(win_dxgi_desc_vram(d), 0, "shared memory not reported");
+}
+
+# An empty Description leaves device_name unset (omitted from JSON).
+fn test_dxgi_empty_name() {
+    var d = mk_desc("", 0x8086, 0x3185, 134217728, 0, 0, 0);
+    var profiles = vec_new();
+    win_dxgi_desc_emit(d, 0, profiles);
+    assert_eq(profile_device_name(vec_get(profiles, 0)), 0, "empty name -> no device_name");
+}
+
+# Enumeration order hybrid laptop + software adapter, fed the way
+# win_dxgi_enum_adapters feeds it (running count as the device id): the two
+# hardware adapters get ids 0 and 1, the Basic Render Driver is dropped.
+fn test_dxgi_enumeration_ids() {
+    var igpu = mk_desc("Intel(R) UHD Graphics 770", 0x8086, 0x4680, 134217728, 0, 17179869184, 0);
+    var dgpu = mk_desc("NVIDIA GeForce RTX 3060", 0x10DE, 0x2503, 12884901888, 0, 17179869184, 0);
+    var sw = mk_desc("Microsoft Basic Render Driver", 0x1414, 0x8C, 0, 0, 17179869184, 2);
+    var profiles = vec_new();
+    var count = 0;
+    count = count + win_dxgi_desc_emit(igpu, count, profiles);
+    count = count + win_dxgi_desc_emit(dgpu, count, profiles);
+    count = count + win_dxgi_desc_emit(sw, count, profiles);
+    assert_eq(count, 2, "2 hardware adapters");
+    assert_eq(vec_len(profiles), 2, "2 profiles");
+    assert_eq(profile_device_id(vec_get(profiles, 0)), 0, "igpu id 0");
+    assert_eq(profile_device_id(vec_get(profiles, 1)), 1, "dgpu id 1");
+    assert_streq(profile_device_name(vec_get(profiles, 1)), "NVIDIA GeForce RTX 3060", "dgpu name");
+    assert_eq(profile_memory_bytes(vec_get(profiles, 1)), 12884901888, "dgpu 12 GiB");
+}
+
+# --- win_utf16_to_cstr ---
+
+# U+2122 (3-byte UTF-8), U+1F600 as a surrogate pair (4-byte), a high
+# surrogate followed by a non-surrogate, and a lone low surrogate (each of
+# the last two becomes U+FFFD).
+fn test_utf16_unicode() {
+    var w = alloc(32);
+    memset(w, 0, 32);
+    put_wchar(w, 0, 0x41);
+    put_wchar(w, 1, 0x2122);
+    put_wchar(w, 2, 0xD83D);
+    put_wchar(w, 3, 0xDE00);
+    put_wchar(w, 4, 0xD800);
+    put_wchar(w, 5, 0x42);
+    put_wchar(w, 6, 0xDC00);
+    put_wchar(w, 7, 0x43);
+    var s = win_utf16_to_cstr(w, 16);
+    var want = alloc(17);
+    store8(want + 0, 0x41);
+    store8(want + 1, 0xE2);  store8(want + 2, 0x84);  store8(want + 3, 0xA2);
+    store8(want + 4, 0xF0);  store8(want + 5, 0x9F);  store8(want + 6, 0x98);  store8(want + 7, 0x80);
+    store8(want + 8, 0xEF);  store8(want + 9, 0xBF);  store8(want + 10, 0xBD);
+    store8(want + 11, 0x42);
+    store8(want + 12, 0xEF); store8(want + 13, 0xBF); store8(want + 14, 0xBD);
+    store8(want + 15, 0x43);
+    store8(want + 16, 0);
+    assert_eq(strlen(s), 16, "utf8 length");
+    assert_eq(memeq(s, want, 17), 1, "utf8 bytes");
+}
+
+# A high surrogate in the last allowed unit is U+FFFD: its partner lies past
+# the bound and is not read.
+fn test_utf16_pair_split_by_bound() {
+    var w = alloc(8);
+    memset(w, 0, 8);
+    put_wchar(w, 0, 0xD83D);
+    put_wchar(w, 1, 0xDE00);
+    var s = win_utf16_to_cstr(w, 1);
+    assert_eq(strlen(s), 3, "split pair -> one U+FFFD");
+    assert_eq(load8(s), 0xEF, "U+FFFD lead byte");
+}
+
+# A Description that fills all 128 WCHARs with no terminator stops at 128;
+# the VendorId bytes that follow are not read as text.
+fn test_dxgi_name_unterminated() {
+    var d = mk_desc("", 0x8086, 0x3185, 134217728, 0, 0, 0);
+    var i = 0;
+    while (i < WIN_DXGI_DESC_NAME_WCHARS) {
+        put_wchar(d, i, 0x41);
+        i = i + 1;
+    }
+    var s = win_utf16_to_cstr(d + WIN_DXGI_DESC_NAME, WIN_DXGI_DESC_NAME_WCHARS);
+    assert_eq(strlen(s), 128, "unterminated name bounded at 128");
+}
+
+# --- win_parse_videocontrollers (wmic fallback) ---
 
 fn test_win_gpu_single() {
     var out = str_from("AdapterRAM=1073741824\nName=Intel(R) UHD Graphics 600\n");
@@ -77,35 +263,7 @@ fn test_win_gpu_empty() {
     assert_eq(vec_len(profiles), 0, "no profiles");
 }
 
-# --- win_merge_vram (DXGI/WMI VRAM reconciliation) ---
-
-# Discrete card: WMI AdapterRAM caps at 4 GiB; DXGI reports the true 24 GiB.
-# The precise DXGI figure must win.
-fn test_merge_vram_discrete() {
-    var wmi = 4294967295;        # WMI 4 GiB cap (uint32 max)
-    var dxgi = 25769803776;      # 24 GiB precise
-    assert_eq(win_merge_vram(wmi, dxgi), 25769803776, "discrete -> dxgi wins");
-}
-
-# Integrated GPU (e.g. Intel UHD 600): WMI surfaces 1 GiB shared; DXGI's
-# DedicatedVideoMemory is only 128 MB. WMI's larger figure must be kept.
-fn test_merge_vram_integrated() {
-    var wmi = 1073741824;        # 1 GiB shared (WMI)
-    var dxgi = 134217728;        # 128 MB dedicated (DXGI)
-    assert_eq(win_merge_vram(wmi, dxgi), 1073741824, "integrated -> wmi kept");
-}
-
-# DXGI unavailable / failed (0) -> keep the WMI value untouched.
-fn test_merge_vram_dxgi_zero() {
-    assert_eq(win_merge_vram(2147483648, 0), 2147483648, "dxgi 0 -> wmi kept");
-}
-
-# Equal figures -> unchanged.
-fn test_merge_vram_equal() {
-    assert_eq(win_merge_vram(8589934592, 8589934592), 8589934592, "equal -> same");
-}
-
-# --- win_parse_total_memory ---
+# --- win_parse_total_memory (wmic fallback) ---
 
 fn test_win_mem() {
     var out = str_from("\nTotalPhysicalMemory=8405598208\n\n");
@@ -126,14 +284,23 @@ fn test_win_mem_absent() {
 
 alloc_init();
 
+test_dxgi_cass_uhd600();
+test_dxgi_basic_render_skipped();
+test_dxgi_basic_render_ids_without_flag();
+test_dxgi_software_flag_any_vendor();
+test_dxgi_other_microsoft_device_kept();
+test_dxgi_discrete_24g();
+test_dxgi_dedicated_system_fallback();
+test_dxgi_no_dedicated_memory();
+test_dxgi_empty_name();
+test_dxgi_enumeration_ids();
+test_utf16_unicode();
+test_utf16_pair_split_by_bound();
+test_dxgi_name_unterminated();
 test_win_gpu_single();
 test_win_gpu_multi();
 test_win_gpu_crlf();
 test_win_gpu_empty();
-test_merge_vram_discrete();
-test_merge_vram_integrated();
-test_merge_vram_dxgi_zero();
-test_merge_vram_equal();
 test_win_mem();
 test_win_mem_crlf();
 test_win_mem_absent();

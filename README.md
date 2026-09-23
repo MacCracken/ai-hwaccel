@@ -14,7 +14,7 @@ decide how to quantize and shard a model across them.
 |--------|-------|
 | Binary size | **214 KB** (`CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.6.6 |
-| Tests | 629 assertions (14 test units) |
+| Tests | 656 assertions (14 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** |
 | Hardware families | 18 |

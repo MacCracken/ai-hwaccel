@@ -1520,7 +1520,8 @@ fn has_dev_device(prefix) {
 
 # Parse `wmic computersystem get TotalPhysicalMemory` output (a
 # `TotalPhysicalMemory=<bytes>` line) into a byte count. 0 if absent.
-# Pure — Linux-testable. v2.3.7.
+# Pure — Linux-testable. v2.3.7. Only the fallback uses it now; see
+# detect_system_memory.
 fn win_parse_total_memory(out) {
     var lines = str_split(out, 10);
     var nl = vec_len(lines);
@@ -1539,11 +1540,35 @@ fn win_parse_total_memory(out) {
     return 0;
 }
 
-# Get total system memory (in bytes). Windows: `wmic computersystem`
-# via CreateProcessW spawn. Else: /proc/meminfo. Returns 0 on failure
-# (caller substitutes a default).
+#ifdef CYRIUS_TARGET_WIN
+# Total physical memory (bytes) from kernel32!GlobalMemoryStatusEx, or 0 on
+# failure. The PE backend has no reroute for it, so it is resolved at run
+# time: GetModuleHandleA("kernel32.dll") (syscall 0xF013) -> GetProcAddress
+# (0xF014) -> callptr. MEMORYSTATUSEX is 64 bytes: dwLength@0 must hold its
+# size on entry, ullTotalPhys@8. The result is the figure Windows reports as
+# Win32_ComputerSystem.TotalPhysicalMemory (8405598208 on cass for both).
+fn win_total_phys_bytes() {
+    var k32 = syscall(0xF013, "kernel32.dll");
+    if (k32 == 0) { return 0; }
+    var gmse = syscall(0xF014, k32, "GlobalMemoryStatusEx");
+    if (gmse == 0) { return 0; }
+    var memstat[64];
+    memset(&memstat, 0, 64);
+    store32(&memstat, 64);
+    var ok = callptr(gmse, &memstat);
+    if ((ok & 0xFFFFFFFF) == 0) { return 0; }
+    return load64(&memstat + 8);
+}
+#endif
+
+# Get total system memory (in bytes). Windows: GlobalMemoryStatusEx, with a
+# `wmic computersystem` spawn only if that fails (wmic is absent on Windows 11
+# 24H2+). Else: /proc/meminfo. Returns 0 on failure (caller substitutes a
+# default).
 fn detect_system_memory() {
     #ifdef CYRIUS_TARGET_WIN
+    var native = win_total_phys_bytes();
+    if (native > 0) { return native; }
     var wargs = vec_new();
     vec_push(wargs, "wmic");
     vec_push(wargs, "computersystem");
@@ -1551,7 +1576,8 @@ fn detect_system_memory() {
     vec_push(wargs, "TotalPhysicalMemory");
     vec_push(wargs, "/value");
     var wbuf = alloc(4096);
-    var wn = exec_capture(wargs, wbuf, 4096);
+    # One byte short of the buffer, so the NUL below always fits.
+    var wn = exec_capture(wargs, wbuf, 4095);
     if (wn > 0) {
         store8(wbuf + wn, 0);
         return win_parse_total_memory(str_new(wbuf, wn));
@@ -3385,46 +3411,149 @@ fn detect_environment(sio) {
 
 # --- windows.cyr ---
 
-# windows.cyr — Windows-side accelerator detection (WMI / Win32_VideoController).
+# windows.cyr — Windows-side accelerator detection (DXGI adapter enumeration).
 #
 # `detect_windows` is compiled in only when the target is Win64 PE
-# (CYRIUS_TARGET_WIN, predefined by cycc_win). On Linux / macOS it is
-# preprocessed out, so registry_detect_with's call to it is also gated.
+# (CYRIUS_TARGET_WIN, predefined by `cyrius build --win`). On Linux / macOS
+# it is preprocessed out, so registry_detect_with's call to it is also gated.
 #
-# Mechanism (2.3.7): cyrius 6.0.51 routed Win32 process creation
-# (CreateProcessW; lib/process_win.cyr), so detection spawns `wmic` and
-# parses its output — the same subprocess model as the Unix detectors.
-#   - GPUs : `wmic path win32_VideoController get Name,AdapterRAM /format:list`
-#            -> one ACCEL_WIN_GPU profile per controller (name + VRAM).
-#   - RAM  : detect_system_memory() (platform.cyr) spawns
-#            `wmic computersystem get TotalPhysicalMemory`.
+# Mechanism: GPUs come straight from DXGI — CreateDXGIFactory1 ->
+# IDXGIFactory1::EnumAdapters1(i) until DXGI_ERROR_NOT_FOUND ->
+# IDXGIAdapter1::GetDesc1 — one ACCEL_WIN_GPU profile per hardware adapter,
+# named from DXGI_ADAPTER_DESC1.Description, sized from DedicatedVideoMemory.
+# Software adapters (the Microsoft Basic Render Driver, which cass lists
+# last) are skipped. No subprocess: the factory is the
+# 0xF012 PE reroute (dxgi.dll) and its methods are COM vtable slots called
+# through `callptr`.
 #
-# Win32_VideoController.AdapterRAM is a 32-bit field capped at 4 GiB, so
-# large discrete-GPU VRAM under-reports. A native DXGI pass
-# (CreateDXGIFactory1 -> EnumAdapters1 -> GetDesc1 -> DedicatedVideoMemory,
-# no subprocess) reads precise, uncapped VRAM through a COM vtable via
-# `callptr`, and `win_merge_vram` reconciles it with the WMI figure (max —
-# precise large VRAM for discrete cards, WMI's shared figure for integrated
-# GPUs that report ~0 DedicatedVideoMemory).
+# Through 2.3.24 detection spawned `wmic path win32_VideoController` to CREATE
+# the profiles and DXGI only enriched their VRAM. Windows 11 24H2+ removes
+# `wmic` by default, so on such a host (cass, build 26200) the Windows backend
+# found no GPU at all, and detect_system_memory's `wmic computersystem` spawn
+# failed too (16 GiB fallback). wmic is now only the fallback for a host where
+# DXGI itself is unavailable (no factory, or the first EnumAdapters1 fails
+# with anything other than DXGI_ERROR_NOT_FOUND). A host where DXGI works but
+# lists only software adapters has no GPU, and wmic is not consulted.
+# Total RAM comes from kernel32!GlobalMemoryStatusEx (platform.cyr).
 #
-# STATUS (2.3.9): the DXGI precise-VRAM pass is ON by default for Windows PE
-# builds. It was previously gated OFF behind `-D AI_HWACCEL_DXGI` because the
-# callptr -> real-Win64-COM chain corrupted the caller in a non-trivial
-# program (`dxgi_vram_bytes()` followed by `str_builder_add_cstr(sb, "true")`
-# garbled the "true" literal on cass). Root-caused upstream as an m128
-# array-padding / PE `.rdata` layout divergence (function-local arrays are
-# `.rdata` globals; the &gvar prefix-sum was padded against the ELF dbase
-# while _pe_layout sized the string zone unpadded, so `&desc`'s 312-B
-# GetDesc1 write drifted +8 onto the "true" literal) — NOT a callptr
-# register/DF bug — and fixed in cyrius 6.1.7 (GPU-confirmed on cass via that
-# exact ai-hwaccel repro). Issue
-# 2026-06-08-windows-com-callee-corrupts-caller-in-nontrivial-program.md
-# (resolved). Default Windows builds now report precise DedicatedVideoMemory.
+# Integrated GPUs report their dedicated carve-out (the Intel UHD 600 on cass:
+# 128 MiB). The wmic-era figure was the driver's AdapterRAM (1 GiB there),
+# which DXGI does not expose. Neither figure is the shared system memory the
+# adapter can also draw on (DXGI's SharedSystemMemory: half of RAM on cass).
 #
-# The pure parsers `win_parse_videocontrollers` and `win_merge_vram` are
-# ungated so the Linux-hosted fixture test (tests/tcyr/windows_test.tcyr)
-# exercises them without a Windows host; the wmic spawn and the DXGI COM pass
-# are CYRIUS_TARGET_WIN-only (callptr + syscall 0xF012 exist only on PE).
+# The descriptor readers (win_dxgi_desc_*, win_utf16_to_cstr) and the wmic
+# parser (win_parse_videocontrollers) are ungated and pure, so the Linux-hosted
+# fixture test (tests/tcyr/windows_test.tcyr) exercises them without a Windows
+# host. Only the COM walk and the wmic spawn are CYRIUS_TARGET_WIN-only
+# (callptr into Win64 COM and syscall 0xF012 exist only on PE).
+
+# DXGI_ADAPTER_DESC1 (x64) field offsets, plus the adapter IDs and HRESULTs
+# the enumeration needs. sizeof(DXGI_ADAPTER_DESC1) is 312; the buffer is 320.
+enum WinDxgi {
+    WIN_DXGI_DESC_NAME = 0;             # WCHAR Description[128]
+    WIN_DXGI_DESC_NAME_WCHARS = 128;
+    WIN_DXGI_DESC_VENDOR = 256;         # UINT VendorId
+    WIN_DXGI_DESC_DEVICE = 260;         # UINT DeviceId
+    WIN_DXGI_DESC_DEDICATED_VIDEO = 272;    # SIZE_T DedicatedVideoMemory
+    WIN_DXGI_DESC_DEDICATED_SYSTEM = 280;   # SIZE_T DedicatedSystemMemory
+    WIN_DXGI_DESC_FLAGS = 304;          # UINT Flags
+    WIN_DXGI_DESC_BUF = 320;
+    WIN_DXGI_FLAG_SOFTWARE = 0x2;       # DXGI_ADAPTER_FLAG_SOFTWARE
+    WIN_DXGI_VENDOR_MICROSOFT = 0x1414;
+    WIN_DXGI_DEVICE_BASIC_RENDER = 0x8C;    # Microsoft Basic Render Driver
+    WIN_DXGI_ERROR_NOT_FOUND = 0x887A0002;  # EnumAdapters1 past the last adapter
+    WIN_DXGI_MAX_ADAPTERS = 16;
+}
+
+# Convert UTF-16LE text at `w` (at most `max_units` code units, stopping at a
+# NUL) into a fresh NUL-terminated UTF-8 cstr. Bounded on the input side
+# because DXGI's Description is a fixed WCHAR[128] with no guarantee of a
+# terminator. Surrogate pairs decode to 4-byte UTF-8; a lone surrogate becomes
+# U+FFFD rather than invalid UTF-8. Pure.
+fn win_utf16_to_cstr(w, max_units) {
+    # <= 3 bytes per code unit (a 2-unit surrogate pair encodes to 4) + NUL.
+    var buf = alloc(max_units * 3 + 1);
+    var i = 0;
+    var o = 0;
+    while (i < max_units) {
+        var cu = load8(w + i * 2) | (load8(w + i * 2 + 1) << 8);
+        if (cu == 0) { break; }
+        i = i + 1;
+        var cp = cu;
+        if (cu >= 0xD800) {
+            if (cu <= 0xDFFF) {
+                cp = 0xFFFD;
+                if (cu <= 0xDBFF) {
+                    if (i < max_units) {
+                        var cu2 = load8(w + i * 2) | (load8(w + i * 2 + 1) << 8);
+                        if (cu2 >= 0xDC00) {
+                            if (cu2 <= 0xDFFF) {
+                                cp = 0x10000 + ((cu - 0xD800) << 10) + (cu2 - 0xDC00);
+                                i = i + 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (cp < 0x80) {
+            store8(buf + o, cp);
+            o = o + 1;
+        } elif (cp < 0x800) {
+            store8(buf + o, 0xC0 | (cp >> 6));
+            store8(buf + o + 1, 0x80 | (cp & 0x3F));
+            o = o + 2;
+        } elif (cp < 0x10000) {
+            store8(buf + o, 0xE0 | (cp >> 12));
+            store8(buf + o + 1, 0x80 | ((cp >> 6) & 0x3F));
+            store8(buf + o + 2, 0x80 | (cp & 0x3F));
+            o = o + 3;
+        } else {
+            store8(buf + o, 0xF0 | (cp >> 18));
+            store8(buf + o + 1, 0x80 | ((cp >> 12) & 0x3F));
+            store8(buf + o + 2, 0x80 | ((cp >> 6) & 0x3F));
+            store8(buf + o + 3, 0x80 | (cp & 0x3F));
+            o = o + 4;
+        }
+    }
+    store8(buf + o, 0);
+    return buf;
+}
+
+# 1 if a DXGI_ADAPTER_DESC1 describes a software adapter: the
+# DXGI_ADAPTER_FLAG_SOFTWARE bit, or the Microsoft Basic Render Driver's
+# 1414:008C IDs, a second check that does not rely on the flag. Pure.
+fn win_dxgi_desc_is_software(desc) {
+    if ((load32(desc + WIN_DXGI_DESC_FLAGS) & WIN_DXGI_FLAG_SOFTWARE) != 0) { return 1; }
+    if (load32(desc + WIN_DXGI_DESC_VENDOR) == WIN_DXGI_VENDOR_MICROSOFT) {
+        if (load32(desc + WIN_DXGI_DESC_DEVICE) == WIN_DXGI_DEVICE_BASIC_RENDER) { return 1; }
+    }
+    return 0;
+}
+
+# Memory (bytes) to report for a DXGI adapter: DedicatedVideoMemory, or
+# DedicatedSystemMemory when a driver books its boot-time carve-out there
+# instead (both are memory the CPU does not share). 0 when neither is set.
+# SharedSystemMemory is deliberately not used. Pure.
+fn win_dxgi_desc_vram(desc) {
+    var v = load64(desc + WIN_DXGI_DESC_DEDICATED_VIDEO);
+    if (v > 0) { return v; }
+    var s = load64(desc + WIN_DXGI_DESC_DEDICATED_SYSTEM);
+    if (s > 0) { return s; }
+    return 0;
+}
+
+# Push an ACCEL_WIN_GPU profile (device `dev_id`) for one DXGI_ADAPTER_DESC1
+# unless it is a software adapter. Returns 1 if a profile was pushed, else 0.
+# Pure — the COM walk that fills `desc` is win_dxgi_enum_adapters.
+fn win_dxgi_desc_emit(desc, dev_id, profiles) {
+    if (win_dxgi_desc_is_software(desc) == 1) { return 0; }
+    var p = profile_new(ACCEL_WIN_GPU, dev_id, win_dxgi_desc_vram(desc));
+    var name = win_utf16_to_cstr(desc + WIN_DXGI_DESC_NAME, WIN_DXGI_DESC_NAME_WCHARS);
+    if (load8(name) != 0) { profile_set_device_name(p, name); }
+    vec_push(profiles, p);
+    return 1;
+}
 
 # Push an ACCEL_WIN_GPU profile (name copied to a NUL-terminated cstr).
 fn win_emit_gpu(profiles, dev_id, name, ram) {
@@ -3440,7 +3569,8 @@ fn win_emit_gpu(profiles, dev_id, name, ram) {
 # Parse `wmic ... win32_VideoController get Name,AdapterRAM /format:list`
 # output into ACCEL_WIN_GPU profiles. Each controller is a block of
 # `Key=Value` lines (AdapterRAM= and Name=, any order) separated by blank
-# lines. Returns the count of GPUs pushed. Pure — no I/O.
+# lines. Returns the count of GPUs pushed. Pure — no I/O. Only reached when
+# DXGI is unavailable (see detect_windows).
 fn win_parse_videocontrollers(out, profiles) {
     var lines = str_split(out, 10);
     var nl = vec_len(lines);
@@ -3484,27 +3614,14 @@ fn win_parse_videocontrollers(out, profiles) {
     return count;
 }
 
-# Choose the VRAM figure to report for a Windows GPU given the WMI
-# AdapterRAM value (`wmi_bytes`) and the DXGI DedicatedVideoMemory value
-# (`dxgi_bytes`). WMI's AdapterRAM is a uint32 capped at 4 GiB, so it
-# under-reports large discrete VRAM; DXGI's DedicatedVideoMemory is precise
-# and uncapped but reads ~0 / small for integrated GPUs that have no
-# dedicated VRAM (they use shared system memory, which WMI surfaces).
-# Taking the max keeps the most useful capacity figure in both cases:
-# precise large VRAM for a discrete card, WMI's shared figure for an
-# integrated one. Pure — no I/O; Linux-testable.
-fn win_merge_vram(wmi_bytes, dxgi_bytes) {
-    if (dxgi_bytes > wmi_bytes) { return dxgi_bytes; }
-    return wmi_bytes;
-}
-
 #ifdef CYRIUS_TARGET_WIN
 
-# --- Native DXGI precise-VRAM pass (PE only; ON by default since 2.3.9) ------
-# Walks the COM vtable through `callptr` exactly as cyrius's reference
-# lib/dxgi.cyr (GPU-verified on cass). Each method N lives at
-# load64(vtbl + N*8). DXGI_ADAPTER_DESC1: VendorId @256, DeviceId @260,
-# DedicatedVideoMemory @272 (SIZE_T) — a 320-byte buffer holds the struct.
+# --- DXGI adapter enumeration (PE only) --------------------------------------
+# Walks the COM vtable through `callptr` as cyrius's reference lib/dxgi.cyr
+# does (GPU-verified on cass). Each method N lives at load64(vtbl + N*8):
+# IUnknown::Release @2, IDXGIFactory1::EnumAdapters1 @12,
+# IDXGIAdapter1::GetDesc1 @10. HRESULTs are 32-bit, so they are masked before
+# being compared with a specific code.
 
 # Fill `dst` (>=16 bytes) with IID_IDXGIFactory1
 # {770aae78-f26f-4dba-a829-253c83d1b387} in COM's little-endian-Data1..3 +
@@ -3526,72 +3643,65 @@ fn win_dxgi_release(obj) {
     return 0;
 }
 
-# DedicatedVideoMemory (bytes) of DXGI adapter `index`, or 0 on any failure.
-# CreateDXGIFactory1 -> EnumAdapters1(index) -> GetDesc1 -> @272, releasing
-# both COM objects before returning.
-fn win_dxgi_adapter_vram_bytes(index) {
+# Push one ACCEL_WIN_GPU profile per hardware DXGI adapter, in enumeration
+# order, with device ids 0,1,2… over the adapters kept. Returns the number
+# pushed (0 is a real answer: DXGI works and lists only software adapters),
+# or -1 when DXGI is unavailable — no factory, or EnumAdapters1(0) fails with
+# anything but DXGI_ERROR_NOT_FOUND — which is detect_windows' cue to try
+# wmic. An adapter whose GetDesc1 fails is skipped.
+fn win_dxgi_enum_adapters(profiles) {
     var iid[16];
     win_dxgi_iid_factory1(&iid);
     var pFactory = 0;
     var hr = syscall(0xF012, &iid, &pFactory);     # CreateDXGIFactory1
-    if (hr != 0) { return 0; }
-    if (pFactory == 0) { return 0; }
+    if ((hr & 0xFFFFFFFF) != 0) { return 0 - 1; }
+    if (pFactory == 0) { return 0 - 1; }
     var fvtbl = load64(pFactory);
-    var pAdapter = 0;
-    # EnumAdapters1(this, index, &pAdapter) @ IDXGIFactory1 slot 12.
-    var hr2 = callptr(load64(fvtbl + 12 * 8), pFactory, index, &pAdapter);
-    if (hr2 != 0) {
-        var r1 = win_dxgi_release(pFactory);
-        return 0;
-    }
-    if (pAdapter == 0) {
-        var r2 = win_dxgi_release(pFactory);
-        return 0;
-    }
-    var avtbl = load64(pAdapter);
-    var desc[320];                                 # DXGI_ADAPTER_DESC1
-    # GetDesc1(this, &desc) @ IDXGIAdapter1 slot 10.
-    var hr3 = callptr(load64(avtbl + 10 * 8), pAdapter, &desc);
-    var vram = 0;
-    if (hr3 == 0) { vram = load64(&desc + 272); }  # DedicatedVideoMemory
-    var r3 = win_dxgi_release(pAdapter);
-    var r4 = win_dxgi_release(pFactory);
-    return vram;
-}
-
-# Enrich the ACCEL_WIN_GPU profiles pushed at indices [base, end) with
-# precise DXGI VRAM. The WMI controllers were emitted in enumeration order
-# with dev_id 0,1,2…, which is used as the DXGI EnumAdapters1 index (the two
-# enumerations agree for the common single-/discrete-GPU case). Per adapter,
-# the reported memory becomes max(WMI, DXGI) (see win_merge_vram).
-fn win_enrich_dxgi_vram(profiles, base) {
-    var n = vec_len(profiles);
-    var i = base;
-    while (i < n) {
-        var p = vec_get(profiles, i);
-        if (profile_accel_type(p) == ACCEL_WIN_GPU) {
-            var idx = profile_device_id(p);
-            var dxgi = win_dxgi_adapter_vram_bytes(idx);
-            if (dxgi > 0) {
-                var wmi = profile_memory_bytes(p);
-                var merged = win_merge_vram(wmi, dxgi);
-                if (merged != wmi) {
-                    profile_set_memory_bytes(p, merged);
-                    hwlog_debug_n("windows: dxgi precise vram override (bytes) ", merged);
-                } else {
-                    hwlog_debug_n("windows: dxgi vram below wmi, kept wmi (bytes) ", wmi);
-                }
-            }
+    var count = 0;
+    var idx = 0;
+    var unavailable = 0;
+    while (idx < WIN_DXGI_MAX_ADAPTERS) {
+        var pAdapter = 0;
+        # EnumAdapters1(this, index, &pAdapter) @ IDXGIFactory1 slot 12.
+        var hr2 = callptr(load64(fvtbl + 12 * 8), pFactory, idx, &pAdapter);
+        hr2 = hr2 & 0xFFFFFFFF;
+        if (hr2 == WIN_DXGI_ERROR_NOT_FOUND) { break; }
+        if (hr2 != 0) {
+            if (idx == 0) { unavailable = 1; }
+            hwlog_debug_n("windows: dxgi EnumAdapters1 failed at index ", idx);
+            break;
         }
-        i = i + 1;
+        if (pAdapter == 0) {
+            if (idx == 0) { unavailable = 1; }
+            break;
+        }
+        var avtbl = load64(pAdapter);
+        var desc[WIN_DXGI_DESC_BUF];                   # DXGI_ADAPTER_DESC1
+        # GetDesc1(this, &desc) @ IDXGIAdapter1 slot 10.
+        var hr3 = callptr(load64(avtbl + 10 * 8), pAdapter, &desc);
+        if ((hr3 & 0xFFFFFFFF) == 0) {
+            count = count + win_dxgi_desc_emit(&desc, count, profiles);
+        } else {
+            hwlog_debug_n("windows: dxgi GetDesc1 failed, skipped adapter ", idx);
+        }
+        var r1 = win_dxgi_release(pAdapter);
+        idx = idx + 1;
     }
-    return 0;
+    var r2 = win_dxgi_release(pFactory);
+    if (unavailable == 1) { return 0 - 1; }
+    return count;
 }
 
-# Detect Windows-visible GPUs by spawning wmic. CreateProcessW resolves
-# `wmic` from System32\wbem on PATH (no which()/PATH-env dependency,
-# which is unavailable on PE — /proc/self/environ doesn't exist).
+# Detect Windows-visible GPUs: DXGI first, wmic only when DXGI is
+# unavailable. CreateProcessW resolves `wmic` from System32\wbem on PATH, so
+# the fallback needs no which()/PATH lookup of its own.
 fn detect_windows(profiles, warnings) {
+    var n = win_dxgi_enum_adapters(profiles);
+    if (n >= 0) {
+        hwlog_debug_n("windows: dxgi hardware adapters=", n);
+        return n;
+    }
+    hwlog_debug("windows: dxgi unavailable, falling back to wmic");
     var args = vec_new();
     vec_push(args, "wmic");
     vec_push(args, "path");
@@ -3600,22 +3710,16 @@ fn detect_windows(profiles, warnings) {
     vec_push(args, "Name,AdapterRAM");
     vec_push(args, "/format:list");
     var buf = alloc(CMD_MAX_STDOUT);
-    var n = exec_capture(args, buf, CMD_MAX_STDOUT);
-    if (n <= 0) {
+    # One byte short of the buffer, so the NUL below always fits.
+    var got = exec_capture(args, buf, CMD_MAX_STDOUT - 1);
+    if (got <= 0) {
         if (warnings != 0) {
             vec_push(warnings, warning_tool_failed("wmic", 0 - 1, "win32_VideoController query failed"));
         }
         return 0;
     }
-    store8(buf + n, 0);
-    # Parse WMI controllers, then override WMI's 4 GiB-capped AdapterRAM with
-    # precise DXGI DedicatedVideoMemory where the native COM pass returns a
-    # larger figure (discrete cards). On by default since 2.3.9 — the upstream
-    # callptr->COM .rdata-corruption residual was fixed in cyrius 6.1.7.
-    var base = vec_len(profiles);
-    var count = win_parse_videocontrollers(str_new(buf, n), profiles);
-    var enriched = win_enrich_dxgi_vram(profiles, base);
-    return count;
+    store8(buf + got, 0);
+    return win_parse_videocontrollers(str_new(buf, got), profiles);
 }
 
 #endif
@@ -3942,8 +4046,9 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
         detect_mediatek_apu(profs, warns);
     }
     #ifdef CYRIUS_TARGET_WIN
-    # Windows-native GPU detection (wmic Win32_VideoController). detect_windows
-    # exists only on PE builds, so both the symbol and call are gated.
+    # Windows-native GPU detection: DXGI adapter enumeration, with wmic only
+    # when DXGI is unavailable. detect_windows exists only on PE builds, so
+    # both the symbol and call are gated.
     if (builder_is_enabled(builder_mask, BACKEND_WINDOWS) == 1) {
         detect_windows(profs, warns);
     }
