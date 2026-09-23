@@ -1,7 +1,9 @@
 # cuda.cyr — NVIDIA CUDA GPU detection via nvidia-smi
 
-# nvidia-smi query args
-var _NVSMI_QUERY = "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name,temperature.gpu,power.draw,utilization.gpu,clocks.max.memory"; #skip-lint
+# nvidia-smi query args. pci.device_id (field 11, 2.4.0) is the PCI device and
+# vendor ID, "0x268410DE"; profiles_dedup matches Vulkan's view of the same GPU
+# on it. Fields are read by position, so output without it still parses.
+var _NVSMI_QUERY = "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name,temperature.gpu,power.draw,utilization.gpu,clocks.max.memory,pci.device_id"; #skip-lint
 var _NVSMI_FMT = "--format=csv,noheader,nounits";
 
 # Bus width lookup by compute capability (bits)
@@ -148,6 +150,15 @@ fn parse_cuda_output(output, profiles, warnings) {
         if (vec_len(fields) > 9) {
             var gu = str_to_int(vec_get(fields, 9));
             if (gu >= 0) { profile_set_gpu_util(p, gu); }
+        }
+
+        # PCI device and vendor ID (field 11): "0x268410DE" is device 0x2684
+        # of vendor 0x10DE.
+        if (vec_len(fields) > 11) {
+            var dv_id = parse_hex_field(vec_get(fields, 11));
+            if (dv_id > 0) {
+                profile_set_pci_id(p, pci_id_make(dv_id & 0xFFFF, (dv_id >> 16) & 0xFFFF));
+            }
         }
 
         vec_push(profiles, p);

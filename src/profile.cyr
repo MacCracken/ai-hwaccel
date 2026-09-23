@@ -1,6 +1,6 @@
 # profile.cyr — accelerator capability profile.
-# 21-field heap-allocated descriptor with typed accessors. The biggest
-# single struct in the codebase (168 bytes / 21 fields), most-called
+# 22-field heap-allocated descriptor with typed accessors. The biggest
+# single struct in the codebase (176 bytes / 22 fields), most-called
 # accessor surface (every detect/* backend, registry helpers, json_out,
 # sharding, training, cost).
 #
@@ -43,6 +43,7 @@ struct profile {
     neuron_chip;
     neuron_cores;
     shared_mem;
+    pci_id;
 }
 
 # shared_mem (2.3.28): how many of memory_bytes are system RAM, i.e. the pool
@@ -53,7 +54,13 @@ struct profile {
 # set memory_bytes when they construct the profile; profile_new derives this
 # field from it, so a later profile_set_memory_bytes would leave it stale.
 
-var PROFILE_SIZE = 168;
+# pci_id (2.4.0): the device's PCI vendor and device ID, as
+# pci_id_make(vendor, device), or 0 when unknown. The CUDA (nvidia-smi
+# pci.device_id), ROCm and Vulkan backends set it; profiles_dedup
+# (registry.cyr) matches on it to report one profile per physical device. It is
+# not serialized.
+
+var PROFILE_SIZE = 176;
 var PROFILE_NONE = 0 - 1;
 
 fn profile_new(atype, dev_id, mem_bytes) {
@@ -88,7 +95,16 @@ fn profile_new(atype, dev_id, mem_bytes) {
         }
     }
     profile_set_shared_mem(p, sh);
+    profile_set_pci_id(p, 0);
     return p;
+}
+
+# A profile's pci_id from a PCI vendor and device ID: (vendor << 16) | device,
+# or 0 unless both are 16-bit IDs. Pure.
+fn pci_id_make(vendor, device) {
+    if (vendor <= 0 || vendor > 0xFFFF) { return 0; }
+    if (device < 0 || device > 0xFFFF) { return 0; }
+    return (vendor << 16) | device;
 }
 
 # --- Convenience constructors ---

@@ -400,6 +400,240 @@ fn test_totals_clamped() {
     return 0;
 }
 
+# --- One physical device, one profile (2.4.0) ---
+
+# A GPU profile of `atype` with a PCI id and name, for the dedup tests.
+fn _gpu(atype, vendor, device, name, mem) {
+    var p = profile_new(atype, 0, mem);
+    profile_set_pci_id(p, pci_id_make(vendor, device));
+    profile_set_device_name(p, name);
+    return p;
+}
+
+fn test_placeholder_names() {
+    assert_eq(profile_name_is_placeholder(0), 1, "no name");
+    assert_eq(profile_name_is_placeholder(""), 1, "empty name");
+    assert_eq(profile_name_is_placeholder("AMD Radeon (PCI 0x1002:0x1638)"), 1, "rocm fallback");
+    assert_eq(profile_name_is_placeholder("AMD Radeon"), 1, "bare rocm fallback");
+    assert_eq(profile_name_is_placeholder("Apple Silicon (Asahi Linux)"), 1, "asahi");
+    assert_eq(profile_name_is_placeholder("Apple Silicon"), 1, "system_profiler default");
+    assert_eq(profile_name_is_placeholder("AMD Radeon RX 7900 XTX"), 0, "a model");
+    assert_eq(profile_name_is_placeholder("Apple M5 Pro"), 0, "a chip");
+    return 0;
+}
+
+# The dev host: ROCm and Vulkan report its one APU. ROCm's profile survives,
+# with RADV's name in place of its PCI-id fallback; the 8 GiB counts once.
+fn test_dedup_rocm_vulkan() {
+    var v = vec_new();
+    vec_push(v, profile_cpu(58880188416));
+    vec_push(v, _gpu(ACCEL_ROCM, 0x1002, 0x1638, "AMD Radeon (PCI 0x1002:0x1638)", 8 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x1638, "AMD Radeon Graphics (RADV RENOIR)", 8 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(v), 1, "apu: one dropped");
+    assert_eq(vec_len(v), 2, "apu: cpu + one gpu");
+    var g = vec_get(v, 1);
+    assert_eq(profile_accel_type(g), ACCEL_ROCM, "apu: rocm survives");
+    assert(streq(profile_device_name(g), "AMD Radeon Graphics (RADV RENOIR)") == 1, "apu: RADV's name kept");
+    var r = registry_from_profiles(v);
+    assert_eq(reg_total_accel_memory(r), 8 * BYTES_PER_GIB, "apu: 8 GiB once");
+    assert_eq(reg_total_memory(r), 58880188416 + 8 * BYTES_PER_GIB, "apu: total");
+    return 0;
+}
+
+# Two identical NVIDIA cards next to an Intel iGPU: both Vulkan views of the
+# cards go, the iGPU (no dedicated backend) stays, and order is kept. The Rust
+# releases dropped the iGPU too.
+fn test_dedup_cuda_keeps_other_gpus() {
+    var v = vec_new();
+    vec_push(v, _gpu(ACCEL_CUDA, 0x10DE, 0x2684, "NVIDIA GeForce RTX 4090", 24 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_CUDA, 0x10DE, 0x2684, "NVIDIA GeForce RTX 4090", 24 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x10DE, 0x2684, "NVIDIA GeForce RTX 4090", 4 * BYTES_PER_GIB));
+    var igpu = _gpu(ACCEL_VULKAN, 0x8086, 0x46a6, "Intel(R) Graphics (ADL GT2)", 4 * BYTES_PER_GIB);
+    profile_set_shared_mem(igpu, 4 * BYTES_PER_GIB);
+    vec_push(v, igpu);
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x10DE, 0x2684, "NVIDIA GeForce RTX 4090", 4 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(v), 2, "two card views dropped");
+    assert_eq(vec_len(v), 3, "two cards + the igpu");
+    assert_eq(profile_accel_type(vec_get(v, 0)), ACCEL_CUDA, "order: cuda 0");
+    assert_eq(profile_accel_type(vec_get(v, 1)), ACCEL_CUDA, "order: cuda 1");
+    assert(vec_get(v, 2) == igpu, "order: the igpu last, kept");
+    assert(streq(profile_device_name(vec_get(v, 0)), "NVIDIA GeForce RTX 4090") == 1, "a real name is not replaced");
+    return 0;
+}
+
+# A GPU two Vulkan drivers list (RADV and AMDVLK) is still one device.
+fn test_dedup_two_vulkan_drivers() {
+    var v = vec_new();
+    vec_push(v, _gpu(ACCEL_ROCM, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX", 24 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX", 4 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX (RADV NAVI31)", 4 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(v), 2, "both driver views dropped");
+    assert_eq(vec_len(v), 1, "the card once");
+    assert(streq(profile_device_name(vec_get(v, 0)), "AMD Radeon RX 7900 XTX") == 1, "product name not replaced");
+    return 0;
+}
+
+# Nothing matches on an unknown id, on a different id, or against another
+# Vulkan profile; a lone Vulkan GPU stays.
+fn test_dedup_no_false_matches() {
+    var v = vec_new();
+    vec_push(v, profile_new(ACCEL_CUDA, 0, 8 * BYTES_PER_GIB));
+    vec_push(v, profile_new(ACCEL_VULKAN, 0, 4 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_ROCM, 0x1002, 0x73bf, "AMD Radeon RX 6800", 16 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX", 4 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x10DE, 0x2684, "NVIDIA GeForce RTX 4090", 4 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x10DE, 0x2684, "NVIDIA GeForce RTX 4090", 4 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(v), 0, "nothing dropped");
+    assert_eq(vec_len(v), 6, "all kept");
+    return 0;
+}
+
+# Apple Silicon: MoltenVK (macOS) and Honeykrisp (Asahi) list the Metal GPU.
+# An integrated Vulkan GPU on system RAM next to a Metal profile is the same
+# device; Asahi's generic Metal name takes Honeykrisp's.
+fn test_dedup_apple() {
+    var mac = vec_new();
+    var metal = profile_new(ACCEL_METAL, 0, 48 * BYTES_PER_GIB);
+    profile_set_device_name(metal, "Apple M5 Pro");
+    vec_push(mac, metal);
+    var mvk = profile_new(ACCEL_VULKAN, 0, 36 * BYTES_PER_GIB);
+    profile_set_device_name(mvk, "Apple M5 Pro");
+    profile_set_shared_mem(mvk, 36 * BYTES_PER_GIB);
+    vec_push(mac, mvk);
+    assert_eq(profiles_dedup(mac), 1, "moltenvk dropped");
+    assert(vec_get(mac, 0) == metal, "metal survives");
+    var asahi = vec_new();
+    var am = profile_new(ACCEL_METAL, 0, 32 * BYTES_PER_GIB);
+    profile_set_device_name(am, "Apple Silicon (Asahi Linux)");
+    vec_push(asahi, am);
+    var hk = profile_new(ACCEL_VULKAN, 0, 16 * BYTES_PER_GIB);
+    profile_set_device_name(hk, "Apple M1 Max (G13C C0)");
+    profile_set_shared_mem(hk, 16 * BYTES_PER_GIB);
+    vec_push(asahi, hk);
+    assert_eq(profiles_dedup(asahi), 1, "honeykrisp dropped");
+    assert(streq(profile_device_name(am), "Apple M1 Max (G13C C0)") == 1, "asahi takes the chip name");
+    # A Vulkan GPU with memory of its own is not the SoC GPU.
+    var egpu = vec_new();
+    vec_push(egpu, profile_new(ACCEL_METAL, 0, 48 * BYTES_PER_GIB));
+    vec_push(egpu, profile_new(ACCEL_VULKAN, 0, 8 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(egpu), 0, "dedicated vulkan gpu kept");
+    return 0;
+}
+
+# Property test: 300 pseudo-random profile sets (a fixed LCG seed), up to 12
+# profiles of CUDA / ROCm / Vulkan / Metal with PCI ids drawn from a few
+# values (0 = unknown) and Vulkan GPUs shared or not. After profiles_dedup:
+# no Vulkan profile with a twin is left, every other profile is, order is
+# kept, and a second pass drops nothing.
+var _lcg = 12345;
+
+fn _rnd(n) {
+    _lcg = (_lcg * 1103515245 + 12345) & 0x7FFFFFFF;
+    return (_lcg >> 8) % n;
+}
+
+fn test_dedup_properties() {
+    var bad = 0;
+    var round = 0;
+    while (round < 300) {
+        round = round + 1;
+        var v = vec_new();
+        var n = _rnd(13);
+        var k = 0;
+        while (k < n) {
+            var kind = _rnd(4);
+            var atype = ACCEL_VULKAN;
+            if (kind == 0) { atype = ACCEL_CUDA; }
+            if (kind == 1) { atype = ACCEL_ROCM; }
+            if (kind == 2) {
+                if (_rnd(4) == 0) { atype = ACCEL_METAL; }
+            }
+            var p = profile_new(atype, k, BYTES_PER_GIB);
+            var ids = _rnd(4);
+            if (ids == 1) { profile_set_pci_id(p, pci_id_make(0x10DE, 0x2684)); }
+            if (ids == 2) { profile_set_pci_id(p, pci_id_make(0x1002, 0x1638)); }
+            if (ids == 3) { profile_set_pci_id(p, pci_id_make(0x8086, 0x46a6)); }
+            if (atype == ACCEL_VULKAN) {
+                if (_rnd(2) == 1) { profile_set_shared_mem(p, BYTES_PER_GIB); }
+            }
+            vec_push(v, p);
+            k = k + 1;
+        }
+        var before = vec_new();
+        var i = 0;
+        while (i < n) {
+            vec_push(before, vec_get(v, i));
+            i = i + 1;
+        }
+        var dropped = profiles_dedup(v);
+        if (vec_len(v) != n - dropped) { bad = bad + 1; }
+        # Survivors, in order: walk `before`, matching `v` from the front.
+        var j = 0;
+        i = 0;
+        while (i < n) {
+            var q = vec_get(before, i);
+            i = i + 1;
+            var here = 0;
+            if (j < vec_len(v)) {
+                if (vec_get(v, j) == q) { here = 1; }
+            }
+            if (here == 1) {
+                j = j + 1;
+                if (profile_accel_type(q) == ACCEL_VULKAN) {
+                    if (_dedup_twin(before, q) != 0) { bad = bad + 1; }
+                }
+            } else {
+                # Only a Vulkan profile with a twin may be missing.
+                if (profile_accel_type(q) != ACCEL_VULKAN) { bad = bad + 1; }
+                elif (_dedup_twin(before, q) == 0) { bad = bad + 1; }
+            }
+        }
+        if (j != vec_len(v)) { bad = bad + 1; }
+        if (profiles_dedup(v) != 0) { bad = bad + 1; }
+    }
+    assert_eq(bad, 0, "dedup properties over 300 random sets");
+    return 0;
+}
+
+# On any host, no entry point returns a Vulkan profile next to the CUDA or
+# ROCm profile of the same device. On the dev host this is its APU.
+fn _dupes(r) {
+    var profs = reg_profiles(r);
+    var n = vec_len(profs);
+    var d = 0;
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        if (profile_accel_type(p) == ACCEL_VULKAN) {
+            if (_dedup_twin(profs, p) != 0) { d = d + 1; }
+        }
+    }
+    return d;
+}
+
+fn test_dedup_entry_points() {
+    assert_eq(_dupes(registry_detect()), 0, "registry_detect: one profile per device");
+    assert_eq(_dupes(registry_detect_no_exec()), 0, "no_exec: one profile per device");
+    assert_eq(_dupes(registry_detect_threaded()), 0, "threaded: one profile per device");
+    assert_eq(_dupes(lazy_into_registry(lazy_new())), 0, "lazy: one profile per device");
+    # The Vulkan scan without its no-exec rule does see the APU; dedup drops it.
+    var scan = vec_new();
+    detect_rocm(scan, vec_new());
+    _detect_vulkan_sysfs(scan, 0);
+    profiles_dedup(scan);
+    var vk = 0;
+    var i = 0;
+    while (i < vec_len(scan)) {
+        if (profile_accel_type(vec_get(scan, i)) == ACCEL_VULKAN) { vk = vk + 1; }
+        i = i + 1;
+    }
+    var left = vec_new();
+    _detect_vulkan_sysfs(left, 1);
+    assert_eq(vk, vec_len(left), "the scan's AMD cards are ROCm's");
+    return 0;
+}
+
 # --- Suggest quantization ---
 
 fn test_suggest_quant_gpu_small() {
@@ -495,6 +729,14 @@ test_totals_mixed();
 test_totals_no_cpu_and_unavailable();
 test_totals_clamped();
 test_totals_vulkan_igpu();
+test_placeholder_names();
+test_dedup_rocm_vulkan();
+test_dedup_cuda_keeps_other_gpus();
+test_dedup_two_vulkan_drivers();
+test_dedup_no_false_matches();
+test_dedup_apple();
+test_dedup_properties();
+test_dedup_entry_points();
 test_suggest_quant_gpu_small();
 test_suggest_quant_gpu_large();
 test_suggest_quant_tpu();

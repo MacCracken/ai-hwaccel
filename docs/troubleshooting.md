@@ -33,19 +33,21 @@ cyrius build src/main.cyr build/ai-hwaccel -DCUDA
 
 ---
 
-## "Vulkan GPU listed instead of, or next to, a CUDA/ROCm GPU"
+## "Vulkan GPU listed instead of a CUDA/ROCm GPU"
 
-**Expected behavior**: A GPU that both Vulkan and a dedicated backend (CUDA or
-ROCm) detect is listed twice, once per backend, and both count in the
-totals. ai-hwaccel does not merge them yet. The Rust releases dropped every
-Vulkan GPU whenever a CUDA or ROCm GPU was found; the Cyrius port lost that,
-and this page said otherwise until 2.3.29. Merging them is
-planned for 2.4.x (see the roadmap's "One physical device, one profile"). The
-CUDA or ROCm profile is the fuller one, with driver, temperature and
-utilization. If you see only the Vulkan profile, the dedicated backend failed.
+**Expected behavior** (since 2.4.0): a GPU that both Vulkan and a dedicated
+backend (CUDA or ROCm) detect is listed once, as the CUDA or ROCm profile,
+which has the driver, temperature and utilization. The two are matched on the
+card's PCI vendor and device ID (`nvidia-smi`'s `pci.device_id`, sysfs, and
+`vulkaninfo`'s `vendorID`/`deviceID`). A Vulkan GPU no dedicated backend
+reports, such as an Intel iGPU next to an NVIDIA card, stays. Through 2.3.29
+such a GPU was listed twice and counted twice in the totals. If you see only
+the Vulkan profile, the dedicated backend failed.
 
 **Fix**: Check that `nvidia-smi` or `/sys/class/drm/card*/device/driver` is
-working. Run with `--debug` to see detection diagnostics:
+working. Run with `--log-level debug` (or `AI_HWACCEL_LOG=debug`) to see
+detection diagnostics, including a `dedup:` line for each Vulkan view that was
+dropped:
 
 ```sh
 AI_HWACCEL_LOG=debug ai-hwaccel --table
@@ -81,7 +83,7 @@ expose memory info on older versions.
   let cache = CachedRegistry::new(60);
   let registry = cache.get();
   ```
-- Check for hanging tools: run with `--debug` and look for `Timeout` warnings.
+- Check for hanging tools: run with `--log-level debug` and look for `Timeout` warnings.
 
 ---
 

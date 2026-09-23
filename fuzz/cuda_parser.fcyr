@@ -76,4 +76,33 @@ var w7 = vec_new();
 parse_cuda_output(str_builder_build(sb), p7, w7);
 if (vec_len(p7) != 100) { syscall(60, 7); }
 
+# pci.device_id (field 11, 2.4.0): valid, missing, malformed. Every line
+# still yields its profile; only a valid id sets pci_id.
+var ids = vec_new();
+vec_push(ids, "0x268410DE");
+vec_push(ids, "[N/A]");
+vec_push(ids, "0x");
+vec_push(ids, "0xZZZZ10DE");
+vec_push(ids, "0x1234567890ABCDEF0");
+vec_push(ids, "");
+vec_push(ids, "0x0");
+vec_push(ids, "10DE2684");
+var ii = 0;
+while (ii < vec_len(ids)) {
+    var sb8 = str_builder_new();
+    str_builder_add_cstr(sb8, "0, 8192, 0, 8192, 7.0, 450, GPU, 40, 70, 0, 1250, ");
+    str_builder_add_cstr(sb8, vec_get(ids, ii));
+    var p8 = vec_new();
+    var w8 = vec_new();
+    parse_cuda_output(str_builder_build(sb8), p8, w8);
+    if (vec_len(p8) != 1) { syscall(60, 8); }
+    var pid = profile_pci_id(vec_get(p8, 0));
+    if (ii == 0) {
+        if (pid != pci_id_make(0x10DE, 0x2684)) { syscall(60, 9); }
+    } else {
+        if (pid != 0) { syscall(60, 10); }
+    }
+    ii = ii + 1;
+}
+
 syscall(60, 0);

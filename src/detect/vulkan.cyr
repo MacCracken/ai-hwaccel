@@ -95,42 +95,6 @@ fn _vk_value(line) {
     return str_trim(str_sub(line, eq + 1, str_len(line) - eq - 1));
 }
 
-# A "0x…" hex field (a Str, or 0) as an int, or -1: vulkaninfo's
-# "vendorID = 0x8086" and sysfs's "0x8086". Leading blanks and anything after
-# the digits are ignored. At most 15 digits (the IDs are 32-bit). Pure.
-fn _vk_hex(s) {
-    if (s == 0) { return 0 - 1; }
-    var d = str_data(s);
-    var n = str_len(s);
-    var i = 0;
-    while (i < n) {
-        var c = load8(d + i);
-        if (c != 32 && c != 9) { break; }
-        i = i + 1;
-    }
-    if (i + 2 >= n) { return 0 - 1; }
-    if (load8(d + i) != 48) { return 0 - 1; }
-    var x = load8(d + i + 1);
-    if (x != 120 && x != 88) { return 0 - 1; }
-    i = i + 2;
-    var v = 0;
-    var digits = 0;
-    while (i < n) {
-        var h = load8(d + i);
-        var dv = 0 - 1;
-        if (h >= 48 && h <= 57) { dv = h - 48; }
-        elif (h >= 97 && h <= 102) { dv = h - 87; }
-        elif (h >= 65 && h <= 70) { dv = h - 55; }
-        if (dv < 0) { break; }
-        if (digits >= 15) { return 0 - 1; }
-        v = v * 16 + dv;
-        digits = digits + 1;
-        i = i + 1;
-    }
-    if (digits == 0) { return 0 - 1; }
-    return v;
-}
-
 # The decimal number that `s` (a Str, or 0) starts with, after blanks:
 # "4202799104 (0xfa81a000) (3.91 GiB)" gives 4202799104. 0 if there is none
 # or it runs past 18 digits. str_to_int cannot do this: it gathers every digit
@@ -223,6 +187,7 @@ fn _vk_emit(profiles, ids, dev_id, name, vendor, device, dev_type) {
     if (dev_type == VK_DEV_CPU) { return 0; }
     var p = profile_new(ACCEL_VULKAN, dev_id, 4 * BYTES_PER_GIB);
     profile_set_device_name(p, str_cstr(name));
+    profile_set_pci_id(p, pci_id_make(vendor, device));
     if (vulkan_uses_system_memory(dev_type, vendor) == 1) {
         profile_set_shared_mem(p, profile_memory_bytes(p));
     }
@@ -281,11 +246,11 @@ fn _parse_vulkaninfo_ids(output, profiles, ids) {
             continue;
         }
         if (_vk_key_is(line, "vendorID") == 1) {
-            if (vendor < 0) { vendor = _vk_hex(_vk_value(line)); }
+            if (vendor < 0) { vendor = parse_hex_field(_vk_value(line)); }
             continue;
         }
         if (_vk_key_is(line, "deviceID") == 1) {
-            if (device < 0) { device = _vk_hex(_vk_value(line)); }
+            if (device < 0) { device = parse_hex_field(_vk_value(line)); }
             continue;
         }
         if (_vk_key_is(line, "deviceType") == 1) {
@@ -376,11 +341,11 @@ fn vulkan_local_heap_bytes(full, vendor, device, name) {
         }
 
         if (_vk_key_is(line, "vendorID") == 1) {
-            if (s_vendor < 0) { s_vendor = _vk_hex(_vk_value(line)); }
+            if (s_vendor < 0) { s_vendor = parse_hex_field(_vk_value(line)); }
             continue;
         }
         if (_vk_key_is(line, "deviceID") == 1) {
-            if (s_device < 0) { s_device = _vk_hex(_vk_value(line)); }
+            if (s_device < 0) { s_device = parse_hex_field(_vk_value(line)); }
             continue;
         }
         if (_vk_key_is(line, "deviceName") == 1) {
@@ -461,9 +426,9 @@ fn _vulkan_sysfs_vram(vendor, device) {
         ei = ei + 1;
         if (str_starts_with(name, "card") != 1) { continue; }
         if (str_index_of(name, 45) >= 0) { continue; }
-        var v = _vk_hex(sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/vendor")));
+        var v = parse_hex_field(sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/vendor")));
         if (v != vendor) { continue; }
-        var d = _vk_hex(sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/device")));
+        var d = parse_hex_field(sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/device")));
         if (d != device) { continue; }
         var vram = sysfs_read_int(sysfs_path_str("/sys/class/drm", name, "device/mem_info_vram_total"));
         if (vram > 0) { return vram; }
@@ -549,6 +514,8 @@ fn _detect_vulkan_sysfs(profiles, leave_amdgpu) {
         if (is_gpu == 1) {
             var p = profile_new(ACCEL_VULKAN, dev_id, est_vram);
             profile_set_device_name(p, gpu_name);
+            var dev_str = sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/device"));
+            profile_set_pci_id(p, pci_id_make(parse_hex_field(vendor_str), parse_hex_field(dev_str)));
             if (igpu == 1) { profile_set_shared_mem(p, est_vram); }
             vec_push(profiles, p);
             dev_id = dev_id + 1;

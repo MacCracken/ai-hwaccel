@@ -127,6 +127,10 @@ fn _lazy_ensure(lr, family) {
         }
         i = i + 1;
     }
+    # Each partial registry is already deduplicated; this catches one device
+    # seen by two families' probes, such as the Metal GPU from an NPU query
+    # (Apple) and its MoltenVK view from a later GPU query (Vulkan).
+    profiles_dedup(main_profs);
     return 0;
 }
 

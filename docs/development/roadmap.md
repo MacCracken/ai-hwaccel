@@ -27,6 +27,7 @@ correctness and platform validation come first.
 | 2.3.13 – 2.3.20 | 2026-07-13 → 08-30 | cyrius 6.4.62 → 6.5.x, symbol namespacing (`HWA_ERR_*`, `hw_registry_new`, kavach clashes), profile JSON round-trip, focused bayan dep |
 | 2.3.21 – 2.3.24 | 2026-09-07 → 09-22 | cyrius 6.6.x + bayan 1.5.x, the five defects cyrius 6.6.0 surfaced, issue-folder triage |
 | 2.3.25 – 2.3.29 | 2026-09-23 | Windows detection without wmic, Windows GPUs from every detection entry point, lazy NPU queries find the Apple Neural Engine, macOS real RAM and Apple Silicon via sysctl (no `system_profiler`; found in no-exec mode), unified memory counted once in totals (schema v6), integrated GPUs through Vulkan sized and shared, no lavapipe, Vulkan in no-exec mode |
+| 2.4.0 | 2026-09-23 | One profile per physical device: Vulkan views of CUDA, ROCm and Apple Metal GPUs dropped, matched on PCI vendor:device ID |
 
 ---
 
@@ -34,11 +35,11 @@ correctness and platform validation come first.
 
 Fix what ai-hwaccel reports wrong today, and close the CI gaps that let those
 bugs ship. The first item changes output (profile counts and memory totals),
-which is why the series starts at 2.4.0.
+which is why the series starts at 2.4.0; it shipped in 2.4.0.
 
 ### Detection output
 
-- [ ] **One physical device, one profile.** Several backends can report the
+- [x] **One physical device, one profile.** Several backends can report the
   same GPU. On the Linux dev host, a single AMD Cezanne iGPU (one `lspci` VGA
   entry) comes back twice, as a ROCm GPU and as a Vulkan GPU, 8 GiB each since
   2.3.29 (the Vulkan profile had a 4 GiB estimate before). So `gpu_count` is 2
@@ -52,7 +53,14 @@ which is why the series starts at 2.4.0.
   full `vulkaninfo` output carries it (`VkPhysicalDevicePCIBusInfoPropertiesEXT`),
   as sysfs does; on Windows it is vendor:device + LUID. Shared-memory profiles
   already count once in the totals (2.3.28, 2.3.29), so only dedicated memory
-  is double counted.
+  is double counted. **Fixed in 2.4.0:** profiles carry an internal `pci_id`
+  (PCI vendor and device ID: `nvidia-smi`'s `pci.device_id`, sysfs, and
+  `vulkaninfo`'s `vendorID`/`deviceID`). A post-pass in every entry point drops
+  a Vulkan profile with a CUDA or ROCm profile's ID, and a Vulkan iGPU next to
+  Apple's Metal GPU. The dedicated profile survives with its memory, and it
+  takes the Vulkan name when its own is a placeholder. The key is the ID, not
+  the bus address: `--summary` has no bus address, and identical cards need
+  none to be matched. The dev host now lists one GPU, with 8 GiB.
 - [x] **Unified memory is counted twice in totals.** On Apple Silicon the CPU
   and the Metal GPU profiles describe the same RAM, and `total_memory_bytes`
   summed every profile: on `ecb` (48 GB) 2.3.27 reported 100 GiB. **Fixed in
@@ -93,7 +101,10 @@ which is why the series starts at 2.4.0.
   "tool not found" there: `nvidia-smi`, `vulkaninfo` (`cass` has
   `C:\Windows\System32\vulkaninfo.exe`) and the rest. GPUs are still found,
   through DXGI, but with no CUDA details. Fixing it adds CUDA and Vulkan
-  profiles next to the DXGI ones, so it waits on the duplicate-device item.
+  profiles next to the DXGI ones. The duplicate pass (2.4.0) would drop them
+  once DXGI profiles carry a `pci_id` (`DXGI_ADAPTER_DESC1` has `VendorId` and
+  `DeviceId`) and count as the survivor for Vulkan; CUDA's profile should then
+  win over DXGI's.
 
 ### Build and docs
 

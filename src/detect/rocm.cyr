@@ -34,6 +34,9 @@ fn detect_rocm(profiles, warnings) {
         var mem_used = sysfs_read_int(used_path);
 
         var p = profile_rocm(dev_id, mem_total);
+        var vendor_s = sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/vendor"));
+        var device_s = sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/device"));
+        profile_set_pci_id(p, pci_id_make(parse_hex_field(vendor_s), parse_hex_field(device_s)));
 
         # Device name: prefer the kernel-exposed product_name (newer
         # amdgpu drivers populate it for discrete cards); otherwise
@@ -47,10 +50,6 @@ fn detect_rocm(profiles, warnings) {
         if (prod != 0 && str_len(prod) > 0) {
             profile_set_device_name(p, str_cstr(prod));
         } else {
-            var vendor_path = sysfs_path_str("/sys/class/drm", name, "device/vendor");
-            var device_path = sysfs_path_str("/sys/class/drm", name, "device/device");
-            var vendor_s = sysfs_read(vendor_path);
-            var device_s = sysfs_read(device_path);
             if (vendor_s != 0 && device_s != 0) {
                 # Build "AMD Radeon (PCI 0x1002:0x1638)" — vendor + device
                 # files come prefixed with "0x" already.

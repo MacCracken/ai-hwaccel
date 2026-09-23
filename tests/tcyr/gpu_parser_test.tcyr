@@ -196,6 +196,34 @@ fn test_detector_names() {
     return 0;
 }
 
+# nvidia-smi's pci.device_id (field 11, queried since 2.4.0) gives the PCI id
+# the duplicate pass matches on: "0x268410DE" is device 0x2684 of vendor
+# 0x10DE. Output without the field (or with "[N/A]") leaves it unknown.
+fn _cuda_line(tail) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "0, 24576, 1024, 23552, 8.9, 550.54, NVIDIA GeForce RTX 4090, 45, 120.5, 30, 1325");
+    str_builder_add_cstr(sb, tail);
+    return str_builder_build(sb);
+}
+
+fn test_cuda_pci_id() {
+    var warnings = vec_new();
+    var p1 = vec_new();
+    parse_cuda_output(_cuda_line(", 0x268410DE"), p1, warnings);
+    assert_eq(vec_len(p1), 1, "12 fields parse");
+    if (vec_len(p1) == 1) {
+        assert_eq(profile_pci_id(vec_get(p1, 0)), pci_id_make(0x10DE, 0x2684), "pci id from pci.device_id");
+    }
+    var p2 = vec_new();
+    parse_cuda_output(_cuda_line(""), p2, warnings);
+    assert_eq(profile_pci_id(vec_get(p2, 0)), 0, "11 fields: unknown");
+    var p3 = vec_new();
+    parse_cuda_output(_cuda_line(", [N/A]"), p3, warnings);
+    assert_eq(profile_pci_id(vec_get(p3, 0)), 0, "[N/A]: unknown");
+    assert_eq(vec_len(warnings), 0, "no warnings");
+    return 0;
+}
+
 # --- Vulkan parsing tests (2.3.29) ---
 #
 # The fixtures are real vulkaninfo captures (tests/fixtures/vulkaninfo/): the
@@ -227,13 +255,13 @@ fn _vk_join(lines) {
 }
 
 fn test_vulkan_helpers() {
-    assert_eq(_vk_hex(str_from("0x8086")), 0x8086, "hex vendor");
-    assert_eq(_vk_hex(str_from(" 0x10DE\n")), 0x10DE, "hex: blanks, capitals, newline");
-    assert_eq(_vk_hex(str_from("0x10005")), 0x10005, "hex: Mesa's vendor id");
-    assert_eq(_vk_hex(str_from("0x")), 0 - 1, "hex without digits");
-    assert_eq(_vk_hex(str_from("8086")), 0 - 1, "hex without 0x");
-    assert_eq(_vk_hex(str_from("0x1234567890abcdef0")), 0 - 1, "hex too long");
-    assert_eq(_vk_hex(0), 0 - 1, "hex of nothing");
+    assert_eq(parse_hex_field(str_from("0x8086")), 0x8086, "hex vendor");
+    assert_eq(parse_hex_field(str_from(" 0x10DE\n")), 0x10DE, "hex: blanks, capitals, newline");
+    assert_eq(parse_hex_field(str_from("0x10005")), 0x10005, "hex: Mesa's vendor id");
+    assert_eq(parse_hex_field(str_from("0x")), 0 - 1, "hex without digits");
+    assert_eq(parse_hex_field(str_from("8086")), 0 - 1, "hex without 0x");
+    assert_eq(parse_hex_field(str_from("0x1234567890abcdef0")), 0 - 1, "hex too long");
+    assert_eq(parse_hex_field(0), 0 - 1, "hex of nothing");
     assert_eq(_vk_leading_int(str_from("4202799104 (0xfa81a000) (3.91 GiB)")), 4202799104, "leading int");
     assert_eq(_vk_leading_int(str_from("(3.91 GiB)")), 0, "no leading int");
     assert_eq(_vk_is_gpu_header(str_from("GPU0:")), 1, "header");
@@ -281,6 +309,7 @@ fn test_vulkan_summary_uhd600() {
     assert_eq(vec_get(ids, 0), 0x8086, "uhd600: vendor");
     assert_eq(vec_get(ids, 1), 0x3185, "uhd600: device");
     assert_eq(vec_get(ids, 2), VK_DEV_INTEGRATED, "uhd600: integrated");
+    assert_eq(profile_pci_id(p), pci_id_make(0x8086, 0x3185), "uhd600: pci id");
     return 0;
 }
 
@@ -298,6 +327,7 @@ fn test_vulkan_summary_renoir() {
     assert_eq(vec_get(ids, 0), PCI_VENDOR_AMD, "renoir: vendor");
     assert_eq(vec_get(ids, 1), 0x1638, "renoir: device");
     assert_eq(vec_get(ids, 2), VK_DEV_INTEGRATED, "renoir: integrated");
+    assert_eq(profile_pci_id(p), pci_id_make(0x1002, 0x1638), "renoir: pci id, as ROCm's");
     return 0;
 }
 
@@ -525,6 +555,7 @@ test_cuda_gh200_unified();
 test_cuda_multi_gpu();
 test_cuda_bad_csv();
 test_cuda_empty_lines();
+test_cuda_pci_id();
 test_nvidia_bus_width();
 test_nvidia_est_bw();
 test_gaudi_gen_detection();

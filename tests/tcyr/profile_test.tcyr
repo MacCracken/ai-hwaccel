@@ -137,6 +137,19 @@ fn test_profile_shared_mem() {
     return 0;
 }
 
+# pci_id (2.4.0): 0 until a backend sets it; pci_id_make packs 16-bit IDs.
+fn test_profile_pci_id() {
+    assert_eq(profile_pci_id(profile_cuda(0, BYTES_PER_GIB)), 0, "unknown by default");
+    assert_eq(pci_id_make(0x1002, 0x1638), 0x10021638, "vendor high, device low");
+    assert_eq(pci_id_make(0x10DE, 0), 0x10DE0000, "device 0 is an id");
+    assert_eq(pci_id_make(0, 0x1638), 0, "no vendor");
+    assert_eq(pci_id_make(0 - 1, 0x1638), 0, "vendor unknown");
+    assert_eq(pci_id_make(0x10005, 0), 0, "Mesa's vendor id is not PCI");
+    assert_eq(pci_id_make(0x8086, 0 - 1), 0, "device unknown");
+    assert_eq(pci_id_make(0x8086, 0x10000), 0, "device out of range");
+    return 0;
+}
+
 fn test_profile_rank() {
     var cuda = profile_cuda(0, 24 * BYTES_PER_GIB);
     var cpu = profile_cpu(16 * BYTES_PER_GIB);
@@ -301,6 +314,7 @@ alloc_init();
 
 test_profile_cpu();
 test_profile_shared_mem();
+test_profile_pci_id();
 test_profile_cuda();
 test_profile_tpu();
 test_profile_gaudi();

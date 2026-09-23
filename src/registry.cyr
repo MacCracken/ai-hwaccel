@@ -274,11 +274,123 @@ fn builder_no_exec() {
     return mask;
 }
 
+# --- One physical device, one profile (2.4.0) ---
+
+# 1 if `name` (a cstr, or 0) is a backend's stand-in rather than a model name:
+# missing, ROCm's sysfs fallback ("AMD Radeon (PCI 0x1002:0x1638)", or "AMD
+# Radeon"), or the Apple backend's "Apple Silicon" / "Apple Silicon (Asahi
+# Linux)". Pure.
+fn profile_name_is_placeholder(name) {
+    if (name == 0) { return 1; }
+    var n = strlen(name);
+    if (n == 0) { return 1; }
+    if (streq(name, "AMD Radeon") == 1) { return 1; }
+    if (n >= 16) {
+        if (memeq(name, "AMD Radeon (PCI ", 16) == 1) { return 1; }
+    }
+    if (streq(name, "Apple Silicon") == 1) { return 1; }
+    if (streq(name, "Apple Silicon (Asahi Linux)") == 1) { return 1; }
+    return 0;
+}
+
+# The profile that Vulkan profile `vk` is another view of, or 0: a CUDA or ROCm
+# profile with the same nonzero pci_id, or, when `vk` is an integrated GPU on
+# system RAM and `profiles` holds an Apple Metal profile, that one. Pure.
+fn _dedup_twin(profiles, vk) {
+    var pid = profile_pci_id(vk);
+    var on_ram = 0;
+    if (profile_shared_bytes(vk) > 0) { on_ram = 1; }
+    var n = vec_len(profiles);
+    var i = 0;
+    while (i < n) {
+        var q = vec_get(profiles, i);
+        i = i + 1;
+        var t = profile_accel_type(q);
+        if (t == ACCEL_CUDA || t == ACCEL_ROCM) {
+            if (pid != 0 && profile_pci_id(q) == pid) { return q; }
+        }
+        if (t == ACCEL_METAL && on_ram == 1) { return q; }
+    }
+    return 0;
+}
+
+# Log (at debug) that Vulkan profile `vk` was dropped as a view of `twin`,
+# and (`renamed` 1) that `twin` takes its name. Call before renaming.
+fn _dedup_log(vk, twin, renamed) {
+    if (hwlog_enabled(SK_DEBUG) == 0) { return 0; }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "dedup: Vulkan GPU ");
+    if (profile_device_name(vk) != 0) { str_builder_add_cstr(sb, profile_device_name(vk)); }
+    str_builder_add_cstr(sb, " is the ");
+    str_builder_add_cstr(sb, accel_name(profile_accel_type(twin)));
+    str_builder_add_cstr(sb, " ");
+    if (profile_device_name(twin) != 0) { str_builder_add_cstr(sb, profile_device_name(twin)); }
+    str_builder_add_cstr(sb, "; dropped");
+    if (renamed == 1) { str_builder_add_cstr(sb, ", its name kept"); }
+    var m = str_builder_build(sb);
+    _sk_log(SK_DEBUG, str_data(m), str_len(m));
+    return 0;
+}
+
+# Several backends can report one GPU. Vulkan sees the cards CUDA and ROCm see,
+# and on Apple Silicon the GPU the Apple backend reports. The dedicated
+# backend's profile survives, with its own memory figure and fields; the
+# Vulkan one is dropped:
+#   - a Vulkan profile whose pci_id (PCI vendor and device ID) matches a CUDA
+#     or ROCm profile's. Every such Vulkan profile goes, so a GPU listed by two
+#     Vulkan drivers (RADV and AMDVLK) goes twice. A device no dedicated
+#     backend reports, such as an Intel iGPU next to an NVIDIA card, stays.
+#     The Rust releases dropped every Vulkan GPU whenever any CUDA or ROCm GPU
+#     was found, that iGPU included.
+#   - an integrated Vulkan GPU on system RAM when an Apple Metal profile exists:
+#     MoltenVK (macOS) and Honeykrisp (Asahi Linux) list the same SoC GPU.
+# A survivor whose name is a placeholder (profile_name_is_placeholder) takes
+# the dropped profile's name, which has the model: on the dev host, ROCm's
+# "AMD Radeon (PCI 0x1002:0x1638)" becomes RADV's "AMD Radeon Graphics (RADV
+# RENOIR)". Order is kept; `profiles` is compacted in place. Returns the number
+# of profiles dropped. Through 2.3.29 nothing was dropped: the dev host listed
+# its one iGPU twice and counted its 8 GiB twice.
+fn profiles_dedup(profiles) {
+    var n = vec_len(profiles);
+    if (n < 2) { return 0; }
+    var drop = alloc(n);
+    var i = 0;
+    while (i < n) {
+        store8(drop + i, 0);
+        var p = vec_get(profiles, i);
+        if (profile_accel_type(p) == ACCEL_VULKAN) {
+            var twin = _dedup_twin(profiles, p);
+            if (twin != 0) {
+                store8(drop + i, 1);
+                var rename = 0;
+                if (profile_name_is_placeholder(profile_device_name(twin)) == 1) {
+                    if (profile_name_is_placeholder(profile_device_name(p)) == 0) { rename = 1; }
+                }
+                _dedup_log(p, twin, rename);
+                if (rename == 1) { profile_set_device_name(twin, profile_device_name(p)); }
+            }
+        }
+        i = i + 1;
+    }
+    var kept = 0;
+    i = 0;
+    while (i < n) {
+        if (load8(drop + i) == 0) {
+            vec_set(profiles, kept, vec_get(profiles, i));
+            kept = kept + 1;
+        }
+        i = i + 1;
+    }
+    vec_truncate(profiles, kept);
+    return n - kept;
+}
+
 # --- Full detection orchestration ---
 
 # Post-passes shared by every detection entry point (registry_detect_with_opts,
-# registry_detect_threaded_with, lazy_into_registry): enrich the profiles, then
-# fill the registry's system I/O. The three system-I/O passes take the
+# registry_detect_threaded_with, lazy_into_registry): drop duplicate views of
+# one device (profiles_dedup, 2.4.0), enrich the profiles, then fill the
+# registry's system I/O. The three system-I/O passes take the
 # registry's system_io, NOT the registry — through 2.3.24 the threaded and lazy
 # paths passed `r`, which pushed interconnects into profiles and storage into
 # warnings and replaced system_io with the environment struct, so serializing
@@ -287,6 +399,8 @@ fn builder_no_exec() {
 fn registry_post_passes(r, allow_exec) {
     var profs = reg_profiles(r);
     var sio = reg_system_io(r);
+    # First, so enrichment runs once per physical device.
+    profiles_dedup(profs);
     enrich_bandwidth(profs);
     enrich_pcie(profs);
     enrich_numa(profs);

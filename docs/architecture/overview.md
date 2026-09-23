@@ -57,17 +57,21 @@ registry_detect()
        2. spawn backends in parallel        thread.cyr for 2+ backends
           each: run_tool() or read sysfs -> parse -> Vec<AcceleratorProfile>
        3. collect profiles + warnings
-       4. post-pass enrichment (registry_post_passes):
-          a. bandwidth enrichment           nvidia-smi clock -> BW estimate
-          b. PCIe enrichment                sysfs link speed/width
-          c. NUMA enrichment                sysfs numa_node per PCI address
-          d. interconnect detection         InfiniBand, NVLink, XGMI (exec only)
-          e. storage detection              NVMe/SATA/HDD classification
-          f. environment detection          Docker, k8s, cloud instance metadata
-          There is no dedup pass: a GPU two backends report (Vulkan and CUDA
-          or ROCm) is listed twice until the roadmap's 2.4.x work. The Vulkan
-          backend's sysfs scan is part of the backend, run when vulkaninfo
-          is missing and in no-exec mode.
+       4. post-passes (registry_post_passes):
+          a. duplicate devices (2.4.0)      profiles_dedup: a Vulkan profile
+                                            with a CUDA/ROCm profile's PCI
+                                            vendor:device ID, or a Vulkan
+                                            iGPU next to Apple's Metal GPU,
+                                            is dropped; the survivor keeps
+                                            its memory and fields
+          b. bandwidth enrichment           nvidia-smi clock -> BW estimate
+          c. PCIe enrichment                sysfs link speed/width
+          d. NUMA enrichment                sysfs numa_node per PCI address
+          e. interconnect detection         InfiniBand, NVLink, XGMI (exec only)
+          f. storage detection              NVMe/SATA/HDD classification
+          g. environment detection          Docker, k8s, cloud instance metadata
+          The Vulkan backend's sysfs scan is part of the backend, run when
+          vulkaninfo is missing and in no-exec mode.
        5. build AcceleratorRegistry
 ```
 

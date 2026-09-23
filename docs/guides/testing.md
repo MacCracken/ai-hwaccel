@@ -6,14 +6,14 @@ results.
 ## Quick start
 
 ```sh
-cyrius tests                         # run all 894 assertions (15 test units)
+cyrius tests                         # run all 950 assertions (15 test units)
 cyrius lint src/main.cyr             # lint (zero warnings)
 cyrius fmt src/main.cyr --check      # check formatting
 ```
 
 ## Test categories
 
-Tests are 15 `.tcyr` units under `tests/tcyr/`, with 894 assertions in total.
+Tests are 15 `.tcyr` units under `tests/tcyr/`, with 950 assertions in total.
 The README's *Test units* table lists what each unit covers. Real tool output
 used as fixtures lives in `tests/fixtures/` (read relative to the repository
 root, where CI runs the tests).
@@ -22,7 +22,7 @@ root, where CI runs the tests).
 |---|---|---|
 | Unit tests | `tests/tcyr/*.tcyr` | Types, profiles, registry queries and totals, every detection entry point, parsers, planning, JSON output and round-trip, Windows, lazy detection |
 | Fuzz harnesses | `fuzz/*.fcyr` | The CUDA, Vulkan, Neuron, Gaudi, Apple and model-format parsers |
-| Benchmarks | `benches/*.bcyr` | 17 rows in two suites, `parsing` and `registry` |
+| Benchmarks | `benches/*.bcyr` | 18 rows in two suites, `parsing` and `registry` |
 
 ## Running benchmarks
 
@@ -92,7 +92,7 @@ After installing tools, verify detection works:
 
 ```sh
 # Full detection with debug logging
-build/ai-hwaccel --table --debug
+build/ai-hwaccel --table --log-level debug
 
 # Expected output for AMD GPU system:
 # ID     Device                        Memory   Family  Status

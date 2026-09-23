@@ -273,4 +273,44 @@ print("    avg_ns=", 10);
 fmt_int(bench_avg_ns(b10));
 print("\n", 1);
 
+# --- duplicate-device pass (2.4.0) ---
+# 17 profiles: the CPU, four A100s each also seen through Vulkan, and the
+# mock's other eight accelerators. Each op refills the vec and runs
+# profiles_dedup, which drops the four Vulkan views. Batch-timed.
+
+var dd_src = vec_new();
+vec_push(dd_src, vec_get(mock_profs, 0));
+var ddi = 0;
+while (ddi < 4) {
+    var ddc = profile_new(ACCEL_CUDA, ddi, 80 * BYTES_PER_GIB);
+    profile_set_pci_id(ddc, pci_id_make(0x10DE, 0x20B2));
+    vec_push(dd_src, ddc);
+    var ddv = profile_new(ACCEL_VULKAN, ddi, 4 * BYTES_PER_GIB);
+    profile_set_pci_id(ddv, pci_id_make(0x10DE, 0x20B2));
+    vec_push(dd_src, ddv);
+    ddi = ddi + 1;
+}
+ddi = 5;
+while (ddi < vec_len(mock_profs)) {
+    vec_push(dd_src, vec_get(mock_profs, ddi));
+    ddi = ddi + 1;
+}
+var dd_work = vec_new();
+
+var b11 = bench_new("dedup_17dev");
+bench_batch_start(b11);
+ri = 0;
+while (ri < 20000) {
+    vec_truncate(dd_work, 0);
+    var ddk = 0;
+    while (ddk < vec_len(dd_src)) {
+        vec_push(dd_work, vec_get(dd_src, ddk));
+        ddk = ddk + 1;
+    }
+    profiles_dedup(dd_work);
+    ri = ri + 1;
+}
+bench_batch_stop(b11, 20000);
+bench_report(b11);
+
 syscall(60, 0);

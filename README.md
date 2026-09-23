@@ -14,7 +14,7 @@ decide how to quantize and shard a model across them.
 |--------|-------|
 | Binary size | **214 KB** (`CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.6.6 |
-| Tests | 894 assertions (15 test units) |
+| Tests | 950 assertions (15 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** |
 | Hardware families | 18 |
@@ -129,7 +129,7 @@ src/
 ├── main.cyr                CLI entry point
 ├── types.cyr               AcceleratorType (18 variants), AcceleratorFamily
 ├── profile.cyr             Device profile (memory, capabilities, throughput)
-├── registry.cyr            AcceleratorRegistry, DetectBuilder (bitmask)
+├── registry.cyr            AcceleratorRegistry, DetectBuilder (bitmask), duplicate-device pass
 ├── plan.cyr                Sharding planner (tensor/pipeline/data parallel)
 ├── quantization.cyr        QuantizationLevel (FP32 → INT4, fixed-point x1000)
 ├── training.cyr            Training memory estimation (8 methods)
@@ -199,6 +199,10 @@ All detection is best-effort and non-destructive:
 1. **sysfs probing** — reads `/sys/class/drm`, `/sys/class/misc`, etc.
 2. **`/dev` introspection** — checks for device nodes (`/dev/accel*`, `/dev/neuron*`)
 3. **`$PATH` tool execution** — runs `nvidia-smi`, `hl-smi`, `vulkaninfo`, `neuron-ls` when present
+4. **One profile per device** (since 2.4.0) — a GPU that Vulkan and CUDA or
+   ROCm both report is listed once, as the CUDA/ROCm profile, matched on its
+   PCI vendor and device ID. On Apple Silicon, a Vulkan (MoltenVK, Asahi)
+   view of the Metal GPU is dropped.
 
 If a tool or sysfs path is absent the accelerator simply isn't registered — no errors, no crashes.
 
@@ -212,7 +216,7 @@ cyrius vet src/main.cyr                        # Include-graph audit
 cyrius lint src/main.cyr                       # Static analysis
 cyrius fmt src/main.cyr                        # Format check (diff against committed)
 
-# Test suite — 15 units under tests/tcyr/, 894 assertions total
+# Test suite — 15 units under tests/tcyr/, 950 assertions total
 for t in tests/tcyr/*.tcyr; do
     cyrius build "$t" "/tmp/$(basename $t .tcyr)"
     "/tmp/$(basename $t .tcyr)"
@@ -227,7 +231,7 @@ done
 |------|---------|
 | `foundation_test.tcyr` | error codes, accel types, family classification |
 | `profile_test.tcyr` | profile struct construction, throughput, rank |
-| `registry_test.tcyr` | registry + detection builder + suggest_quant + memory totals + every detection entry point, end to end |
+| `registry_test.tcyr` | registry + detection builder + suggest_quant + memory totals + the duplicate-device pass + every detection entry point, end to end |
 | `requirement_test.tcyr` | accelerator requirement matching |
 | `gpu_parser_test.tcyr` | CUDA / Gaudi / Neuron output parsing; Vulkan against real `vulkaninfo` captures (`tests/fixtures/vulkaninfo/`) |
 | `backend_test.tcyr` | Apple / Intel / AMD XDNA / cloud ASIC / edge |

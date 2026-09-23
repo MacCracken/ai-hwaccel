@@ -134,6 +134,17 @@ fn test_summary_json() {
 
 # shared_memory_bytes appears on a shared-memory accelerator only, and the
 # summary for ecb (48 GB M5 Pro) counts the unified 48 GiB once.
+# pci_id is internal (2.4.0): the JSON (schema v6) is unchanged.
+fn test_pci_id_not_serialized() {
+    var p = profile_cuda(0, 24 * BYTES_PER_GIB);
+    profile_set_pci_id(p, pci_id_make(0x10DE, 0x2684));
+    var sb = str_builder_new();
+    profile_to_json(sb, p);
+    assert(str_contains_cstr(str_builder_build(sb), "pci") == 0, "no pci key");
+    assert_eq(SCHEMA_VERSION, 6, "schema still v6");
+    return 0;
+}
+
 fn test_shared_memory_json() {
     var sb = str_builder_new();
     profile_to_json(sb, profile_new(ACCEL_METAL, 0, 48 * BYTES_PER_GIB));
@@ -262,6 +273,7 @@ test_profile_json();
 test_registry_json();
 test_summary_json();
 test_shared_memory_json();
+test_pci_id_not_serialized();
 test_json_optional_fields();
 test_json_with_warnings();
 test_binary_size();

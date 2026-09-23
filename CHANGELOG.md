@@ -5,6 +5,199 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.4.0] — 2026-09-23 — one physical device, one profile
+
+A GPU that two backends report is now listed once. Vulkan sees every card that
+CUDA and ROCm see, and ai-hwaccel listed both views. So the dev host's single
+AMD APU appeared twice, and its 8 GiB counted twice. A new post-pass in every
+detection entry point drops the Vulkan view when a CUDA or ROCm profile has
+the same PCI vendor and device ID. It also drops a Vulkan view of Apple's Metal
+GPU (MoltenVK on macOS, Honeykrisp on Asahi Linux). The dedicated backend's
+profile survives with its own memory and fields. Profile counts and totals
+change on any host with such a GPU and `vulkan-tools` installed, hence 2.4.0.
+The JSON schema stays v6: no key is added or removed.
+
+### Fixed
+
+- **A GPU seen by Vulkan and by CUDA or ROCm was listed and counted twice.**
+  Profiles now carry an internal `pci_id`, the PCI vendor and device ID:
+  - from `nvidia-smi`'s `pci.device_id`, a twelfth query field;
+  - from sysfs for ROCm and for Vulkan's sysfs scan;
+  - from `vulkaninfo`'s `vendorID` and `deviceID`.
+
+  `profiles_dedup` (`src/registry.cyr`) runs first in `registry_post_passes`,
+  and in the lazy registry after each family's profiles are merged. It drops:
+  - every Vulkan profile whose `pci_id` matches a CUDA or ROCm profile's. A GPU
+    listed by two Vulkan drivers (RADV and AMDVLK) is dropped twice over. A
+    GPU no dedicated backend reports stays, such as an Intel iGPU next to an
+    NVIDIA card. The Rust releases dropped every Vulkan GPU whenever any CUDA
+    or ROCm GPU was found, that iGPU included.
+  - an integrated Vulkan GPU on system RAM when an Apple Metal profile exists.
+
+  The key is the ID, not the bus address: `vulkaninfo --summary` prints no bus
+  address, and identical cards need none to be matched. On the dev host, with
+  real `vulkaninfo` and sysfs:
+
+  | | 2.3.29 | 2.4.0 |
+  |---|---|---|
+  | GPU profiles | ROCm "AMD Radeon (PCI 0x1002:0x1638)" 8 GiB; Vulkan "AMD Radeon Graphics (RADV RENOIR)" 8 GiB | ROCm "AMD Radeon Graphics (RADV RENOIR)" 8 GiB |
+  | `gpu_count` | 2 | 1 |
+  | `accelerator_memory_bytes` | 17 179 869 184 | 8 589 934 592 |
+  | `total_memory_bytes` | 76 060 057 600 | 67 470 123 008 |
+
+  An end-to-end run on the dev host used stand-in `nvidia-smi` and
+  `vulkaninfo` first on `PATH`. The `nvidia-smi` stand-in reported two RTX
+  4090s. The `vulkaninfo` stand-in listed both cards, `cass`'s UHD 600, a
+  lavapipe device and the host's real APU. 2.3.29 reports 7 GPU profiles,
+  total 136 164 433 920. 2.4.0 reports 4 (both CUDA cards, the ROCm APU, the
+  UHD 600), total 118 984 564 736. The same happens from
+  `registry_detect`, `registry_detect_threaded` and `lazy_into_registry`.
+- **Apple Silicon with MoltenVK listed its GPU twice.** On `ecb`, with a
+  stand-in `vulkaninfo` that reports what MoltenVK does, 2.3.29 lists the M5
+  Pro twice: Metal 48 GiB, and Vulkan 36 GiB with `gpu_count` 2. 2.4.0 lists
+  it once. The totals were already right, because both views are shared
+  memory (2.3.28, 2.3.29).
+
+### Changed
+
+- **The survivor keeps a better name.** When a dedicated profile's name is a
+  placeholder, it takes the dropped Vulkan profile's name. The placeholders are
+  ROCm's sysfs fallback "AMD Radeon (PCI vendor:device)" and the Apple
+  backend's "Apple Silicon" / "Apple Silicon (Asahi Linux)". So the dev host's
+  APU is now "AMD Radeon Graphics (RADV RENOIR)". A real name is never
+  replaced.
+- **Each drop is logged at debug level:** `dedup: Vulkan GPU … is the ROCm
+  GPU …; dropped, its name kept`.
+- **The `nvidia-smi` query gains `pci.device_id`.** Fields are read by position,
+  so output without it still parses, with the ID unknown. The query was not
+  run on real NVIDIA hardware (none here); the parser is tested on its
+  documented output, `0x268410DE` for device 0x2684 of vendor 0x10DE.
+- **New:**
+  - the profile's 22nd field `pci_id` (`PROFILE_SIZE` 176; not serialized) and
+    `pci_id_make`;
+  - `profiles_dedup` and `profile_name_is_placeholder`;
+  - `parse_hex_field`, which is `vulkan.cyr`'s `_vk_hex` moved to `command.cyr`
+    for the CUDA parser.
+- **Tests: 894 → 950 assertions in 15 units.**
+  - `registry_test` 113 → 149. The rules: the dev host's APU, identical
+    cards next to an iGPU, two Vulkan drivers, no false matches, Apple (macOS,
+    Asahi, a dedicated GPU). Placeholder names. A property test over 300
+    pseudo-random profile sets: no duplicate left, nothing else dropped, order
+    kept, idempotent. Every entry point, on the host it runs on.
+  - `gpu_parser_test` 141 → 148: `pci.device_id` and `pci_id` from the real
+    `vulkaninfo` captures.
+  - `profile_test` 103 → 111: `pci_id_make`.
+  - `json_output_test` 45 → 47: `pci_id` is not serialized, and the schema is
+    still v6.
+  - `lazy_test` 35 → 38: an NPU query, then a GPU query whose MoltenVK view
+    arrives in another partial registry.
+
+  Each of 18 single-point mutations of the new code fails at least one
+  assertion. The property test catches a 19th that the hand-written cases miss:
+  a duplicate in the first position never dropped.
+- **Fuzz:** `fuzz/cuda_parser.fcyr` covers `pci.device_id`, valid, missing and
+  malformed.
+- **Benchmarks: 17 → 18 rows.** `dedup_17dev` runs the pass on 17 profiles,
+  4 of them Vulkan views of CUDA cards, refill included (batch-timed).
+- **Docs:**
+  - the README's detection list, module tree and test table;
+  - the architecture overview's post-passes;
+  - `docs/troubleshooting.md`, which also named a nonexistent `--debug` flag,
+    as did `docs/guides/testing.md` and `docs/guides/production.md` (now
+    `--log-level debug`);
+  - the counts in `CLAUDE.md` and `docs/guides/testing.md`.
+- **Roadmap:** the duplicate-device item is closed. The Windows item now names
+  what remains there: a `pci_id` on DXGI profiles.
+
+### Known, not changed here
+
+- **Windows has nothing to merge yet.** No vendor tool runs there (the roadmap's
+  `which()` item), so DXGI is the only GPU backend. DXGI profiles have no
+  `pci_id`, and DXGI is not a survivor for Vulkan.
+- **Intel oneAPI (`xpu-smi`) profiles have no `pci_id`.** An Intel data-center
+  GPU seen by `xpu-smi` and by Vulkan is still listed twice. No host has one,
+  and the `--dump` field IDs the parser uses are unverified.
+- **Platform GPUs other than Apple's have no PCI ID.** A Jetson seen by CUDA and
+  Vulkan is an example. Such a pair is not matched.
+
+### Performance
+
+**17 neutral, 0 regressions** (2.3.29 → 2.4.0). The method is 2.3.28's: 5
+code layouts per arm, the three floor-bound rows batch-timed (†), and two
+30-round passes, shuffled and pinned to one CPU (60 rounds). The two rows
+2.3.29 added are compared too.
+
+| row | 2.3.29 | 2.4.0 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 14.13 µs | 14.14 µs | +0.1% | 0.80 | neutral |
+| `parse_vulkan_2gpu` | 2.67 µs | 2.60 µs | −2.6% | 0.03 | neutral |
+| `parse_neuron_2dev` | 1.67 µs | 1.70 µs | +1.5% | 0.17 | neutral |
+| `detect_safetensors` † | 406.8 ns | 399.7 ns | −1.7% | 0.03 | neutral |
+| `detect_gguf` † | 38.6 ns | 38.6 ns | +0.1% | 0.85 | neutral |
+| `best_available_13dev` † | 180.5 ns | 181.8 ns | +0.7% | 0.50 | neutral |
+| `total_memory_13dev` | 105.6 ns | 106.1 ns | +0.5% | 0.33 | neutral |
+| `has_accelerator_13dev` | 18.7 ns | 18.6 ns | −0.1% | 0.55 | neutral |
+| `plan_70B_bf16_4gpu` | 1.46 µs | 1.46 µs | +0.4% | 0.27 | neutral |
+| `count_family_gpu_13dev` | 248.2 ns | 249.7 ns | +0.6% | 0.18 | neutral |
+| `json_serialize_13dev` | 23.54 µs | 23.51 µs | −0.1% | 0.57 | neutral |
+| `json_summary_13dev` | 3.24 µs | 3.23 µs | −0.1% | 0.81 | neutral |
+| `json_system_io` | 5.25 µs | 5.27 µs | +0.4% | 0.24 | neutral |
+| `json_plan` | 17.44 µs | 17.44 µs | 0.0% | 0.96 | neutral |
+| `json_training` | 2.53 µs | 2.53 µs | 0.0% | 0.95 | neutral |
+| `parse_vulkan_summary_renoir` | 15.32 µs | 14.88 µs | −2.9% | <0.01 | neutral (placement) |
+| `vulkan_heaps_uhd600` | 634.70 µs | 646.13 µs | +1.8% | 0.10 | neutral |
+
+A verdict needs p < 0.01 and |Δ| > 1%. `parse_vulkan_summary_renoir` crosses
+the bar, but it is not a win. The parse does strictly more work than before:
+each profile also records its `pci_id` and is 8 bytes larger. Its code moved
+when `_vk_hex` left `vulkan.cyr`, and the parse runs on the same input. The
+detection path's new cost is the pass: `dedup_17dev` measures 907 ns (mean of
+per-layout medians), refill included, next to detection's tens of
+milliseconds. The host was running other work (load ~4), and the arms were
+interleaved.
+
+In `bench-history.csv`, the `028b1e1-dirty` rows at 18:16:43Z are 2.4.0. The
+`028b1e1` rows at 18:16:45Z are 2.3.29, measured from `git archive 028b1e1`
+right after them.
+
+| binary | 2.3.29 | 2.4.0 | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 231 960 | 236 120 | +4 160 (text +3 912) |
+| x86_64 ELF, no DCE | 457 240 | 461 400 | +4 160 (text +3 608) |
+| ELF-aarch64 | 805 224 | 805 288 | +64 (text +4 208) |
+| PE, as shipped (no DCE) | 529 920 | 534 016 | +4 096 |
+| agnos, `CYRIUS_DCE=1` | 229 624 | 233 792 | +4 168 (text +3 912) |
+| Mach-O arm64 (cross-built, as verified) | 721 332 | 737 716 | +16 384 (one 16 KiB page) |
+
+### Verified
+
+- **Tests:** 950 assertions in 15 units pass through CI's loop; fuzz 6/6.
+- **CI gates:** fmt, lint (0 warnings in `src/`), vet, raw-offset guard,
+  `cyrius.lock` current, DCE build. `dist/ai-hwaccel.cyr` differs from
+  2.3.29's only in its version line and the seven changed modules (`profile`,
+  `command`, `cuda`, `rocm`, `vulkan`, `registry`, `lazy`), and `distlib` is
+  deterministic.
+- **Linux CLI output matches 2.3.29** on 18 invocations covering every flag,
+  apart from the dedup itself:
+  - the APU's Vulkan profile and table row are gone;
+  - ROCm takes RADV's name;
+  - the counts and totals change;
+  - the `-v` log reports 2 profiles, not 3.
+
+  **ELF-aarch64** under `qemu-aarch64` matches x86_64 on 8 invocations, dedup
+  included. **agnos** builds.
+- **Stand-ins** (the table under *Fixed*): every entry point drops the same
+  views, and `registry_detect_no_exec()` runs neither tool.
+- **Windows on `cass`:** the EXE exactly as `stage_win_cross.sh` builds it
+  passes `windows-smoke` (a)–(d). Its JSON and `--summary` match 2.3.29's EXE:
+  there is nothing to merge on Windows.
+- **macOS on `ecb`**, cross-built:
+  - without a stand-in, the JSON matches 2.3.29;
+  - with the MoltenVK stand-in, all five detection paths hold one M5 Pro GPU;
+  - the debug log shows the drop.
+- **Not verified:** a real NVIDIA host (the `pci.device_id` query), a real
+  MoltenVK or Honeykrisp install, and two Vulkan drivers on one AMD card.
+
 ## [2.3.29] — 2026-09-23 — integrated GPUs through Vulkan: real size, counted once, found without exec
 
 Every Vulkan GPU carried a 4 GiB estimate and counted as memory of its own.

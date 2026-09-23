@@ -127,7 +127,7 @@ AI_HWACCEL_LOG=warn build/ai-hwaccel --table
 AI_HWACCEL_LOG=debug build/ai-hwaccel --table
 ```
 
-The CLI binary supports `AI_HWACCEL_LOG` and `--debug` flags.
+The CLI binary supports `AI_HWACCEL_LOG` and the `--log-level <level>`, `-v`, `-vv` and `-q` flags.
 
 ## Monitoring with the CLI
 

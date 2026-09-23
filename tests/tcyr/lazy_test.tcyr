@@ -40,7 +40,18 @@ fn _stub(profiles, backend, atype) {
 
 fn detect_cuda(p, w) { return _stub(p, BACKEND_CUDA, ACCEL_CUDA); }
 fn detect_rocm(p, w) { return _stub(p, BACKEND_ROCM, ACCEL_ROCM); }
-fn detect_vulkan_opts(p, w, a, l) { return _stub(p, BACKEND_VULKAN, ACCEL_VULKAN); }
+# When _vk_moltenvk is 1 the Vulkan stub reports what MoltenVK does on a Mac:
+# the Metal GPU again, as an integrated GPU on system RAM.
+var _vk_moltenvk = 0;
+
+fn detect_vulkan_opts(p, w, a, l) {
+    _stub(p, BACKEND_VULKAN, ACCEL_VULKAN);
+    if (_vk_moltenvk == 1) {
+        var v = vec_get(p, vec_len(p) - 1);
+        profile_set_shared_mem(v, profile_memory_bytes(v));
+    }
+    return 0;
+}
 fn detect_intel_npu(p, w) { return _stub(p, BACKEND_INTEL_NPU, ACCEL_INTEL_NPU); }
 fn detect_amd_xdna(p, w) { return _stub(p, BACKEND_AMD_XDNA, ACCEL_AMD_XDNA); }
 fn detect_tpu(p, w) { return _stub(p, BACKEND_TPU, ACCEL_TPU); }
@@ -198,6 +209,23 @@ fn test_tpu_query_runs_only_tpu() {
 
 # Probing everything runs each backend exactly once and yields exactly the
 # profiles full detection yields.
+# One device seen by two families' probes (2.4.0): an NPU query runs Apple
+# (Metal + Neural Engine), a later GPU query runs Vulkan, whose MoltenVK view
+# of the same GPU arrives in another partial registry. The lazy list drops it
+# on merge, so the GPU query and the full registry hold one Metal GPU.
+fn test_lazy_dedup_across_families() {
+    _vk_moltenvk = 1;
+    var lr = lazy_new();
+    lazy_by_family(lr, FAMILY_NPU);
+    var gpus = lazy_by_family(lr, FAMILY_GPU);
+    assert_eq(_count_type(gpus, ACCEL_METAL), 1, "lazy: metal");
+    assert_eq(_count_type(gpus, ACCEL_VULKAN), 0, "lazy: moltenvk view dropped");
+    var all = reg_profiles(lazy_into_registry(lr));
+    assert_eq(_count_type(all, ACCEL_VULKAN), 0, "lazy registry: moltenvk view dropped");
+    _vk_moltenvk = 0;
+    return 0;
+}
+
 fn test_into_registry_runs_each_backend_once() {
     _reset_calls();
     var full = reg_profiles(registry_detect());
@@ -233,6 +261,7 @@ test_gpu_first_then_npu();
 test_family_query_matches_full_detection();
 test_tpu_query_runs_only_tpu();
 test_into_registry_runs_each_backend_once();
+test_lazy_dedup_across_families();
 
 var fails = assert_summary();
 syscall(60, fails);
