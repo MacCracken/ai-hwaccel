@@ -14,17 +14,20 @@
 # an i64 bitmask (bit 0 = CPU probed, 1 = GPU, 2 = NPU, 3 = TPU,
 # 4 = AI_ASIC) — getter returns the raw mask, bit-manipulation
 # helpers below use `lazy_probed` + `lazy_set_probed` plus a small
-# inline mask compute.
+# inline mask compute. `backends` (2.3.26) is a builder mask of the
+# backends already run, so a backend whose profiles span two families
+# runs once however the families are queried.
 
 #derive(accessors)
 struct lazy {
     profiles;
     probed;
     mutex;
+    backends;
 }
 
 fn lazy_new() {
-    var lr = alloc(24);
+    var lr = alloc(32);
     var profs = vec_new();
     # Always include CPU
     var sys_mem = detect_system_memory();
@@ -33,6 +36,7 @@ fn lazy_new() {
     lazy_set_profiles(lr, profs);
     lazy_set_probed(lr, 1);  # bit 0 = CPU probed
     lazy_set_mutex(lr, mutex_new());
+    lazy_set_backends(lr, 0);
     return lr;
 }
 
@@ -55,11 +59,14 @@ fn _lazy_mark_probed(lr, family) {
     return 0;
 }
 
-# Build a builder mask for backends of a specific family. Every backend sits
-# in exactly one family mask (the one its profiles belong to), so probing all
-# families never runs a backend twice. Intel oneAPI and Windows (DXGI) emit
-# GPU profiles; through 2.3.24 oneAPI sat in the AI_ASIC mask and Windows in
-# none, so lazy_by_family(lr, FAMILY_GPU) never probed either.
+# Build a builder mask of the backends that can emit profiles of `family`.
+# A backend sits in the mask of every family its profiles belong to: Apple
+# emits the Metal GPU and the Neural Engine, so it is in the GPU and NPU
+# masks; _lazy_ensure's `backends` tracking still runs it only once. Through
+# 2.3.25 Apple was in the GPU mask only, so a lazy NPU query found the Neural
+# Engine only if GPUs had been queried first. Intel oneAPI and Windows (DXGI)
+# emit GPU profiles; through 2.3.24 oneAPI sat in the AI_ASIC mask and
+# Windows in none, so lazy_by_family(lr, FAMILY_GPU) never probed either.
 fn _family_builder_mask(family) {
     var mask = 0;
     if (family == FAMILY_GPU) {
@@ -72,6 +79,7 @@ fn _family_builder_mask(family) {
         return mask;
     }
     if (family == FAMILY_NPU) {
+        mask = builder_with(mask, BACKEND_APPLE);
         mask = builder_with(mask, BACKEND_INTEL_NPU);
         mask = builder_with(mask, BACKEND_AMD_XDNA);
         mask = builder_with(mask, BACKEND_SAMSUNG_NPU);
@@ -94,13 +102,18 @@ fn _family_builder_mask(family) {
     return mask;
 }
 
-# Ensure a family is probed, run detection if not
+# Ensure a family is probed, run detection if not. Only backends that no
+# earlier probe has run are detected: one that spans two families (Apple)
+# delivered all its profiles the first time, so running it again would
+# push them twice.
 fn _lazy_ensure(lr, family) {
     if (family == FAMILY_CPU) { return 0; }
     if (_lazy_is_probed(lr, family) == 1) { return 0; }
     _lazy_mark_probed(lr, family);
 
-    var mask = _family_builder_mask(family);
+    var mask = _family_builder_mask(family) & (~lazy_backends(lr));
+    if (mask == 0) { return 0; }
+    lazy_set_backends(lr, lazy_backends(lr) | mask);
     var partial = registry_detect_with(mask);
     var partial_profs = reg_profiles(partial);
     var main_profs = lazy_profiles(lr);

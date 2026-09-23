@@ -217,35 +217,6 @@ fn test_no_exec_memory() {
     return 0;
 }
 
-# --- Lazy family masks ---
-
-# lazy_by_family probes only the backends in that family's mask, so a GPU
-# backend missing from the GPU mask means lazy GPU queries skip its GPUs.
-# Every backend with a detector sits in exactly one mask (no double probe).
-fn test_lazy_family_masks() {
-    var gpu = _family_builder_mask(FAMILY_GPU);
-    var npu = _family_builder_mask(FAMILY_NPU);
-    var tpu = _family_builder_mask(FAMILY_TPU);
-    var asic = _family_builder_mask(FAMILY_AI_ASIC);
-    assert_eq(builder_is_enabled(gpu, BACKEND_CUDA), 1, "lazy gpu: cuda");
-    assert_eq(builder_is_enabled(gpu, BACKEND_ROCM), 1, "lazy gpu: rocm");
-    assert_eq(builder_is_enabled(gpu, BACKEND_VULKAN), 1, "lazy gpu: vulkan");
-    assert_eq(builder_is_enabled(gpu, BACKEND_APPLE), 1, "lazy gpu: apple");
-    assert_eq(builder_is_enabled(gpu, BACKEND_INTEL_ONEAPI), 1, "lazy gpu: oneapi");
-    assert_eq(builder_is_enabled(gpu, BACKEND_WINDOWS), 1, "lazy gpu: windows");
-    assert_eq(builder_is_enabled(asic, BACKEND_INTEL_ONEAPI), 0, "oneapi not in asic");
-    assert_eq(gpu & npu, 0, "gpu/npu disjoint");
-    assert_eq(gpu & tpu, 0, "gpu/tpu disjoint");
-    assert_eq(gpu & asic, 0, "gpu/asic disjoint");
-    assert_eq(npu & tpu, 0, "npu/tpu disjoint");
-    assert_eq(npu & asic, 0, "npu/asic disjoint");
-    assert_eq(tpu & asic, 0, "tpu/asic disjoint");
-    # AGNOS_GPU is a reserved backend id with no detector yet.
-    var all = builder_without(builder_all(), BACKEND_AGNOS_GPU);
-    assert_eq(gpu | npu | tpu | asic, all, "every detector reachable lazily");
-    return 0;
-}
-
 # --- Detection entry points (real detectors, this host) ---
 
 # A registry from any entry point must hold only profiles in `profiles`, only
@@ -378,7 +349,6 @@ test_backend_uses_exec();
 test_builder_no_exec_mask();
 test_no_exec_strips_exec_bits();
 test_no_exec_memory();
-test_lazy_family_masks();
 test_detection_entry_points();
 test_suggest_quant_gpu_small();
 test_suggest_quant_gpu_large();

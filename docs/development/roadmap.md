@@ -729,7 +729,12 @@ is resolved below.
   the wheel from 77 534 to 43 684 B compressed (zip's default deflate). See
   [the issue](issues/2026-09-07-cyrius-dce-pe-access-violation.md).
 - [ ] **macOS arm64 runtime not re-verified** — `ecb` has cyrius ≤ 6.6.4, and
-  the `macos-14` wheel job builds without running the binary.
+  the `macos-14` wheel job builds without running the binary. *Partly covered
+  since 2.3.26:* the pinned toolchain's Linux-hosted `cycc_aarch64` with
+  `CYRIUS_MACHO_ARM=1` cross-builds a Mach-O arm64 binary from the same input
+  `stage_binary.sh` composes. Ad-hoc signed (`codesign -s - -f`) it runs on
+  `ecb`, and the 2.3.26 CLI passed there. The wheel's own native build still
+  goes unrun.
 
 ### 2.3.25 — Windows detection without wmic; Windows GPUs on every entry point
 
@@ -757,11 +762,23 @@ is resolved below.
   (`SharedSystemMemory`, typically half of RAM). Reporting the shared budget
   for UMA adapters needs an integrated-vs-discrete signal, which
   `DXGI_ADAPTER_DESC1` does not carry.
-- [ ] **`lazy_by_family(lr, FAMILY_NPU)` misses the Apple Neural Engine**
+- [x] **`lazy_by_family(lr, FAMILY_NPU)` misses the Apple Neural Engine**
   unless the GPU family was probed first: `detect_apple` emits both the Metal
   GPU and the ANE, but only the GPU mask probes it. Putting Apple in both masks
   would push its profiles twice, so the lazy registry needs per-backend (not
-  per-family) probe tracking.
+  per-family) probe tracking. **Fixed in 2.3.26** (see below).
+
+### 2.3.26 — lazy NPU queries find the Apple Neural Engine
+
+- [x] **Apple in the GPU and NPU lazy masks, with per-backend probe
+  tracking** (`backends` field on `lazy`), so an NPU query finds the Neural
+  Engine on a fresh registry and no query order runs Apple twice. Verified on
+  `ecb` (Apple M5 Pro): 2.3.25 returns no NPU, 2.3.26 returns the Neural
+  Engine, with no duplicate profiles.
+- [x] **`tests/tcyr/lazy_test.tcyr`:** stub detectors; lazy family queries
+  must equal full detection per family, and no backend may run twice.
+- [x] **Bench delta:** bench binaries byte-identical to 2.3.25 (15 neutral by
+  construction); the x86_64 Linux wheel binary is byte-identical too.
 
 ### WASM / JS
 

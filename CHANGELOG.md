@@ -5,6 +5,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.3.26] — 2026-09-23 — lazy NPU queries find the Apple Neural Engine
+
+A lazy NPU query on a fresh `lazy` registry missed the Apple Neural Engine
+unless GPUs had been queried first. Fixed, and verified on an Apple M5 Pro.
+Nothing else changes. The CLI does not use the lazy registry, so its output is
+identical to 2.3.25, and the x86_64 Linux wheel binary is byte-identical.
+
+### Fixed
+
+- **`lazy_by_family(lr, FAMILY_NPU)` missed the Apple Neural Engine.**
+  `detect_apple` is the one detector whose profiles span two families: it
+  emits the Metal GPU (GPU family) and the Neural Engine (NPU family). The lazy
+  registry runs a backend only for the families whose mask holds it, and Apple
+  was in the GPU mask only. An NPU query on a fresh registry never ran it, so
+  the Neural Engine showed up only if GPUs had been queried first. Apple is now
+  in both the GPU and NPU masks. The lazy registry also records which
+  *backends* it has run (a new `backends` field on the `lazy` struct), so the
+  second family's query does not run Apple again and push its profiles twice.
+
+  Verified on `ecb` (Apple M5 Pro, macOS 27.0) with a probe built by the
+  pinned 6.6.6 toolchain's Linux-hosted Mach-O cross compiler (`cycc_aarch64`
+  with `CYRIUS_MACHO_ARM=1`, from the same compiler input
+  `stage_binary.sh` composes on macOS). For an NPU query on a fresh lazy
+  registry, 2.3.25 returns `count=0` and 2.3.26 returns the Apple Neural
+  Engine. The GPU query that follows returns the Metal GPU. The registry then
+  holds 3 profiles (CPU, Metal GPU, Neural Engine), the same as
+  `registry_detect()`.
+
+### Changed
+
+- **New test unit `tests/tcyr/lazy_test.tcyr` (35 assertions).** Its stub
+  detectors each emit their backend's accelerator type and count their calls;
+  `detect_apple` emits both of its profiles. The unit checks that, for every
+  family, a lazy query on a fresh registry returns the same profiles by type as
+  full detection filtered to that family. It also checks that no backend runs
+  twice in either query order, and that a TPU query starts no other backend.
+  The family-mask test moved here from `registry_test` (108 → 94 assertions),
+  updated for Apple being in two masks. **725 assertions in 15 units.** Run
+  against the 2.3.25 `lazy.cyr`, the unit fails 5 assertions; each of 4
+  single-point mutations of the fix fails at least one.
+- **The `lazy` struct has 4 fields** (`backends` added; 32 bytes), with the
+  derived `lazy_backends` / `lazy_set_backends` accessors.
+- **README's test-unit table lists all 15 units.** It had 11 rows and a stale
+  "13 units, 623 assertions" count.
+
+### Performance
+
+- **Benchmarks: 15 neutral by construction, 0 regressions.** Neither bench
+  suite includes `src/lazy.cyr`, so `benches/parsing` and `benches/registry`
+  build byte-identical to 2.3.25, plain and with `CYRIUS_DCE=1`
+  (sha256-compared). `bench-history.csv` rows: `5a72769` (2.3.25) and
+  `5a72769-dirty` (2.3.26).
+
+| binary | 2.3.25 | 2.3.26 | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 219 448 | 219 448 | 0 (byte-identical) |
+| x86_64 ELF, no DCE | 444 728 | 444 728 | 0 (padding) |
+| ELF-aarch64 | 739 456 | 739 456 | 0 (padding) |
+| PE, as shipped (no DCE) | 515 584 | 516 096 | +512 |
+| agnos, `CYRIUS_DCE=1` | 217 112 | 217 112 | 0 (byte-identical) |
+
+The DCE builds drop the lazy registry entirely: the CLI never calls it.
+
+### Verified
+
+- **Tests:** 725 assertions in 15 units pass through CI's loop; fuzz 6/6.
+- **CI gates:** fmt, lint (0 warnings), vet, raw-offset guard, DCE build.
+  `dist/ai-hwaccel.cyr` differs from 2.3.25's only in its version line and
+  `lazy.cyr`.
+- **Linux CLI output identical to 2.3.25** on 18 invocations covering every
+  flag.
+- **macOS on `ecb`:** the cross-built 2.3.26 CLI reports the CPU, the Metal GPU
+  (Apple M5 Pro) and the Neural Engine. stdout carries the JSON; stderr stays
+  silent at the default level and carries the `detect` span with `-vv`. This
+  binary is a Linux cross-build, not the wheel's native `macos-14` build, and
+  that job still does not run its binary.
+- **Windows on `cass`:** the EXE exactly as `stage_win_cross.sh` builds it
+  passes `windows-smoke` (a)–(d), with `--version` reporting 2.3.26.
+
 ## [2.3.25] — 2026-09-23 — Windows detection without wmic; Windows GPUs on every entry point
 
 Windows detection moves off `wmic`, which Windows 11 24H2+ removes: GPUs now come

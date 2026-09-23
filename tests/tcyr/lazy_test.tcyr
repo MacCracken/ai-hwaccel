@@ -1,0 +1,237 @@
+# lazy_test.tcyr — the lazy registry (src/lazy.cyr) against stub detectors.
+# Every stub emits one profile of its backend's accelerator type and counts
+# its calls; detect_apple emits two (Metal GPU + Neural Engine), because it is
+# the one backend whose profiles span two families. A lazy query for a family
+# must return what full detection returns for that family, and no backend may
+# run twice however the families are queried.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+include "lib/thread.cyr"
+
+include "lib/sakshi.cyr"
+include "src/log.cyr"
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+
+# --- Stub detectors ---
+
+# Per-backend call counters, indexed by backend id (alloc'd in the runner).
+var _calls = 0;
+
+fn _stub(profiles, backend, atype) {
+    store64(_calls + backend * 8, load64(_calls + backend * 8) + 1);
+    vec_push(profiles, profile_new(atype, 0, BYTES_PER_GIB));
+    return 0;
+}
+
+fn detect_cuda(p, w) { return _stub(p, BACKEND_CUDA, ACCEL_CUDA); }
+fn detect_rocm(p, w) { return _stub(p, BACKEND_ROCM, ACCEL_ROCM); }
+fn detect_vulkan(p, w) { return _stub(p, BACKEND_VULKAN, ACCEL_VULKAN); }
+fn detect_intel_npu(p, w) { return _stub(p, BACKEND_INTEL_NPU, ACCEL_INTEL_NPU); }
+fn detect_amd_xdna(p, w) { return _stub(p, BACKEND_AMD_XDNA, ACCEL_AMD_XDNA); }
+fn detect_tpu(p, w) { return _stub(p, BACKEND_TPU, ACCEL_TPU); }
+fn detect_gaudi(p, w) { return _stub(p, BACKEND_GAUDI, ACCEL_GAUDI); }
+fn detect_neuron(p, w) { return _stub(p, BACKEND_NEURON, ACCEL_NEURON); }
+fn detect_intel_oneapi(p, w) { return _stub(p, BACKEND_INTEL_ONEAPI, ACCEL_INTEL_ONEAPI); }
+fn detect_qualcomm(p, w) { return _stub(p, BACKEND_QUALCOMM, ACCEL_QUALCOMM); }
+fn detect_cerebras(p, w) { return _stub(p, BACKEND_CEREBRAS, ACCEL_CEREBRAS); }
+fn detect_graphcore(p, w) { return _stub(p, BACKEND_GRAPHCORE, ACCEL_GRAPHCORE); }
+fn detect_groq(p, w) { return _stub(p, BACKEND_GROQ, ACCEL_GROQ); }
+fn detect_samsung_npu(p, w) { return _stub(p, BACKEND_SAMSUNG_NPU, ACCEL_SAMSUNG_NPU); }
+fn detect_mediatek_apu(p, w) { return _stub(p, BACKEND_MEDIATEK_APU, ACCEL_MEDIATEK_APU); }
+
+# Apple Silicon: the Metal GPU and the Neural Engine, from one probe.
+fn detect_apple(p, w) {
+    _stub(p, BACKEND_APPLE, ACCEL_METAL);
+    vec_push(p, profile_new(ACCEL_APPLE_NPU, 0, 4 * BYTES_PER_GIB));
+    return 0;
+}
+
+fn enrich_bandwidth(p) { return 0; }
+fn enrich_pcie(p) { return 0; }
+fn enrich_numa(p) { return 0; }
+fn detect_interconnects(s, p, w) { return 0; }
+fn detect_storage(s) { return 0; }
+fn detect_environment(s) { return 0; }
+fn detect_system_memory() { return 16 * BYTES_PER_GIB; }
+fn detect_system_memory_opts(a) { return 16 * BYTES_PER_GIB; }
+
+include "src/registry.cyr"
+include "src/lazy.cyr"
+
+fn _reset_calls() {
+    memset(_calls, 0, 8 * AIHW_BACKEND_COUNT);
+    return 0;
+}
+
+fn _calls_of(backend) { return load64(_calls + backend * 8); }
+
+# Profiles of accelerator type `t` in vec `v`.
+fn _count_type(v, t) {
+    var n = vec_len(v);
+    var c = 0;
+    var i = 0;
+    while (i < n) {
+        if (profile_accel_type(vec_get(v, i)) == t) { c = c + 1; }
+        i = i + 1;
+    }
+    return c;
+}
+
+# --- Family masks ---
+
+# Each family mask holds every backend that can emit that family's profiles.
+# Apple is the one backend in two masks (GPU + NPU); every other pair of
+# masks is disjoint, and together they reach every backend with a detector.
+fn test_family_masks() {
+    var gpu = _family_builder_mask(FAMILY_GPU);
+    var npu = _family_builder_mask(FAMILY_NPU);
+    var tpu = _family_builder_mask(FAMILY_TPU);
+    var asic = _family_builder_mask(FAMILY_AI_ASIC);
+    assert_eq(builder_is_enabled(gpu, BACKEND_CUDA), 1, "gpu mask: cuda");
+    assert_eq(builder_is_enabled(gpu, BACKEND_ROCM), 1, "gpu mask: rocm");
+    assert_eq(builder_is_enabled(gpu, BACKEND_VULKAN), 1, "gpu mask: vulkan");
+    assert_eq(builder_is_enabled(gpu, BACKEND_APPLE), 1, "gpu mask: apple");
+    assert_eq(builder_is_enabled(gpu, BACKEND_INTEL_ONEAPI), 1, "gpu mask: oneapi");
+    assert_eq(builder_is_enabled(gpu, BACKEND_WINDOWS), 1, "gpu mask: windows");
+    assert_eq(builder_is_enabled(npu, BACKEND_APPLE), 1, "npu mask: apple");
+    assert_eq(gpu & npu, 1 << BACKEND_APPLE, "gpu/npu share only apple");
+    assert_eq(gpu & tpu, 0, "gpu/tpu disjoint");
+    assert_eq(gpu & asic, 0, "gpu/asic disjoint");
+    assert_eq(npu & tpu, 0, "npu/tpu disjoint");
+    assert_eq(npu & asic, 0, "npu/asic disjoint");
+    assert_eq(tpu & asic, 0, "tpu/asic disjoint");
+    # AGNOS_GPU is a reserved backend id with no detector yet.
+    var all = builder_without(builder_all(), BACKEND_AGNOS_GPU);
+    assert_eq(gpu | npu | tpu | asic, all, "every detector reachable lazily");
+    return 0;
+}
+
+# --- Lazy queries ---
+
+# The 2.3.25 gap: an NPU query on a fresh lazy registry never ran the Apple
+# backend, so the Neural Engine was missing. A GPU query afterwards must not
+# run Apple again (its Metal profile arrived with the NPU probe).
+fn test_npu_first_finds_neural_engine() {
+    _reset_calls();
+    var lr = lazy_new();
+    var npus = lazy_by_family(lr, FAMILY_NPU);
+    assert_eq(_count_type(npus, ACCEL_APPLE_NPU), 1, "npu first: neural engine");
+    assert_eq(_count_type(npus, ACCEL_INTEL_NPU), 1, "npu first: intel npu");
+    assert_eq(_calls_of(BACKEND_APPLE), 1, "npu first: apple ran once");
+    var gpus = lazy_by_family(lr, FAMILY_GPU);
+    assert_eq(_count_type(gpus, ACCEL_METAL), 1, "then gpu: metal");
+    assert_eq(_calls_of(BACKEND_APPLE), 1, "then gpu: apple not rerun");
+    var all = lazy_probed_profiles(lr);
+    assert_eq(_count_type(all, ACCEL_METAL), 1, "one metal profile");
+    assert_eq(_count_type(all, ACCEL_APPLE_NPU), 1, "one neural engine profile");
+    return 0;
+}
+
+fn test_gpu_first_then_npu() {
+    _reset_calls();
+    var lr = lazy_new();
+    var gpus = lazy_by_family(lr, FAMILY_GPU);
+    assert_eq(_count_type(gpus, ACCEL_METAL), 1, "gpu first: metal");
+    var npus = lazy_by_family(lr, FAMILY_NPU);
+    assert_eq(_count_type(npus, ACCEL_APPLE_NPU), 1, "then npu: neural engine");
+    assert_eq(_calls_of(BACKEND_APPLE), 1, "gpu then npu: apple ran once");
+    var all = lazy_probed_profiles(lr);
+    assert_eq(_count_type(all, ACCEL_APPLE_NPU), 1, "gpu then npu: no duplicate");
+    return 0;
+}
+
+# For every family, a query on a fresh lazy registry returns the same
+# profiles, by accelerator type, as full detection filtered to that family.
+fn test_family_query_matches_full_detection() {
+    _reset_calls();
+    var full = reg_profiles(registry_detect());
+    var fam = FAMILY_GPU;
+    while (fam <= FAMILY_AI_ASIC) {
+        var got = lazy_by_family(lazy_new(), fam);
+        var mismatches = 0;
+        var t = 0;
+        while (t <= ACCEL_AGNOS_GPU) {
+            if (t != ACCEL_CPU) {
+                if (accel_family(t) == fam) {
+                    if (_count_type(got, t) != _count_type(full, t)) { mismatches = mismatches + 1; }
+                }
+            }
+            t = t + 1;
+        }
+        assert_eq(mismatches, 0, family_name(fam));
+        fam = fam + 1;
+    }
+    return 0;
+}
+
+# A family query runs only that family's backends: a TPU query must not
+# start the GPU tools (the reason the lazy registry exists).
+fn test_tpu_query_runs_only_tpu() {
+    _reset_calls();
+    var tpus = lazy_by_family(lazy_new(), FAMILY_TPU);
+    assert_eq(_count_type(tpus, ACCEL_TPU), 1, "tpu found");
+    var others = 0;
+    var b = 0;
+    while (b < AIHW_BACKEND_COUNT) {
+        if (b != BACKEND_TPU) { others = others + _calls_of(b); }
+        b = b + 1;
+    }
+    assert_eq(others, 0, "tpu query ran no other backend");
+    return 0;
+}
+
+# Probing everything runs each backend exactly once and yields exactly the
+# profiles full detection yields.
+fn test_into_registry_runs_each_backend_once() {
+    _reset_calls();
+    var full = reg_profiles(registry_detect());
+    _reset_calls();
+    var lazy_all = reg_profiles(lazy_into_registry(lazy_new()));
+    var reruns = 0;
+    var b = 0;
+    while (b < AIHW_BACKEND_COUNT) {
+        if (_calls_of(b) > 1) { reruns = reruns + 1; }
+        b = b + 1;
+    }
+    assert_eq(reruns, 0, "no backend ran twice");
+    assert_eq(_calls_of(BACKEND_APPLE), 1, "apple ran once");
+    assert_eq(vec_len(lazy_all), vec_len(full), "same profile count as full detection");
+    var mismatches = 0;
+    var t = 0;
+    while (t <= ACCEL_AGNOS_GPU) {
+        if (_count_type(lazy_all, t) != _count_type(full, t)) { mismatches = mismatches + 1; }
+        t = t + 1;
+    }
+    assert_eq(mismatches, 0, "same profiles by type as full detection");
+    return 0;
+}
+
+# --- Run all tests ---
+
+alloc_init();
+_calls = alloc(8 * AIHW_BACKEND_COUNT);
+
+test_family_masks();
+test_npu_first_finds_neural_engine();
+test_gpu_first_then_npu();
+test_family_query_matches_full_detection();
+test_tpu_query_runs_only_tpu();
+test_into_registry_runs_each_backend_once();
+
+var fails = assert_summary();
+syscall(60, fails);
