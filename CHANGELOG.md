@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
-## [Unreleased]
+## [2.3.25] — 2026-09-23 — Windows detection without wmic; Windows GPUs on every entry point
+
+Windows detection moves off `wmic`, which Windows 11 24H2+ removes: GPUs now come
+from DXGI and total RAM from `GlobalMemoryStatusEx`. Windows GPUs are detected
+by every detection entry point; `registry_detect_no_exec()`,
+`registry_detect_threaded()` and lazy GPU queries used to skip them. The
+threaded and lazy entry points no longer return a corrupted registry. The macOS
+wheel job that failed on the 2.3.24 tag builds again. Linux CLI output is
+unchanged, and all 15 benchmarks are neutral.
 
 ### Fixed
 
@@ -26,9 +34,10 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 - **Windows detection no longer needs `wmic`.** Windows 11 24H2+ removes
   `wmic` by default. The Windows backend used it to create its GPU profiles,
   and memory detection used it to read total RAM, so on such a host the
-  Windows wheel reported a CPU profile only, with the 16 GiB fallback. On `cass` (Windows 11 10.0.26200, 8 GB, Intel UHD
-  Graphics 600) 2.3.23 and 2.3.24 printed `"memory_bytes":17179869184`, no GPU,
-  and a `"wmic"` warning. Now:
+  Windows wheel reported a CPU profile only, with the 16 GiB fallback. On
+  `cass` (Windows 11 10.0.26200, 8 GB, Intel UHD Graphics 600) 2.3.23 and
+  2.3.24 printed `"memory_bytes":17179869184`, no GPU, and a `"wmic"` warning.
+  Now:
   - **GPUs come from DXGI** (`src/detect/windows.cyr`). `CreateDXGIFactory1` →
     `EnumAdapters1(i)` until `DXGI_ERROR_NOT_FOUND` → `GetDesc1` gives one
     `Windows GPU` profile per hardware adapter, named from the descriptor's
@@ -36,22 +45,23 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
     (`DedicatedSystemMemory` when a driver reports its carve-out there instead).
     Software adapters are skipped: `DXGI_ADAPTER_FLAG_SOFTWARE`, or the
     Microsoft Basic Render Driver's `1414:008C` IDs as a second check that
-    does not rely on the flag. `cass` lists that driver last, flag set. One
-    factory serves the whole enumeration; the old enrichment pass created one
-    per adapter.
+    does not rely on the flag. One factory serves the whole enumeration; the
+    old enrichment pass created one per adapter. An adapter that fails
+    `EnumAdapters1` or `GetDesc1` is reported as a `dxgi` warning and
+    enumeration carries on to the next one, so one bad adapter cannot hide the
+    rest.
   - **Total RAM comes from `kernel32!GlobalMemoryStatusEx`**
     (`src/detect/platform.cyr`). The PE backend has no reroute for it, so it is
     resolved at run time through the `GetModuleHandleA`/`GetProcAddress`
     reroutes (`syscall` `0xF013`/`0xF014`) and called with `callptr`.
     `ullTotalPhys` on `cass` is 8 405 598 208, exactly
-    `Win32_ComputerSystem.TotalPhysicalMemory`. A side effect:
-    `registry_detect_no_exec()` no longer spawns a process on Windows to read
-    RAM, unless `GlobalMemoryStatusEx` fails.
-  - **`wmic` is only a fallback now.** It runs for GPUs only when DXGI itself is
-    unavailable: no factory, or the first `EnumAdapters1` fails with anything
-    but `DXGI_ERROR_NOT_FOUND`. It runs for RAM only if `GlobalMemoryStatusEx`
-    fails. A host where DXGI works but lists only software adapters has no
-    GPU, and `wmic` is not consulted.
+    `Win32_ComputerSystem.TotalPhysicalMemory`.
+  - **`wmic` is only a fallback now, and only where exec is allowed.** For
+    GPUs it runs when DXGI itself is unavailable (no factory, or the first
+    `EnumAdapters1` fails with anything but `DXGI_ERROR_NOT_FOUND`), which is
+    always reported as a `dxgi` warning. For RAM it runs if
+    `GlobalMemoryStatusEx` fails. A host where DXGI works but lists only
+    software adapters has no GPU, and `wmic` is not consulted.
 
   On `cass` the fixed EXE reports `"memory_bytes":8405598208`, a `Windows GPU`
   profile for the Intel(R) UHD Graphics 600, and no `"wmic"` warning.
@@ -59,8 +69,40 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
   reports its dedicated carve-out, not the driver's `AdapterRAM`. When `cass`
   still had `wmic`, 2.3.9 reported the UHD 600 at 1 GiB; DXGI reports its
   128 MiB `DedicatedVideoMemory`. A discrete card already reported the larger
-  of the two figures, which is DXGI's once VRAM passes `wmic`'s 4 GiB cap. The
-  shared-memory alternative is noted in the roadmap.
+  of the two figures, which is DXGI's once VRAM passes `wmic`'s 4 GiB cap.
+- **Windows GPUs were skipped by three of the four detection entry points.**
+  Only `registry_detect()` (the CLI's path) called the Windows detector.
+  - `registry_detect_no_exec()`: `BACKEND_WINDOWS` was classed exec, so the
+    no-exec mask dropped DXGI together with its `wmic` fallback. DXGI spawns
+    nothing, so the backend is native now. `detect_windows_opts(profiles,
+    warnings, allow_exec)` always runs DXGI and runs the `wmic` fallback only
+    when `allow_exec` is 1. RAM works the same way through
+    `detect_system_memory_opts(allow_exec)`, so on Windows
+    `registry_detect_no_exec()` never starts a process.
+  - `registry_detect_threaded()` never called the Windows detector at all. It
+    now runs it on the main thread while the CLI-tool threads run.
+  - `lazy_by_family(lr, FAMILY_GPU)` probed CUDA, ROCm, Vulkan and Apple only.
+    Windows was missing, and so was Intel oneAPI, on every platform. oneAPI
+    emits GPU-family profiles but sat in the AI_ASIC probe mask, so its GPUs
+    appeared in a lazy GPU query only if the AI_ASIC family had already been
+    probed. Both are in the GPU mask now, and every backend with a detector
+    sits in exactly one family mask, so probing all families never runs a
+    backend twice.
+
+  Verified on `cass` with a probe that calls each entry point: all four report
+  the UHD 600 and the exact RAM, and the no-exec registry carries no warnings
+  at all, because no tool was spawned.
+- **`registry_detect_threaded()` and `lazy_into_registry()` returned a
+  corrupted registry, on every platform.** Their post-passes handed
+  `detect_storage`, `detect_interconnects` and `detect_environment` the
+  registry instead of its `system_io`. So interconnects were pushed into
+  `profiles`, storage entries into `warnings`, and the environment struct
+  replaced `system_io`. `registry_to_json` on either result segfaulted (exit
+  139 on the Linux dev host, with the 2.3.24 tree as well). The summary JSON
+  never reads those fields, which kept it hidden, and the CLI uses
+  `registry_detect()`, which was correct. All three entry points now share one
+  `registry_post_passes(r, allow_exec)`, which always passes
+  `reg_system_io(r)`.
 - **Both `wmic` spawns wrote one byte past their buffer** on an exactly-full
   read: `alloc(N)`, `exec_capture(…, N)`, then `store8(buf + n, 0)`. That is the
   same pattern 2.3.22 fixed in `load_models`. Each now reads at most `N - 1`
@@ -88,17 +130,30 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
   The step runs under Windows PowerShell 5.1 (`shell: powershell`), the engine
   it was verified with: `cass` has no `pwsh`. Its body was extracted from the
   YAML and run on `cass` inside a reproduction of GitHub's `shell: powershell`
-  wrapper. It passes the fixed EXE and fails the 2.3.24 EXE at the fallback
+  wrapper. It passes the 2.3.25 EXE and fails the 2.3.24 EXE at the fallback
   check. With the EXE's output swapped for fixtures, it fails a result with no
   GPU profile and one with RAM more than 1% off, and passes RAM 4 KiB short.
-- **`tests/tcyr/windows_test.tcyr`: 25 → 52 assertions.** It adds DXGI
-  descriptor fixtures, including the two adapters `cass` actually enumerates,
-  with the field values a probe read there. They cover software-adapter
-  detection, the memory rule, device-id order across a hybrid + software list,
-  UTF-16 names (surrogate pairs, lone surrogates → U+FFFD, an unterminated
-  128-WCHAR `Description`) and an empty name. Each of 8 single-point mutations
-  of the new code fails at least one assertion. The wmic-parser tests stay,
-  because that parser still serves the fallback.
+- **`BACKEND_WINDOWS` is no longer classed exec** (`backend_uses_exec` → 0), so
+  `builder_no_exec()` includes it. New functions: `detect_windows_opts`,
+  `detect_system_memory_opts` and `registry_post_passes`. `detect_windows` and
+  `detect_system_memory` keep their signatures and allow exec.
+- **Tests: 629 → 704 assertions in 14 units.**
+  - `windows_test` 25 → 57: DXGI descriptor fixtures (including the two
+    adapters `cass` enumerates, with the field values a probe read there), the
+    software-adapter and memory rules, device-id order across a hybrid +
+    software list, UTF-16 names (surrogate pairs, lone surrogates → U+FFFD, an
+    unterminated 128-WCHAR `Description`), an empty name, and the `wmic`
+    fallback rule.
+  - `registry_test` 69 → 108: the exec classification, no-exec memory, the lazy
+    family masks (disjoint, covering every detector), and all four detection
+    entry points run end to end on the host, including serializing each
+    registry. No test called a detection entry point before, which is how the
+    threaded and lazy corruption went unnoticed.
+  - `json_output_test` 36 → 40: `registry_post_passes` hands each system-I/O
+    pass `system_io`, and skips interconnects without exec.
+
+  17 single-point mutations of the new code, including re-introducing the
+  original post-pass bug in each path, each fail at least one assertion.
 
 ### Removed
 
@@ -107,62 +162,81 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
   the profiles there is nothing to reconcile. `win_merge_vram` was ungated and
   shipped in `dist/ai-hwaccel.cyr`; nothing in this repo calls it any more. New
   in its place: `win_dxgi_desc_is_software`, `win_dxgi_desc_vram`,
-  `win_dxgi_desc_emit` and `win_utf16_to_cstr` (ungated, pure), plus
-  `win_dxgi_enum_adapters` and `win_total_phys_bytes` (PE only).
+  `win_dxgi_desc_emit`, `win_utf16_to_cstr` and `win_gpu_use_wmic_fallback`
+  (ungated, pure), plus `win_dxgi_enum_adapters` and `win_total_phys_bytes`
+  (PE only).
 
 ### Performance
 
-- **Benchmarks: 15 neutral by construction, 0 regressions.** Neither bench
-  suite includes `src/detect/windows.cyr`, and every change to the files they
-  do include (`platform.cyr`, `registry.cyr`) is inside
-  `#ifdef CYRIUS_TARGET_WIN` or a comment. So `benches/parsing` and
-  `benches/registry` build byte-identical to the baseline (`a2cb2aa`), plain
-  and with `CYRIUS_DCE=1` (sha256-compared, including the binaries
-  `bench-history.sh` built). The two CSV runs recorded for this change
-  (`a2cb2aa`, `a2cb2aa-dirty`) differ by −41% to +15% per row on identical
-  binaries. That is this host's single-run noise.
+**15 neutral, 0 regressions** (2.3.24 → 2.3.25). This release changes code the
+benchmarks include (`types.cyr`, `platform.cyr`, `registry.cyr`), so each arm
+was measured at 5 code layouts (a never-called function of 0/5/11/17/23
+statements before the first function in `src/log.cyr`). The three floor-bound
+rows were re-timed in batch windows of 20 000 ops (†). The 20 binaries were run
+in 30 rounds, shuffled each round and pinned to one CPU. The toolchain and
+`lib/bench.cyr` are the same in both arms.
+
+| row | 2.3.24 | 2.3.25 | Δ | p | verdict | layout spread (2.3.24 / 2.3.25) |
+|---|---:|---:|---:|---:|---|---:|
+| `parse_cuda_8gpu` | 13.62 µs | 13.63 µs | +0.1% | 0.83 | neutral | 1.3% / 1.3% |
+| `parse_vulkan_2gpu` | 2.55 µs | 2.56 µs | +0.2% | 0.73 | neutral | 1.6% / 2.4% |
+| `parse_neuron_2dev` | 1.57 µs | 1.58 µs | +0.1% | 0.89 | neutral | 2.9% / 1.6% |
+| `detect_safetensors` † | 389.4 ns | 390.1 ns | +0.2% | 0.82 | neutral | 3.0% / 2.6% |
+| `detect_gguf` † | 37.5 ns | 37.4 ns | −0.1% | 0.77 | neutral | 1.2% / 1.6% |
+| `best_available_13dev` † | 169.2 ns | 170.0 ns | +0.5% | 0.27 | neutral | 1.2% / 1.8% |
+| `total_memory_13dev` | 85.0 ns | 85.0 ns | 0.0% | 0.41 | neutral | 0.2% / 0.2% |
+| `has_accelerator_13dev` | 18.2 ns | 18.2 ns | 0.0% | 0.88 | neutral | 0.1% / 0.1% |
+| `plan_70B_bf16_4gpu` | 1.42 µs | 1.43 µs | +0.2% | 0.76 | neutral | 2.4% / 2.2% |
+| `count_family_gpu_13dev` | 243.0 ns | 243.0 ns | 0.0% | 1.00 | neutral | 0.0% / 0.0% |
+| `json_serialize_13dev` | 22.58 µs | 22.56 µs | −0.1% | 0.41 | neutral | 0.5% / 0.2% |
+| `json_summary_13dev` | 3.08 µs | 3.07 µs | −0.3% | 0.22 | neutral | 1.1% / 0.6% |
+| `json_system_io` | 5.12 µs | 5.12 µs | −0.2% | 0.44 | neutral | 0.7% / 0.8% |
+| `json_plan` | 16.91 µs | 16.91 µs | 0.0% | 0.97 | neutral | 0.2% / 0.1% |
+| `json_training` | 2.45 µs | 2.46 µs | +0.2% | 0.28 | neutral | 0.7% / 0.5% |
+
+Values are means of the 5 per-layout medians. p is Welch's t on those medians,
+so layout variation is the error term. A verdict needs p < 0.01 and
+|Δ| > 1%. No row moves by more than 0.5%, which is less than the layout spread
+alone. `bench-history.csv` rows `a2cb2aa` (2.3.24 source) and `e25e8c0-dirty`
+(2.3.25) are single runs; the table above is the evidence.
+
 - **Windows wall-clock: slower on `cass` because detection now does work.**
-  The median of 30 interleaved runs goes from 33.0 ms to 47.8 ms per
-  invocation. The 2.3.24 EXE's `wmic` spawn failed at once, and DXGI only ran
-  after a successful `wmic`, so that EXE detected nothing. The added time is
-  DXGI enumeration: a probe EXE doing only the DXGI walk and
-  `GlobalMemoryStatusEx` takes 43.2 ms, against 23.5 ms for `--version`,
-  which detects nothing. A host that still has `wmic` used to pay for a `wmic`
+  The median of 30 interleaved runs goes from 33.6 ms (2.3.24) to 48.4 ms
+  (2.3.25) per invocation. The 2.3.24 EXE's `wmic` spawn failed at once, and
+  DXGI only ran after a successful `wmic`, so that EXE detected nothing. The
+  added time is DXGI enumeration: in an earlier run of the same kind, a probe
+  EXE doing only the DXGI walk and `GlobalMemoryStatusEx` took 43.2 ms,
+  against 23.5 ms for `--version`, which detects nothing. A host that still has `wmic` used to pay for a `wmic`
   process plus one DXGI factory per adapter. No such host was available, so
   that case is unmeasured.
 
-| binary | baseline (`a2cb2aa`) | this change | Δ |
+| binary | 2.3.24 | 2.3.25 | Δ |
 |---|---:|---:|---:|
 | x86_64 ELF, `CYRIUS_DCE=1` | 219 344 | 219 448 | +104 |
 | x86_64 ELF, no DCE | 440 528 | 444 728 | +4 200 |
 | ELF-aarch64 | 739 352 | 739 456 | +104 |
-| PE, as shipped (no DCE) | 510 976 | 513 536 | +2 560 |
+| PE, as shipped (no DCE) | 510 976 | 515 584 | +4 608 |
 | agnos, `CYRIUS_DCE=1` | 217 008 | 217 112 | +104 |
-
-The non-Windows growth is the new ungated descriptor helpers, which are dead
-code there.
 
 ### Verified
 
-- **Tests:** 656 assertions in 14 units pass through CI's loop; fuzz 6/6.
+- **Tests:** 704 assertions in 14 units pass through CI's loop; fuzz 6/6.
 - **CI gates:** fmt (whole CI file set), lint (0 warnings), vet, raw-offset
-  guard, DCE build. `dist/ai-hwaccel.cyr` is regenerated and deterministic. It
-  equals the committed bundle with exactly `platform.cyr` and `windows.cyr`
-  swapped, and the baseline tree regenerates the committed bundle
-  byte-for-byte, so there is no other drift.
-- **Linux CLI output identical to the baseline** on 18 invocations covering
-  every flag, after normalising live sensor readings and timestamps.
+  guard, DCE build, distlib fresh and deterministic.
+- **Linux CLI output identical to 2.3.24** on 18 invocations covering every
+  flag, after normalising live sensor readings and timestamps.
   **ELF-aarch64** under `qemu-aarch64` matches x86_64 on 8 invocations.
   **agnos** builds with and without DCE.
-- **PE build:** `stage_win_cross.sh` itself was run, and its EXE is
-  byte-identical to the one tested on `cass`. The build is deterministic, and
-  its compiler diagnostics are the same set as the baseline's.
-- **Windows on `cass`,** EXE laid out as the wheel's `_bin/`: `windows-smoke`
-  (a)–(c) pass under Git Bash, and (d) passes as described above. `-vv` shows
-  `windows: dxgi hardware adapters=1`. `--summary` reports `gpu_count` 1, and
-  `--table` lists the UHD 600.
-- **Not verified:** a host where DXGI is unavailable (the `wmic` fallback path),
-  a discrete GPU on Windows, and the `windows-latest` runner itself.
+- **PE build:** `stage_win_cross.sh` itself was run; its EXE is byte-identical
+  to the one tested on `cass`, and the version bump does not change it. Its
+  compiler diagnostics are the same set as 2.3.24's.
+- **Windows on `cass`,** with the EXE laid out as the wheel's `_bin/`:
+  `windows-smoke` (a)–(c) pass under Git Bash (`--version` reports 2.3.25),
+  and (d) passes as described above. `-vv` shows `windows: dxgi hardware
+  adapters=1`. The entry-point probe reports the UHD 600 from all four
+  entry points.
+- **Not verified:** a host where DXGI is unavailable (the `wmic` fallback
+  path), a discrete GPU on Windows, and the `windows-latest` runner itself.
 
 ## [2.3.24] — 2026-09-22 — cyrius 6.6.6, bayan 1.5.6
 

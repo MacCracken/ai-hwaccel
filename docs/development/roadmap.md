@@ -722,21 +722,7 @@ is resolved below.
   (removed from Windows 11 24H2+). 2.3.23 and 2.3.24 alike report CPU only,
   with the 16 GiB fallback on an 8 GB host, and miss its Intel UHD 600;
   `windows-smoke` passes regardless because a CPU profile is always present.
-  Pre-existing, not a bump regression. **Fixed (Unreleased):** GPUs now come
-  from DXGI adapter enumeration and RAM from `GlobalMemoryStatusEx`; wmic is
-  only the fallback where DXGI is unavailable. `windows-smoke` step (d) checks
-  RAM and GPUs against Windows' own CIM view. On `cass` the 2.3.24 EXE fails
-  (d) and the fixed EXE passes. See CHANGELOG.
-- [ ] **Integrated-GPU memory on Windows is the dedicated carve-out.** DXGI
-  reports the UHD 600's 128 MiB `DedicatedVideoMemory`. The wmic path used to
-  report the driver's 1 GiB `AdapterRAM`, which DXGI does not expose. If the
-  planner should see the shared budget instead, `SharedSystemMemory` is in the
-  same descriptor (half of RAM on `cass`); that needs an integrated-vs-discrete
-  test, which `DXGI_ADAPTER_DESC1` does not carry.
-- [ ] **`registry_detect_no_exec()` skips DXGI on Windows.** `BACKEND_WINDOWS`
-  is still classed exec, because the wmic fallback spawns, so the no-exec mask
-  drops the native path with it. Passing `allow_exec` into `detect_windows`
-  (DXGI always, wmic only when allowed) would keep it for no-exec callers.
+  Pre-existing, not a bump regression. **Fixed in 2.3.25** (see below).
 - [ ] **Retire the `CYRIUS_DCE=1` PE workaround** — fixed upstream in 6.6.1
   (PE declines compaction; dead bodies are NOP-filled, so the file stays
   510 976 B) and verified on `cass` under 6.6.6. It would shrink the EXE inside
@@ -744,6 +730,38 @@ is resolved below.
   [the issue](issues/2026-09-07-cyrius-dce-pe-access-violation.md).
 - [ ] **macOS arm64 runtime not re-verified** — `ecb` has cyrius ≤ 6.6.4, and
   the `macos-14` wheel job builds without running the binary.
+
+### 2.3.25 — Windows detection without wmic; Windows GPUs on every entry point
+
+- [x] **GPUs from DXGI, RAM from `GlobalMemoryStatusEx`.** One `Windows GPU`
+  profile per hardware adapter (name + `DedicatedVideoMemory`), software
+  adapters skipped. `wmic` is only a fallback: for GPUs when DXGI itself is
+  unavailable, for RAM when `GlobalMemoryStatusEx` fails, and never without
+  exec.
+- [x] **No detection entry point skips Windows GPUs.**
+  `registry_detect_no_exec()` (the backend was classed exec),
+  `registry_detect_threaded()` (never called the detector) and
+  `lazy_by_family(…, FAMILY_GPU)` (missing from the probe mask) all detect them
+  now. Verified on `cass` from all four entry points.
+- [x] **Lazy GPU queries probe Intel oneAPI.** It sat in the AI_ASIC mask
+  although its profiles are GPU-family.
+- [x] **Threaded and lazy registries were corrupt.** Their post-passes got the
+  registry instead of its `system_io`, and `registry_to_json` segfaulted. One
+  shared `registry_post_passes` now serves all three entry points.
+- [x] **`windows-smoke` step (d)** checks RAM and GPUs against Windows' CIM
+  view. On `cass` the 2.3.24 EXE fails it and 2.3.25 passes.
+- [x] **Bench delta, layout-controlled:** 15 neutral, 0 regressions.
+- [ ] **Integrated GPUs report their dedicated carve-out.** An integrated
+  (UMA) adapter's `DedicatedVideoMemory` is its boot-time carve-out (128 MiB on
+  an Intel UHD 600), not the shared system memory it can also use
+  (`SharedSystemMemory`, typically half of RAM). Reporting the shared budget
+  for UMA adapters needs an integrated-vs-discrete signal, which
+  `DXGI_ADAPTER_DESC1` does not carry.
+- [ ] **`lazy_by_family(lr, FAMILY_NPU)` misses the Apple Neural Engine**
+  unless the GPU family was probed first: `detect_apple` emits both the Metal
+  GPU and the ANE, but only the GPU mask probes it. Putting Apple in both masks
+  would push its profiles twice, so the lazy registry needs per-backend (not
+  per-family) probe tracking.
 
 ### WASM / JS
 

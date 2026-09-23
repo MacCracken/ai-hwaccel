@@ -212,6 +212,18 @@ fn test_dxgi_name_unterminated() {
     assert_eq(strlen(s), 128, "unterminated name bounded at 128");
 }
 
+# --- win_gpu_use_wmic_fallback ---
+
+# wmic runs only when DXGI is unavailable (-1) AND exec is allowed. DXGI
+# answering 0 hardware adapters is an answer, not a reason to spawn.
+fn test_wmic_fallback_rule() {
+    assert_eq(win_gpu_use_wmic_fallback(0 - 1, 1), 1, "dxgi unavailable, exec -> wmic");
+    assert_eq(win_gpu_use_wmic_fallback(0 - 1, 0), 0, "dxgi unavailable, no-exec -> no spawn");
+    assert_eq(win_gpu_use_wmic_fallback(0, 1), 0, "dxgi 0 adapters -> no wmic");
+    assert_eq(win_gpu_use_wmic_fallback(2, 1), 0, "dxgi found gpus -> no wmic");
+    assert_eq(win_gpu_use_wmic_fallback(0, 0), 0, "dxgi 0, no-exec -> no wmic");
+}
+
 # --- win_parse_videocontrollers (wmic fallback) ---
 
 fn test_win_gpu_single() {
@@ -297,6 +309,7 @@ test_dxgi_enumeration_ids();
 test_utf16_unicode();
 test_utf16_pair_split_by_bound();
 test_dxgi_name_unterminated();
+test_wmic_fallback_rule();
 test_win_gpu_single();
 test_win_gpu_multi();
 test_win_gpu_crlf();

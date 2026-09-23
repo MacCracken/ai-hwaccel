@@ -43,14 +43,41 @@ fn detect_mediatek_apu(p, w) { return 0; }
 fn enrich_bandwidth(p) { return 0; }
 fn enrich_pcie(p) { return 0; }
 fn enrich_numa(p) { return 0; }
-fn detect_interconnects(s, p, w) { return 0; }
-fn detect_storage(s) { return 0; }
-fn detect_environment(s) { return 0; }
+# The system-I/O stubs record their first argument, so
+# test_post_passes_get_system_io can check registry_post_passes' wiring.
+var _stub_ic_arg = 0;
+var _stub_storage_arg = 0;
+var _stub_env_arg = 0;
+fn detect_interconnects(s, p, w) { _stub_ic_arg = s; return 0; }
+fn detect_storage(s) { _stub_storage_arg = s; return 0; }
+fn detect_environment(s) { _stub_env_arg = s; return 0; }
 fn detect_system_memory() { return 16 * 1073741824; }
+fn detect_system_memory_opts(a) { return 16 * 1073741824; }
 fn cmd_getenv(n) { return 0; }
 
 include "src/registry.cyr"
 include "src/json_out.cyr"
+
+# --- Post-pass wiring ---
+
+# registry_post_passes must hand the system-I/O passes the registry's
+# system_io, never the registry itself (the threaded and lazy entry points
+# passed `r` through 2.3.24), and must skip interconnects without exec.
+fn test_post_passes_get_system_io() {
+    var r = hw_registry_new();
+    var sio = reg_system_io(r);
+    _stub_ic_arg = 0;
+    _stub_storage_arg = 0;
+    _stub_env_arg = 0;
+    registry_post_passes(r, 1);
+    assert_eq(_stub_storage_arg, sio, "storage pass gets system_io");
+    assert_eq(_stub_env_arg, sio, "environment pass gets system_io");
+    assert_eq(_stub_ic_arg, sio, "interconnect pass gets system_io");
+    _stub_ic_arg = 0;
+    registry_post_passes(r, 0);
+    assert_eq(_stub_ic_arg, 0, "no interconnect pass without exec");
+    return 0;
+}
 
 # --- JSON output tests ---
 
@@ -207,6 +234,7 @@ fn test_training_json() {
 
 alloc_init();
 
+test_post_passes_get_system_io();
 test_profile_json();
 test_registry_json();
 test_summary_json();

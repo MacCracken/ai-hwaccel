@@ -40,6 +40,12 @@ include "src/detect/interconnect.cyr"
 include "src/detect/disk.cyr"
 include "src/detect/environment.cyr"
 include "src/registry.cyr"
+include "src/plan.cyr"
+include "src/training.cyr"
+include "lib/thread.cyr"
+include "src/async_detect.cyr"
+include "src/lazy.cyr"
+include "src/json_out.cyr"
 
 # --- Registry construction ---
 
@@ -150,7 +156,8 @@ fn test_backend_uses_exec() {
     assert_eq(backend_uses_exec(BACKEND_CEREBRAS), 1, "cerebras exec");
     assert_eq(backend_uses_exec(BACKEND_GRAPHCORE), 1, "graphcore exec");
 
-    # Eight backends are pure sysfs/syscall
+    # Nine backends spawn nothing (sysfs/syscall, and DXGI on Windows)
+    assert_eq(backend_uses_exec(BACKEND_WINDOWS), 0, "windows native (dxgi)");
     assert_eq(backend_uses_exec(BACKEND_ROCM), 0, "rocm sysfs");
     assert_eq(backend_uses_exec(BACKEND_INTEL_NPU), 0, "intel-npu sysfs");
     assert_eq(backend_uses_exec(BACKEND_AMD_XDNA), 0, "xdna sysfs");
@@ -165,7 +172,9 @@ fn test_backend_uses_exec() {
 fn test_builder_no_exec_mask() {
     var mask = builder_no_exec();
 
-    # Every sysfs backend present
+    # Every native backend present; Windows GPUs must not be skipped in
+    # registry_detect_no_exec() (DXGI spawns nothing)
+    assert_eq(builder_is_enabled(mask, BACKEND_WINDOWS), 1, "windows in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_ROCM), 1, "rocm in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_INTEL_NPU), 1, "npu in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_AMD_XDNA), 1, "xdna in mask");
@@ -195,6 +204,91 @@ fn test_no_exec_strips_exec_bits() {
     assert_eq(builder_is_enabled(stripped, BACKEND_CUDA), 0, "cuda forced off");
     assert_eq(builder_is_enabled(stripped, BACKEND_NEURON), 0, "neuron forced off");
     assert_eq(builder_is_enabled(stripped, BACKEND_ROCM), 1, "rocm preserved");
+    return 0;
+}
+
+# No-exec memory detection reads the same figure: on Linux allow_exec has no
+# effect (only the Windows wmic fallback depends on it).
+fn test_no_exec_memory() {
+    var mem = detect_system_memory();
+    assert_gt(mem, 0, "memory detected");
+    assert_eq(detect_system_memory_opts(0), mem, "no-exec memory == memory");
+    assert_eq(detect_system_memory_opts(1), mem, "exec memory == memory");
+    return 0;
+}
+
+# --- Lazy family masks ---
+
+# lazy_by_family probes only the backends in that family's mask, so a GPU
+# backend missing from the GPU mask means lazy GPU queries skip its GPUs.
+# Every backend with a detector sits in exactly one mask (no double probe).
+fn test_lazy_family_masks() {
+    var gpu = _family_builder_mask(FAMILY_GPU);
+    var npu = _family_builder_mask(FAMILY_NPU);
+    var tpu = _family_builder_mask(FAMILY_TPU);
+    var asic = _family_builder_mask(FAMILY_AI_ASIC);
+    assert_eq(builder_is_enabled(gpu, BACKEND_CUDA), 1, "lazy gpu: cuda");
+    assert_eq(builder_is_enabled(gpu, BACKEND_ROCM), 1, "lazy gpu: rocm");
+    assert_eq(builder_is_enabled(gpu, BACKEND_VULKAN), 1, "lazy gpu: vulkan");
+    assert_eq(builder_is_enabled(gpu, BACKEND_APPLE), 1, "lazy gpu: apple");
+    assert_eq(builder_is_enabled(gpu, BACKEND_INTEL_ONEAPI), 1, "lazy gpu: oneapi");
+    assert_eq(builder_is_enabled(gpu, BACKEND_WINDOWS), 1, "lazy gpu: windows");
+    assert_eq(builder_is_enabled(asic, BACKEND_INTEL_ONEAPI), 0, "oneapi not in asic");
+    assert_eq(gpu & npu, 0, "gpu/npu disjoint");
+    assert_eq(gpu & tpu, 0, "gpu/tpu disjoint");
+    assert_eq(gpu & asic, 0, "gpu/asic disjoint");
+    assert_eq(npu & tpu, 0, "npu/tpu disjoint");
+    assert_eq(npu & asic, 0, "npu/asic disjoint");
+    assert_eq(tpu & asic, 0, "tpu/asic disjoint");
+    # AGNOS_GPU is a reserved backend id with no detector yet.
+    var all = builder_without(builder_all(), BACKEND_AGNOS_GPU);
+    assert_eq(gpu | npu | tpu | asic, all, "every detector reachable lazily");
+    return 0;
+}
+
+# --- Detection entry points (real detectors, this host) ---
+
+# A registry from any entry point must hold only profiles in `profiles`, only
+# warnings in `warnings`, and serialize. Through 2.3.24 the threaded and lazy
+# entry points gave the system-I/O post-passes the registry instead of its
+# system_io: storage structs landed in `warnings` (their first field, a name
+# pointer, reads as an out-of-range warning code) and registry_to_json
+# segfaulted.
+fn check_registry_shape(r, label) {
+    var profs = reg_profiles(r);
+    var n = vec_len(profs);
+    assert_gt(n, 0, label);
+    var bad = 0;
+    var i = 0;
+    while (i < n) {
+        var t = profile_accel_type(vec_get(profs, i));
+        if (t < ACCEL_CPU) { bad = bad + 1; }
+        if (t > ACCEL_AGNOS_GPU) { bad = bad + 1; }
+        i = i + 1;
+    }
+    assert_eq(bad, 0, label);
+    var warns = reg_warnings(r);
+    var nw = vec_len(warns);
+    bad = 0;
+    i = 0;
+    while (i < nw) {
+        var c = warning_code(vec_get(warns, i));
+        if (c < HWA_ERR_NONE) { bad = bad + 1; }
+        if (c > HWA_ERR_SYSFS_READ) { bad = bad + 1; }
+        i = i + 1;
+    }
+    assert_eq(bad, 0, label);
+    var js = registry_to_json(r);
+    assert_eq(memeq(str_data(js), "{\"schema_version\":", 18), 1, label);
+    assert_eq(load8(str_data(js) + str_len(js) - 1), 125, label);
+    return 0;
+}
+
+fn test_detection_entry_points() {
+    check_registry_shape(registry_detect(), "registry_detect");
+    check_registry_shape(registry_detect_no_exec(), "registry_detect_no_exec");
+    check_registry_shape(registry_detect_threaded(), "registry_detect_threaded");
+    check_registry_shape(lazy_into_registry(lazy_new()), "lazy_into_registry");
     return 0;
 }
 
@@ -283,6 +377,9 @@ test_builder_selective();
 test_backend_uses_exec();
 test_builder_no_exec_mask();
 test_no_exec_strips_exec_bits();
+test_no_exec_memory();
+test_lazy_family_masks();
+test_detection_entry_points();
 test_suggest_quant_gpu_small();
 test_suggest_quant_gpu_large();
 test_suggest_quant_tpu();

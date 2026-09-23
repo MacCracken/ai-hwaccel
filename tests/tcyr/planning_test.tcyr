@@ -47,6 +47,7 @@ fn detect_interconnects(s, p, w) { return 0; }
 fn detect_storage(s) { return 0; }
 fn detect_environment(s) { return 0; }
 fn detect_system_memory() { return 16 * 1073741824; }
+fn detect_system_memory_opts(a) { return 16 * 1073741824; }
 fn cmd_getenv(n) { return 0; }
 fn which(n) { return 0; }
 fn run_tool(t, a, w) { return 0; }

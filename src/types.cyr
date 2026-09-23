@@ -384,6 +384,8 @@ fn backend_name(b) {
 # registry_detect_no_exec() entry point, which honors this predicate.
 # Source-of-truth grep: any detect_<backend> that calls run_tool* in
 # src/detect/<backend>.cyr is EXEC; everything else is sysfs/syscall.
+# BACKEND_WINDOWS is native: DXGI adapter enumeration spawns nothing, and its
+# wmic fallback runs only when registry_detect_with_opts' allow_exec is 1.
 fn backend_uses_exec(b) {
     if (b == BACKEND_CUDA) { return 1; }
     if (b == BACKEND_APPLE) { return 1; }
@@ -393,6 +395,5 @@ fn backend_uses_exec(b) {
     if (b == BACKEND_INTEL_ONEAPI) { return 1; }
     if (b == BACKEND_CEREBRAS) { return 1; }
     if (b == BACKEND_GRAPHCORE) { return 1; }
-    if (b == BACKEND_WINDOWS) { return 1; }
     return 0;
 }

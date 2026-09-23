@@ -55,7 +55,11 @@ fn _lazy_mark_probed(lr, family) {
     return 0;
 }
 
-# Build a builder mask for backends of a specific family
+# Build a builder mask for backends of a specific family. Every backend sits
+# in exactly one family mask (the one its profiles belong to), so probing all
+# families never runs a backend twice. Intel oneAPI and Windows (DXGI) emit
+# GPU profiles; through 2.3.24 oneAPI sat in the AI_ASIC mask and Windows in
+# none, so lazy_by_family(lr, FAMILY_GPU) never probed either.
 fn _family_builder_mask(family) {
     var mask = 0;
     if (family == FAMILY_GPU) {
@@ -63,6 +67,8 @@ fn _family_builder_mask(family) {
         mask = builder_with(mask, BACKEND_ROCM);
         mask = builder_with(mask, BACKEND_VULKAN);
         mask = builder_with(mask, BACKEND_APPLE);
+        mask = builder_with(mask, BACKEND_INTEL_ONEAPI);
+        mask = builder_with(mask, BACKEND_WINDOWS);
         return mask;
     }
     if (family == FAMILY_NPU) {
@@ -79,7 +85,6 @@ fn _family_builder_mask(family) {
     if (family == FAMILY_AI_ASIC) {
         mask = builder_with(mask, BACKEND_GAUDI);
         mask = builder_with(mask, BACKEND_NEURON);
-        mask = builder_with(mask, BACKEND_INTEL_ONEAPI);
         mask = builder_with(mask, BACKEND_QUALCOMM);
         mask = builder_with(mask, BACKEND_CEREBRAS);
         mask = builder_with(mask, BACKEND_GRAPHCORE);
@@ -162,12 +167,7 @@ fn lazy_into_registry(lr) {
         vec_push(rp, vec_get(profs, i));
         i = i + 1;
     }
-    # Post-passes
-    enrich_bandwidth(rp);
-    enrich_pcie(rp);
-    enrich_numa(rp);
-    detect_storage(r);
-    detect_interconnects(r, reg_profiles(r), reg_warnings(r));
-    detect_environment(r);
+    # Post-passes: enrich profiles, then system I/O.
+    registry_post_passes(r, 1);
     return r;
 }

@@ -244,6 +244,28 @@ fn builder_no_exec() {
 
 # --- Full detection orchestration ---
 
+# Post-passes shared by every detection entry point (registry_detect_with_opts,
+# registry_detect_threaded_with, lazy_into_registry): enrich the profiles, then
+# fill the registry's system I/O. The three system-I/O passes take the
+# registry's system_io, NOT the registry — through 2.3.24 the threaded and lazy
+# paths passed `r`, which pushed interconnects into profiles and storage into
+# warnings and replaced system_io with the environment struct, so serializing
+# that registry segfaulted. detect_interconnects shells out to ibstat /
+# nvidia-smi topo, so it runs only when `allow_exec` is 1.
+fn registry_post_passes(r, allow_exec) {
+    var profs = reg_profiles(r);
+    var sio = reg_system_io(r);
+    enrich_bandwidth(profs);
+    enrich_pcie(profs);
+    enrich_numa(profs);
+    if (allow_exec == 1) {
+        detect_interconnects(sio, profs, reg_warnings(r));
+    }
+    detect_storage(sio);
+    detect_environment(sio);
+    return 0;
+}
+
 fn registry_detect() {
     return registry_detect_with_opts(builder_all(), 1);
 }
@@ -275,10 +297,9 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
     var r = hw_registry_new();
     var profs = reg_profiles(r);
     var warns = reg_warnings(r);
-    var sio = reg_system_io(r);
 
     # Always add CPU profile
-    var sys_mem = detect_system_memory();
+    var sys_mem = detect_system_memory_opts(allow_exec);
     if (sys_mem == 0) { sys_mem = 16 * BYTES_PER_GIB; }
     reg_add_profile(r, profile_cpu(sys_mem));
 
@@ -318,26 +339,18 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
         detect_mediatek_apu(profs, warns);
     }
     #ifdef CYRIUS_TARGET_WIN
-    # Windows-native GPU detection: DXGI adapter enumeration, with wmic only
-    # when DXGI is unavailable. detect_windows exists only on PE builds, so
-    # both the symbol and call are gated.
+    # Windows-native GPU detection: DXGI adapter enumeration, which spawns
+    # nothing, so it runs with allow_exec 0 too; only its wmic fallback
+    # (DXGI unavailable) needs allow_exec. detect_windows_opts exists only on
+    # PE builds, so both the symbol and call are gated.
     if (builder_is_enabled(builder_mask, BACKEND_WINDOWS) == 1) {
-        detect_windows(profs, warns);
+        detect_windows_opts(profs, warns, allow_exec);
     }
     #endif
 
-    # Post-passes: enrich profiles (sysfs only — always run)
-    enrich_bandwidth(profs);
-    enrich_pcie(profs);
-    enrich_numa(profs);
-
-    # Detect system I/O — detect_interconnects shells out to ibstat /
-    # nvidia-smi topo; gate it on allow_exec.
-    if (allow_exec == 1) {
-        detect_interconnects(sio, profs, warns);
-    }
-    detect_storage(sio);
-    detect_environment(sio);
+    # Post-passes: enrich profiles, then system I/O (interconnects only with
+    # allow_exec).
+    registry_post_passes(r, allow_exec);
 
     # One summary line per detection pass (info), plus a warn when a
     # detector pushed diagnostics. Counts are cheap (vec_len); the

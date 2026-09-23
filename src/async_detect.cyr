@@ -157,6 +157,13 @@ fn registry_detect_threaded_with(builder_mask) {
 
     # While CLI threads run, do sysfs backends on main thread
     _detect_sysfs_backends(builder_mask, profs, warns);
+    #ifdef CYRIUS_TARGET_WIN
+    # Windows GPUs (DXGI, no subprocess) on the main thread too; its wmic
+    # fallback is allowed here, as in registry_detect_with.
+    if (builder_is_enabled(builder_mask, BACKEND_WINDOWS) == 1) {
+        detect_windows_opts(profs, warns, 1);
+    }
+    #endif
 
     # Join all threads and merge results
     var nt = vec_len(threads);
@@ -168,13 +175,8 @@ fn registry_detect_threaded_with(builder_mask) {
         i = i + 1;
     }
 
-    # Post-passes: enrich profiles
-    enrich_bandwidth(profs);
-    enrich_pcie(profs);
-    enrich_numa(profs);
-    detect_storage(r);
-    detect_interconnects(r, reg_profiles(r), reg_warnings(r));
-    detect_environment(r);
+    # Post-passes: enrich profiles, then system I/O.
+    registry_post_passes(r, 1);
 
     # Main thread, after every join+merge — see warnings_log_parse in
     # src/error.cyr for why the detector threads no longer log directly.

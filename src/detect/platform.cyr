@@ -145,13 +145,14 @@ fn win_total_phys_bytes() {
 #endif
 
 # Get total system memory (in bytes). Windows: GlobalMemoryStatusEx, with a
-# `wmic computersystem` spawn only if that fails (wmic is absent on Windows 11
-# 24H2+). Else: /proc/meminfo. Returns 0 on failure (caller substitutes a
-# default).
-fn detect_system_memory() {
+# `wmic computersystem` spawn only if that fails AND `allow_exec` is 1 (wmic
+# is absent on Windows 11 24H2+). Else: /proc/meminfo; `allow_exec` has no
+# effect there. Returns 0 on failure (caller substitutes a default).
+fn detect_system_memory_opts(allow_exec) {
     #ifdef CYRIUS_TARGET_WIN
     var native = win_total_phys_bytes();
     if (native > 0) { return native; }
+    if (allow_exec == 0) { return 0; }
     var wargs = vec_new();
     vec_push(wargs, "wmic");
     vec_push(wargs, "computersystem");
@@ -204,6 +205,11 @@ fn detect_system_memory() {
         }
     }
     return 0;
+}
+
+# detect_system_memory_opts with exec allowed.
+fn detect_system_memory() {
+    return detect_system_memory_opts(1);
 }
 
 # List entries in a sysfs directory. Returns vec of Str names.

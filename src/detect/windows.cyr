@@ -11,7 +11,9 @@
 # Software adapters (the Microsoft Basic Render Driver, which cass lists
 # last) are skipped. No subprocess: the factory is the
 # 0xF012 PE reroute (dxgi.dll) and its methods are COM vtable slots called
-# through `callptr`.
+# through `callptr`. So it runs in every detection entry point, including
+# registry_detect_no_exec(); only the wmic fallback depends on the caller
+# allowing exec (see win_gpu_use_wmic_fallback).
 #
 # Through 2.3.24 detection spawned `wmic path win32_VideoController` to CREATE
 # the profiles and DXGI only enriched their VRAM. Windows 11 24H2+ removes
@@ -49,7 +51,7 @@ enum WinDxgi {
     WIN_DXGI_VENDOR_MICROSOFT = 0x1414;
     WIN_DXGI_DEVICE_BASIC_RENDER = 0x8C;    # Microsoft Basic Render Driver
     WIN_DXGI_ERROR_NOT_FOUND = 0x887A0002;  # EnumAdapters1 past the last adapter
-    WIN_DXGI_MAX_ADAPTERS = 16;
+    WIN_DXGI_MAX_ADAPTERS = 64;             # loop bound only; NOT_FOUND ends it
 }
 
 # Convert UTF-16LE text at `w` (at most `max_units` code units, stopping at a
@@ -140,6 +142,15 @@ fn win_dxgi_desc_emit(desc, dev_id, profiles) {
     if (load8(name) != 0) { profile_set_device_name(p, name); }
     vec_push(profiles, p);
     return 1;
+}
+
+# 1 if detect_windows_opts should fall back to wmic: only when DXGI itself
+# is unavailable (`dxgi_count` < 0) and the caller allows spawning a process.
+# DXGI answering 0 hardware adapters is an answer, not a failure. Pure.
+fn win_gpu_use_wmic_fallback(dxgi_count, allow_exec) {
+    if (dxgi_count >= 0) { return 0; }
+    if (allow_exec == 1) { return 1; }
+    return 0;
 }
 
 # Push an ACCEL_WIN_GPU profile (name copied to a NUL-terminated cstr).
@@ -234,9 +245,10 @@ fn win_dxgi_release(obj) {
 # order, with device ids 0,1,2… over the adapters kept. Returns the number
 # pushed (0 is a real answer: DXGI works and lists only software adapters),
 # or -1 when DXGI is unavailable — no factory, or EnumAdapters1(0) fails with
-# anything but DXGI_ERROR_NOT_FOUND — which is detect_windows' cue to try
-# wmic. An adapter whose GetDesc1 fails is skipped.
-fn win_dxgi_enum_adapters(profiles) {
+# anything but DXGI_ERROR_NOT_FOUND. A later index that fails, or an adapter
+# whose GetDesc1 fails, is reported in `warnings` (once per kind) and
+# enumeration carries on, so one bad adapter never hides the ones after it.
+fn win_dxgi_enum_adapters(profiles, warnings) {
     var iid[16];
     win_dxgi_iid_factory1(&iid);
     var pFactory = 0;
@@ -247,20 +259,31 @@ fn win_dxgi_enum_adapters(profiles) {
     var count = 0;
     var idx = 0;
     var unavailable = 0;
+    var warned_enum = 0;
+    var warned_desc = 0;
     while (idx < WIN_DXGI_MAX_ADAPTERS) {
         var pAdapter = 0;
         # EnumAdapters1(this, index, &pAdapter) @ IDXGIFactory1 slot 12.
         var hr2 = callptr(load64(fvtbl + 12 * 8), pFactory, idx, &pAdapter);
         hr2 = hr2 & 0xFFFFFFFF;
         if (hr2 == WIN_DXGI_ERROR_NOT_FOUND) { break; }
-        if (hr2 != 0) {
-            if (idx == 0) { unavailable = 1; }
+        var failed = 0;
+        if (hr2 != 0) { failed = 1; }
+        if (pAdapter == 0) { failed = 1; }
+        if (failed == 1) {
+            if (idx == 0) {
+                unavailable = 1;
+                break;
+            }
             hwlog_debug_n("windows: dxgi EnumAdapters1 failed at index ", idx);
-            break;
-        }
-        if (pAdapter == 0) {
-            if (idx == 0) { unavailable = 1; }
-            break;
+            if (warnings != 0) {
+                if (warned_enum == 0) {
+                    vec_push(warnings, warning_tool_failed("dxgi", 0 - 1, "EnumAdapters1 failed for an adapter"));
+                    warned_enum = 1;
+                }
+            }
+            idx = idx + 1;
+            continue;
         }
         var avtbl = load64(pAdapter);
         var desc[WIN_DXGI_DESC_BUF];                   # DXGI_ADAPTER_DESC1
@@ -269,7 +292,13 @@ fn win_dxgi_enum_adapters(profiles) {
         if ((hr3 & 0xFFFFFFFF) == 0) {
             count = count + win_dxgi_desc_emit(&desc, count, profiles);
         } else {
-            hwlog_debug_n("windows: dxgi GetDesc1 failed, skipped adapter ", idx);
+            hwlog_debug_n("windows: dxgi GetDesc1 failed at index ", idx);
+            if (warnings != 0) {
+                if (warned_desc == 0) {
+                    vec_push(warnings, warning_tool_failed("dxgi", 0 - 1, "GetDesc1 failed for an adapter"));
+                    warned_desc = 1;
+                }
+            }
         }
         var r1 = win_dxgi_release(pAdapter);
         idx = idx + 1;
@@ -279,14 +308,23 @@ fn win_dxgi_enum_adapters(profiles) {
     return count;
 }
 
-# Detect Windows-visible GPUs: DXGI first, wmic only when DXGI is
-# unavailable. CreateProcessW resolves `wmic` from System32\wbem on PATH, so
-# the fallback needs no which()/PATH lookup of its own.
-fn detect_windows(profiles, warnings) {
-    var n = win_dxgi_enum_adapters(profiles);
+# Detect Windows-visible GPUs. DXGI always runs (no subprocess). Only when
+# DXGI is unavailable, and only if `allow_exec` is 1, does it fall back to
+# wmic; CreateProcessW resolves `wmic` from System32\wbem on PATH, so the
+# fallback needs no which()/PATH lookup of its own. DXGI being unavailable is
+# always reported in `warnings`, so a missing GPU list is never silent.
+fn detect_windows_opts(profiles, warnings, allow_exec) {
+    var n = win_dxgi_enum_adapters(profiles, warnings);
     if (n >= 0) {
         hwlog_debug_n("windows: dxgi hardware adapters=", n);
         return n;
+    }
+    if (warnings != 0) {
+        vec_push(warnings, warning_tool_failed("dxgi", 0 - 1, "DXGI adapter enumeration unavailable"));
+    }
+    if (win_gpu_use_wmic_fallback(n, allow_exec) == 0) {
+        hwlog_debug("windows: dxgi unavailable, wmic fallback not allowed (no-exec)");
+        return 0;
     }
     hwlog_debug("windows: dxgi unavailable, falling back to wmic");
     var args = vec_new();
@@ -307,6 +345,11 @@ fn detect_windows(profiles, warnings) {
     }
     store8(buf + got, 0);
     return win_parse_videocontrollers(str_new(buf, got), profiles);
+}
+
+# detect_windows_opts with exec allowed (the wmic fallback may run).
+fn detect_windows(profiles, warnings) {
+    return detect_windows_opts(profiles, warnings, 1);
 }
 
 #endif
