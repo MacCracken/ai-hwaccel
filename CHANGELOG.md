@@ -9,20 +9,20 @@ This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
 ### Fixed
 
-- **The macOS wheel job failed under the 2.3.24 toolchain** with 46 × `cannot
-  hash the pinned snapshot (sha256sum missing?)`. Since 2.3.24, `cyrius.lock`
-  records the pin, and cyrius ≥ 6.6.4 then hashes every stdlib file in the
-  pinned snapshot with `/usr/bin/env sha256sum` before `cyrius build` will
-  vendor it, refusing the build if it cannot. The GitHub `macos-14` runner has
-  only `shasum`. Under 6.6.2 there was no such check, so the job passed.
-  `bindings/python/scripts/stage_binary.sh` now supplies `sha256sum` as
-  `shasum -a 256` when the real tool is absent. It prints the same
-  `<hex>  <path>` line, and cyrius reads only the 64-character digest.
-  Reproduced on Linux with `sha256sum` removed from `PATH`: the same 46
-  refusals before the fix, and after it a binary byte-identical to the normal
-  build. All 47 stdlib hashes in the lock also match the macOS 6.6.6 release
-  tarball's snapshot, so nothing else stands between the job and a build. No
-  binary changes; the Linux and Windows jobs never take the shim.
+- **The macOS wheel job failed on the 2.3.24 tag** with 46 × `cannot hash the
+  pinned snapshot (sha256sum missing?)`. `cyrius build` checks and rewrites
+  `cyrius.lock` with `sha256sum`, which it cannot reach on the macOS runner, and
+  since 2.3.24 the lock records the toolchain pin, which turns that check on.
+  On macOS, `bindings/python/scripts/stage_binary.sh` now runs the build as its
+  two halves. First, `cyrius deps --no-lock` vendors `./lib/` with the lock set
+  aside; the lock is restored on exit, and CI's Linux job still verifies it.
+  Second, the pinned `cycc` compiles the same input `cyrius build` composes.
+  That input was checked byte-identical to `cyrius build src/main.cyr` output.
+  Linux and the aarch64 cross-build keep using `cyrius build` and stage the same
+  binaries as before. Verified by reproducing the runner's exact failure (no
+  hasher reachable, `uname -s` = Darwin): 46 refusals before, a clean build
+  after. A failed compile still restores the lock. All 47 stdlib hashes in the
+  lock match the macOS 6.6.6 release's snapshot.
 
 ## [2.3.24] — 2026-09-22 — cyrius 6.6.6, bayan 1.5.6
 
