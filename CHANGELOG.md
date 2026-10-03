@@ -5,13 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
-## [Unreleased] — documentation checked against the code
+## [2.4.1] — 2026-10-03 — cyrius 6.6.14, bayan 1.5.11, and the docs checked against the code
 
-Documentation only. The source changes are comments, so the CLI and both
-benchmark binaries build byte-identical to 2.4.0 (236 120, 146 200 and
-164 840 B with `CYRIUS_DCE=1`), and there is no benchmark delta to review.
+A toolchain and dependency bump, released together with the documentation review
+that was `[Unreleased]`. The CLI's output does not change. Consumers that build
+`dist/ai-hwaccel.cyr` on cyrius 6.6.13 or later (agnosai, agnostic) no longer get
+three `#deprecated` warnings from it.
 
-### Changed
+### Changed — toolchain and dependency
+
+- **cyrius `6.6.6` → `6.6.14`.** `./lib/` was re-vendored from an empty tree
+  (`lib sync`, then `deps`): 49 files, one more than 2.4.0. The new one is
+  `chrono`, which 6.6.14's `hashseed` includes. The CLI builds with 0 warnings.
+  The test units print the same `undefined function` warnings they printed on
+  6.6.6 (each unit includes a subset of the modules). The PE build prints 5
+  unrouted-syscall warnings from `lib/syscalls_windows.cyr`, `lib/freelist.cyr`
+  and `lib/mmap.cyr`, where 6.6.6 printed 6 less specific ones.
+- **bayan `1.5.6` → `1.5.11`**, the bayan cyrius 6.6.14 folds (commit `aeb13d2`,
+  the commit the fold names). It is still the optional `dist/bayan-json.cyr`
+  sublib.
+- **`profile_from_json_str` reads fields with `bayan_json_v_obj_get_by_cstr`**
+  (`src/json_out.cyr`: `_pj_int`, `_pj_bool`, `_pj_cstr`). bayan 1.5.10
+  deprecated the bare `bayan_json_v_obj_get`. Every key that reaches these three
+  helpers is a string literal, the case `_by_cstr` is for, so the lookups are
+  unchanged.
+
+### Changed — documentation checked against the code
+
+These changes are documentation and comments. On their own they built
+byte-identical to 2.4.0.
 
 - **`docs/schema.json` describes the real output.** It described the Rust-era
   v1 registry, which no current output validates against. It is now a JSON
@@ -41,6 +63,92 @@ benchmark binaries build byte-identical to 2.4.0 (236 120, 146 200 and
 - Comments only: `builder_no_exec()` and the post-pass comments in
   `src/registry.cyr` (`dist/ai-hwaccel.cyr` regenerated to match), and the
   Python runner's comment on reading environment variables on Windows.
+
+### Performance
+
+**16 neutral, 1 slower from the toolchain, 0 regressions in ai-hwaccel's code**
+(2.4.0 on cyrius 6.6.6 → 2.4.1 on 6.6.14). The method is 2.4.0's: each arm
+built at 5 code layouts, the three floor-bound rows batch-timed (†), and runs
+shuffled and pinned to one CPU. The parsing rows ran 40 rounds from a tree that
+holds the fixtures; the registry rows ran 60.
+
+| row | 2.4.0 | 2.4.1 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 13.75 µs | 13.81 µs | +0.4% | <0.01 | neutral |
+| `parse_vulkan_2gpu` | 2.46 µs | 2.47 µs | +0.3% | 0.16 | neutral |
+| `parse_neuron_2dev` | 1.62 µs | 1.62 µs | +0.6% | 0.06 | neutral |
+| `detect_safetensors` † | 394.9 ns | 416.7 ns | +5.5% | <0.01 | neutral (placement) |
+| `detect_gguf` † | 36.0 ns | 36.3 ns | +0.7% | <0.01 | neutral |
+| `parse_vulkan_summary_renoir` | 14.63 µs | 14.94 µs | +2.1% | <0.01 | slower (toolchain) |
+| `vulkan_heaps_uhd600` | 636.18 µs | 640.15 µs | +0.6% | <0.01 | neutral |
+| `best_available_13dev` † | 171.8 ns | 173.0 ns | +0.7% | <0.01 | neutral |
+| `total_memory_13dev` | 104.0 ns | 104.0 ns | 0.0% | 0.47 | neutral |
+| `has_accelerator_13dev` | 18.6 ns | 18.4 ns | −0.9% | <0.01 | neutral |
+| `plan_70B_bf16_4gpu` | 1.44 µs | 1.43 µs | −0.3% | 0.09 | neutral |
+| `count_family_gpu_13dev` | 245.6 ns | 245.4 ns | −0.1% | 0.78 | neutral |
+| `json_serialize_13dev` | 23.06 µs | 23.12 µs | +0.3% | 0.02 | neutral |
+| `json_summary_13dev` | 3.18 µs | 3.18 µs | −0.2% | 0.40 | neutral |
+| `json_system_io` | 5.19 µs | 5.18 µs | −0.2% | 0.13 | neutral |
+| `json_plan` | 17.13 µs | 17.14 µs | +0.1% | 0.40 | neutral |
+| `json_training` | 2.49 µs | 2.48 µs | −0.3% | 0.23 | neutral |
+| `dedup_17dev` | 890.9 ns | 892.8 ns | +0.2% | 0.09 | neutral |
+
+A verdict needs p < 0.01 and |Δ| > 1%. None of the measured paths changed in
+ai-hwaccel: the only changed code, the three `_pj_*` helpers behind
+`profile_from_json_str`, runs in no benchmark. The two rows that cross the bar were measured again at 7 larger layouts per arm (a
+never-called pad of 0 to about 24 KiB ahead of `src/`):
+
+- **`detect_safetensors`, +5.5%, is placement.** On 6.6.6 alone it spans 393–429
+  ns across those layouts, and on 6.6.14 397–440 ns. The layout means differ
+  by +1.3%. 2.3.29 recorded −5.7% on this row from a 10 KiB code shift.
+- **`parse_vulkan_summary_renoir`, +2.1%, is the toolchain.** Across the 7
+  layouts it spans 14.58–14.97 µs on 6.6.6 and 14.98–15.26 µs on 6.6.14. The
+  ranges do not overlap, and the means differ by +2.5%. The parse runs once per
+  detection, on the output of a `vulkaninfo` run that takes tens of
+  milliseconds. Not bisected across 6.6.7–6.6.13.
+- `parse_cuda_8gpu` moved +1.0% across the larger layouts (13.72–13.78 µs on
+  6.6.6, 13.80–13.99 µs on 6.6.14). That is under the bar, and it is 0.4% at
+  the small layouts.
+
+In `bench-history.csv`, the `2c0a1c8` rows at 16:46:31Z are 2.4.0, measured on
+the clean tree before any change. The `2c0a1c8-dirty` rows at 17:06:55Z are
+2.4.1.
+
+| binary | 2.4.0 (6.6.6) | 2.4.1 (6.6.14) | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 236 120 | 245 256 | +9 136 |
+| x86_64 ELF, no DCE | 461 400 | 507 400 | +46 000 |
+| ELF-aarch64 | 805 288 | 937 304 | +132 016 |
+| PE, as shipped (no DCE) | 534 016 | 611 328 | +77 312 |
+| agnos, `CYRIUS_DCE=1` | 233 792 | 243 168 | +9 376 |
+| Mach-O arm64 (cross-built) | 737 716 | 786 940 | +49 224 |
+
+The growth is the toolchain's. A five-line program that prints one integer
+grows from 199 384 to 330 720 B on aarch64 (+131 336), and from 60 200 to
+68 664 B on x86_64, between 6.6.6 and 6.6.14. The aarch64 builds keep their
+unreachable functions: 6.6.14 counts 295 of them, 240 596 bytes, in that
+program.
+
+### Verified
+
+- **Tests:** 950 assertions in 15 units pass through CI's loop; fuzz 6/6.
+- **CI gates:** fmt, lint (0 warnings in `src/`), vet, raw-offset guard,
+  `cyrius.lock` current (49 entries), DCE build, `distlib` fresh and
+  deterministic, version and Python-bindings version consistency.
+  `dist/ai-hwaccel.cyr` differs from 2.4.0's in its version line, the three
+  call sites and `src/registry.cyr`'s comments.
+- **CLI output** is identical between 2.4.0 on 6.6.6 and 2.4.1 on 6.6.14, and
+  between x86_64 and ELF-aarch64 under `qemu-aarch64`, on 16 invocations: every
+  flag but `--data-dir`, and three error paths. The live sensor fields (power, temperature,
+  utilization, memory used and free) are masked before comparing.
+- **Cross builds:** ELF-aarch64, PE (`--win`, as `stage_win_cross.sh` builds
+  it), agnos, and the Mach-O arm64 translation unit `stage_binary.sh` composes
+  on macOS (cross-built with `cycc_aarch64` and `CYRIUS_MACHO_ARM=1`) all build.
+  The hand-written include list in that unit still compiles with no
+  `undefined function`: `hashseed` includes `chrono` itself.
+- **Not verified:** Windows on `cass` and macOS on `ecb` were not run for this
+  release. Under wine the PE prints `--version`, and its `--summary` fails
+  under wine for 2.4.0's EXE as well.
 
 ## [2.4.0] — 2026-09-23 — one physical device, one profile
 

@@ -7,7 +7,7 @@ started, what we expect from contributions, and how the review process works.
 
 1. **Fork and clone** the repository.
 2. Install the Cyrius toolchain at the version `cyrius.cyml` pins
-   (`cyrius = "6.6.6"`).
+   (`cyrius = "6.6.14"`).
 3. Vendor the standard library and dependencies into `lib/` (gitignored). Run
    both commands, in this order; `lib sync` alone leaves `lib/` incomplete:
 
