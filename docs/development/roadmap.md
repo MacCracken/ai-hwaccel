@@ -283,3 +283,14 @@ scale.
   training.
 - **Kernel driver management** — no installing or configuring drivers.
 - **Cloud provisioning** — detect what is present, not what could be spun up.
+
+## Recorded by cyrius 6.6.17 (2026-10-05) — for the next cyrius pin move
+
+⛔ **Nothing to do until cyrius 6.6.17 is tagged and out.** Docs-only note from the cyrius 6.6.17 lanes; each item
+is this repo's to adopt when it pins ≥ 6.6.17. Nothing here gates a cyrius release.
+
+- ⚠ **This CAN be a new red at the 6.6.17 pin bump** (cyrius t1). CI runs `lib sync` → `deps` with no final
+  `deps --verify`; before 6.6.17 `lib sync` never looked at the lock, so a lock committed after a build-first
+  pin move went unchecked. That lock carries the previous pin's rows for files `deps` does not vendor, and
+  from 6.6.17 `lib sync` refuses them by name. After a pin move run `cyrius lib sync --full` before committing
+  the lock, or `cyrius lib sync --full --relock` if `deps` / `build` already ran under the new pin.
