@@ -10,7 +10,9 @@
 # (~/.cyrius/versions/<pin>/bin/cyrius) so the output matches CI, which
 # installs the pinned version rather than whatever the local wrapper has
 # drifted to. distlib output is version-independent apart from that
-# header line, but matching CI exactly is the safe default.
+# header line, but matching CI exactly is the safe default. It runs with
+# --no-default-features, as CI does, so the bundle's `# Requires` block is
+# verified without the optional bayan dep (see ci.yml's distlib step).
 #
 # Tag and push after bumping.
 set -euo pipefail
@@ -29,10 +31,10 @@ elif command -v cyrius >/dev/null 2>&1; then
     echo "warning: pinned cyrius ${PIN} not found at ${PINNED_BIN}; using PATH cyrius (verify CI parity)."
 else
     CYBIN=""
-    echo "warning: no cyrius toolchain found — regenerate dist/ai-hwaccel.cyr manually with 'cyrius distlib'."
+    echo "warning: no cyrius toolchain found — regenerate dist/ai-hwaccel.cyr manually with 'cyrius distlib --no-default-features'."
 fi
 if [ -n "$CYBIN" ]; then
-    (cd "$REPO_ROOT" && "$CYBIN" distlib >/dev/null) \
+    (cd "$REPO_ROOT" && "$CYBIN" distlib --no-default-features >/dev/null) \
         && echo "Regenerated dist/ai-hwaccel.cyr (embeds ${NEW_VERSION})."
 fi
 

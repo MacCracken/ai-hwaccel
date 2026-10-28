@@ -7,7 +7,7 @@ started, what we expect from contributions, and how the review process works.
 
 1. **Fork and clone** the repository.
 2. Install the Cyrius toolchain at the version `cyrius.cyml` pins
-   (`cyrius = "6.6.14"`).
+   (`cyrius = "6.6.20"`).
 3. Vendor the standard library and dependencies into `lib/` (gitignored). Run
    both commands, in this order; `lib sync` alone leaves `lib/` incomplete:
 
@@ -31,13 +31,15 @@ for f in src/*.cyr src/detect/*.cyr; do cyrius lint --strict "$f"; done   # fail
 for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do
     cyrius fmt "$f" --check                               # plain `cyrius fmt <file>` rewrites the file
 done
-cyrius distlib                                            # after changing any module under src/
+cyrius distlib --no-default-features                     # after changing any module under src/
 ./scripts/bench-history.sh                                # benchmarks
 ```
 
 `dist/ai-hwaccel.cyr` is the library bundle consumers pull; it is generated
 from the `[lib]` modules in `cyrius.cyml`. Commit the regenerated file with
-your change.
+your change. `--no-default-features` leaves the optional bayan dep out of
+distlib's check, so the bundle's `# Requires` block covers a consumer that
+does not use bayan.
 
 CI (`.github/workflows/ci.yml`) runs these checks plus the raw-offset guard,
 the `dist/` drift check and the `cyrius.lock` hash check. CI runs lint without
@@ -120,7 +122,8 @@ bindings/python/        the Python package
    a warning), and push a warning for output it cannot parse.
 3. **Build**: include the new file in `src/main.cyr`, and list it at the same
    position in `cyrius.cyml`'s `[lib] modules`. The compiler is single-pass, so
-   it must come after the modules it uses. Then run `cyrius distlib`.
+   it must come after the modules it uses. Then run
+   `cyrius distlib --no-default-features`.
 4. **Wire it into every entry point**: `registry_detect_with_opts`
    (`src/registry.cyr`), `registry_detect_threaded_with`
    (`src/async_detect.cyr`: its thread list if the detector runs a tool,

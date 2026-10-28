@@ -12,8 +12,8 @@ decide how to quantize and shard a model across them.
 
 | Metric | Value |
 |--------|-------|
-| Binary size | **245 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
-| Compiler | Cyrius cycc 6.6.14 |
+| Binary size | **259 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
+| Compiler | Cyrius cycc 6.6.20 |
 | Tests | 950 assertions (15 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** third-party (bayan's JSON sublib: first-party, optional) |
@@ -79,7 +79,9 @@ The package wraps the binary and its JSON in typed dataclasses; see
 ### Using as a library
 
 `cyrius distlib` bundles every non-CLI module into `dist/ai-hwaccel.cyr`,
-a single self-contained file consumers pull via `cyrius deps`. The bundle
+a single self-contained file consumers pull via `cyrius deps`. Its
+`# Requires` block includes the stdlib files it needs, so
+`include "lib/ai-hwaccel.cyr"` compiles with no other include before it. The bundle
 includes every detection backend, the registry/profile surface, the
 sharding planner, the cost model, the training memory estimator, the
 model-format header parser, and the JSON serializer.
@@ -93,7 +95,7 @@ Wire it from a consumer's `cyrius.cyml`:
 ```toml
 [deps.ai-hwaccel]
 git = "https://github.com/MacCracken/ai-hwaccel.git"
-tag = "2.4.1"
+tag = "2.4.2"
 modules = ["dist/ai-hwaccel.cyr"]
 ```
 

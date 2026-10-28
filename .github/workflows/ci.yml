@@ -57,7 +57,7 @@ jobs:
         run: cyrius deps
 
       - name: Verify dep hashes
-        # `cyrius.lock` pins the bayan commit, a SHA-256 for each of the 49
+        # `cyrius.lock` pins the bayan commit, a SHA-256 for each of the 50
         # vendored lib files, and the cyrius pin (its last line).
         #
         # A stale lock already fails the step above: since cyrius 6.6.4,
@@ -78,7 +78,7 @@ jobs:
             echo "Run 'cyrius lib sync && cyrius deps' locally and commit cyrius.lock."
             exit 1
           fi
-          echo "cyrius.lock is current (49 entries, content-compared)."
+          echo "cyrius.lock is current (50 entries, content-compared)."
 
       - name: Include-graph audit
         # `cyrius vet` walks every `include` from src/main.cyr and
@@ -202,14 +202,21 @@ jobs:
         #      non-determinism (timestamps, dict ordering, …) breaks
         #      the reproducible-build contract.
         # Mirrors the libro / mihi / yukti gates.
+        #
+        # `--no-default-features`: distlib compile-verifies the bundle's
+        # `# Requires` block (cyrius 6.6.18+) with the root's features, and
+        # `default = ["bayan"]` would let bayan's own `# Requires` block
+        # stand in for leaves the bundle needs. A consumer without bayan
+        # then fails to link (2.4.2: `file_read_all`, `getenv`, …). Verify
+        # the bundle as a consumer that skips the optional dep sees it.
         run: |
-          test -f dist/ai-hwaccel.cyr || { echo "FAIL: dist/ai-hwaccel.cyr missing — run 'cyrius distlib' and commit."; exit 1; }
+          test -f dist/ai-hwaccel.cyr || { echo "FAIL: dist/ai-hwaccel.cyr missing — run 'cyrius distlib --no-default-features' and commit."; exit 1; }
           cp dist/ai-hwaccel.cyr /tmp/dist-checked-in.cyr
-          cyrius distlib > /dev/null
+          cyrius distlib --no-default-features > /dev/null
           diff -q /tmp/dist-checked-in.cyr dist/ai-hwaccel.cyr \
-            || { echo "FAIL: dist/ai-hwaccel.cyr is stale. Run 'cyrius distlib' and commit."; exit 1; }
+            || { echo "FAIL: dist/ai-hwaccel.cyr is stale. Run 'cyrius distlib --no-default-features' and commit."; exit 1; }
           sha256sum dist/ai-hwaccel.cyr > /tmp/dist_a.sha
-          cyrius distlib > /dev/null
+          cyrius distlib --no-default-features > /dev/null
           sha256sum dist/ai-hwaccel.cyr > /tmp/dist_b.sha
           diff -q /tmp/dist_a.sha /tmp/dist_b.sha \
             || { echo "FAIL: cyrius distlib output not deterministic across runs."; cat /tmp/dist_a.sha /tmp/dist_b.sha; exit 1; }

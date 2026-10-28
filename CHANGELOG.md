@@ -5,6 +5,165 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.4.2] — 2026-10-28 — cyrius 6.6.20, bayan 1.5.12
+
+A toolchain and dependency bump. The CLI's output does not change.
+`dist/ai-hwaccel.cyr` now opens with a `# Requires` block that includes the
+stdlib files it needs, and its `.deps` sidecar lists 12 leaves instead of 18
+(see *Consumers*).
+
+### Changed — toolchain and dependency
+
+- **cyrius `6.6.14` → `6.6.20`.** `./lib/` was re-vendored from an empty tree
+  (`lib sync`, then `deps`): 50 files, one more than 2.4.1. The new one is
+  `poison`, which 6.6.20's `freelist` includes. 26 of the other 48 stdlib
+  files changed. `lib/bench.cyr` changed in comments only, so both sides of
+  the benchmarks below use the same instrument. The CLI builds with 0 warnings.
+  The PE build prints 2 unrouted-syscall warnings where 6.6.14 printed 5:
+  6.6.20 routes `munmap` on Windows, where it used to return `-ENOSYS` and leak
+  every large `fl_free`.
+- **bayan `1.5.11` → `1.5.12`**, the bayan cyrius 6.6.20 folds (commit
+  `de460c4`, the commit the fold names). `dist/bayan-json.cyr` has no source
+  change. It gains a `# Requires` block, and its sidecar lists the same 10
+  leaves in a new order. The build includes those leaves first, so the stdlib
+  sits in a different order in every binary: same sizes, different bytes. The
+  benchmarks below were measured with 1.5.12.
+- **`cyrius.lock` regenerated from empty.** 6.6.20 keeps an old tag's commit
+  line after a tag bump (it fails closed), and deleting the lock is how its
+  changelog says to re-pin. The lock pins bayan 1.5.12 only and has 50 file
+  rows. CI's sequence (`lib sync`, `deps`, `deps --verify`, then the content
+  compare) reproduces it byte for byte.
+- **`dist/ai-hwaccel.cyr` is generated with `cyrius distlib
+  --no-default-features`**, in CI's drift gate, in `scripts/version-bump.sh`
+  and in CONTRIBUTING. distlib (6.6.18+) checks that the `# Requires` block
+  compiles with the root manifest's features. With `default = ["bayan"]`,
+  bayan 1.5.12's own `# Requires` block stood in for seven leaves the bundle
+  needs, and plain `distlib` wrote a 6-leaf block. A consumer that includes
+  the bundle without bayan then failed to link: `file_exists`,
+  `file_read_all`, `file_write_all` and `getenv` were undefined. Checking
+  without the optional dep gives the 12-leaf block. distlib now warns about
+  the 7 `bayan_json_*` names a consumer must supply. That is the existing
+  contract for `profile_from_json_str`.
+- **The cyrius 6.6.17 pin-move note is resolved** and removed from the
+  roadmap. `lib sync` ran before `deps` under the new pin, from an empty
+  `lib/`, which is the order 6.6.17's re-locking `lib sync` needs. The note's
+  `lib sync --full` does not fit this repo: at 6.6.20 it copies the whole
+  113-file snapshot, which the lock does not cover. CLAUDE.md records the
+  order.
+
+### Consumers
+
+- **`include "lib/ai-hwaccel.cyr"` compiles with no stdlib include before
+  it.** The bundle's `# Requires` block includes `sakshi string io process
+  str alloc vec fs syscalls args thread sync`. A consumer that includes only
+  the bundle builds on 6.6.20 and finds the same profiles as the CLI. Without
+  bayan, its only undefined functions are the 7 `bayan_json_*` (unreachable
+  unless it calls `profile_from_json_str`). With bayan included first, there
+  are none.
+- **`dist/ai-hwaccel.deps` lists those 12 leaves instead of 18.** Through
+  2.4.1 the sidecar copied this repo's whole `[deps] stdlib`. A consumer that
+  got `fmt`, `tagged`, `fnptr`, `assert`, `bench`, `freelist` or `hashmap`
+  only through ai-hwaccel's sidecar must now list it in its own
+  `[deps] stdlib`.
+- The bundle's body (every module) is byte-identical to 2.4.1's. Only the
+  version line and the `# Requires` block differ.
+
+### Performance
+
+**15 neutral, 3 faster from the toolchain, 0 regressions** (2.4.1 on cyrius
+6.6.14 → 2.4.2 on 6.6.20 with bayan 1.5.12). Same method as 2.4.1: each arm
+built at 5 code layouts, the three floor-bound rows batch-timed (†), and 80
+rounds per suite, shuffled and pinned to one CPU.
+
+| row | 2.4.1 | 2.4.2 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 13.39 µs | 12.96 µs | −3.2% | <0.01 | faster (toolchain, partly placement) |
+| `parse_vulkan_2gpu` | 2.40 µs | 2.41 µs | +0.3% | 0.83 | neutral |
+| `parse_neuron_2dev` | 1.61 µs | 1.55 µs | −3.8% | <0.01 | faster (toolchain) |
+| `detect_safetensors` † | 390.1 ns | 391.7 ns | +0.4% | 0.83 | neutral |
+| `detect_gguf` † | 36.0 ns | 35.9 ns | −0.3% | 0.40 | neutral |
+| `parse_vulkan_summary_renoir` | 14.28 µs | 14.38 µs | +0.7% | 0.27 | neutral |
+| `vulkan_heaps_uhd600` | 617.31 µs | 586.27 µs | −5.0% | <0.01 | faster (toolchain) |
+| `best_available_13dev` † | 170.9 ns | 170.0 ns | −0.5% | 0.51 | neutral |
+| `total_memory_13dev` | 97.7 ns | 97.7 ns | 0.0% | 0.93 | neutral |
+| `has_accelerator_13dev` | 17.4 ns | 17.4 ns | −0.1% | 0.67 | neutral |
+| `plan_70B_bf16_4gpu` | 1.41 µs | 1.39 µs | −1.8% | 0.34 | neutral |
+| `count_family_gpu_13dev` | 232.5 ns | 232.4 ns | 0.0% | 0.77 | neutral |
+| `json_serialize_13dev` | 21.89 µs | 21.91 µs | +0.1% | 0.28 | neutral |
+| `json_summary_13dev` | 3.01 µs | 3.02 µs | +0.4% | <0.01 | neutral |
+| `json_system_io` | 4.91 µs | 4.87 µs | −0.8% | <0.01 | neutral |
+| `json_plan` | 16.19 µs | 16.29 µs | +0.6% | <0.01 | neutral |
+| `json_training` | 2.35 µs | 2.35 µs | −0.2% | 0.28 | neutral |
+| `dedup_17dev` | 842.9 ns | 845.6 ns | +0.3% | 0.20 | neutral |
+
+A verdict needs p < 0.01 and |Δ| > 1%. No ai-hwaccel source changed. The
+three faster rows were measured again at 7 larger layouts per arm (a
+never-called pad of 0 to about 31 KiB ahead of `src/`), and again with bayan
+1.5.11's include order (the first candidate) at both layout sets:
+
+- **`vulkan_heaps_uhd600` is faster on 6.6.20.** −4.5% at the larger layouts
+  (608.0–611.4 µs on 6.6.14, 580.5–583.0 µs on 6.6.20; the ranges do not
+  overlap), and −5.0% / −4.5% with 1.5.11's order. Not bisected between the
+  compiler and the stdlib.
+- **`parse_cuda_8gpu` is faster, but part of the gain is placement.** −3.5%
+  at the larger layouts (13.07–13.52 µs against 12.82–12.91 µs). With bayan
+  1.5.11's include order the same toolchain gave −1.1% and −1.8%, so about 2
+  points come from where the stdlib lands.
+- **`parse_neuron_2dev` is faster by an amount that moves with layout.**
+  −2.3% at the larger layouts (p 0.009, ranges overlapping); with 1.5.11's
+  order −3.8% and −1.6% (p 0.11).
+- `parse_vulkan_summary_renoir` is +0.9% at the larger layouts (p < 0.001),
+  under the bar. 2.4.1 recorded +2.1% on this row from 6.6.6 → 6.6.14.
+
+Absolute numbers move between runs on this host (the 6.6.14 arm of
+`vulkan_heaps_uhd600` averaged 617 µs in one run and 609 µs in another), so
+compare within a run. In `bench-history.csv`, the `85d7985` rows at
+23:13:10Z are 2.4.1, measured on the clean tree before any change. The
+`85d7985-dirty` rows at 23:39:10Z are 2.4.2.
+
+| binary | 2.4.1 (6.6.14) | 2.4.2 (6.6.20) | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 245 256 | 258 616 | +13 360 |
+| x86_64 ELF, no DCE | 507 400 | 541 240 | +33 840 |
+| ELF-aarch64 | 937 304 | 676 224 | −261 080 |
+| PE, as shipped (no DCE) | 611 328 | 655 872 | +44 544 |
+| agnos, `CYRIUS_DCE=1` | 243 168 | 256 656 | +13 488 |
+| Mach-O arm64 (cross-built) | 786 940 | 672 252 | −114 688 |
+
+Both moves are the toolchain's. A five-line program built with this repo's
+manifest grows from 93 736 to 107 224 B on x86_64 with `CYRIUS_DCE=1`
+(+13 488). It shrinks from 732 536 to 471 584 B on aarch64 (−260 952): since
+6.6.18 the aarch64 back end no longer inlines the whole x86 → aarch64 syscall
+translation chain (about 1.2 KB) at every `syscall()` site, and arm64 Mach-O
+gets the same fold.
+
+### Verified
+
+- **Tests:** 950 assertions in 15 units pass through CI's loop; fuzz 6/6. The
+  gate output, the test units' `undefined function` warnings included, is
+  identical to 6.6.14's.
+- **CI gates:** fmt, lint (`--strict`, 0 warnings in `src/`), vet (38 deps, 0
+  untrusted), raw-offset guard, `cyrius.lock` current (50 entries), DCE
+  build, `distlib` fresh and deterministic, and version and Python-bindings
+  version consistency. `version-bump.sh` reproduces the committed bundle.
+- **CLI output** is identical between 2.4.1 on 6.6.14 and 2.4.2 on 6.6.20 on
+  17 invocations (every flag but `--data-dir`, and three error paths), on
+  x86_64 with and without DCE and on ELF-aarch64 under `qemu-aarch64`. Only
+  `--version` differs. The live sensor fields are masked before comparing.
+- **`ecb`** (Apple M5 Pro, macOS 27.2): the Mach-O arm64 binary,
+  cross-built from the translation unit `stage_binary.sh` composes, matches
+  2.4.1's cross-built binary on 18 runs (the 17 above plus `-vv`) apart from
+  `--version` and the detect timing. CPU memory equals `hw.memsize`; the Metal
+  GPU and the Neural Engine are found; stderr is silent at the default level.
+  This is not the wheel's native macOS build.
+- **`cass`** (Windows 11): the PE as `stage_win_cross.sh` builds it matches
+  2.4.1's on the same 18 runs apart from `--version`. CPU memory equals CIM's
+  `TotalPhysicalMemory`, DXGI finds the UHD 600, `-vv` prints the detect span,
+  and stderr is silent at the default level. Run from Git Bash, not through
+  the `windows-smoke` job.
+- **Not verified:** the wheels were not built or installed, and the CI
+  workflows have not run on this tree.
+
 ## [2.4.1] — 2026-10-03 — cyrius 6.6.14, bayan 1.5.11, and the docs checked against the code
 
 A toolchain and dependency bump, released together with the documentation review
