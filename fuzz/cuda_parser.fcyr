@@ -33,11 +33,13 @@ var w1 = vec_new();
 var csv1 = str_from("0, 24576, 1024, 23552, 8.9, 550.54, NVIDIA GeForce RTX 4090, 45, 120.5, 30, 1325");
 parse_cuda_output(csv1, p1, w1);
 if (vec_len(p1) != 1) { syscall(60, 1); }
+# power.draw "120.5" is 120.5 W (2.5.5: str_to_int made it 1205 W).
+if (profile_power_x1000(vec_get(p1, 0)) != 120500) { syscall(60, 1); }
 
 # Multi-GPU
 var p2 = vec_new();
 var w2 = vec_new();
-var csv2 = str_from("0, 81920, 0, 81920, 8.0, 470.82, A100-SXM4-80GB, 35, 60, 0, 1593\n1, 81920, 512, 81408, 8.0, 470.82, A100-SXM4-80GB, 36, 62, 5, 1593");
+var csv2 = str_from("0, 81920, 0, 81920, 8.0, 535.104.05, A100-SXM4-80GB, 35, 60, 0, 1593\n1, 81920, 512, 81408, 8.0, 535.104.05, A100-SXM4-80GB, 36, 62, 5, 1593");
 parse_cuda_output(csv2, p2, w2);
 if (vec_len(p2) != 2) { syscall(60, 2); }
 
@@ -103,6 +105,92 @@ while (ii < vec_len(ids)) {
         if (pid != 0) { syscall(60, 10); }
     }
     ii = ii + 1;
+}
+
+# pci.bus_id (field 12, 2.5.5): valid, missing, malformed. Every line still
+# yields its profile; only a valid address sets pci_bdf, and it is never a
+# path.
+var bus = vec_new();
+vec_push(bus, "00000000:3B:00.0");
+vec_push(bus, "[N/A]");
+vec_push(bus, "");
+vec_push(bus, "../../../etc/passwd");
+vec_push(bus, "00000000:3B:00");
+vec_push(bus, "000000000:3B:00.0");
+vec_push(bus, "0000000G:3B:00.0");
+vec_push(bus, "00000000:3B/00.0");
+vec_push(bus, "00000000:3B:00.0/x");
+var bi = 0;
+while (bi < vec_len(bus)) {
+    var sb12 = str_builder_new();
+    str_builder_add_cstr(sb12, "0, 8192, 0, 8192, 7.0, 535.104.05, GPU, 40, 70, 0, 1250, 0x1DB410DE, ");
+    str_builder_add_cstr(sb12, vec_get(bus, bi));
+    var p12 = vec_new();
+    parse_cuda_output(str_builder_build(sb12), p12, vec_new());
+    if (vec_len(p12) != 1) { syscall(60, 12); }
+    var bdf = profile_pci_bdf(vec_get(p12, 0));
+    if (bi == 0) {
+        if (bdf == 0) { syscall(60, 13); }
+        if (streq(bdf, "0000:3b:00.0") != 1) { syscall(60, 13); }
+    } else {
+        if (bdf != 0) { syscall(60, 14); }
+    }
+    bi = bi + 1;
+}
+
+# Every field of a full row replaced in turn by what nvidia-smi prints for a
+# field it cannot read, parsed with and without a warnings vec and as the
+# query without compute_cap: nothing crashes, memory is never below 0, and a
+# row is skipped only for its index or memory.
+var row = vec_new();
+vec_push(row, "0");
+vec_push(row, "81559");
+vec_push(row, "0");
+vec_push(row, "81559");
+vec_push(row, "9.0");
+vec_push(row, "550.54");
+vec_push(row, "NVIDIA H100");
+vec_push(row, "30");
+vec_push(row, "70.24");
+vec_push(row, "0");
+vec_push(row, "2619");
+vec_push(row, "0x233010DE");
+vec_push(row, "00000000:3B:00.0");
+var bad = vec_new();
+vec_push(bad, "[N/A]");
+vec_push(bad, "[Not Supported]");
+vec_push(bad, "[Unknown Error]");
+vec_push(bad, "");
+vec_push(bad, "-1");
+vec_push(bad, "1.5.5");
+vec_push(bad, "99999999999999999999999");
+var fi = 0;
+while (fi < vec_len(row)) {
+    var bj = 0;
+    while (bj < vec_len(bad)) {
+        var sb13 = str_builder_new();
+        var k = 0;
+        while (k < vec_len(row)) {
+            if (k > 0) { str_builder_add_cstr(sb13, ", "); }
+            if (k == fi) { str_builder_add_cstr(sb13, vec_get(bad, bj)); } else { str_builder_add_cstr(sb13, vec_get(row, k)); }
+            k = k + 1;
+        }
+        var line13 = str_builder_build(sb13);
+        var p13 = vec_new();
+        var w13 = vec_new();
+        parse_cuda_output(line13, p13, w13);
+        parse_cuda_output(line13, p13, 0);
+        parse_cuda_output_cc(line13, p13, 0, 0);
+        var m = 0;
+        while (m < vec_len(p13)) {
+            if (profile_memory_bytes(vec_get(p13, m)) < 0) { syscall(60, 15); }
+            m = m + 1;
+        }
+        if (fi > 1 && vec_len(w13) != 0) { syscall(60, 16); }
+        if (fi > 1 && vec_len(p13) < 2) { syscall(60, 16); }
+        bj = bj + 1;
+    }
+    fi = fi + 1;
 }
 
 syscall(60, 0);

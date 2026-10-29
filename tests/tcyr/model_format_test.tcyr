@@ -7,6 +7,9 @@ include "lib/vec.cyr"
 include "lib/str.cyr"
 include "lib/fmt.cyr"
 include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/freelist.cyr"
 
 include "src/units.cyr"
 include "src/error.cyr"
@@ -37,7 +40,7 @@ fn test_safetensors_valid() {
 }
 
 fn test_safetensors_multi_tensor() {
-    var json = "{\"w1\":{\"dtype\":\"BF16\",\"shape\":[1024,512],\"data_offsets\":[0,1]},\"w2\":{\"dtype\":\"BF16\",\"shape\":[512,256],\"data_offsets\":[1,2]},\"__metadata__\":{\"format\":\"pt\"}}";
+    var json = "{\"w1\":{\"dtype\":\"BF16\",\"shape\":[1024,512],\"data_offsets\":[0,1]},\"w2\":{\"dtype\":\"BF16\",\"shape\":[512,256],\"data_offsets\":[1,2]},\"__metadata__\":{\"format\":\"pt\"}}"; #skip-lint
     var jlen = strlen(json);
     var buf = alloc(8 + jlen);
     store64(buf, jlen);
@@ -53,8 +56,22 @@ fn test_safetensors_multi_tensor() {
     return 0;
 }
 
+# 8-byte LE header_size + `json`, in a buffer of exactly that size.
+fn _st_buf(json) {
+    var jlen = strlen(json);
+    var buf = alloc(8 + jlen);
+    store64(buf, jlen);
+    memcpy(buf + 8, json, jlen);
+    return buf;
+}
+
+fn _st_meta(json) {
+    return detect_format_from_bytes(_st_buf(json), 8 + strlen(json));
+}
+
 fn test_safetensors_empty_shape() {
-    # Scalar tensor — shape [] should give 0 params
+    # Scalar tensor — shape [] is one element (its data_offsets span 4 bytes,
+    # one F32); 2.5.4 counted it 0
     var json = "{\"bias\":{\"dtype\":\"F32\",\"shape\":[],\"data_offsets\":[0,4]}}";
     var jlen = strlen(json);
     var buf = alloc(8 + jlen);
@@ -64,8 +81,73 @@ fn test_safetensors_empty_shape() {
     var meta = detect_format_from_bytes(buf, 8 + jlen);
     assert(meta != 0, "empty shape detected");
     assert_eq(meta_format(meta), FMT_SAFETENSORS, "format");
-    assert_eq(meta_param_count(meta), 0, "no params for empty shape");
+    assert_eq(meta_param_count(meta), 1, "scalar is one param");
     assert_eq(meta_tensor_count(meta), 1, "still 1 tensor");
+    # Any JSON whitespace inside the brackets: 2.5.4 skipped only ' ' and \n
+    var mt = _st_meta("{\"a\":{\"dtype\":\"F32\",\"shape\":[\t],\"data_offsets\":[0,4]},\"b\":{\"dtype\":\"F32\",\"shape\":[\r\n ],\"data_offsets\":[4,8]}}"); #skip-lint
+    assert_eq(meta_param_count(mt), 2, "[\\t] and [\\r\\n ] are scalars too");
+    return 0;
+}
+
+fn test_safetensors_shape_overflow() {
+    # A product past the i64 is unknown (0), never wrapped: 2.5.4 gave 0 for
+    # the first, -9223372036709301616 for the second, 4294967296 for the third.
+    var a = _st_meta("{\"w\":{\"dtype\":\"F16\",\"shape\":[4294967296,4294967296,3],\"data_offsets\":[0,2]}}");
+    assert_eq(meta_param_count(a), 0, "2^32 x 2^32 x 3 unknown");
+    var b = _st_meta("{\"w\":{\"dtype\":\"F16\",\"shape\":[3037000500,3037000500],\"data_offsets\":[0,2]}}");
+    assert_eq(meta_param_count(b), 0, "3037000500^2 unknown, not negative");
+    var c = _st_meta("{\"w\":{\"dtype\":\"F16\",\"shape\":[4294967296,4294967297],\"data_offsets\":[0,2]}}");
+    assert_eq(meta_param_count(c), 0, "2^32 x (2^32+1) unknown, not wrapped");
+    var d = _st_meta("{\"w\":{\"dtype\":\"F16\",\"shape\":[1234567890123456789012345],\"data_offsets\":[0,2]}}");
+    assert_eq(meta_param_count(d), 0, "25-digit dimension unknown");
+    # Each tensor fits, the sum does not
+    var e = _st_meta("{\"a\":{\"dtype\":\"F16\",\"shape\":[3037000499,3037000499],\"data_offsets\":[0,2]},\"b\":{\"dtype\":\"F16\",\"shape\":[3037000499,3037000499],\"data_offsets\":[2,4]}}"); #skip-lint
+    assert_eq(meta_param_count(e), 0, "sum past i64 unknown");
+    assert_eq(meta_tensor_count(e), 2, "both tensors counted");
+    # The largest product that fits is kept
+    var f = _st_meta("{\"a\":{\"dtype\":\"F16\",\"shape\":[3037000499,3037000499],\"data_offsets\":[0,2]}}");
+    assert_eq(meta_param_count(f), 9223372030926249001, "3037000499^2 kept");
+    return 0;
+}
+
+fn test_safetensors_scan_stays_in_header() {
+    # A header that ends inside a string, followed by bytes outside it: the
+    # dtype scan must not read them (2.5.4 returned "FZ").
+    var hdr = "{\"w\":{\"dtype\":\"F";
+    var hlen = strlen(hdr);
+    var buf = alloc(8 + hlen + 2);
+    store64(buf, hlen);
+    memcpy(buf + 8, hdr, hlen);
+    store8(buf + 8 + hlen, 90);       # 'Z' past the header
+    store8(buf + 8 + hlen + 1, 34);   # '"'
+    var m = detect_format_from_bytes(buf, 8 + hlen);
+    assert(m != 0, "unterminated header still SafeTensors");
+    assert_eq(meta_dtype(m), 0, "no dtype from past the header");
+    # Same with a trailing backslash
+    var hdr2 = "{\"w\":{\"dtype\":\"F\\";
+    var hlen2 = strlen(hdr2);
+    var buf2 = alloc(8 + hlen2 + 2);
+    store64(buf2, hlen2);
+    memcpy(buf2 + 8, hdr2, hlen2);
+    store8(buf2 + 8 + hlen2, 90);
+    store8(buf2 + 8 + hlen2 + 1, 34);
+    var m2 = detect_format_from_bytes(buf2, 8 + hlen2);
+    assert(m2 != 0, "trailing-backslash header still SafeTensors");
+    assert_eq(meta_dtype(m2), 0, "no dtype past a trailing backslash");
+    # _skip_json_object never returns past json_len (2.5.4: +1 and +2)
+    assert_eq(_skip_json_object("{\"abc", 5, 0), 5, "unterminated string clamps");
+    assert_eq(_skip_json_object("{\"a\\", 4, 0), 4, "trailing backslash clamps");
+    return 0;
+}
+
+fn test_safetensors_dtype_value_type() {
+    # A null dtype is no dtype; 2.5.4 took the next quoted text ("shape").
+    var m = _st_meta("{\"w\":{\"dtype\":null,\"shape\":[2,2],\"data_offsets\":[0,8]}}");
+    assert_eq(meta_dtype(m), 0, "null dtype");
+    assert_eq(meta_param_count(m), 4, "shape still read");
+    # An escaped quote does not end the value
+    var e = _st_meta("{\"w\":{\"dtype\":\"F16\\\"x\",\"shape\":[4,4],\"data_offsets\":[0,32]}}");
+    assert(streq(meta_dtype(e), "F16\\\"x") == 1, "escaped quote kept in the value");
     return 0;
 }
 
@@ -166,6 +248,42 @@ fn test_onnx_too_short() {
     return 0;
 }
 
+fn test_onnx_varint_bounds() {
+    # 08, nine continuation bytes, 01, 12: the varint reached shift 63 and
+    # 2.5.4 accepted it as ONNX with ir_version INT64_MIN.
+    var buf = alloc(12);
+    store8(buf, 8);
+    var i = 1;
+    while (i < 10) {
+        store8(buf + i, 128);
+        i = i + 1;
+    }
+    store8(buf + 10, 1);
+    store8(buf + 11, 18);
+    assert_eq(detect_format_from_bytes(buf, 12), 0, "10-byte varint is not ONNX");
+    # Six bytes is past the 5-byte cap even though the value is 9
+    var b6 = alloc(8);
+    store8(b6, 8);
+    store8(b6 + 1, 137);
+    store8(b6 + 2, 128);
+    store8(b6 + 3, 128);
+    store8(b6 + 4, 128);
+    store8(b6 + 5, 128);
+    store8(b6 + 6, 0);
+    store8(b6 + 7, 18);
+    assert_eq(_parse_onnx(b6, 8), 0, "6-byte varint rejected");
+    # A non-minimal 2-byte varint for 9 is still a valid encoding
+    var b2 = alloc(4);
+    store8(b2, 8);
+    store8(b2 + 1, 137);
+    store8(b2 + 2, 0);
+    store8(b2 + 3, 18);
+    var m = _parse_onnx(b2, 4);
+    assert(m != 0, "2-byte varint accepted");
+    if (m != 0) { assert_eq(meta_format_version(m), 9, "ir_version 9 from 2 bytes"); }
+    return 0;
+}
+
 fn test_onnx_invalid_second_field() {
     var buf = alloc(3);
     store8(buf, 8);
@@ -236,6 +354,17 @@ fn test_gguf_dtype_names() {
     assert(streq(_gguf_file_type_name(7), "Q8_0") == 1, "Q8_0");
     assert(streq(_gguf_file_type_name(15), "Q4_K_M") == 1, "Q4_K_M");
     assert(streq(_gguf_file_type_name(18), "Q6_K") == 1, "Q6_K");
+    # 21-38 (2.5.4 stopped at 20): BF16 and IQ4_XS GGUFs are common
+    assert(streq(_gguf_file_type_name(21), "Q2_K_S") == 1, "Q2_K_S");
+    assert(streq(_gguf_file_type_name(30), "IQ4_XS") == 1, "IQ4_XS");
+    assert(streq(_gguf_file_type_name(31), "IQ1_M") == 1, "IQ1_M");
+    assert(streq(_gguf_file_type_name(32), "BF16") == 1, "BF16");
+    assert(streq(_gguf_file_type_name(36), "TQ1_0") == 1, "TQ1_0");
+    assert(streq(_gguf_file_type_name(38), "MXFP4_MOE") == 1, "MXFP4_MOE");
+    # Retired types stay unknown
+    assert(streq(_gguf_file_type_name(4), "unknown") == 1, "4 retired");
+    assert(streq(_gguf_file_type_name(34), "unknown") == 1, "34 retired");
+    assert(streq(_gguf_file_type_name(39), "unknown") == 1, "39 unassigned");
     assert(streq(_gguf_file_type_name(999), "unknown") == 1,
       "unknown type");
     return 0;
@@ -249,6 +378,37 @@ fn test_model_meta_json() {
     assert(str_contains_cstr(json, "GGUF") == 1, "json has GGUF");
     assert(str_contains_cstr(json, "Q4_K_M") == 1, "json has dtype");
     assert(str_contains_cstr(json, "42") == 1, "json has tensor count");
+    # The dtype comes from an untrusted header: escaped on output. 2.5.4
+    # wrote `"dtype":"F16\"` for the first (invalid JSON) and a raw newline
+    # for the second.
+    var e = _st_meta("{\"w\":{\"dtype\":\"F16\\\"x\",\"shape\":[4,4],\"data_offsets\":[0,32]}}");
+    var ej = model_meta_to_json(e);
+    assert(str_contains_cstr(ej, "\"dtype\":\"F16\\\\\\\"x\"") == 1, "dtype backslash and quote escaped");
+    var nl = meta_new(FMT_SAFETENSORS, 1, "F\n16", 1, 0);
+    assert(str_contains_cstr(model_meta_to_json(nl), "\"dtype\":\"F\\n16\"") == 1, "dtype control byte escaped");
+    return 0;
+}
+
+# --- File API ---
+
+fn test_detect_model_format_file() {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "/tmp/ai-hwaccel-mf-test-");
+    str_builder_add_int(sb, sys_getpid());
+    var path = str_data(str_builder_build(sb));
+    var json = "{\"weight\":{\"dtype\":\"BF16\",\"shape\":[64,32],\"data_offsets\":[0,4096]}}";
+    var n = 8 + strlen(json);
+    var buf = _st_buf(json);
+    assert(file_write_all(path, buf, n) == n, "temp model file written");
+    var m = detect_model_format(path);
+    assert(m != 0, "file detected");
+    if (m != 0) {
+        assert_eq(meta_format(m), FMT_SAFETENSORS, "file is SafeTensors");
+        assert_eq(meta_param_count(m), 2048, "file param count");
+        assert(streq(meta_dtype(m), "BF16") == 1, "file dtype outlives the read buffer");
+    }
+    sys_unlink(path);
+    assert_eq(detect_model_format(path), 0, "missing file returns 0");
     return 0;
 }
 
@@ -259,6 +419,9 @@ alloc_init();
 test_safetensors_valid();
 test_safetensors_multi_tensor();
 test_safetensors_empty_shape();
+test_safetensors_shape_overflow();
+test_safetensors_scan_stays_in_header();
+test_safetensors_dtype_value_type();
 test_safetensors_too_small();
 test_safetensors_bad_header_size();
 test_gguf_valid();
@@ -268,12 +431,14 @@ test_onnx_valid();
 test_onnx_bad_ir_version();
 test_onnx_too_short();
 test_onnx_invalid_second_field();
+test_onnx_varint_bounds();
 test_pytorch_zip_magic();
 test_pytorch_not_zip();
 test_unknown_format();
 test_format_name();
 test_gguf_dtype_names();
 test_model_meta_json();
+test_detect_model_format_file();
 
 var fails = assert_summary();
 syscall(60, fails);

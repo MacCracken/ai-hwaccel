@@ -79,8 +79,8 @@ runs the backends one after another, on one thread. The CLI takes
 
 ## Binary size
 
-`CYRIUS_DCE=1` removes unreachable code: the x86_64 CLI is about 236 KB with
-it and 461 KB without. Every backend is always compiled in: the per-backend
+`CYRIUS_DCE=1` removes unreachable code: the x86_64 CLI is about 216 KB with
+it and 544 KB without. Every backend is always compiled in: the per-backend
 `-D` flags described in ADR-004 were never implemented.
 
 ---

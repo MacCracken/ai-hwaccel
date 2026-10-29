@@ -12,9 +12,9 @@ decide how to quantize and shard a model across them.
 
 | Metric | Value |
 |--------|-------|
-| Binary size | **199 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
+| Binary size | **216 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.7.18 |
-| Tests | 1157 assertions (15 test units) |
+| Tests | 1226 assertions (15 test units) |
 | Fuzz harnesses | 7 |
 | Dependencies | **0** third-party (bayan's JSON sublib: first-party, optional) |
 | Hardware families | 18 |
@@ -24,7 +24,7 @@ decide how to quantize and shard a model across them.
 
 | Family | Variants | Detection method |
 |--------|----------|------------------|
-| NVIDIA CUDA | GeForce, Tesla, A100, H100, GH200, ... | `nvidia-smi` on `$PATH` (Linux) |
+| NVIDIA CUDA | GeForce, Tesla, A100, H100, GH200, ... | `nvidia-smi` on `$PATH` (Linux, Windows) |
 | AMD ROCm | MI250, MI300, RX 7900 | `/sys/class/drm` sysfs |
 | Apple Metal | M-series GPU cores | `sysctl` (`system_profiler` fallback) |
 | Apple ANE | Neural Engine | `sysctl` (`system_profiler` fallback) |
@@ -64,7 +64,7 @@ ai-hwaccel                  # Full registry JSON
 ai-hwaccel --summary        # Compact summary JSON
 ai-hwaccel --table          # Human-readable table
 ai-hwaccel --plan 70B       # Sharding plan JSON (--quant int4, ...)
-ai-hwaccel --train 7B --method lora   # Training memory JSON
+ai-hwaccel --train 7B --method lora   # Training memory JSON (GPU target)
 ai-hwaccel --cost 70B       # Cloud instance recommendation (--json for JSON)
 ai-hwaccel --version        # Print version
 ai-hwaccel --threaded       # Any of the above, the vendor tools in parallel
@@ -75,8 +75,12 @@ Every JSON output is described by [`docs/schema.json`](docs/schema.json).
 
 ### From Python
 
+The Python package is not published on PyPI. Install a wheel file from the
+Wheels workflow's artifacts (or build one; see the bindings README), never the
+name `ai-hwaccel` from an index, where the project does not own it:
+
 ```sh
-pip install ai-hwaccel
+pip install ./ai_hwaccel-<version>-py3-none-<platform>.whl
 ```
 
 The package wraps the binary and its JSON in typed dataclasses; see
@@ -101,7 +105,7 @@ Wire it from a consumer's `cyrius.cyml`:
 ```toml
 [deps.ai-hwaccel]
 git = "https://github.com/MacCracken/ai-hwaccel.git"
-tag = "2.5.0"
+tag = "2.5.5"
 modules = ["dist/ai-hwaccel.cyr"]
 ```
 
@@ -117,7 +121,7 @@ include "lib/ai-hwaccel.cyr"
 # post-pass when an NVIDIA GPU was found (InfiniBand, NVSwitch and XGMI come
 # from sysfs).
 var r = registry_detect();
-# ... reg_profiles(r), reg_count(r), ...
+# ... reg_profiles(r), reg_num_profiles(r), reg_count_by_family(r, FAMILY_GPU), ...
 ```
 
 #### No-exec entry point
@@ -228,7 +232,9 @@ warnings so far with `lazy_warnings(lr)`.
 
 8 methods: full fine-tune, LoRA, QLoRA (4/8-bit), prefix tuning, DPO, RLHF,
 distillation. Per-component breakdown (model, optimizer, activations).
-Device-aware: GPU, TPU, Gaudi and CPU each have tuned multipliers.
+Device-aware: GPU, TPU, Gaudi and CPU each have tuned multipliers. The CLI's
+`--train` (and so the Python `training_memory()`) estimates for a GPU, with bf16
+weights unless the method is a QLoRA one.
 
 ## How Detection Works
 
@@ -254,13 +260,13 @@ the `warnings` array names the missing tool. Detection itself doesn't fail.
 ```sh
 cyrius lib sync                                # Repopulate lib/ from the version-pinned stdlib snapshot
 cyrius deps                                    # Resolve non-stdlib [deps.*] entries (bayan) + transitive stdlib leaves
-CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # Build (≈236 KB ELF, x86_64)
+CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # Build (≈216 KB ELF, x86_64)
 cyrius vet src/main.cyr                        # Include-graph audit
 for f in src/*.cyr src/detect/*.cyr; do cyrius lint --strict "$f"; done # Static analysis (fails on a warning)
 for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do cyrius fmt "$f" --check; done
                                                # Format check (plain `cyrius fmt <file>` rewrites the file)
 
-# Test suite — 15 units under tests/tcyr/, 950 assertions total. Run from the
+# Test suite — 15 units under tests/tcyr/, 1226 assertions total. Run from the
 # repository root: some tests read tests/fixtures/.
 for t in tests/tcyr/*.tcyr; do
     CYRIUS_DCE=1 cyrius build "$t" "/tmp/$(basename $t .tcyr)"
@@ -322,7 +328,7 @@ struct profile {
 | [Framework integration](docs/guides/framework-integration.md) | Using the output from ML frameworks |
 | [Troubleshooting](docs/troubleshooting.md) | Common detection problems |
 | [Performance](docs/performance.md) | Benchmarks and cost of detection |
-| [Python bindings](bindings/python/README.md) | `pip install ai-hwaccel` |
+| [Python bindings](bindings/python/README.md) | The Python package, from a CI wheel (not on PyPI) |
 | [Roadmap](docs/development/roadmap.md) | Open work |
 | [Changelog](CHANGELOG.md) | Release history |
 | [Contributing](CONTRIBUTING.md) | How to contribute |

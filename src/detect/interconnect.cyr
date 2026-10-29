@@ -2,8 +2,16 @@
 # InfiniBand, RoCE, NVLink, NVSwitch, XGMI, ICI
 
 fn detect_interconnects(sio, profiles, warnings) {
+    return detect_interconnects_opts(sio, profiles, warnings, 1);
+}
+
+# The interconnect pass. `allow_exec` 0 skips its one tool run,
+# `nvidia-smi nvlink -s`; InfiniBand, NVSwitch and XGMI come from sysfs and
+# ICI from the TPU profiles, so they are found either way (2.5.5; through
+# 2.5.4 registry_detect_no_exec() skipped the whole pass).
+fn detect_interconnects_opts(sio, profiles, warnings, allow_exec) {
     _detect_infiniband(sio);
-    _detect_nvlink_nvswitch(sio, profiles, warnings);
+    _detect_nvlink_nvswitch(sio, profiles, warnings, allow_exec);
     _detect_xgmi(sio);
     _detect_ici(sio, profiles);
     return 0;
@@ -11,9 +19,42 @@ fn detect_interconnects(sio, profiles, warnings) {
 
 # --- InfiniBand / RoCE ---
 
+# An interconnect's `state` is the kernel's IB port-state number, the one
+# ports/N/state starts with ("4: ACTIVE"): 1 DOWN, 2 INIT, 3 ARMED, 4 ACTIVE,
+# 5 ACTIVE_DEFER, and 0 when not known (NVLink, XGMI, ICI). An NVSwitch, which
+# is listed only when its nodes exist, reports ACTIVE. Through 2.5.4 the field
+# held a C-string pointer, which the JSON printed as an integer: an address.
+enum IbPortState {
+    IB_PORT_STATE_UNKNOWN = 0;
+    IB_PORT_STATE_ACTIVE = 4;
+}
+
+# The port-state number a sysfs ports/N/state value (a Str, or 0) starts
+# with: 4 for "4: ACTIVE". IB_PORT_STATE_UNKNOWN when it starts with no
+# digit or with more than two. Pure.
+fn ib_port_state_code(s) {
+    var v = str_leading_uint(s);
+    if (v < 0 || v > 99) { return IB_PORT_STATE_UNKNOWN; }
+    return v;
+}
+
+# GB/s x1000 of an InfiniBand ports/N/rate value (a Str, or 0): "200 Gb/sec
+# (4X HDR)" gives 25000, "2.5 Gb/sec (1X SDR)" 312 (through 2.5.4 the .5 was
+# dropped). 0 when it starts with no number. Pure.
+fn ib_rate_gbps_x1000(s) {
+    var gbit_x1000 = parse_decimal_x1000(s);
+    if (gbit_x1000 <= 0) { return 0; }
+    return gbit_x1000 / GBITS_PER_GBYTE;
+}
+
 fn _detect_infiniband(sio) {
-    var ib_dir = str_from("/sys/class/infiniband");
-    var entries = dir_list(ib_dir);
+    return _detect_infiniband_at(sio, "/sys/class/infiniband");
+}
+
+# One interconnect per device of the infiniband class at `root` (a cstr),
+# from its port 1: rate, link layer (Ethernet is RoCE v2) and state.
+fn _detect_infiniband_at(sio, root) {
+    var entries = sysfs_list_dir(root);
     var nent = vec_len(entries);
 
     var ei = 0;
@@ -21,24 +62,13 @@ fn _detect_infiniband(sio) {
         var name = vec_get(entries, ei);
         ei = ei + 1;
 
-        # Read port 1 state
-        var state_path = sysfs_path_str("/sys/class/infiniband", name, "ports/1/state");
-        var state = sysfs_read(state_path);
-
-        # Read rate (e.g., "200 Gb/sec (4X HDR)")
-        var rate_path = sysfs_path_str("/sys/class/infiniband", name, "ports/1/rate");
-        var rate_str = sysfs_read(rate_path);
-        var bw_x1000 = 0;
-        if (rate_str != 0) {
-            var gbps = parse_value_with_suffix(rate_str);
-            # Convert Gb/s to GB/s (* 1000 / 8)
-            bw_x1000 = gbps * 1000 / GBITS_PER_GBYTE;
-        }
+        var state = sysfs_read(sysfs_path_str(root, name, "ports/1/state"));
+        var rate_str = sysfs_read(sysfs_path_str(root, name, "ports/1/rate"));
+        var bw_x1000 = ib_rate_gbps_x1000(rate_str);
 
         # Determine kind: IB vs RoCE
         var kind = ICK_INFINIBAND;
-        var ll_path = sysfs_path_str("/sys/class/infiniband", name, "ports/1/link_layer");
-        var ll = sysfs_read(ll_path);
+        var ll = sysfs_read(sysfs_path_str(root, name, "ports/1/link_layer"));
         if (ll != 0) {
             if (str_contains_cstr(ll, "Ethernet") == 1) {
                 kind = ICK_ROCEV2;
@@ -46,9 +76,7 @@ fn _detect_infiniband(sio) {
         }
 
         var ic = interconnect_new(kind, str_cstr(name), bw_x1000);
-        if (state != 0) {
-            ic_set_state(ic, str_cstr(state));
-        }
+        ic_set_state(ic, ib_port_state_code(state));
         sio_add_interconnect(sio, ic);
     }
     return 0;
@@ -71,11 +99,88 @@ fn profiles_have_nvidia_gpu(profiles) {
     return 0;
 }
 
-fn _detect_nvlink_nvswitch(sio, profiles, warnings) {
+# 1 if `warnings` (a vec, or 0) holds a deadline kill of `tool` (a cstr).
+fn _warnings_have_timeout(warnings, tool) {
+    if (warnings == 0) { return 0; }
+    var n = vec_len(warnings);
+    var i = 0;
+    while (i < n) {
+        var w = vec_get(warnings, i);
+        i = i + 1;
+        if (warning_code(w) == HWA_ERR_TIMEOUT && streq(warning_tool(w), tool) == 1) { return 1; }
+    }
+    return 0;
+}
+
+# GB/s x1000 of one `nvidia-smi nvlink -s` link value (a Str, what follows
+# "Link N:"): "26.562 GB/s" gives 26562. 0 for "<inactive>", for a value
+# without "GB/s", and for one past 1000 GB/s, more than any link carries.
+# Pure.
+fn nvlink_link_gbps_x1000(v) {
+    if (str_contains_cstr(v, "GB/s") != 1) { return 0; }
+    var x = parse_decimal_x1000(v);
+    if (x <= 0 || x > 1000000) { return 0; }
+    return x;
+}
+
+# Add GPU `gpu`'s NVLink interconnect, "nvlinkN" at `bw` GB/s x1000, when
+# there is a GPU (`gpu` 0 or more) with an active link (`bw` over 0).
+# Returns the number added.
+fn _nvlink_add(sio, gpu, bw) {
+    if (gpu < 0 || bw <= 0) { return 0; }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "nvlink");
+    str_builder_add_int(sb, gpu);
+    sio_add_interconnect(sio, interconnect_new(ICK_NVLINK, str_data(str_builder_build(sb)), bw));
+    return 1;
+}
+
+# Parse `nvidia-smi nvlink -s` output: under each "GPU N: <name>" line, a
+# "Link N: <rate> GB/s" (or "<inactive>") line per link. Each GPU with an
+# active link gets its own NVLink interconnect, "nvlinkN", with the sum of
+# its active links, so the figure is one GPU's, as the NVSwitch one is.
+# Through 2.5.4 every line containing "Link" counted as a 25 GB/s link (the
+# rate was never read, inactive links and NVML's "NVLink" messages counted
+# too), all summed across GPUs into one entry: two unbridged RTX 3090s were a
+# 200 GB/s NVLink, enough for a tensor-parallel plan. At most 256 links count
+# per GPU. Returns the number of interconnects added. Pure.
+fn parse_nvlink_status(out, sio) {
+    var lines = str_split(out, 10);
+    var nl = vec_len(lines);
+    var added = 0;
+    var gpu = 0 - 1;
+    var gpus = 0;
+    var bw = 0;
+    var links = 0;
+    var li = 0;
+    while (li < nl) {
+        var t = str_trim(vec_get(lines, li));
+        li = li + 1;
+        if (str_starts_with(t, "GPU ") == 1) {
+            added = added + _nvlink_add(sio, gpu, bw);
+            gpu = str_leading_uint(str_sub(t, 4, str_len(t) - 4));
+            if (gpu < 0 || gpu > CMD_MAX_DEVICE_ID) { gpu = gpus; }
+            gpus = gpus + 1;
+            bw = 0;
+            links = 0;
+            continue;
+        }
+        if (gpu < 0) { continue; }
+        if (str_starts_with(t, "Link ") != 1) { continue; }
+        var colon = str_index_of(t, 58);
+        if (colon < 0) { continue; }
+        if (links >= 256) { continue; }
+        links = links + 1;
+        bw = bw + nvlink_link_gbps_x1000(str_sub(t, colon + 1, str_len(t) - colon - 1));
+    }
+    return added + _nvlink_add(sio, gpu, bw);
+}
+
+fn _detect_nvlink_nvswitch(sio, profiles, warnings, allow_exec) {
     # Check for NVSwitch via sysfs
     if (dir_exists("/sys/devices/virtual/nvidia-nvswitch") == 1) {
         var ic = interconnect_new(ICK_NVSWITCH, "nvswitch", 900000);
-        ic_set_state(ic, "Active");
+        ic_set_state(ic, IB_PORT_STATE_ACTIVE);
         sio_add_interconnect(sio, ic);
         return 0;
     }
@@ -83,18 +188,23 @@ fn _detect_nvlink_nvswitch(sio, profiles, warnings) {
         var nvsw_entries = sysfs_list_dir("/sys/bus/nvidia_nvswitch/devices");
         if (vec_len(nvsw_entries) > 0) {
             var ic = interconnect_new(ICK_NVSWITCH, "nvswitch", 900000);
-            ic_set_state(ic, "Active");
+            ic_set_state(ic, IB_PORT_STATE_ACTIVE);
             sio_add_interconnect(sio, ic);
             return 0;
         }
     }
 
+    if (allow_exec == 0) { return 0; }
     # `nvidia-smi nvlink -s` only when there is an NVIDIA GPU to ask about
     # (2.5.2). Through 2.5.1 it ran whenever the NVSwitch nodes were missing:
     # a host without nvidia-smi was told so a second time, and one with
     # nvidia-smi but no GPU it can reach (a container without the driver)
     # spawned it again for nothing.
     if (profiles_have_nvidia_gpu(profiles) == 0) { return 0; }
+    # Nor after the CUDA backend's nvidia-smi run hit the deadline in this
+    # pass (2.5.5): the same driver would hang `nvlink -s` as long again, so a
+    # wedged GPU cost two deadlines.
+    if (_warnings_have_timeout(warnings, "nvidia-smi") == 1) { return 0; }
     # Its exit status is not judged (2.5.4): what `nvlink -s` returns on a GPU
     # without NVLink is not documented (nvidia-smi's 3 is "the requested
     # operation is not available on target device"), and the CUDA backend's
@@ -104,39 +214,22 @@ fn _detect_nvlink_nvswitch(sio, profiles, warnings) {
     vec_push(nargs, "nvlink");
     vec_push(nargs, "-s");
     var result = run_tool_status("nvidia-smi", nargs, warnings, 0);
-    if (result != 0) {
-        if (str_len(result) > 0) {
-            # Count NVLink entries and estimate bandwidth
-            var link_count = 0;
-            var link_bw = 25000;
-            var lines = str_split(result, 10);
-            var li = 0;
-            while (li < vec_len(lines)) {
-                var line = vec_get(lines, li);
-                li = li + 1;
-                if (str_contains_cstr(line, "Link") == 1) {
-                    link_count = link_count + 1;
-                    # Parse bandwidth if available
-                    var bval = parse_value_with_suffix(line);
-                    if (bval > 0) { link_bw = bval * 1000; }
-                }
-            }
-            if (link_count > 0) {
-                var total_bw = link_bw * link_count;
-                var ic = interconnect_new(ICK_NVLINK, "nvlink", total_bw);
-                sio_add_interconnect(sio, ic);
-            }
-        }
-    }
+    if (result != 0) { parse_nvlink_status(result, sio); }
     return 0;
 }
 
 # --- AMD XGMI / Infinity Fabric ---
 
 fn _detect_xgmi(sio) {
-    # Check sysfs for XGMI hive
-    var drm_dir = str_from("/sys/class/drm");
-    var entries = dir_list(drm_dir);
+    return _detect_xgmi_at(sio, "/sys/class/drm");
+}
+
+# One XGMI interconnect when a card of the drm class at `root` (a cstr) has
+# device/xgmi_hive_info, which amdgpu creates only for a GPU in a hive.
+# Through 2.5.4 the path went through str_data, which read its first 8 bytes
+# as a pointer, so no hive was ever found.
+fn _detect_xgmi_at(sio, root) {
+    var entries = sysfs_list_dir(root);
     var nent = vec_len(entries);
     var has_xgmi = 0;
 
@@ -147,8 +240,7 @@ fn _detect_xgmi(sio) {
         if (str_starts_with(name, "card") != 1) { continue; }
         if (str_index_of(name, 45) >= 0) { continue; }
 
-        var hive_path = sysfs_path_str("/sys/class/drm", name, "device/xgmi_hive_info");
-        if (aihw_path_exists(str_data(hive_path)) == 1) {
+        if (aihw_path_exists(sysfs_path_str(root, name, "device/xgmi_hive_info")) == 1) {
             has_xgmi = 1;
             break;
         }
@@ -163,8 +255,14 @@ fn _detect_xgmi(sio) {
 
 # --- Google TPU ICI ---
 
+# One ICI interconnect over every TPU profile: the sum of each one's chips
+# times its version's per-chip bandwidth (GB/s x1000). Through 2.5.4 only the
+# first TPU profile counted, so a host with one profile per chip reported one
+# chip's bandwidth while the planner used them all.
 fn _detect_ici(sio, profiles) {
     var np = vec_len(profiles);
+    var total_bw = 0;
+    var seen = 0;
     var pi = 0;
     while (pi < np) {
         var p = vec_get(profiles, pi);
@@ -173,15 +271,16 @@ fn _detect_ici(sio, profiles) {
 
         var version = profile_tpu_version(p);
         var chips = profile_tpu_chips(p);
-        # Per-chip ICI bandwidth by version (GB/s * 1000)
+        if (chips < 1) { chips = 1; }
         var per_chip_bw = 192000;
         if (version == TPU_V5E) { per_chip_bw = 204800; }
         elif (version == TPU_V5P) { per_chip_bw = 409600; }
 
-        var total_bw = per_chip_bw * chips;
-        var ic = interconnect_new(ICK_ICI, "ici", total_bw);
-        sio_add_interconnect(sio, ic);
-        break;
+        total_bw = total_bw + per_chip_bw * chips;
+        seen = 1;
+    }
+    if (seen == 1) {
+        sio_add_interconnect(sio, interconnect_new(ICK_ICI, "ici", total_bw));
     }
     return 0;
 }

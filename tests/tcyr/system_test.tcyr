@@ -1,0 +1,424 @@
+# system_test.tcyr — the system passes and the library entry points around
+# detection (2.5.5): the runtime environment (k8s GPU count, cloud DMI),
+# storage classification over a fixture /sys/block, the TTL cache under
+# threads, the threaded entry point's backend split and its first getenv, and
+# the data directory a library build resolves. Linux only: the fixtures live
+# under /tmp, and two tests run this binary again as a child (/proc/self/exe).
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+include "lib/args.cyr"
+
+include "lib/sakshi.cyr"
+include "src/log.cyr"
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/cuda.cyr"
+include "src/detect/rocm.cyr"
+include "src/detect/tpu.cyr"
+include "src/detect/gaudi.cyr"
+include "src/detect/neuron.cyr"
+include "src/detect/vulkan.cyr"
+include "src/detect/apple.cyr"
+include "src/detect/intel.cyr"
+include "src/detect/amd_xdna.cyr"
+include "src/detect/edge.cyr"
+include "src/detect/cloud_asic.cyr"
+include "src/detect/bandwidth.cyr"
+include "src/detect/pcie.cyr"
+include "src/detect/numa.cyr"
+include "src/detect/interconnect.cyr"
+include "src/detect/disk.cyr"
+include "src/detect/environment.cyr"
+include "src/registry.cyr"
+include "src/plan.cyr"
+include "src/training.cyr"
+include "lib/thread.cyr"
+include "src/async_detect.cyr"
+include "src/cache.cyr"
+include "src/lazy.cyr"
+include "src/json_out.cyr"
+
+# --- Fixtures ---
+
+var _fx_seq = 0;
+
+# A fresh directory /tmp/ai-hwaccel-sys-<pid>-<n>, as a cstr.
+fn _fx_dir() {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "/tmp/ai-hwaccel-sys-");
+    str_builder_add_int(sb, sys_getpid());
+    str_builder_putc(sb, '-');
+    str_builder_add_int(sb, _fx_seq);
+    _fx_seq = _fx_seq + 1;
+    var d = str_data(str_builder_build(sb));
+    sys_mkdir(d, 0x1ED);
+    return d;
+}
+
+# Write cstr `text` to `dir`/`rel`, making the directories on the way, with
+# mode `mode`. Returns the path.
+fn _fx_file(dir, rel, text, mode) {
+    var p = sysfs_path(dir, rel, 0);
+    var n = strlen(p);
+    var i = strlen(dir) + 1;
+    while (i < n) {
+        if (load8(p + i) == 47) {
+            store8(p + i, 0);
+            sys_mkdir(p, 0x1ED);
+            store8(p + i, 47);
+        }
+        i = i + 1;
+    }
+    file_write_all(p, text, strlen(text));
+    sys_chmod(p, mode);
+    return p;
+}
+
+fn _fx_rm(dir) {
+    run_tool2("rm", "-rf", dir, 0);
+    return 0;
+}
+
+# --- Runtime environment (2.5.5) ---
+
+# NVIDIA_VISIBLE_DEVICES as the NVIDIA container toolkit reads it. Through
+# 2.5.4 "all", "void", "none", "" and the volume-mounts path all counted 1.
+fn test_visible_devices_count() {
+    assert_eq(visible_devices_count("0,1,2,3"), 4, "k8s gpus: index list");
+    assert_eq(visible_devices_count("GPU-aaa,GPU-bbb"), 2, "k8s gpus: uuid list");
+    assert_eq(visible_devices_count("0,1,"), 2, "k8s gpus: trailing comma");
+    assert_eq(visible_devices_count("0,,1"), 2, "k8s gpus: empty item");
+    assert_eq(visible_devices_count("3"), 1, "k8s gpus: one");
+    assert_eq(visible_devices_count(""), 0, "k8s gpus: empty is none");
+    assert_eq(visible_devices_count("void"), 0, "k8s gpus: void");
+    assert_eq(visible_devices_count("none"), 0, "k8s gpus: none");
+    assert_eq(visible_devices_count("all"), PROFILE_NONE, "k8s gpus: all is unknown");
+    assert_eq(visible_devices_count("/var/run/nvidia-container-devices"), PROFILE_NONE, "k8s gpus: volume-mounts path");
+    assert_eq(visible_devices_count(0), PROFILE_NONE, "k8s gpus: unset");
+    return 0;
+}
+
+# An environment with no k8s GPU count omits the field: through 2.5.4 every
+# environment said "k8s_gpu_count":0.
+fn test_env_gpu_count_unset() {
+    var env = runtime_env_new();
+    assert_eq(env_k8s_gpu_count(env), PROFILE_NONE, "fresh env: k8s gpu count unset");
+    env_set_is_docker(env, 1);
+    var r = registry_from_profiles(vec_new());
+    sio_set_environment(reg_system_io(r), env);
+    var json = registry_to_json(r);
+    assert(str_contains_cstr(json, "\"is_docker\":true") == 1, "env json: docker");
+    assert_eq(str_contains_cstr(json, "k8s_gpu_count"), 0, "env json: no k8s_gpu_count off k8s");
+    return 0;
+}
+
+fn _cloud(vendor, bios, biosver, product, asset) {
+    var v = 0;
+    var b = 0;
+    var bv = 0;
+    var p = 0;
+    var a = 0;
+    if (vendor != 0) { v = str_from(vendor); }
+    if (bios != 0) { b = str_from(bios); }
+    if (biosver != 0) { bv = str_from(biosver); }
+    if (product != 0) { p = str_from(product); }
+    if (asset != 0) { a = str_from(asset); }
+    var c = dmi_cloud_provider(v, b, bv, p, a);
+    if (c == 0) { return ""; }
+    return c;
+}
+
+# DMI strings from real hosts. Through 2.5.4 sys_vendor alone decided: the
+# Surface and the local Hyper-V VM read as Azure, the Chromebook as GCP, and
+# Xen EC2 as nothing.
+fn test_dmi_cloud_provider() {
+    var ms = "Microsoft Corporation";
+    var hv = "Hyper-V UEFI Release v4.1";
+    assert_streq(_cloud(ms, ms, "124.1", "Surface Laptop 4", "0"), "", "Surface Laptop: no cloud");
+    assert_streq(_cloud(ms, ms, hv, "Virtual Machine", "1234"), "", "local Hyper-V VM: no cloud");
+    assert_streq(_cloud(ms, ms, hv, "Virtual Machine", "7783-7084-3265-9085-8269-3286-77"), "azure", "Azure VM");
+    assert_streq(_cloud("Google", "coreboot", "Google_Volteer.13672.0.0", "Volteer", 0), "", "Chromebook: no cloud");
+    assert_streq(_cloud("Google", "Google", "Google", "Google Compute Engine", 0), "gcp", "GCE");
+    assert_streq(_cloud("Xen", "Xen", "4.11.amazon", "HVM domU", 0), "aws", "Xen EC2 (p3)");
+    assert_streq(_cloud("Amazon EC2", "Amazon EC2", "1.0", "p4d.24xlarge", 0), "aws", "Nitro EC2");
+    assert_streq(_cloud("LENOVO", "LENOVO", "N3HET80W", "21CB", 0), "", "a laptop");
+    assert_streq(_cloud(0, 0, 0, 0, 0), "", "no DMI");
+    return 0;
+}
+
+# --- Storage (2.5.5) ---
+
+fn test_storage_classify() {
+    assert_eq(storage_name_skipped(str_from("nbd0")), 1, "skip nbd");
+    assert_eq(storage_name_skipped(str_from("zd16")), 1, "skip ZFS zvol");
+    assert_eq(storage_name_skipped(str_from("rbd0")), 1, "skip Ceph RBD");
+    assert_eq(storage_name_skipped(str_from("drbd1")), 1, "skip DRBD");
+    assert_eq(storage_name_skipped(str_from("mtdblock0")), 1, "skip MTD");
+    assert_eq(storage_name_skipped(str_from("loop3")), 1, "skip loop");
+    assert_eq(storage_name_skipped(str_from("sda")), 0, "keep sda");
+    assert_eq(storage_name_skipped(str_from("nvme0n1")), 0, "keep nvme");
+    var pcie = str_from("pcie");
+    var nvme = str_from("nvme0n1");
+    assert_eq(storage_classify(nvme, 0 - 1, str_from("Samsung SSD 980"), pcie), STK_NVME, "local NVMe");
+    assert_eq(storage_classify(nvme, 0 - 1, str_from("Amazon Elastic Block Store"), pcie), STK_UNKNOWN, "EBS on Nitro");
+    assert_eq(storage_classify(nvme, 0 - 1, str_from("Linux"), str_from("tcp")), STK_UNKNOWN, "NVMe over TCP");
+    assert_eq(storage_classify(str_from("nvme3n1"), 0 - 1, 0, 0), STK_NVME, "NVMe, no model read");
+    assert_eq(storage_classify(str_from("sda"), 0, 0, 0), STK_SATA_SSD, "SATA SSD");
+    assert_eq(storage_classify(str_from("sdb"), 1, 0, 0), STK_HDD, "HDD");
+    assert_eq(storage_classify(str_from("vda"), 0 - 1, 0, 0), STK_UNKNOWN, "no rotational flag");
+    assert_eq(storage_kind_bw_x1000(STK_NVME), 3500, "NVMe 3.5 GB/s");
+    assert_eq(storage_kind_bw_x1000(STK_UNKNOWN), 100, "unknown 0.1 GB/s");
+    return 0;
+}
+
+# The storage entry named `name` in `devs`, or 0.
+fn _storage_named(devs, name) {
+    var i = 0;
+    while (i < vec_len(devs)) {
+        var d = vec_get(devs, i);
+        if (streq(storage_name(d), name) == 1) { return d; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# detect_storage over a fixture /sys/block. Through 2.5.4 the unattached
+# nbd node and the empty card reader (size 0) were listed, and the EBS
+# volume was a 3.5 GB/s NVMe.
+fn test_detect_storage_fixture() {
+    var t = _fx_dir();
+    _fx_file(t, "nvme0n1/size", "1000215216\n", 0x1A4);
+    _fx_file(t, "nvme0n1/device/model", "Samsung SSD 980 PRO 1TB                 \n", 0x1A4);
+    _fx_file(t, "nvme0n1/device/transport", "pcie\n", 0x1A4);
+    _fx_file(t, "nvme1n1/size", "209715200\n", 0x1A4);
+    _fx_file(t, "nvme1n1/device/model", "Amazon Elastic Block Store              \n", 0x1A4);
+    _fx_file(t, "nbd0/size", "0\n", 0x1A4);
+    _fx_file(t, "nbd1/size", "2048\n", 0x1A4);
+    _fx_file(t, "sda/size", "3907029168\n", 0x1A4);
+    _fx_file(t, "sda/queue/rotational", "1\n", 0x1A4);
+    _fx_file(t, "sdb/size", "0\n", 0x1A4);
+    _fx_file(t, "sdb/queue/rotational", "0\n", 0x1A4);
+    _fx_file(t, "sdc/queue/rotational", "0\n", 0x1A4);
+    var sio = system_io_new();
+    detect_storage_in(sio, t);
+    var devs = sio_storage(sio);
+    assert_eq(vec_len(devs), 4, "storage: four devices");
+    var n0 = _storage_named(devs, "nvme0n1");
+    assert(n0 != 0, "storage: local NVMe listed");
+    if (n0 != 0) { assert_eq(storage_bw_x1000(n0), 3500, "storage: local NVMe 3.5 GB/s"); }
+    var n1 = _storage_named(devs, "nvme1n1");
+    assert(n1 != 0, "storage: EBS listed");
+    if (n1 != 0) { assert_eq(storage_kind(n1), STK_UNKNOWN, "storage: EBS is not a local NVMe"); }
+    var sa = _storage_named(devs, "sda");
+    assert(sa != 0, "storage: HDD listed");
+    if (sa != 0) { assert_eq(storage_kind(sa), STK_HDD, "storage: HDD kind"); }
+    assert(_storage_named(devs, "sdc") != 0, "storage: a device without a size file is kept");
+    assert_eq(_storage_named(devs, "sdb"), 0, "storage: an empty card reader is skipped");
+    assert_eq(_storage_named(devs, "nbd0") + _storage_named(devs, "nbd1"), 0, "storage: nbd skipped");
+    _fx_rm(t);
+    return 0;
+}
+
+# --- TTL cache (2.5.5) ---
+
+fn test_cache_fresh() {
+    assert_eq(_cache_fresh(1, 100, 60, 120), 1, "cache: within the TTL");
+    assert_eq(_cache_fresh(1, 100, 60, 160), 0, "cache: past the TTL");
+    assert_eq(_cache_fresh(0, 100, 60, 120), 0, "cache: no registry");
+    assert_eq(_cache_fresh(1, 0, 60, 0), 0, "cache: a clock that reads 0 never serves");
+    assert_eq(_cache_fresh(1, 0, 60, 0 - 5), 0, "cache: a failing clock never serves");
+    return 0;
+}
+
+var _cc_c = 0;
+var _cc_a = 0;
+var _cc_b = 0;
+
+fn _cc_worker_a(arg) {
+    _cc_a = cached_get(_cc_c);
+    return 0;
+}
+
+fn _cc_worker_b(arg) {
+    _cc_b = cached_get(_cc_c);
+    return 0;
+}
+
+# Two cold misses share one detection, and an invalidate that lands during a
+# miss is not overwritten by it. Through 2.5.4 both failed on every run.
+fn test_cached_concurrent() {
+    _cc_c = cached_registry_new(3600);
+    var x = thread_create(&_cc_worker_a, 0);
+    var y = thread_create(&_cc_worker_b, 0);
+    if (x != 0) { thread_join(x); }
+    if (y != 0) { thread_join(y); }
+    assert(_cc_a != 0, "cache: a concurrent miss has a registry");
+    assert_eq(_cc_a, _cc_b, "cache: concurrent cold misses share one detection");
+
+    _cc_c = cached_registry_new(3600);
+    _cc_a = 0;
+    var t = thread_create(&_cc_worker_a, 0);
+    assert(t != 0, "cache: invalidate test thread started");
+    if (t != 0) {
+        # Wait until the miss holds the mutex (or is already done).
+        while (atomic_load(cached_mutex(_cc_c)) == 0 && atomic_load(&_cc_a) == 0) { }
+        cached_invalidate(_cc_c);
+        thread_join(t);
+    }
+    assert_eq(cached_is_valid(_cc_c), 0, "cache: an invalidate during a miss is not overwritten");
+    return 0;
+}
+
+# --- Threaded detection (2.5.5) ---
+
+# Every backend that can start a tool runs on a thread; Cerebras and
+# Graphcore ran theirs on the calling thread through 2.5.4.
+fn test_threaded_mask() {
+    var m = _threaded_mask(builder_all());
+    var b = 0;
+    var ok = 1;
+    while (b < AIHW_BACKEND_COUNT) {
+        var want = 0;
+        if (b == BACKEND_CUDA || b == BACKEND_INTEL_ONEAPI || b == BACKEND_VULKAN || b == BACKEND_APPLE) { want = 1; }
+        if (b == BACKEND_GAUDI || b == BACKEND_NEURON || b == BACKEND_CEREBRAS || b == BACKEND_GRAPHCORE) { want = 1; }
+        if (builder_is_enabled(m, b) != want) { ok = 0; }
+        if (backend_may_exec(b) != want) { ok = 0; }
+        b = b + 1;
+    }
+    assert_eq(ok, 1, "threaded: exactly the tool backends get a thread");
+    assert_eq(builder_is_enabled(m, BACKEND_GRAPHCORE), 1, "threaded: Graphcore on a thread");
+    assert_eq(builder_is_enabled(m, BACKEND_GAUDI), 1, "threaded: Gaudi on a thread");
+    assert_eq(builder_is_enabled(m, BACKEND_NEURON), 1, "threaded: Neuron on a thread");
+    assert_eq(builder_is_enabled(m, BACKEND_ROCM), 0, "threaded: ROCm on the calling thread");
+    var cuda_only = builder_with(builder_none(), BACKEND_CUDA);
+    assert_eq(_threaded_mask(cuda_only), cuda_only, "threaded: the caller's mask applies");
+    return 0;
+}
+
+# A child run of this binary, by its own path, with `mode` (and `extra` args
+# when not 0) after --aihw-child.
+fn _child_args(mode, extra) {
+    var a = vec_new();
+    vec_push(a, "/proc/self/exe");
+    vec_push(a, "--aihw-child");
+    vec_push(a, mode);
+    if (extra != 0) {
+        var i = 0;
+        while (i < vec_len(extra)) {
+            vec_push(a, vec_get(extra, i));
+            i = i + 1;
+        }
+    }
+    return a;
+}
+
+# A library consumer whose first getenv is registry_detect_threaded keeps its
+# tools. Through 2.5.4 a detector thread's which() raced lib/io.cyr's
+# environment load, and with a 64 KB environment the fake vulkaninfo below
+# read as "not found" on nearly every run. A child process, because the
+# environment loads once per process.
+fn test_threaded_first_getenv() {
+    var t = _fx_dir();
+    _fx_file(t, "vulkaninfo", "#!/bin/sh\nexit 0\n", 0x1ED);
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "PATH=");
+    str_builder_add_cstr(sb, t);
+    str_builder_add_cstr(sb, ":/usr/bin:/bin");
+    var pad = alloc(65536 + 5);
+    memcpy(pad, "PAD=", 4);
+    memset(pad + 4, 120, 65536);
+    store8(pad + 4 + 65536, 0);
+    var env = vec_new();
+    vec_push(env, pad);
+    vec_push(env, str_data(str_builder_build(sb)));
+    var runs = 0;
+    var clean = 0;
+    while (runs < 5) {
+        if (exec_env(_child_args("env-race", 0), env) == 0) { clean = clean + 1; }
+        runs = runs + 1;
+    }
+    assert_eq(clean, 5, "threaded first use finds vulkaninfo under a 64 KB environment");
+    _fx_rm(t);
+    return 0;
+}
+
+# The child half: exit 1 when threaded detection reported vulkaninfo missing.
+fn _child_env_race() {
+    var r = registry_detect_threaded();
+    var w = reg_warnings(r);
+    var i = 0;
+    while (i < vec_len(w)) {
+        var x = vec_get(w, i);
+        if (warning_code(x) == HWA_ERR_TOOL_NOT_FOUND && streq(warning_tool(x), "vulkaninfo") == 1) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# --- Data directory (2.5.5) ---
+
+# A library build never reads the host program's argv. Through 2.5.4 a host
+# started with --data-dir moved data_file_path to <its dir>/VERSION.
+fn test_data_dir_not_from_argv() {
+    var extra = vec_new();
+    vec_push(extra, "--data-dir");
+    vec_push(extra, "/aihw-host-dir");
+    var buf = alloc(4096);
+    var st[16];
+    var n = exec_capture_status(_child_args("data-dir", extra), buf, 4095, &st);
+    assert_eq(load64(&st), 0, "data dir child ran");
+    assert(n == 7 && memeq(buf, "VERSION", 7) == 1, "a host's --data-dir is not read from argv");
+    return 0;
+}
+
+# The child half: print data_file_path("VERSION"). Its environment is
+# empty (exec_capture_status), so AI_HWACCEL_DATA_DIR is unset.
+fn _child_data_dir() {
+    var p = data_file_path("VERSION");
+    syscall(1, 1, p, strlen(p));
+    return 0;
+}
+
+# --- Run all tests ---
+
+alloc_init();
+args_init();
+
+if (argc() > 2) {
+    if (streq(argv(1), "--aihw-child") == 1) {
+        var code = 0;
+        if (streq(argv(2), "env-race") == 1) { code = _child_env_race(); }
+        if (streq(argv(2), "data-dir") == 1) { code = _child_data_dir(); }
+        syscall(60, code);
+    }
+}
+
+test_visible_devices_count();
+test_env_gpu_count_unset();
+test_dmi_cloud_provider();
+test_storage_classify();
+test_detect_storage_fixture();
+test_cache_fresh();
+test_cached_concurrent();
+test_threaded_mask();
+test_threaded_first_getenv();
+test_data_dir_not_from_argv();
+
+var fails = assert_summary();
+syscall(60, fails);

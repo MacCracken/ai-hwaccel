@@ -79,6 +79,10 @@ class Interconnect:
     kind: str
     name: str
     bandwidth_bytes_per_sec: int
+    # The InfiniBand PortState of an IB/RoCE port (1 DOWN, 2 INIT, 3 ARMED,
+    # 4 ACTIVE, 5 ACTIVE_DEFER), 4 for an NVSwitch fabric, and 0 where no
+    # state is reported (NVLink, XGMI, ICI). Through 2.5.4 the IB and
+    # NVSwitch entries held a memory address here instead.
     state: int
 
     @classmethod
@@ -182,6 +186,10 @@ class ShardingPlan:
     total_memory_bytes: int
     est_tokens_per_sec_x1000: Optional[int] = None
     shards: list = field(default_factory=list)
+    # False when no accelerator group and no CPU holds the model (2.5.5);
+    # the plan is then the CPU fallback, given only for reference. A binary
+    # before 2.5.5 does not send the field.
+    fits: bool = True
 
     @classmethod
     def from_dict(cls, d: dict) -> "ShardingPlan":
@@ -190,6 +198,7 @@ class ShardingPlan:
             strategy_count=d.get("strategy_count", 0),
             total_memory_bytes=d.get("total_memory_bytes", 0),
             est_tokens_per_sec_x1000=d.get("est_tokens_per_sec_x1000"),
+            fits=d.get("fits", True),
             shards=[ModelShard.from_dict(x) for x in d.get("shards", [])],
         )
 

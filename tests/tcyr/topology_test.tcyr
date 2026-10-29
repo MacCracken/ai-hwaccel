@@ -41,50 +41,307 @@ include "src/detect/interconnect.cyr"
 include "src/detect/disk.cyr"
 include "src/detect/environment.cyr"
 
-# --- AMD bus width lookup ---
-
-fn test_amd_bus_width() {
-    var mi300 = str_from("0x740c");
-    assert_eq(_amd_bus_width(mi300), 8192, "MI300X 8192-bit");
-
-    var mi100 = str_from("0x738c");
-    assert_eq(_amd_bus_width(mi100), 4096, "MI100 4096-bit");
-
-    var rx7900 = str_from("0x744c");
-    assert_eq(_amd_bus_width(rx7900), 384, "RX 7900 384-bit");
-
-    var unknown = str_from("0xffff");
-    assert_eq(_amd_bus_width(unknown), 0, "unknown = 0");
-    return 0;
-}
-
-fn test_amd_bus_width_from_vram() {
-    assert_eq(_est_amd_bus_width_from_vram(192 * BYTES_PER_GIB), 8192, "192 GiB = 8192");
-    assert_eq(_est_amd_bus_width_from_vram(80 * BYTES_PER_GIB), 4096, "80 GiB = 4096");
-    assert_eq(_est_amd_bus_width_from_vram(24 * BYTES_PER_GIB), 384, "24 GiB = 384");
-    assert_eq(_est_amd_bus_width_from_vram(8 * BYTES_PER_GIB), 256, "8 GiB = 256");
-    assert_eq(_est_amd_bus_width_from_vram(4 * BYTES_PER_GIB), 128, "4 GiB = 128");
-    return 0;
-}
-
-# --- PCIe bandwidth calculation ---
+# --- PCIe link bandwidth ---
 
 fn test_pcie_bw_calc() {
-    # Gen4 x16: 16 GT/s * 16 * 984/8 = 31488 (x1000)
-    var speed = 16;
-    var width = 16;
-    var bw = speed * width * PCIE_GEN3_PLUS_ENCODING_X1000 / 8;
-    assert(bw > 30000, "Gen4 x16 > 30 GB/s");
-    assert(bw < 32000, "Gen4 x16 < 32 GB/s");
+    var gen1 = parse_decimal_x1000(str_from("2.5 GT/s PCIe"));
+    assert_eq(gen1, 2500, "Gen1 speed is 2.5 GT/s, not 2");
+    assert_eq(pcie_link_bw_x1000(gen1, 16), 4000, "Gen1 x16 = 4 GB/s");
+    assert_eq(pcie_link_bw_x1000(gen1, 1), 250, "Gen1 x1");
+    assert_eq(pcie_link_bw_x1000(5000, 8), 4000, "Gen2 x8 = 4 GB/s");
+    assert_eq(pcie_link_bw_x1000(parse_decimal_x1000(str_from("8.0 GT/s PCIe")), 16), 15744, "Gen3 x16");
+    assert_eq(pcie_link_bw_x1000(parse_decimal_x1000(str_from("8 GT/s")), 16), 15744, "old-kernel format");
+    assert_eq(pcie_link_bw_x1000(parse_decimal_x1000(str_from("16.0 GT/s PCIe")), 16), 31488, "Gen4 x16");
+    assert_eq(pcie_link_bw_x1000(parse_decimal_x1000(str_from("32.0 GT/s PCIe")), 16), 62976, "Gen5 x16");
+    assert_eq(pcie_link_bw_x1000(parse_decimal_x1000(str_from("Unknown")), 16), 0, "unknown speed");
+    assert_eq(pcie_link_bw_x1000(8000, 0), 0, "no width");
+    return 0;
+}
 
-    # Gen3 x16: 8 GT/s * 16 * 984/8 = 15744
-    var bw3 = 8 * 16 * PCIE_GEN3_PLUS_ENCODING_X1000 / 8;
-    assert(bw3 > 15000, "Gen3 x16 > 15 GB/s");
-    assert(bw3 < 16000, "Gen3 x16 < 16 GB/s");
+# --- A fake sysfs tree (2.5.5) ---
+#
+# Built under /tmp at run time, since what matters is symlinks: a DRM card's
+# device link names its PCI address, the device's driver link its driver,
+# and /sys/bus/pci/devices/<addr> leads to the device under its bridge, so
+# "<addr>/.." is the port above it. Real captures from the dev host
+# (tests/fixtures/sysfs/renoir/) fill its APU; the rest is hand-written. `t`
+# is a vec: the root, then each path made and whether it is a directory, so
+# _ft_remove can take them down in reverse.
 
-    # Gen2 x8: 5 GT/s * 8 * 800/8 = 4000
-    var bw2 = 5 * 8 * PCIE_GEN1_GEN2_ENCODING_X1000 / 8;
-    assert_eq(bw2, 4000, "Gen2 x8 = 4 GB/s");
+fn _ft_path(t, rel) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, vec_get(t, 0));
+    str_builder_add_cstr(sb, "/");
+    str_builder_add_cstr(sb, rel);
+    return str_cstr(str_builder_build(sb));
+}
+
+fn _ft_made(t, path, is_dir) {
+    vec_push(t, path);
+    vec_push(t, is_dir);
+    return path;
+}
+
+fn _ft_new() {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "/tmp/ai-hwaccel-sysfs-test-");
+    str_builder_add_int(sb, sys_getpid());
+    var root = str_cstr(str_builder_build(sb));
+    var t = vec_new();
+    vec_push(t, root);
+    sys_mkdir(root, 0x1ED);
+    _ft_made(t, root, 1);
+    return t;
+}
+
+fn _ft_dir(t, rel) {
+    var p = _ft_path(t, rel);
+    sys_mkdir(p, 0x1ED);
+    return _ft_made(t, p, 1);
+}
+
+fn _ft_file(t, rel, text) {
+    var p = _ft_path(t, rel);
+    file_write_all(p, text, strlen(text));
+    return _ft_made(t, p, 0);
+}
+
+fn _ft_copy(t, rel, fixture) {
+    var buf = alloc(8192);
+    var n = file_read_all(fixture, buf, 8191);
+    assert_gt(n, 0, fixture);
+    if (n < 0) { n = 0; }
+    var p = _ft_path(t, rel);
+    file_write_all(p, buf, n);
+    return _ft_made(t, p, 0);
+}
+
+fn _ft_link(t, rel, target) {
+    var p = _ft_path(t, rel);
+    sys_symlink(target, p);
+    return _ft_made(t, p, 0);
+}
+
+fn _ft_remove(t) {
+    var i = vec_len(t) - 2;
+    while (i >= 1) {
+        if (vec_get(t, i + 1) == 1) { sys_rmdir(vec_get(t, i)); } else { sys_unlink(vec_get(t, i)); }
+        i = i - 2;
+    }
+    return 0;
+}
+
+# A PCI device directory `rel` with link attributes; `max_speed` 0 leaves
+# the max_link files out.
+fn _ft_pci_dev(t, rel, max_speed, cur_speed, width) {
+    _ft_dir(t, rel);
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, rel);
+    str_builder_add_cstr(sb, "/");
+    var base = str_cstr(str_builder_build(sb));
+    if (max_speed != 0) {
+        _ft_file(t, _ft_cat(base, "max_link_speed"), max_speed);
+        _ft_file(t, _ft_cat(base, "max_link_width"), width);
+    }
+    if (cur_speed != 0) {
+        _ft_file(t, _ft_cat(base, "current_link_speed"), cur_speed);
+        _ft_file(t, _ft_cat(base, "current_link_width"), width);
+    }
+    return 0;
+}
+
+fn _ft_cat(a, b) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, a);
+    str_builder_add_cstr(sb, b);
+    return str_cstr(str_builder_build(sb));
+}
+
+# The dev host's APU at 0000:04:00.0 behind the 0000:00:08.1 bridge (card1,
+# no card0), an RX 7900 XTX at 0000:83:00.0 behind a Gen4 port (card2), an
+# Intel iGPU (card0, i915), an AMD device on a driver named like amdgpu but
+# not it (card3), an NVIDIA GPU at 0000:65:00.0 on the root bus, a device at
+# 0000:66:00.0 with only its current link, and a Gen1 x1 one at 0000:67:00.0.
+fn _ft_build() {
+    var t = _ft_new();
+    var fx = "tests/fixtures/sysfs/renoir/";
+    _ft_dir(t, "devices");
+    _ft_pci_dev(t, "devices/0000:00:08.1", "8.0 GT/s PCIe\n", "8.0 GT/s PCIe\n", "16\n");
+    var apu = "devices/0000:00:08.1/0000:04:00.0/";
+    _ft_pci_dev(t, "devices/0000:00:08.1/0000:04:00.0", "16.0 GT/s PCIe\n", "2.5 GT/s PCIe\n", "16\n");
+    _ft_file(t, _ft_cat(apu, "vendor"), "0x1002\n");
+    _ft_file(t, _ft_cat(apu, "device"), "0x1638\n");
+    _ft_file(t, _ft_cat(apu, "revision"), "0xc5\n");
+    _ft_file(t, _ft_cat(apu, "mem_info_vram_total"), "3221225472\n");
+    _ft_file(t, _ft_cat(apu, "mem_info_vram_used"), "180809728\n");
+    _ft_file(t, _ft_cat(apu, "numa_node"), "-1\n");
+    _ft_copy(t, _ft_cat(apu, "pp_dpm_mclk"), _ft_cat(fx, "pp_dpm_mclk.txt"));
+    _ft_link(t, _ft_cat(apu, "driver"), "../../../drivers/amdgpu");
+    _ft_pci_dev(t, "devices/0000:80:01.1", "16.0 GT/s PCIe\n", "16.0 GT/s PCIe\n", "16\n");
+    var dgpu = "devices/0000:80:01.1/0000:83:00.0/";
+    _ft_pci_dev(t, "devices/0000:80:01.1/0000:83:00.0", "16.0 GT/s PCIe\n", "2.5 GT/s PCIe\n", "16\n");
+    _ft_file(t, _ft_cat(dgpu, "vendor"), "0x1002\n");
+    _ft_file(t, _ft_cat(dgpu, "device"), "0x744c\n");
+    _ft_file(t, _ft_cat(dgpu, "mem_info_vram_total"), "25753026560\n");
+    _ft_file(t, _ft_cat(dgpu, "numa_node"), "1\n");
+    _ft_file(t, _ft_cat(dgpu, "pp_dpm_mclk"), "0: 96Mhz\n1: 456Mhz\n2: 772Mhz\n3: 1249Mhz *\n");
+    _ft_link(t, _ft_cat(dgpu, "driver"), "../../../drivers/amdgpu");
+    _ft_dir(t, "devices/0000:00:02.0");
+    _ft_file(t, "devices/0000:00:02.0/vendor", "0x8086\n");
+    _ft_file(t, "devices/0000:00:02.0/device", "0x46a6\n");
+    _ft_link(t, "devices/0000:00:02.0/driver", "../../drivers/i915");
+    _ft_dir(t, "devices/0000:05:00.0");
+    _ft_file(t, "devices/0000:05:00.0/vendor", "0x1002\n");
+    _ft_file(t, "devices/0000:05:00.0/device", "0x7550\n");
+    _ft_link(t, "devices/0000:05:00.0/driver", "../../drivers/amdgpux");
+    _ft_pci_dev(t, "devices/0000:65:00.0", "32.0 GT/s PCIe\n", "2.5 GT/s PCIe\n", "16\n");
+    _ft_file(t, "devices/0000:65:00.0/numa_node", "0\n");
+    _ft_pci_dev(t, "devices/0000:66:00.0", 0, "8.0 GT/s PCIe\n", "8\n");
+    _ft_pci_dev(t, "devices/0000:67:00.0", "2.5 GT/s PCIe\n", "2.5 GT/s PCIe\n", "1\n");
+    _ft_dir(t, "drm");
+    _ft_dir(t, "drm/card0");
+    _ft_link(t, "drm/card0/device", "../../devices/0000:00:02.0");
+    _ft_dir(t, "drm/card1");
+    _ft_link(t, "drm/card1/device", "../../devices/0000:00:08.1/0000:04:00.0");
+    _ft_dir(t, "drm/card1-DP-1");
+    _ft_dir(t, "drm/card2");
+    _ft_link(t, "drm/card2/device", "../../devices/0000:80:01.1/0000:83:00.0");
+    _ft_dir(t, "drm/card3");
+    _ft_link(t, "drm/card3/device", "../../devices/0000:05:00.0");
+    _ft_dir(t, "drm/renderD128");
+    _ft_dir(t, "kfd");
+    _ft_dir(t, "kfd/0");
+    _ft_copy(t, "kfd/0/properties", _ft_cat(fx, "kfd-node0-properties.txt"));
+    _ft_dir(t, "kfd/1");
+    _ft_copy(t, "kfd/1/properties", _ft_cat(fx, "kfd-node1-properties.txt"));
+    _ft_dir(t, "kfd/1/mem_banks");
+    _ft_dir(t, "kfd/1/mem_banks/0");
+    _ft_copy(t, "kfd/1/mem_banks/0/properties", _ft_cat(fx, "kfd-node1-mem-bank0-properties.txt"));
+    _ft_dir(t, "kfd/2");
+    var node2 = "gfx_target_version 110000\nvendor_id 4098\ndevice_id 29772\nlocation_id 33536\ndomain 0\n";
+    _ft_file(t, "kfd/2/properties", node2);
+    _ft_dir(t, "kfd/2/mem_banks");
+    _ft_dir(t, "kfd/2/mem_banks/0");
+    _ft_file(t, "kfd/2/mem_banks/0/properties", "heap_type 1\nwidth 384\nmem_clk_max 1249\n");
+    _ft_dir(t, "pci");
+    _ft_link(t, "pci/0000:04:00.0", "../devices/0000:00:08.1/0000:04:00.0");
+    _ft_link(t, "pci/0000:83:00.0", "../devices/0000:80:01.1/0000:83:00.0");
+    _ft_link(t, "pci/0000:65:00.0", "../devices/0000:65:00.0");
+    return t;
+}
+
+# The profile in `profs` at PCI address `bdf` (a cstr), or 0.
+fn _by_bdf(profs, bdf) {
+    var i = 0;
+    while (i < vec_len(profs)) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        if (profile_pci_bdf(p) != 0) {
+            if (streq(profile_pci_bdf(p), bdf) == 1) { return p; }
+        }
+    }
+    return 0;
+}
+
+fn _cc_is(p, s) {
+    if (p == 0) { return 0; }
+    if (profile_compute_cap(p) == 0) { return 0; }
+    return streq(profile_compute_cap(p), s);
+}
+
+# detect_rocm on the tree: each amdgpu card from its own device directory
+# (2.5.5). Through 2.5.4 bandwidth came from "card<device_id>" (card0, the
+# iGPU, for the APU) and the pp_dpm_mclk level, the gfx target from the PCI
+# revision, and a driver named "amdgpu" plus anything counted.
+fn test_rocm_fake_tree(t) {
+    var profs = vec_new();
+    detect_rocm_at(profs, _ft_path(t, "drm"), _ft_path(t, "kfd"));
+    assert_eq(vec_len(profs), 2, "rocm: the two amdgpu cards");
+    var apu = _by_bdf(profs, "0000:04:00.0");
+    var dgpu = _by_bdf(profs, "0000:83:00.0");
+    assert(apu != 0, "rocm: the APU carries its PCI address");
+    assert(dgpu != 0, "rocm: the dGPU carries its PCI address");
+    if (apu == 0 || dgpu == 0) { return 0; }
+    assert_eq(profile_accel_type(apu), ACCEL_ROCM, "rocm type");
+    assert_eq(profile_memory_bytes(apu), 3221225472, "apu: vram total");
+    assert_eq(profile_mem_free(apu), 3221225472 - 180809728, "apu: free");
+    assert_eq(profile_pci_id(apu), pci_id_make(0x1002, 0x1638), "apu: pci id");
+    assert(_cc_is(apu, "gfx90c") == 1, "apu: gfx90c, not the revision 0xc5");
+    assert_eq(profile_mem_bw_x1000(apu), 51200, "apu: 1600 MHz x 128 bit x 2 = 51.2 GB/s");
+    assert(_cc_is(dgpu, "gfx1100") == 1, "dgpu: gfx1100");
+    assert_eq(profile_mem_bw_x1000(dgpu), 959232, "dgpu: GDDR6 1249 MHz x 384 bit x 16");
+    # Without KFD the gfx target and bus width are unknown: no guess.
+    var nk = vec_new();
+    detect_rocm_at(nk, _ft_path(t, "drm"), _ft_path(t, "no-kfd"));
+    assert_eq(vec_len(nk), 2, "no kfd: the cards are still found");
+    var nka = _by_bdf(nk, "0000:04:00.0");
+    if (nka != 0) {
+        assert_eq(profile_mem_bw_x1000(nka), PROFILE_NONE, "no kfd: bandwidth unknown");
+        assert_eq(profile_compute_cap(nka), 0, "no kfd: gfx target unknown");
+    }
+    return 0;
+}
+
+# enrich_pcie / enrich_numa read each profile's own PCI address (2.5.5), and
+# the link's capability: the idle current link (2.5 GT/s) is not it, and a
+# port above the device caps it.
+fn test_enrich_fake_tree(t) {
+    var profs = vec_new();
+    detect_rocm_at(profs, _ft_path(t, "drm"), _ft_path(t, "kfd"));
+    var row = "81559, 0, 81559, 9.0, 550.54, NVIDIA H100 PCIe, 30, 70, 0, 1593, 0x233110DE";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "0, ");
+    str_builder_add_cstr(sb, row);
+    str_builder_add_cstr(sb, ", 00000000:65:00.0\n1, ");
+    str_builder_add_cstr(sb, row);
+    parse_cuda_output(str_builder_build(sb), profs, vec_new());
+    enrich_pcie_at(profs, _ft_path(t, "pci"));
+    enrich_numa_at(profs, _ft_path(t, "pci"));
+    var apu = _by_bdf(profs, "0000:04:00.0");
+    var dgpu = _by_bdf(profs, "0000:83:00.0");
+    var nv = _by_bdf(profs, "0000:65:00.0");
+    if (apu == 0 || dgpu == 0 || nv == 0) {
+        assert(0, "enrich: profiles with addresses");
+        return 0;
+    }
+    assert_eq(profile_pcie_bw_x1000(apu), 15744, "apu: Gen4 device on a Gen3 port, not its idle Gen1");
+    assert_eq(profile_pcie_bw_x1000(dgpu), 31488, "dgpu: Gen4 x16");
+    assert_eq(profile_pcie_bw_x1000(nv), 62976, "nvidia: Gen5 x16 on the root bus");
+    assert_eq(profile_numa_node(apu), PROFILE_NONE, "apu: numa_node -1");
+    assert_eq(profile_numa_node(dgpu), 1, "dgpu: its own numa node");
+    assert_eq(profile_numa_node(nv), 0, "nvidia: its own numa node");
+    var none = vec_get(profs, vec_len(profs) - 1);
+    assert_eq(profile_pci_bdf(none), 0, "the second CUDA row has no address");
+    assert_eq(profile_pcie_bw_x1000(none), PROFILE_NONE, "no address: no link guessed");
+    assert_eq(profile_numa_node(none), PROFILE_NONE, "no address: no node guessed");
+    # No max_link files: the current link.
+    var cur = _ft_path(t, "devices/0000:66:00.0");
+    assert_eq(pcie_link_cap(cur, "max_link_speed", "current_link_speed", 1), 8000, "current speed fallback");
+    assert_eq(pcie_link_cap(cur, "max_link_width", "current_link_width", 0), 8, "current width fallback");
+    var g1 = _ft_path(t, "devices/0000:67:00.0");
+    assert_eq(pcie_link_cap(g1, "max_link_speed", "current_link_speed", 1), 2500, "Gen1: 2.5 GT/s, not 2");
+    return 0;
+}
+
+# The Vulkan sysfs scan on the tree: vendors by their parsed IDs, the Intel
+# iGPU at 00:02.0 all shared, and with `leave_amdgpu` only amdgpu itself left
+# to ROCm.
+fn test_vulkan_sysfs_fake_tree(t) {
+    var all = vec_new();
+    _detect_vulkan_sysfs_at(all, 0, _ft_path(t, "drm"));
+    assert_eq(vec_len(all), 4, "vulkan scan: four cards");
+    var left = vec_new();
+    _detect_vulkan_sysfs_at(left, 1, _ft_path(t, "drm"));
+    assert_eq(vec_len(left), 2, "vulkan scan: amdgpu's two cards left to ROCm");
+    var igpu = 0;
+    var i = 0;
+    while (i < vec_len(all)) {
+        var p = vec_get(all, i);
+        if (profile_pci_id(p) == pci_id_make(0x8086, 0x46a6)) { igpu = p; }
+        i = i + 1;
+    }
+    assert(igpu != 0, "vulkan scan: the intel igpu");
+    if (igpu != 0) { assert_eq(profile_shared_bytes(igpu), profile_memory_bytes(igpu), "intel igpu: all shared"); }
     return 0;
 }
 
@@ -174,9 +431,12 @@ fn test_nvswitch_helpers() {
 
 alloc_init();
 
-test_amd_bus_width();
-test_amd_bus_width_from_vram();
 test_pcie_bw_calc();
+var tree = _ft_build();
+test_rocm_fake_tree(tree);
+test_enrich_fake_tree(tree);
+test_vulkan_sysfs_fake_tree(tree);
+_ft_remove(tree);
 test_interconnect_names();
 test_storage_names();
 test_ici_bandwidth();

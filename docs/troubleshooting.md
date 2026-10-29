@@ -127,6 +127,18 @@ changed; [docs/schema.json](schema.json) describes the current format.
 
 ---
 
+## "`AI_HWACCEL_BIN=... is not an executable file`" (Python)
+
+**Cause**: since 2.5.5 a `binary=` argument or an `AI_HWACCEL_BIN` that names a
+missing or non-executable file raises `BinaryNotFoundError`. Through 2.5.4 the
+package ran the wheel-bundled binary or the one on `PATH` instead, without a
+word, so the results came from a build the caller had not chosen.
+
+**Fix**: point it at the binary you built (and `chmod +x` it), or unset
+`AI_HWACCEL_BIN` to use the bundled one.
+
+---
+
 ## "`pcie_bandwidth_x1000` is missing"
 
 **Cause**: The sysfs PCI device files `current_link_width` and

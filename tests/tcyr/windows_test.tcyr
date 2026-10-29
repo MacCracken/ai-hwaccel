@@ -301,6 +301,38 @@ fn test_win_gpu_empty() {
     assert_eq(vec_len(profiles), 0, "no profiles");
 }
 
+# A virtual display adapter is no GPU (2.5.5): an RDP session's Remote
+# Display Adapter (SWD\), an indirect-display driver (ROOT\) and Hyper-V's
+# synthetic video are skipped, a PCI GPU and Windows on Arm's ACPI Adreno are
+# kept, and device ids count the GPUs kept. Through 2.5.4 all five were GPUs.
+fn test_win_gpu_virtual_skipped() {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "AdapterRAM=0\r\nName=Microsoft Remote Display Adapter\r\n");
+    str_builder_add_cstr(sb, "PNPDeviceID=SWD\\REMOTEDISPLAYENUM\\RDPIDD_INDIRECTDISPLAY&SESSIONID_0001\r\n\r\n");
+    str_builder_add_cstr(sb, "AdapterRAM=0\r\nName=Microsoft Hyper-V Video\r\n");
+    str_builder_add_cstr(sb, "PNPDeviceID=VMBUS\\{da0a7802-e377-4aac-8e77-0558eb1073f8}\\{5620e0c7-8062}\r\n\r\n");
+    str_builder_add_cstr(sb, "AdapterRAM=0\r\nName=Virtual Display Driver\r\nPNPDeviceID=ROOT\\DISPLAY\\0000\r\n\r\n");
+    str_builder_add_cstr(sb, "AdapterRAM=4293918720\r\nName=NVIDIA GeForce RTX 3060\r\n");
+    str_builder_add_cstr(sb, "PNPDeviceID=PCI\\VEN_10DE&DEV_2503&SUBSYS_00000000&REV_A1\\4&1\r\n\r\n");
+    str_builder_add_cstr(sb, "AdapterRAM=0\r\nName=Qualcomm(R) Adreno(TM) X1-85 GPU\r\n");
+    str_builder_add_cstr(sb, "PNPDeviceID=ACPI\\QCOM0C36\\2&DABA3FF&0\r\n");
+    var profiles = vec_new();
+    assert_eq(win_parse_videocontrollers(str_builder_build(sb), profiles), 2, "virtual adapters: two GPUs");
+    if (vec_len(profiles) == 2) {
+        var p0 = vec_get(profiles, 0);
+        var p1 = vec_get(profiles, 1);
+        assert_streq(profile_device_name(p0), "NVIDIA GeForce RTX 3060", "virtual adapters: the PCI GPU kept");
+        assert_eq(profile_device_id(p0), 0, "virtual adapters: device 0");
+        assert_streq(profile_device_name(p1), "Qualcomm(R) Adreno(TM) X1-85 GPU", "virtual adapters: ACPI GPU kept");
+        assert_eq(profile_device_id(p1), 1, "virtual adapters: device 1");
+    }
+    var vm = "VMBUS\\{11111111-2222-3333-4444-555555555555}\\x";
+    assert_eq(win_pnp_is_virtual(vm, strlen(vm)), 0, "another VMBUS device (a partitioned GPU) is kept");
+    var swd = "swd\\remotedisplayenum";
+    assert_eq(win_pnp_is_virtual(swd, strlen(swd)), 1, "SWD in lower case");
+    return 0;
+}
+
 # --- win_parse_total_memory (wmic fallback) ---
 
 fn test_win_mem() {
@@ -342,6 +374,7 @@ test_win_gpu_single();
 test_win_gpu_multi();
 test_win_gpu_crlf();
 test_win_gpu_empty();
+test_win_gpu_virtual_skipped();
 test_win_mem();
 test_win_mem_crlf();
 test_win_mem_absent();

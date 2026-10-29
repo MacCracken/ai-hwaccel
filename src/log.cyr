@@ -9,29 +9,61 @@
 # Contract:
 #   - All logs go to **stderr (fd 2)** via sakshi's default output. stdout
 #     stays byte-clean for the JSON that consumers (hoosh, daimon, …) parse.
-#   - Default level is **WARN**: quiet on success, visible on failure.
-#     Raise via the `AI_HWACCEL_LOG` env var (off|fatal|error|warn|info|
-#     debug|trace) or the `--log-level <name>` / `-v` (debug) / `-vv`
-#     (trace) / `-q` (off) CLI flags. env is read first; a CLI flag wins.
+#   - Default level is **WARN**: quiet on success, visible on failure. It
+#     holds from the include on (2.5.5), for a library consumer that never
+#     calls hwlog_init too: through 2.5.4 only hwlog_init set it, and such a
+#     consumer got sakshi's INFO default, an "[INFO] detect: profiles=N" line
+#     on stderr per detection. Raise via the `AI_HWACCEL_LOG` env var
+#     (off|fatal|error|warn|info|debug|trace, any letter case) or the
+#     `--log-level <name>` / `-v` (debug) / `-vv` (trace) / `-q` (off) CLI
+#     flags. env is read first; a CLI flag wins. An unknown name warns.
 #   - Hot-path rule: a below-threshold log call still **evaluates its
 #     arguments**. Static-message helpers (hwlog_warn etc.) only cost one
 #     strlen + a level compare, but any helper that *builds* a message
 #     (hwlog_*_n) is guarded by hwlog_enabled() so no str_builder runs
 #     when the level is suppressed. Never log inside a per-iteration parse
 #     loop — log per operation (one detector, one plan), at dispatch sites.
+#   - Every emitter goes through sakshi's public per-level functions, so a
+#     consumer's `-D SAKSHI_DISABLE_<LEVEL>` or `#define SAKSHI_LEVEL <n>`
+#     removes the hwlog_*_n lines as it does the static ones.
 
-# Map a level name (cstring) to a sakshi SK_* level. "off" returns a
-# below-FATAL sentinel (-1) so even fatals are suppressed; an unknown name
-# returns -100 so the caller can leave the level untouched.
+# sakshi starts at INFO. Lower it to WARN once, as the program starts, unless
+# it chose a level before including this module. A global's initializer
+# (lib/poison.cyr's idiom): a top-level statement here would come before the
+# enums of the modules that follow, which the compiler refuses.
+fn _hwlog_default_level(): i64 {
+    if (sakshi_get_level() == SK_INFO) { sakshi_set_level(SK_WARN); }
+    return 0;
+}
+
+var _hwlog_defaulted = _hwlog_default_level();
+
+# Map a level name (cstring, any letter case) to a sakshi SK_* level. "off"
+# returns a below-FATAL sentinel (-1) so even fatals are suppressed; an
+# unknown name, or 0, returns -100 so the caller can leave the level
+# untouched.
 fn hwlog_level_from_name(name): i64 {
-    if (streq(name, "off") == 1) { return 0 - 1; }
-    if (streq(name, "fatal") == 1) { return SK_FATAL; }
-    if (streq(name, "error") == 1) { return SK_ERROR; }
-    if (streq(name, "warn") == 1) { return SK_WARN; }
-    if (streq(name, "info") == 1) { return SK_INFO; }
-    if (streq(name, "debug") == 1) { return SK_DEBUG; }
-    if (streq(name, "trace") == 1) { return SK_TRACE; }
+    if (hw_streq_ci(name, "off") == 1) { return 0 - 1; }
+    if (hw_streq_ci(name, "fatal") == 1) { return SK_FATAL; }
+    if (hw_streq_ci(name, "error") == 1) { return SK_ERROR; }
+    if (hw_streq_ci(name, "warn") == 1) { return SK_WARN; }
+    if (hw_streq_ci(name, "info") == 1) { return SK_INFO; }
+    if (hw_streq_ci(name, "debug") == 1) { return SK_DEBUG; }
+    if (hw_streq_ci(name, "trace") == 1) { return SK_TRACE; }
     return 0 - 100;
+}
+
+# Warn that `src` (the env var or the flag) named no level. Through 2.5.4
+# "AI_HWACCEL_LOG=verbose" was dropped without a word.
+fn _hwlog_unknown_level(src, name): i64 {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, src);
+    str_builder_add_cstr(sb, ": unknown log level '");
+    str_builder_add_cstr(sb, name);
+    str_builder_add_cstr(sb, "', level unchanged (off|fatal|error|warn|info|debug|trace)");
+    var m = str_builder_build(sb);
+    sakshi_warn(str_data(m), str_len(m));
+    return 0;
 }
 
 # Initialize logging. Call once at startup, after alloc_init() (the env
@@ -40,20 +72,24 @@ fn hwlog_level_from_name(name): i64 {
 fn hwlog_init(): i64 {
     sakshi_set_level(SK_WARN);
     var ev = getenv("AI_HWACCEL_LOG");
-    if (ev != 0) {
+    # Set but empty reads as unset.
+    if (ev != 0 && load8(ev) != 0) {
         var lv = hwlog_level_from_name(ev);
         if (lv != (0 - 100)) { sakshi_set_level(lv); }
+        else { _hwlog_unknown_level("AI_HWACCEL_LOG", ev); }
     }
     sakshi_trace_set(getpid());
     return 0;
 }
 
 # Apply a `--log-level <name>` value (cstring, or 0 if the flag was
-# absent). Unknown names are ignored, leaving the env/default level.
+# absent). An unknown name warns and leaves the env/default level; the CLI
+# refuses one before it gets here.
 fn hwlog_apply_level_name(val): i64 {
     if (val == 0) { return 0; }
     var lv = hwlog_level_from_name(val);
     if (lv != (0 - 100)) { sakshi_set_level(lv); }
+    else { _hwlog_unknown_level("--log-level", val); }
     return 0;
 }
 
@@ -98,14 +134,23 @@ fn hwlog_trace(msg): i64 {
 
 # --- Message + integer emitter ("prefix" + n) ---
 #
-# Guarded so the str_builder never runs when the level is suppressed.
+# Guarded so the str_builder never runs when the level is suppressed. The
+# line goes out through the level's sakshi_* function, not sakshi's private
+# _sk_log (through 2.5.4), which skipped the compile-time gates.
 fn hwlog_emit_n(level, prefix, n): i64 {
     if (hwlog_enabled(level) == 0) { return 0; }
     var sb = str_builder_new();
     str_builder_add_cstr(sb, prefix);
     str_builder_add_int(sb, n);
     var m = str_builder_build(sb);
-    _sk_log(level, str_data(m), str_len(m));
+    var d = str_data(m);
+    var len = str_len(m);
+    if (level == SK_FATAL) { sakshi_fatal(d, len); }
+    elif (level == SK_ERROR) { sakshi_error(d, len); }
+    elif (level == SK_WARN) { sakshi_warn(d, len); }
+    elif (level == SK_INFO) { sakshi_info(d, len); }
+    elif (level == SK_DEBUG) { sakshi_debug(d, len); }
+    else { sakshi_trace(d, len); }
     return 0;
 }
 

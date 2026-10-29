@@ -36,7 +36,7 @@ struct meta {
 }
 
 fn meta_new(fmt, params, dtype, tensors, version) {
-    var m = alloc(40);
+    var m = alloc(sizeof(meta));
     meta_set_format(m, fmt);
     meta_set_param_count(m, params);
     meta_set_dtype(m, dtype);
@@ -50,12 +50,17 @@ fn meta_new(fmt, params, dtype, tensors, version) {
 # --- Top-level API ---
 
 # Detect format from file path (reads first 16 KB)
-# Returns ModelMetadata ptr or 0 on failure
+# Returns ModelMetadata ptr or 0 on failure. The read buffer is freed before
+# returning (the metadata copies what it keeps), so a scan over a model
+# cache does not grow the bump heap by 16 KiB a file as it did through 2.5.4.
 fn detect_model_format(path) {
-    var buf = alloc(16384);
+    var buf = fl_alloc(16384);
+    if (buf == 0) { return 0; }
     var n = file_read_all(path, buf, 16384);
-    if (n <= 0) { return 0; }
-    return detect_format_from_bytes(buf, n);
+    var m = 0;
+    if (n > 0) { m = detect_format_from_bytes(buf, n); }
+    fl_free(buf);
+    return m;
 }
 
 # Detect format from raw bytes (no file I/O)
@@ -113,9 +118,12 @@ fn _parse_safetensors(buf, len) {
     return meta_new(FMT_SAFETENSORS, 0, 0, 0, 0);
 }
 
-# Extract tensor count, dtype, and param count from SafeTensors JSON
+# Extract tensor count, dtype, and param count from SafeTensors JSON.
+# A shape or a sum past the i64 makes the count unknown (0), never a
+# wrapped or negative one.
 fn _extract_safetensors_meta(json, json_len) {
     var total_params = 0;
+    var overflow = 0;
     var tensor_count = 0;
     var dtype = 0;
     var pos = 0;
@@ -166,10 +174,12 @@ fn _extract_safetensors_meta(json, json_len) {
         # Extract shape and multiply dimensions for param count
         var params = _extract_shape_product(json + obj_start,
           obj_end - obj_start);
-        total_params = total_params + params;
+        if (params < 0 || total_params > HW_I64_MAX - params) { overflow = 1; }
+        else { total_params = total_params + params; }
 
         pos = obj_end;
     }
+    if (overflow == 1) { total_params = 0; }
 
     return meta_new(FMT_SAFETENSORS, total_params,
       dtype, tensor_count, 0);
@@ -188,7 +198,9 @@ fn _skip_json_value(json, json_len, pos) {
     return pos;
 }
 
-# Skip a JSON object, returns position after closing '}'
+# Skip a JSON object, returns position after closing '}', at most json_len
+# (through 2.5.4 an unterminated string, or one ending in a backslash, gave
+# json_len + 1 or + 2, and the dtype and shape scans read past the header).
 fn _skip_json_object(json, json_len, pos) {
     if (pos >= json_len) { return pos; }
     if (load8(json + pos) != 123) { return pos; }
@@ -208,11 +220,19 @@ fn _skip_json_object(json, json_len, pos) {
         }
         pos = pos + 1;
     }
+    if (pos > json_len) { pos = json_len; }
     return pos;
 }
 
+fn _mf_ws(c) {
+    return c == 32 || c == 9 || c == 10 || c == 13;
+}
+
 # Find a JSON string value for a given key within a buffer
-# Returns cstr ptr or 0
+# Returns cstr ptr or 0. The key must be followed by ':' and a string: a
+# null or a number is no value, rather than the next quoted text in the
+# object, and an escaped quote does not end it. The bytes are copied as
+# they stand (escapes kept); model_meta_to_json escapes them on output.
 fn _find_json_string(buf, len, key) {
     var klen = strlen(key);
     var i = 0;
@@ -220,16 +240,23 @@ fn _find_json_string(buf, len, key) {
         if (load8(buf + i) == 34) {
             if (memeq(buf + i + 1, key, klen) == 1) {
                 if (load8(buf + i + 1 + klen) == 34) {
-                    # Found key, find value string
                     var vi = i + klen + 2;
-                    while (vi < len && load8(buf + vi) != 34) {
-                        vi = vi + 1;
+                    while (vi < len && _mf_ws(load8(buf + vi)) == 1) { vi = vi + 1; }
+                    if (vi >= len || load8(buf + vi) != 58) {
+                        i = i + 1;
+                        continue;
                     }
+                    vi = vi + 1;
+                    while (vi < len && _mf_ws(load8(buf + vi)) == 1) { vi = vi + 1; }
+                    if (vi >= len || load8(buf + vi) != 34) { return 0; }
                     vi = vi + 1;
                     var vstart = vi;
                     while (vi < len && load8(buf + vi) != 34) {
+                        if (load8(buf + vi) == 92) { vi = vi + 1; }
                         vi = vi + 1;
                     }
+                    # Unterminated inside the object: no value.
+                    if (vi >= len) { return 0; }
                     var vlen = vi - vstart;
                     if (vlen > 0) {
                         var val = alloc(vlen + 1);
@@ -246,8 +273,10 @@ fn _find_json_string(buf, len, key) {
     return 0;
 }
 
-# Extract shape array and compute product of dimensions
-# Returns 0 for empty or missing shape
+# Extract shape array and compute product of dimensions.
+# Returns 0 for a missing shape, 1 for a scalar (shape [], one element:
+# 2.5.4 counted it 0), and -1 when a dimension or the product passes the
+# i64, so the caller can report the count as unknown.
 fn _extract_shape_product(buf, len) {
     # Find "shape" key
     var needle = "shape";
@@ -265,37 +294,30 @@ fn _extract_shape_product(buf, len) {
                     if (vi >= len) { return 0; }
                     vi = vi + 1;  # skip '['
 
-                    # Check for empty array
-                    var ws = vi;
-                    while (ws < len) {
-                        var c = load8(buf + ws);
-                        if (c != 32 && c != 10) { break; }
-                        ws = ws + 1;
-                    }
-                    if (ws < len && load8(buf + ws) == 93) {
-                        return 0;  # empty shape []
-                    }
-
-                    # Parse comma-separated integers
+                    # Parse comma-separated integers; no dimension at all
+                    # (a scalar, `[]` with any whitespace) leaves product 1
                     var product = 1;
                     var num = 0;
                     var has_num = 0;
                     while (vi < len) {
                         var c2 = load8(buf + vi);
                         if (c2 >= 48 && c2 <= 57) {
+                            # (i64 max - 9) / 10: one more digit would wrap
+                            if (num > 922337203685477579) { return 0 - 1; }
                             num = num * 10 + c2 - 48;
                             has_num = 1;
-                        } elif (c2 == 44) {
+                        } elif (c2 == 44 || c2 == 93) {
                             if (has_num == 1) {
+                                # Both under sqrt(i64 max) cannot wrap; divide
+                                # only for the rare big operand.
+                                if (product > 3037000499 || num > 3037000499) {
+                                    if (num != 0 && product > HW_I64_MAX / num) { return 0 - 1; }
+                                }
                                 product = product * num;
                             }
+                            if (c2 == 93) { return product; }
                             num = 0;
                             has_num = 0;
-                        } elif (c2 == 93) {
-                            if (has_num == 1) {
-                                product = product * num;
-                            }
-                            return product;
                         }
                         vi = vi + 1;
                     }
@@ -389,6 +411,22 @@ fn _gguf_file_type_name(ft) {
     if (ft == 18) { return "Q6_K"; }
     if (ft == 19) { return "IQ2_XXS"; }
     if (ft == 20) { return "IQ2_XS"; }
+    # llama.cpp LLAMA_FTYPE 21-38; 4-6 and 33-35 are retired and stay unknown.
+    if (ft == 21) { return "Q2_K_S"; }
+    if (ft == 22) { return "IQ3_XS"; }
+    if (ft == 23) { return "IQ3_XXS"; }
+    if (ft == 24) { return "IQ1_S"; }
+    if (ft == 25) { return "IQ4_NL"; }
+    if (ft == 26) { return "IQ3_S"; }
+    if (ft == 27) { return "IQ3_M"; }
+    if (ft == 28) { return "IQ2_S"; }
+    if (ft == 29) { return "IQ2_M"; }
+    if (ft == 30) { return "IQ4_XS"; }
+    if (ft == 31) { return "IQ1_M"; }
+    if (ft == 32) { return "BF16"; }
+    if (ft == 36) { return "TQ1_0"; }
+    if (ft == 37) { return "TQ2_0"; }
+    if (ft == 38) { return "MXFP4_MOE"; }
     return "unknown";
 }
 
@@ -399,25 +437,26 @@ fn _parse_onnx(buf, len) {
     if (len < 4) { return 0; }
     if (load8(buf) != 8) { return 0; }
 
-    # Parse ir_version as varint
+    # Parse ir_version as varint. At most 5 bytes: any ir_version 1-20 fits
+    # in one, and through 2.5.4 a 10-byte varint shifted a bit into the sign
+    # and a negative ir_version passed the range check.
     var ir_ver = 0;
     var consumed = 0;
     var shift = 0;
     var vi = 1;
     while (vi < len) {
         var b = load8(buf + vi);
-        ir_ver = ir_ver + (b & 127) * _pow2(shift);
+        ir_ver = ir_ver + ((b & 127) << shift);
         consumed = consumed + 1;
         if ((b & 128) == 0) { break; }
         shift = shift + 7;
-        if (shift >= 64) { return 0; }
+        if (shift >= 35) { return 0; }
         vi = vi + 1;
     }
     if (consumed == 0) { return 0; }
 
     # Sanity: ir_version 1-20
-    if (ir_ver == 0) { return 0; }
-    if (ir_ver > 20) { return 0; }
+    if (ir_ver < 1 || ir_ver > 20) { return 0; }
 
     # Validate second protobuf field
     var next_off = 1 + consumed;
@@ -429,14 +468,6 @@ fn _parse_onnx(buf, len) {
     if (field_num == 0) { return 0; }
 
     return meta_new(FMT_ONNX, 0, 0, 0, ir_ver);
-}
-
-# Simple power-of-2 for varint decoding
-fn _pow2(n) {
-    var r = 1;
-    var i = 0;
-    while (i < n) { r = r * 2; i = i + 1; }
-    return r;
 }
 
 # --- PyTorch detector ---
@@ -464,9 +495,9 @@ fn model_meta_to_json(m) {
         str_builder_add_int(sb, meta_param_count(m));
     }
     if (meta_dtype(m) != 0) {
-        str_builder_add_cstr(sb, ",\"dtype\":\"");
-        str_builder_add_cstr(sb, meta_dtype(m));
-        str_builder_add_cstr(sb, "\"");
+        # The dtype comes from an untrusted file header: escape it.
+        str_builder_add_cstr(sb, ",\"dtype\":");
+        str_builder_add_json_cstr(sb, meta_dtype(m));
     }
     if (meta_tensor_count(m) > 0) {
         str_builder_add_cstr(sb, ",\"tensor_count\":");

@@ -1,6 +1,14 @@
 # training.cyr — training method types and memory estimation
-# All memory values in x1000 GB fixed-point to avoid floats.
-# e.g., 14000 = 14.0 GB, 1400 = 1.4 GB
+# All memory values in GiB x1000 fixed-point to avoid floats
+# (14000 = 14.0 GiB, 1400 = 1.4 GiB). Weights are bf16, 2 B/param ("base").
+#
+# Full fine-tuning is mixed-precision AdamW, about 16 B/param before
+# activations: the bf16 weights (2) plus an optimizer figure of 7x base
+# that counts the gradients (2), the fp32 master copy (4) and Adam's m and
+# v (4 + 4). DPO, RLHF and distillation train one model with the same 7x
+# and hold the others frozen. Through 2.5.4 the optimizer was 2x base, so a
+# 7B full fine-tune read 52 GiB, half of what it needs. Activations are a
+# batch-1 heuristic: treat every total as a lower bound.
 
 enum TrainingMethod {
     TRAIN_FULL = 0;
@@ -25,17 +33,18 @@ fn training_method_name(m) {
     return "unknown";
 }
 
-# Parse a training method name (the --method CLI arg) to its enum.
-# Returns -1 on an unrecognized name so callers can fall back.
+# Parse a training method name (the --method CLI arg) to its enum, in any
+# letter case ("LoRA", "QLoRA-4bit"). Returns -1 on an unrecognized name so
+# callers can fall back.
 fn training_method_from_str(s) {
-    if (streq(s, "full") == 1) { return TRAIN_FULL; }
-    if (streq(s, "lora") == 1) { return TRAIN_LORA; }
-    if (streq(s, "qlora-4bit") == 1) { return TRAIN_QLORA_4; }
-    if (streq(s, "qlora-8bit") == 1) { return TRAIN_QLORA_8; }
-    if (streq(s, "prefix") == 1) { return TRAIN_PREFIX; }
-    if (streq(s, "dpo") == 1) { return TRAIN_DPO; }
-    if (streq(s, "rlhf") == 1) { return TRAIN_RLHF; }
-    if (streq(s, "distillation") == 1) { return TRAIN_DISTILL; }
+    if (hw_streq_ci(s, "full") == 1) { return TRAIN_FULL; }
+    if (hw_streq_ci(s, "lora") == 1) { return TRAIN_LORA; }
+    if (hw_streq_ci(s, "qlora-4bit") == 1) { return TRAIN_QLORA_4; }
+    if (hw_streq_ci(s, "qlora-8bit") == 1) { return TRAIN_QLORA_8; }
+    if (hw_streq_ci(s, "prefix") == 1) { return TRAIN_PREFIX; }
+    if (hw_streq_ci(s, "dpo") == 1) { return TRAIN_DPO; }
+    if (hw_streq_ci(s, "rlhf") == 1) { return TRAIN_RLHF; }
+    if (hw_streq_ci(s, "distillation") == 1) { return TRAIN_DISTILL; }
     return 0 - 1;
 }
 
@@ -63,10 +72,11 @@ struct est {
     total_x1000;
 }
 
-var MEM_EST_SIZE = 32;
+# sizeof, not a literal (2.5.5); the var stays for consumers.
+var MEM_EST_SIZE = sizeof(est);
 
 fn mem_est_new(model, optimizer, activation) {
-    var e = alloc(MEM_EST_SIZE);
+    var e = alloc(sizeof(est));
     est_set_model_x1000(e, model);
     est_set_optimizer_x1000(e, optimizer);
     est_set_activation_x1000(e, activation);
@@ -78,6 +88,7 @@ fn mem_est_new(model, optimizer, activation) {
 # model_params_millions: e.g., 7000 for 7B
 # Returns MemoryEstimate pointer
 fn estimate_training_memory(model_params_m, method, target) {
+    if (model_params_m <= 0) { return mem_est_new(0, 0, 0); }
     # base_gb = params_M * 1M * 2 bytes / GiB
     # base_gb_x1000 = params_M * 2 * 1000000 / 1073741824 * 1000
     # Simplified: base_gb_x1000 ~= params_M * 1863 / 1000
@@ -88,21 +99,26 @@ fn estimate_training_memory(model_params_m, method, target) {
     return _est_gpu(base_x1000, method);
 }
 
+# DPO and RLHF hold a frozen reference next to the trained policy (2x base
+# of weights); distillation a frozen teacher next to a half-size student
+# (1.5x base), whose optimizer is 7x its own 0.5x base.
 fn _est_gpu(base, method) {
-    if (method == TRAIN_FULL) { return mem_est_new(base, base * 2, base); }
+    if (method == TRAIN_FULL) { return mem_est_new(base, base * 7, base); }
     if (method == TRAIN_LORA) { return mem_est_new(base, base / 10, base / 10); }
     if (method == TRAIN_QLORA_4) { return mem_est_new(base / 4, base / 10, base / 40); }
     if (method == TRAIN_QLORA_8) { return mem_est_new(base / 2, base / 10, base / 20); }
     if (method == TRAIN_PREFIX) { return mem_est_new(base, base / 20, base / 20); }
-    if (method == TRAIN_DPO) { return mem_est_new(base * 2, base * 2, base * 3 / 2); }
-    if (method == TRAIN_RLHF) { return mem_est_new(base * 2, base * 2, base * 3 / 2); }
-    if (method == TRAIN_DISTILL) { return mem_est_new(base * 3 / 2, base, base * 4 / 5); }
-    return mem_est_new(base, base * 2, base);
+    if (method == TRAIN_DPO) { return mem_est_new(base * 2, base * 7, base * 3 / 2); }
+    if (method == TRAIN_RLHF) { return mem_est_new(base * 2, base * 7, base * 3 / 2); }
+    if (method == TRAIN_DISTILL) { return mem_est_new(base * 3 / 2, base * 7 / 2, base * 4 / 5); }
+    return mem_est_new(base, base * 7, base);
 }
 
+# TPU and Gaudi keep the same AdamW optimizer accounting as the GPU; only
+# their activation factors differ.
 fn _est_tpu(base, method) {
     if (method == TRAIN_FULL) {
-        return mem_est_new(base, base * 3 / 2, base * 4 / 5);
+        return mem_est_new(base, base * 7, base * 4 / 5);
     }
     if (method == TRAIN_LORA) {
         return mem_est_new(base, base * 15 / 100, base * 12 / 100);
@@ -117,20 +133,20 @@ fn _est_tpu(base, method) {
         return mem_est_new(base, base / 20, base / 20);
     }
     if (method == TRAIN_DPO) {
-        return mem_est_new(base * 2, base * 3 / 2, base * 6 / 5);
+        return mem_est_new(base * 2, base * 7, base * 6 / 5);
     }
     if (method == TRAIN_RLHF) {
-        return mem_est_new(base * 2, base * 3 / 2, base * 6 / 5);
+        return mem_est_new(base * 2, base * 7, base * 6 / 5);
     }
     if (method == TRAIN_DISTILL) {
-        return mem_est_new(base * 3 / 2, base * 4 / 5, base * 3 / 5);
+        return mem_est_new(base * 3 / 2, base * 7 / 2, base * 3 / 5);
     }
-    return mem_est_new(base, base * 3 / 2, base * 4 / 5);
+    return mem_est_new(base, base * 7, base * 4 / 5);
 }
 
 fn _est_gaudi(base, method) {
     if (method == TRAIN_FULL) {
-        return mem_est_new(base, base * 3 / 2, base * 9 / 10);
+        return mem_est_new(base, base * 7, base * 9 / 10);
     }
     if (method == TRAIN_LORA) {
         return mem_est_new(base, base * 12 / 100, base * 12 / 100);
@@ -142,8 +158,8 @@ fn _est_gaudi(base, method) {
         return mem_est_new(base * 55 / 100, base * 12 / 100, base * 12 / 182);
     }
     if (method == TRAIN_PREFIX) { return mem_est_new(base, base / 20, base * 6 / 100); }
-    if (method == TRAIN_DPO) { return mem_est_new(base * 2, base * 3 / 2, base * 13 / 10); }
-    if (method == TRAIN_RLHF) { return mem_est_new(base * 2, base * 3 / 2, base * 13 / 10); }
-    if (method == TRAIN_DISTILL) { return mem_est_new(base * 3 / 2, base * 9 / 10, base * 7 / 10); }
-    return mem_est_new(base, base * 3 / 2, base * 9 / 10);
+    if (method == TRAIN_DPO) { return mem_est_new(base * 2, base * 7, base * 13 / 10); }
+    if (method == TRAIN_RLHF) { return mem_est_new(base * 2, base * 7, base * 13 / 10); }
+    if (method == TRAIN_DISTILL) { return mem_est_new(base * 3 / 2, base * 7 / 2, base * 7 / 10); }
+    return mem_est_new(base, base * 7, base * 9 / 10);
 }

@@ -39,10 +39,11 @@ struct ic {
     state;
 }
 
-var INTERCONNECT_SIZE = 32;
+# sizeof, not a literal (2.5.5); the var stays for consumers.
+var INTERCONNECT_SIZE = sizeof(ic);
 
 fn interconnect_new(kind, name, bw_x1000) {
-    var ic = alloc(INTERCONNECT_SIZE);
+    var ic = alloc(sizeof(ic));
     ic_set_kind(ic, kind);
     ic_set_name(ic, name);
     ic_set_bw_x1000(ic, bw_x1000);
@@ -76,10 +77,11 @@ struct storage {
     bw_x1000;
 }
 
-var STORAGE_SIZE = 24;
+# sizeof, not a literal (2.5.5); the var stays for consumers.
+var STORAGE_SIZE = sizeof(storage);
 
 fn storage_new(name, kind, bw_x1000) {
-    var sd = alloc(STORAGE_SIZE);
+    var sd = alloc(sizeof(storage));
     storage_set_name(sd, name);
     storage_set_kind(sd, kind);
     storage_set_bw_x1000(sd, bw_x1000);
@@ -108,17 +110,21 @@ struct env {
     k8s_gpu_source;
 }
 
-var RUNTIME_ENV_SIZE = 64;
+# sizeof, not a literal (2.5.5); the var stays for consumers.
+var RUNTIME_ENV_SIZE = sizeof(env);
 
 fn runtime_env_new() {
-    var e = alloc(RUNTIME_ENV_SIZE);
+    var e = alloc(sizeof(env));
     env_set_is_docker(e, 0);
     env_set_is_k8s(e, 0);
     env_set_k8s_namespace(e, 0);
     env_set_cloud_provider(e, 0);
     env_set_instance_type(e, 0);
     env_set_region(e, 0);
-    env_set_k8s_gpu_count(e, 0);
+    # PROFILE_NONE until NVIDIA_VISIBLE_DEVICES gives a count, so the JSON
+    # omits it (2.5.5): through 2.5.4 every environment, k8s or not,
+    # reported "k8s_gpu_count":0, a claim of zero GPUs.
+    env_set_k8s_gpu_count(e, PROFILE_NONE);
     env_set_k8s_gpu_source(e, 0);
     return e;
 }
@@ -136,10 +142,11 @@ struct sio {
     environment;
 }
 
-var SYSTEM_IO_SIZE = 24;
+# sizeof, not a literal (2.5.5); the var stays for consumers.
+var SYSTEM_IO_SIZE = sizeof(sio);
 
 fn system_io_new() {
-    var sio = alloc(SYSTEM_IO_SIZE);
+    var sio = alloc(sizeof(sio));
     sio_set_interconnects(sio, vec_new());
     sio_set_storage(sio, vec_new());
     sio_set_environment(sio, 0);
@@ -250,10 +257,11 @@ struct shard {
     memory_bytes;
 }
 
-var MODEL_SHARD_SIZE = 48;
+# sizeof, not a literal (2.5.5); the var stays for consumers.
+var MODEL_SHARD_SIZE = sizeof(shard);
 
 fn model_shard_new(sid, lstart, lend, devtype, devid, membytes) {
-    var ms = alloc(MODEL_SHARD_SIZE);
+    var ms = alloc(sizeof(shard));
     shard_set_id(ms, sid);
     shard_set_layer_start(ms, lstart);
     shard_set_layer_end(ms, lend);
@@ -280,6 +288,9 @@ fn shard_is_valid(ms) {
 # field carries a `vec` pointer (heterogeneous), initialised to a
 # fresh empty vec by the constructor.
 # 2.1.4: hand-rolled accessors replaced with #derive(accessors).
+# 2.5.5: `fits` (1/0) says whether the shards fit the memory of the devices
+# they name; the planner clears it when nothing holds the model (the Rust
+# v1 `fits_in_memory`, dropped in the port). A new plan starts at 1.
 
 #derive(accessors)
 struct plan {
@@ -288,27 +299,30 @@ struct plan {
     strategy_count;
     total_memory;
     est_tps_x1000;
+    fits;
 }
 
-var SHARDING_PLAN_SIZE = 40;
+# sizeof, not a literal (2.5.5); the var stays for consumers.
+var SHARDING_PLAN_SIZE = sizeof(plan);
 
 fn sharding_plan_new(strategy, count) {
-    var sp = alloc(SHARDING_PLAN_SIZE);
+    var sp = alloc(sizeof(plan));
     plan_set_shards(sp, vec_new());
     plan_set_strategy(sp, strategy);
     plan_set_strategy_count(sp, count);
     plan_set_total_memory(sp, 0);
     plan_set_est_tps_x1000(sp, PROFILE_NONE);
+    plan_set_fits(sp, 1);
     return sp;
 }
 
 fn plan_add_shard(sp, ms) {
-    vec_push(load64(sp), ms);
+    vec_push(plan_shards(sp), ms);
     return 0;
 }
 
 fn plan_num_shards(sp) {
-    return vec_len(load64(sp));
+    return vec_len(plan_shards(sp));
 }
 
 fn plan_min_devices(sp) {

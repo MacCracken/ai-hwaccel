@@ -1,9 +1,11 @@
 # json_roundtrip_test.tcyr — profile JSON round-trip (profile_from_json, 2.3.15).
 #
-# profile_to_json is now lossless and profile_from_json is its inverse. The
+# profile_from_json restores every field profile_to_json writes. The
 # TPU/Neuron cases guard the fields the pre-2.3.15 emit dropped, and the
 # requirement_satisfied checks guard the property samay actually depends on:
 # a profile rebuilt from JSON still satisfies the same placement requirement.
+# The 2.5.5 cases feed it what an untrusted producer can: strings that need
+# escaping, keys of the wrong type, values out of range, no document at all.
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
@@ -26,6 +28,34 @@ include "src/quantization.cyr"
 include "src/profile.cyr"
 include "src/system_io.cyr"
 include "src/training.cyr"
+
+# Stubs for the detection modules registry.cyr calls: this unit only
+# round-trips profiles, so it never detects (2.5.5: they built as 23
+# 'undefined function' warnings before).
+fn detect_cuda(p, w) { return 0; }
+fn detect_rocm(p, w) { return 0; }
+fn detect_apple_opts(p, w, a) { return 0; }
+fn detect_vulkan_opts(p, w, a, l) { return 0; }
+fn detect_intel_npu(p, w) { return 0; }
+fn detect_amd_xdna(p, w) { return 0; }
+fn detect_tpu(p, w) { return 0; }
+fn detect_gaudi_opts(p, w, a) { return 0; }
+fn detect_neuron_opts(p, w, a) { return 0; }
+fn detect_intel_oneapi(p, w) { return 0; }
+fn detect_qualcomm(p, w) { return 0; }
+fn detect_cerebras_opts(p, w, a) { return 0; }
+fn detect_graphcore_opts(p, w, a) { return 0; }
+fn detect_groq(p, w) { return 0; }
+fn detect_samsung_npu(p, w) { return 0; }
+fn detect_mediatek_apu(p, w) { return 0; }
+fn enrich_bandwidth(p) { return 0; }
+fn enrich_pcie(p) { return 0; }
+fn enrich_numa(p) { return 0; }
+fn detect_interconnects_opts(s, p, w, a) { return 0; }
+fn detect_storage(s) { return 0; }
+fn detect_environment(s) { return 0; }
+fn detect_system_memory_opts(a) { return 16 * 1073741824; }
+
 include "src/registry.cyr"
 include "src/requirement.cyr"
 include "src/json_out.cyr"
@@ -36,6 +66,17 @@ fn _rt(p) {
     profile_to_json(sb, p);
     var js = str_builder_build(sb);
     return profile_from_json_str(str_data(js));
+}
+
+# profile_from_json_str of {"accel_type_id":<t>,<rest>}.
+fn _pj(t, rest) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "{\"accel_type_id\":");
+    str_builder_add_int(sb, t);
+    str_builder_putc(sb, ',');
+    str_builder_add_cstr(sb, rest);
+    str_builder_putc(sb, '}');
+    return profile_from_json_str(str_data(str_builder_build(sb)));
 }
 
 fn test_roundtrip_cuda() {
@@ -136,8 +177,150 @@ fn test_from_json_malformed() {
     assert_eq(profile_from_json_str("[1,2,3]"), 0, "array root -> 0");
     # bayan 1.11.1 (2.5.0) refuses both; through 2.4.2 the first kept the
     # first value and the second read 05 as 5.
-    assert_eq(profile_from_json_str("{\"accel_type_id\":1,\"memory_bytes\":5,\"memory_bytes\":7}"), 0, "duplicate key -> 0");
-    assert_eq(profile_from_json_str("{\"accel_type_id\":1,\"memory_bytes\":05}"), 0, "leading zero -> 0");
+    assert_eq(_pj(1, "\"memory_bytes\":5,\"memory_bytes\":7"), 0, "duplicate key -> 0");
+    assert_eq(_pj(1, "\"memory_bytes\":05"), 0, "leading zero -> 0");
+    return 0;
+}
+
+# A name holding every byte class that needs a JSON escape comes back byte
+# for byte. Through 2.5.4 the emit copied it raw and the parse refused it.
+fn test_roundtrip_adversarial_strings() {
+    var nm = "GPU \"Max\" C:\\x\ttab\r\x01\x1f";
+    var c = profile_cuda(0, 24 * BYTES_PER_GIB);
+    profile_set_device_name(c, nm);
+    profile_set_driver_version(c, "\\");
+    var c2 = _rt(c);
+    assert(c2 != 0, "name with quote/backslash/control bytes round-trips");
+    if (c2 != 0) {
+        assert_eq(streq(profile_device_name(c2), nm), 1, "name bytes preserved");
+        assert_eq(streq(profile_driver_version(c2), "\\"), 1, "lone backslash preserved");
+    }
+    var d = profile_cuda(0, 24 * BYTES_PER_GIB);
+    profile_set_device_name(d, "RTX\",\"memory_bytes\":1099511627776,\"available\":false,\"x\":\"");
+    var d2 = _rt(d);
+    assert(d2 != 0, "injection-shaped name round-trips");
+    if (d2 != 0) {
+        assert_eq(profile_memory_bytes(d2), 24 * BYTES_PER_GIB, "memory not overridden");
+        assert_eq(profile_available(d2), 1, "available not overridden");
+    }
+    # A document's own escapes decode, and re-emit as valid JSON.
+    var e = _pj(1, "\"memory_bytes\":8,\"device_name\":\"A\\\"B\\u00e9\"");
+    assert(e != 0, "escaped name parses");
+    if (e != 0) {
+        assert_eq(streq(profile_device_name(e), "A\"B\xc3\xa9"), 1, "escapes decoded");
+        assert(_rt(e) != 0, "decoded name re-emits as valid JSON");
+    }
+    return 0;
+}
+
+# A present key of the wrong type reads as absent. Through 2.5.4 each of
+# these read as 0, a plausible value: 0 °C, an unavailable device, TPU v4,
+# no shared memory on a Metal GPU.
+fn test_from_json_wrong_types() {
+    var a = _pj(1, "\"memory_bytes\":100,\"memory_used_bytes\":null,\"available\":1,\"temperature_c\":\"65\"");
+    assert(a != 0, "wrong-typed optionals still parse");
+    if (a != 0) {
+        assert_eq(profile_mem_used(a), PROFILE_NONE, "null memory_used_bytes -> NONE");
+        assert_eq(profile_temp_c(a), PROFILE_NONE, "string temperature_c -> NONE");
+        assert_eq(profile_available(a), 1, "non-bool available -> default 1");
+    }
+    var m = _pj(3, "\"memory_bytes\":1000,\"shared_memory_bytes\":null,\"tpu_version\":null,\"gaudi_gen\":false");
+    assert(m != 0, "null/bool optionals still parse");
+    if (m != 0) {
+        assert_eq(profile_shared_bytes(m), 1000, "null shared_memory_bytes keeps derived share");
+        assert_eq(profile_tpu_version(m), PROFILE_NONE, "null tpu_version -> NONE");
+        assert_eq(profile_gaudi_gen(m), PROFILE_NONE, "bool gaudi_gen -> NONE");
+    }
+    var nf = _pj(1, "\"memory_bytes\":5,\"numa_node\":1.5");
+    assert(nf != 0, "float optional still parses");
+    if (nf != 0) { assert_eq(profile_numa_node(nf), PROFILE_NONE, "float numa_node -> NONE"); }
+    # A float memory_bytes is not an integer: absent, so 0, not INT64_MAX.
+    var f = _pj(1, "\"memory_bytes\":1e30");
+    assert(f != 0, "float memory_bytes parses");
+    if (f != 0) { assert_eq(profile_memory_bytes(f), 0, "float memory_bytes reads as absent"); }
+    var s = profile_from_json_str("{\"accel_type_id\":\"1\",\"device_name\":7}");
+    assert(s != 0, "string accel_type_id parses");
+    if (s != 0) {
+        assert_eq(profile_accel_type(s), ACCEL_CPU, "string accel_type_id -> CPU default");
+        assert_eq(profile_device_name(s), 0, "int device_name -> absent");
+    }
+    return 0;
+}
+
+# A value no producer can mean refuses the profile, as malformed JSON does.
+fn test_from_json_ranges() {
+    assert_eq(_pj(0 - 1, "\"memory_bytes\":5"), 0, "negative accel_type_id -> 0");
+    assert_eq(_pj(1, "\"memory_bytes\":-5"), 0, "negative memory_bytes -> 0");
+    assert_eq(_pj(1, "\"device_id\":-3,\"memory_bytes\":5"), 0, "negative device_id -> 0");
+    assert_eq(_pj(1, "\"device_id\":1025,\"memory_bytes\":5"), 0, "device_id past 1024 -> 0");
+    assert(_pj(1, "\"device_id\":1024,\"memory_bytes\":5") != 0, "device_id 1024 accepted");
+    assert_eq(_pj(1, "\"memory_bytes\":17592186044417"), 0, "GPU memory past 16 TiB -> 0");
+    assert(_pj(1, "\"memory_bytes\":17592186044416") != 0, "GPU memory of 16 TiB accepted");
+    # The CPU profile is the host's RAM: a 24 TiB host round-trips.
+    var big = _rt(profile_cpu(24 * 1024 * BYTES_PER_GIB));
+    assert(big != 0, "24 TiB host RAM round-trips");
+    assert_eq(_pj(0, "\"memory_bytes\":1125899906842625"), 0, "host RAM past 1 PiB -> 0");
+    assert_eq(_pj(1, "\"memory_bytes\":5,\"memory_used_bytes\":-7"), 0, "negative memory_used_bytes -> 0");
+    assert(_pj(1, "\"memory_bytes\":5,\"memory_used_bytes\":-1") != 0, "memory_used_bytes -1 is NONE");
+    var free_big = "\"memory_bytes\":5,\"memory_free_bytes\":17592186044417";
+    assert_eq(_pj(1, free_big), 0, "memory_free_bytes past 16 TiB -> 0");
+    assert_eq(_pj(3, "\"memory_bytes\":5,\"shared_memory_bytes\":6"), 0, "shared past memory_bytes -> 0");
+    assert_eq(_pj(1, "\"memory_bytes\":5,\"shared_memory_bytes\":-2"), 0, "negative shared -> 0");
+    # tpu_chips drives one shard per chip in reg_plan_sharding.
+    assert_eq(_pj(8, "\"memory_bytes\":5,\"tpu_chips\":1000000"), 0, "tpu_chips past 1024 -> 0");
+    assert_eq(_pj(8, "\"memory_bytes\":5,\"tpu_chips\":-2"), 0, "negative tpu_chips -> 0");
+    assert_eq(_pj(10, "\"memory_bytes\":5,\"neuron_cores\":1025"), 0, "neuron_cores past 1024 -> 0");
+    # An id this build does not know is kept, for the family code to place.
+    var u = _pj(25, "\"memory_bytes\":5");
+    assert(u != 0, "unknown accel_type_id kept");
+    if (u != 0) { assert_eq(profile_accel_type(u), 25, "unknown id preserved"); }
+    assert_eq(profile_from_json_str(0), 0, "NULL document -> 0");
+    return 0;
+}
+
+# shared_memory_bytes reads back as profile_to_json writes it, so a second
+# trip changes nothing (fuzz/json_profile.fcyr found both): the CPU's is all
+# of its memory and never written, and 0 is the emit's "no key".
+fn test_from_json_shared_as_emitted() {
+    var cpu = _pj(0, "\"memory_bytes\":1000,\"shared_memory_bytes\":10");
+    assert(cpu != 0, "CPU with a shared key parses");
+    if (cpu != 0) {
+        assert_eq(profile_shared_bytes(cpu), 1000, "CPU shared key ignored");
+        assert_eq(profile_shared_bytes(_rt(cpu)), 1000, "CPU shared stable over a second trip");
+    }
+    var metal = _pj(3, "\"memory_bytes\":1000,\"shared_memory_bytes\":0");
+    assert(metal != 0, "Metal with shared 0 parses");
+    if (metal != 0) {
+        assert_eq(profile_shared_bytes(metal), 1000, "shared 0 reads as no key");
+        assert_eq(profile_shared_bytes(_rt(metal)), 1000, "Metal shared stable over a second trip");
+    }
+    return 0;
+}
+
+# profile_from_json_str_a puts the parse tree on the caller's allocator: the
+# default heap grows by the profile alone, and the profile survives a reset
+# of the scratch arena.
+fn test_from_json_scratch() {
+    var c = profile_cuda(1, 24 * BYTES_PER_GIB);
+    profile_set_device_name(c, "NVIDIA GeForce RTX 4090");
+    profile_set_driver_version(c, "550.54.15");
+    var sb = str_builder_new();
+    profile_to_json(sb, c);
+    var js = str_data(str_builder_build(sb));
+    var scratch = arena_allocator_growable(4096);
+    var u0 = alloc_used();
+    var plain = profile_from_json_str(js);
+    var u1 = alloc_used();
+    var p = profile_from_json_str_a(scratch, js);
+    var u2 = alloc_used();
+    reset_via(scratch);
+    assert(plain != 0 && p != 0, "both parse");
+    assert(u2 - u1 < u1 - u0, "scratch parse keeps the DOM off the heap");
+    if (p != 0) {
+        assert_eq(streq(profile_device_name(p), "NVIDIA GeForce RTX 4090"), 1, "name survives the scratch reset");
+        assert_eq(profile_device_id(p), 1, "device_id survives");
+    }
+    assert_eq(profile_from_json_str_a(scratch, 0), 0, "NULL document -> 0");
     return 0;
 }
 
@@ -152,6 +335,11 @@ fn main() {
     test_from_json_optional_perf_fields();
     test_roundtrip_shared_memory();
     test_from_json_malformed();
+    test_roundtrip_adversarial_strings();
+    test_from_json_wrong_types();
+    test_from_json_ranges();
+    test_from_json_scratch();
+    test_from_json_shared_as_emitted();
     # 2.3.22: was `assert_summary(); return 0;` — which DISCARDED the failure
     # count, so `syscall(60, r)` below always exited 0 and a failing assertion
     # in this unit could never fail `cyrius tests` (it checks exit 0). Every

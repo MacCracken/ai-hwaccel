@@ -109,6 +109,82 @@ fn test_registry_by_family() {
     return 0;
 }
 
+# hw_registry_new and targ_new allocate sizeof their struct, plus the vecs
+# and system_io they create (2.5.5; through 2.5.4, literals).
+fn test_constructor_sizes() {
+    var u = alloc_used();
+    vec_new();
+    var vec_bytes = alloc_used() - u;
+    u = alloc_used();
+    system_io_new();
+    var sio_bytes = alloc_used() - u;
+    u = alloc_used();
+    hw_registry_new();
+    assert_eq(alloc_used() - u, sizeof(reg) + 2 * vec_bytes + sio_bytes, "hw_registry_new: sizeof(reg)");
+    assert_eq(REGISTRY_SIZE, sizeof(reg), "REGISTRY_SIZE is sizeof(reg)");
+    u = alloc_used();
+    targ_new(BACKEND_CUDA);
+    assert_eq(alloc_used() - u, sizeof(targ) + 2 * vec_bytes, "targ_new: sizeof(targ)");
+    return 0;
+}
+
+# An index outside the registry is 0, not vec_get's abort, which exits the
+# calling thread (2.5.5).
+fn test_reg_get_profile_bounds() {
+    var v = vec_new();
+    var cpu = profile_cpu(16 * BYTES_PER_GIB);
+    vec_push(v, cpu);
+    var r = registry_from_profiles(v);
+    assert_eq(reg_get_profile(r, 0), cpu, "index 0: the profile");
+    assert_eq(reg_get_profile(r, 1), 0, "index past the end: 0");
+    assert_eq(reg_get_profile(r, 0 - 1), 0, "negative index: 0");
+    assert_eq(reg_get_profile(hw_registry_new(), 0), 0, "empty registry: 0");
+    return 0;
+}
+
+# A profile of a type this build does not know (a newer producer's JSON) is
+# family Unknown (2.5.5): not counted with the CPU, not the CPU's memory for
+# reg_suggest_quant, and still an accelerator. Through 2.5.4 it was a CPU to
+# the family queries and an accelerator to the others.
+fn test_foreign_type_in_registry() {
+    var v = vec_new();
+    vec_push(v, profile_cpu(8 * BYTES_PER_GIB));
+    vec_push(v, profile_new(ACCEL_TYPE_COUNT, 0, 64 * BYTES_PER_GIB));
+    var r = registry_from_profiles(v);
+    assert_eq(reg_count_by_family(r, FAMILY_CPU), 1, "foreign: not counted as CPU");
+    assert_eq(vec_len(reg_by_family(r, FAMILY_CPU)), 1, "foreign: not in the CPU family");
+    assert_eq(reg_count_by_family(r, FAMILY_UNKNOWN), 1, "foreign: family Unknown");
+    assert_eq(reg_has_accelerator(r), 1, "foreign: still an accelerator");
+    # 13B: the CPU's 8 GiB holds INT4 only; the foreign 64 GiB is no CPU.
+    assert_eq(reg_suggest_quant(r, 13000000000), QUANT_INT4, "foreign: not the CPU's memory");
+    return 0;
+}
+
+# reg_by_family_into refills the caller's vec: once it has grown, repeat
+# queries allocate nothing (2.5.5). reg_by_family allocates a vec per call,
+# which the bump allocator never frees: 10 000 calls grew a long-lived
+# consumer by 1.5 MB.
+fn test_by_family_into_bounded() {
+    var v = vec_new();
+    vec_push(v, profile_cpu(16 * BYTES_PER_GIB));
+    vec_push(v, profile_cuda(0, 24 * BYTES_PER_GIB));
+    vec_push(v, profile_rocm(0, 16 * BYTES_PER_GIB));
+    var r = registry_from_profiles(v);
+    var out = vec_new();
+    reg_by_family_into(r, FAMILY_GPU, out);
+    assert_eq(vec_len(out), 2, "into: the two GPUs");
+    var u0 = alloc_used();
+    var i = 0;
+    while (i < 1000) {
+        reg_by_family_into(r, FAMILY_GPU, out);
+        i = i + 1;
+    }
+    assert_eq(alloc_used() - u0, 0, "into: 1000 queries allocate nothing");
+    assert_eq(vec_len(reg_by_family_into(r, FAMILY_CPU, out)), 1, "into: emptied first");
+    if (vec_len(out) == 1) { assert_eq(vec_get(out, 0), vec_get(v, 0), "into: the CPU profile"); }
+    return 0;
+}
+
 # --- Builder bitmask ---
 
 fn test_builder_all() {
@@ -147,17 +223,19 @@ fn test_builder_selective() {
 # --- 2.2.5: no-exec contract ---
 
 fn test_backend_uses_exec() {
-    # Six backends shell out to vendor CLIs
+    # Four backends find nothing without their vendor CLI
     assert_eq(backend_uses_exec(BACKEND_CUDA), 1, "cuda exec");
-    assert_eq(backend_uses_exec(BACKEND_GAUDI), 1, "gaudi exec");
-    assert_eq(backend_uses_exec(BACKEND_NEURON), 1, "neuron exec");
     assert_eq(backend_uses_exec(BACKEND_INTEL_ONEAPI), 1, "intel-oneapi exec");
-    assert_eq(backend_uses_exec(BACKEND_CEREBRAS), 1, "cerebras exec");
-    assert_eq(backend_uses_exec(BACKEND_GRAPHCORE), 1, "graphcore exec");
+    # 2.5.5: their /dev fallbacks need no tool, so no-exec mode finds them.
+    assert_eq(backend_uses_exec(BACKEND_CEREBRAS), 0, "cerebras native (/dev nodes)");
+    assert_eq(backend_uses_exec(BACKEND_GRAPHCORE), 0, "graphcore native (/dev nodes)");
 
-    # Eleven backends spawn nothing (sysfs/syscall, DXGI on Windows, sysctl on
-    # macOS). Vulkan's sysfs scan is native since 2.3.29; vulkaninfo runs only
-    # with exec.
+    # Thirteen backends spawn nothing (sysfs/syscall, DXGI on Windows, sysctl on
+    # macOS). Vulkan's sysfs scan is native since 2.3.29, and Gaudi's
+    # habanalabs nodes and Neuron's /dev nodes since 2.5.5; vulkaninfo, hl-smi
+    # and neuron-ls run only with exec.
+    assert_eq(backend_uses_exec(BACKEND_GAUDI), 0, "gaudi native (accel nodes)");
+    assert_eq(backend_uses_exec(BACKEND_NEURON), 0, "neuron native (/dev nodes)");
     assert_eq(backend_uses_exec(BACKEND_VULKAN), 0, "vulkan native (sysfs scan)");
     assert_eq(backend_uses_exec(BACKEND_WINDOWS), 0, "windows native (dxgi)");
     assert_eq(backend_uses_exec(BACKEND_APPLE), 0, "apple native (sysctl)");
@@ -188,24 +266,25 @@ fn test_builder_no_exec_mask() {
     assert_eq(builder_is_enabled(mask, BACKEND_GROQ), 1, "groq in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_SAMSUNG_NPU), 1, "samsung in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_MEDIATEK_APU), 1, "mediatek in mask");
+    # 2.5.5: registry_detect_no_exec() finds Gaudi and Neuron devices too.
+    assert_eq(builder_is_enabled(mask, BACKEND_GAUDI), 1, "gaudi in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_NEURON), 1, "neuron in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_CEREBRAS), 1, "cerebras in mask");
+    assert_eq(builder_is_enabled(mask, BACKEND_GRAPHCORE), 1, "graphcore in mask");
 
     # Every exec backend absent
     assert_eq(builder_is_enabled(mask, BACKEND_CUDA), 0, "cuda excluded");
-    assert_eq(builder_is_enabled(mask, BACKEND_GAUDI), 0, "gaudi excluded");
-    assert_eq(builder_is_enabled(mask, BACKEND_NEURON), 0, "neuron excluded");
     assert_eq(builder_is_enabled(mask, BACKEND_INTEL_ONEAPI), 0, "oneapi excluded");
-    assert_eq(builder_is_enabled(mask, BACKEND_CEREBRAS), 0, "cerebras excluded");
-    assert_eq(builder_is_enabled(mask, BACKEND_GRAPHCORE), 0, "graphcore excluded");
     return 0;
 }
 
 # Defense-in-depth: even when the caller forces an EXEC bit on,
 # registry_detect_with_opts(mask, 0) must strip it before dispatch.
 fn test_no_exec_strips_exec_bits() {
-    var poisoned = builder_no_exec() | (1 << BACKEND_CUDA) | (1 << BACKEND_NEURON);
+    var poisoned = builder_no_exec() | (1 << BACKEND_CUDA) | (1 << BACKEND_INTEL_ONEAPI);
     var stripped = poisoned & builder_no_exec();
     assert_eq(builder_is_enabled(stripped, BACKEND_CUDA), 0, "cuda forced off");
-    assert_eq(builder_is_enabled(stripped, BACKEND_NEURON), 0, "neuron forced off");
+    assert_eq(builder_is_enabled(stripped, BACKEND_INTEL_ONEAPI), 0, "oneapi forced off");
     assert_eq(builder_is_enabled(stripped, BACKEND_ROCM), 1, "rocm preserved");
     return 0;
 }
@@ -237,7 +316,7 @@ fn check_registry_shape(r, label) {
     while (i < n) {
         var t = profile_accel_type(vec_get(profs, i));
         if (t < ACCEL_CPU) { bad = bad + 1; }
-        if (t > ACCEL_AGNOS_GPU) { bad = bad + 1; }
+        if (t >= ACCEL_TYPE_COUNT) { bad = bad + 1; }
         i = i + 1;
     }
     assert_eq(bad, 0, label);
@@ -255,6 +334,9 @@ fn check_registry_shape(r, label) {
     var js = registry_to_json(r);
     assert_eq(memeq(str_data(js), "{\"schema_version\":", 18), 1, label);
     assert_eq(load8(str_data(js) + str_len(js) - 1), 125, label);
+    # And it parses: a real host's device names and warnings go into it
+    # (2.5.5; through 2.5.4 nothing escaped them).
+    assert(bayan_json_v_parse_buf(str_data(js), str_len(js)) != 0, label);
     return 0;
 }
 
@@ -290,8 +372,11 @@ fn test_builder_uses_exec() {
     assert_eq(builder_uses_exec(builder_no_exec()), 0, "no_exec mask: no exec");
     assert_eq(builder_uses_exec(builder_none()), 0, "none: no exec");
     assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_VULKAN)), 0, "vulkan alone: no exec");
+    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_GAUDI)), 0, "gaudi alone: no exec");
+    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_NEURON)), 0, "neuron alone: no exec");
     assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_CUDA)), 1, "cuda: exec");
-    assert_eq(builder_uses_exec(builder_with(builder_no_exec(), BACKEND_GRAPHCORE)), 1, "no_exec + graphcore: exec");
+    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_GRAPHCORE)), 0, "graphcore alone: no exec");
+    assert_eq(builder_uses_exec(builder_with(builder_no_exec(), BACKEND_INTEL_ONEAPI)), 1, "no_exec + oneapi: exec");
     return 0;
 }
 
@@ -321,6 +406,66 @@ fn test_exec_free_masks_spawn_nothing() {
     return 0;
 }
 
+# Warnings of `a` and `b` (registries) that differ by code and tool, plus
+# profiles that differ by type and name.
+fn _registry_diff(a, b) {
+    var wa = reg_warnings(a);
+    var wb = reg_warnings(b);
+    var d = 0;
+    if (vec_len(wa) != vec_len(wb)) { d = d + 1; }
+    var i = 0;
+    while (i < vec_len(wa)) {
+        var w = vec_get(wa, i);
+        if (_same_warnings(wa, w) != _same_warnings(wb, w)) { d = d + 1; }
+        i = i + 1;
+    }
+    var pa = reg_profiles(a);
+    var pb = reg_profiles(b);
+    if (vec_len(pa) != vec_len(pb)) { return d + 1; }
+    i = 0;
+    while (i < vec_len(pa)) {
+        var x = vec_get(pa, i);
+        var y = vec_get(pb, i);
+        if (profile_accel_type(x) != profile_accel_type(y)) { d = d + 1; }
+        var nx = profile_device_name(x);
+        var ny = profile_device_name(y);
+        if (nx == 0 || ny == 0) {
+            if (nx != ny) { d = d + 1; }
+        } elif (streq(nx, ny) != 1) {
+            d = d + 1;
+        }
+        i = i + 1;
+    }
+    return d;
+}
+
+# Any nonzero allow_exec is 1 (2.5.5). Through 2.5.4 a 2 kept the exec
+# backends but ran Vulkan, Apple, Gaudi, Neuron and the interconnect pass as
+# if exec were off.
+fn test_allow_exec_normalised() {
+    var one = registry_detect_with_opts(builder_all(), 1);
+    var two = registry_detect_with_opts(builder_all(), 2);
+    assert_eq(_registry_diff(one, two), 0, "allow_exec 2 detects as 1");
+    var neg = registry_detect_with_opts(builder_all(), 0 - 1);
+    assert_eq(_registry_diff(one, neg), 0, "allow_exec -1 detects as 1");
+    return 0;
+}
+
+# Gaudi and Neuron run without exec (2.5.5): registry_detect_no_exec keeps
+# them, and their tools run only with exec.
+fn test_gaudi_neuron_no_exec() {
+    var p = vec_new();
+    var w = vec_new();
+    detect_gaudi_opts(p, w, 0);
+    detect_neuron_opts(p, w, 0);
+    assert_eq(vec_len(w), 0, "gaudi, neuron without exec: no tool looked for");
+    var r = registry_detect_no_exec();
+    assert_eq(_tool_warnings(r), 0, "no_exec: still no tool run");
+    var only = builder_with(builder_with(builder_none(), BACKEND_GAUDI), BACKEND_NEURON);
+    assert_eq(_tool_warnings(registry_detect_with(only)), 0, "gaudi + neuron mask: no tool run");
+    return 0;
+}
+
 # --- Each missing tool is reported once (2.5.1) ---
 
 fn test_warnings_dedup_missing() {
@@ -336,6 +481,67 @@ fn test_warnings_dedup_missing() {
     assert(streq(warning_tool(vec_get(w, 1)), "hl-smi") == 1, "order kept");
     assert_eq(warning_code(vec_get(w, 3)), HWA_ERR_PARSE, "a repeated parse warning stays");
     assert_eq(warnings_dedup_missing(vec_new()), 0, "empty vec");
+    return 0;
+}
+
+# --- A failing tool is logged (2.5.5) ---
+
+var _hook_lines = 0;
+var _hook_levels = 0;
+
+# A sakshi emit hook that keeps a copy of each message and its level.
+fn _log_hook(ts, level, cat, msg, len, fields) {
+    vec_push(_hook_lines, str_from_buf(msg, len));
+    vec_push(_hook_levels, level);
+    return 0;
+}
+
+# The lines warnings_log_parse emits for `w` from `from`, at log level `lvl`.
+fn _logged(w, from, lvl) {
+    _hook_lines = vec_new();
+    _hook_levels = vec_new();
+    var keep = sakshi_get_level();
+    sakshi_set_level(lvl);
+    sakshi_set_emit_hook(&_log_hook);
+    warnings_log_parse(w, from);
+    sakshi_clear_emit_hook();
+    sakshi_set_level(keep);
+    return _hook_lines;
+}
+
+# Parse warnings and timeouts are logged at warn, a tool that ran and failed
+# at info (-v), and a missing tool and a sysfs read not at all. Through 2.5.4
+# only parse warnings were, so a tool that ran and failed (nvidia-smi
+# without its driver, exit 9) looked, to a CLI or wheel user, the same as one
+# not installed.
+fn test_warnings_log() {
+    var w = vec_new();
+    vec_push(w, warning_tool_not_found("hl-smi"));
+    vec_push(w, warning_parse("cuda", "bad line"));
+    vec_push(w, warning_tool_failed("nvidia-smi", 9, "exited with status 9"));
+    vec_push(w, warning_timeout("neuron-ls", 10000));
+    vec_push(w, warning_sysfs("/sys/x", "unreadable"));
+    vec_push(w, warning_tool_failed("dxgi", 0 - 1, "EnumAdapters1 failed"));
+    var lines = _logged(w, 0, SK_INFO);
+    assert_eq(vec_len(lines), 4, "log: parse, two failed tools and a timeout");
+    if (vec_len(lines) == 4) {
+        assert_eq(str_eq_cstr(vec_get(lines, 0), "cuda: bad line"), 1, "log: the parse line as before");
+        var failed = str_eq_cstr(vec_get(lines, 1), "nvidia-smi: exited with status 9");
+        assert_eq(failed, 1, "log: the failed tool's status");
+        assert_eq(str_eq_cstr(vec_get(lines, 2), "neuron-ls: timed out after 10s"), 1, "log: the timeout");
+        assert_eq(str_eq_cstr(vec_get(lines, 3), "dxgi: EnumAdapters1 failed"), 1, "log: a failure with no status");
+        assert_eq(vec_get(_hook_levels, 0), SK_WARN, "log: parse at warn");
+        assert_eq(vec_get(_hook_levels, 1), SK_INFO, "log: failed tool at info");
+        assert_eq(vec_get(_hook_levels, 2), SK_WARN, "log: timeout at warn");
+        assert_eq(vec_get(_hook_levels, 3), SK_INFO, "log: failure with no status at info");
+    }
+    # The default level: parse and timeout only, so a host whose vulkaninfo
+    # exits 1 for want of a Vulkan GPU stays silent.
+    var at_warn = _logged(w, 0, SK_WARN);
+    assert_eq(vec_len(at_warn), 2, "log: at warn, parse and timeout");
+    assert_eq(vec_len(_logged(w, 3, SK_INFO)), 2, "log: from an index on");
+    assert_eq(vec_len(_logged(w, 3, SK_WARN)), 1, "log: from an index on, at warn");
+    assert_eq(vec_len(_logged(w, 0, SK_ERROR)), 0, "log: nothing below the level");
     return 0;
 }
 
@@ -466,7 +672,7 @@ fn test_lazy_matches_full_detection() {
     assert_eq(vec_len(lp), vec_len(fp), "lazy: as many profiles as registry_detect");
     var types = 0;
     var t = 0;
-    while (t <= ACCEL_AGNOS_GPU) {
+    while (t < ACCEL_TYPE_COUNT) {
         var a = 0;
         var b = 0;
         i = 0;
@@ -535,6 +741,58 @@ fn test_disk_cached_in_memory() {
     assert_eq(r1, r2, "disk_cached: same registry within the TTL");
     disk_cached_invalidate(c);
     assert(disk_cached_get(c) != r1, "disk_cached: detected again after invalidate");
+    return 0;
+}
+
+# Readers of a warm cache on several threads all get the one registry, and a
+# reader after an invalidate gets a fresh one.
+var _cr_cache = 0;
+var _cr_want = 0;
+var _cr_bad = 0;
+
+fn _cache_reader(arg) {
+    var i = 0;
+    while (i < 200) {
+        if (cached_get(_cr_cache) != _cr_want) { atomic_fetch_add(&_cr_bad, 1); }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn test_cached_readers_concurrent() {
+    _cr_cache = cached_registry_new(3600);
+    _cr_want = cached_get(_cr_cache);
+    _cr_bad = 0;
+    var ts = vec_new();
+    var k = 0;
+    while (k < 4) {
+        vec_push(ts, thread_create(&_cache_reader, 0));
+        k = k + 1;
+    }
+    _cache_reader(0);
+    k = 0;
+    while (k < 4) {
+        var t = vec_get(ts, k);
+        if (t != 0) { thread_join(t); }
+        k = k + 1;
+    }
+    assert_eq(_cr_bad, 0, "cache: concurrent readers share the registry");
+    cached_invalidate(_cr_cache);
+    assert(cached_get(_cr_cache) != _cr_want, "cache: a reader after an invalidate detects again");
+    return 0;
+}
+
+# The threaded path's sync fallback (thread_create failed) is the thread
+# entry run on the calling thread: it detects what registry_run_detectors
+# does for that backend.
+fn test_threaded_sync_fallback() {
+    var ta = targ_new(BACKEND_VULKAN);
+    _detect_thread_entry(ta);
+    var p = vec_new();
+    var w = vec_new();
+    registry_run_detectors(p, w, builder_with(builder_none(), BACKEND_VULKAN), 1);
+    assert_eq(vec_len(targ_profs(ta)), vec_len(p), "sync fallback: the backend's profiles");
+    assert_eq(vec_len(targ_warns(ta)), vec_len(w), "sync fallback: the backend's warnings");
     return 0;
 }
 
@@ -687,7 +945,8 @@ fn test_placeholder_names() {
     vec_push(v, rocm);
     vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x1638, "AMD GPU (Vulkan)", 8 * BYTES_PER_GIB));
     assert_eq(profiles_dedup(v), 1, "scan view dropped");
-    assert_streq(profile_device_name(rocm), "AMD Radeon (PCI 0x1002:0x1638)", "rocm keeps its own name, not the scan's");
+    assert_streq(profile_device_name(rocm), "AMD Radeon (PCI 0x1002:0x1638)",
+      "rocm keeps its own name, not the scan's");
     return 0;
 }
 
@@ -739,6 +998,52 @@ fn test_dedup_two_vulkan_drivers() {
     assert_eq(profiles_dedup(v), 2, "both driver views dropped");
     assert_eq(vec_len(v), 1, "the card once");
     assert(streq(profile_device_name(vec_get(v, 0)), "AMD Radeon RX 7900 XTX") == 1, "product name not replaced");
+    return 0;
+}
+
+# Two identical cards whose sysfs has no product_name, usual for consumer
+# Radeons: both views go and both cards take the model name (2.5.5). pci_id
+# is the model ID, so through 2.5.4 both views paired with the first card and
+# the second kept "AMD Radeon (PCI 0x1002:0x744c)".
+fn test_dedup_identical_placeholder_cards() {
+    var v = vec_new();
+    vec_push(v, profile_cpu(64 * BYTES_PER_GIB));
+    var a = _gpu(ACCEL_ROCM, 0x1002, 0x744c, "AMD Radeon (PCI 0x1002:0x744c)", 24 * BYTES_PER_GIB);
+    var b = _gpu(ACCEL_ROCM, 0x1002, 0x744c, "AMD Radeon (PCI 0x1002:0x744c)", 24 * BYTES_PER_GIB);
+    vec_push(v, a);
+    vec_push(v, b);
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX (RADV NAVI31)", 24 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX (RADV NAVI31)", 24 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(v), 2, "identical cards: both views dropped");
+    assert_streq(profile_device_name(a), "AMD Radeon RX 7900 XTX (RADV NAVI31)", "identical cards: the first renamed");
+    assert_streq(profile_device_name(b), "AMD Radeon RX 7900 XTX (RADV NAVI31)", "identical cards: the second renamed");
+    return 0;
+}
+
+# A vendor profile with no memory figure takes its vulkaninfo view's heap
+# (2.5.5), as a DXGI iGPU does; the sysfs scan's guess is not taken.
+fn test_dedup_zero_memory_twin() {
+    var v = vec_new();
+    var gb10 = _gpu(ACCEL_CUDA, 0x10DE, 0x2E12, "NVIDIA GB10", 0);
+    var heap = _gpu(ACCEL_VULKAN, 0x10DE, 0x2E12, "NVIDIA GB10", 119 * BYTES_PER_GIB);
+    profile_set_shared_mem(heap, 119 * BYTES_PER_GIB);
+    vec_push(v, gb10);
+    vec_push(v, heap);
+    assert_eq(profiles_dedup(v), 1, "gb10: the view dropped");
+    assert_eq(profile_memory_bytes(gb10), 119 * BYTES_PER_GIB, "gb10: the heap taken");
+    assert_eq(profile_shared_mem(gb10), 119 * BYTES_PER_GIB, "gb10: shared, as the view said");
+    var w = vec_new();
+    var zero = _gpu(ACCEL_CUDA, 0x10DE, 0x2E12, "NVIDIA GB10", 0);
+    vec_push(w, zero);
+    vec_push(w, _gpu(ACCEL_VULKAN, 0x10DE, 0x2E12, "NVIDIA GPU (Vulkan)", 4 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(w), 1, "scan view: dropped");
+    assert_eq(profile_memory_bytes(zero), 0, "scan view: its guess not taken");
+    var x = vec_new();
+    var sized = _gpu(ACCEL_CUDA, 0x10DE, 0x2684, "NVIDIA GeForce RTX 4090", 24 * BYTES_PER_GIB);
+    vec_push(x, sized);
+    vec_push(x, _gpu(ACCEL_VULKAN, 0x10DE, 0x2684, "NVIDIA GeForce RTX 4090", 4 * BYTES_PER_GIB));
+    profiles_dedup(x);
+    assert_eq(profile_memory_bytes(sized), 24 * BYTES_PER_GIB, "sized card: its own memory kept");
     return 0;
 }
 
@@ -1078,6 +1383,38 @@ fn test_suggest_quant_cpu_only() {
     return 0;
 }
 
+# A registry of a CPU with `cpu_gib` and one device `p`.
+fn _host(cpu_gib, p) {
+    var v = vec_new();
+    vec_push(v, profile_cpu(cpu_gib * BYTES_PER_GIB));
+    vec_push(v, p);
+    return registry_from_profiles(v);
+}
+
+# Every AI ASIC counts, at its preferred level or the next one down it
+# supports (2.5.5). Through 2.5.4 only Gaudi did, and the rest were answered
+# from host RAM: INT4 on Inferentia, which cannot run it.
+fn test_suggest_quant_ai_asics() {
+    # inf2.xlarge-like: 15 GiB host, Inferentia2 32 GiB; 7B BF16 is 16.8 GB.
+    var inf = _host(15, profile_neuron(0, NEURON_INFERENTIA, 2));
+    assert_eq(reg_suggest_quant(inf, 7000000000), QUANT_BF16, "7B on Inferentia2 -> BF16");
+    assert_eq(reg_suggest_quant(inf, 20000000000), QUANT_INT8, "20B on Inferentia2 -> INT8");
+    var trn = _host(512, profile_neuron(0, NEURON_TRAINIUM, 2));
+    assert_eq(reg_suggest_quant(trn, 7000000000), QUANT_BF16, "7B on Trainium -> BF16, not FP16 from RAM");
+    # Cloud AI 100, 32 GiB, on an 8 GiB host: 13B INT8 is 15.6 GB.
+    var qc = _host(8, profile_new(ACCEL_QUALCOMM, 0, 32 * BYTES_PER_GIB));
+    assert_eq(reg_suggest_quant(qc, 13000000000), QUANT_INT8, "13B on Cloud AI 100 -> INT8");
+    # Cerebras 44 GiB on a 16 GiB host: 13B BF16 is 31.2 GB.
+    var cs = _host(16, profile_new(ACCEL_CEREBRAS, 0, 44 * BYTES_PER_GIB));
+    assert_eq(reg_suggest_quant(cs, 13000000000), QUANT_BF16, "13B on Cerebras -> BF16");
+    # Graphcore 900 MiB: 0.5B FP16 is 1.2 GB, INT8 0.6 GB.
+    var gc = _host(16, profile_new(ACCEL_GRAPHCORE, 0, 900 * 1024 * 1024));
+    assert_eq(reg_suggest_quant(gc, 500000000), QUANT_INT8, "0.5B on Graphcore -> INT8");
+    var g2 = _host(15, profile_gaudi(0, GAUDI2));
+    assert_eq(reg_suggest_quant(g2, 7000000000), QUANT_BF16, "Gaudi2 unchanged: BF16");
+    return 0;
+}
+
 # --- Memory estimation ---
 
 fn test_estimate_memory() {
@@ -1099,6 +1436,10 @@ test_registry_new();
 test_registry_from_profiles();
 test_registry_best_available();
 test_registry_by_family();
+test_constructor_sizes();
+test_reg_get_profile_bounds();
+test_foreign_type_in_registry();
+test_by_family_into_bounded();
 test_builder_all();
 test_builder_none();
 test_builder_selective();
@@ -1108,7 +1449,10 @@ test_no_exec_strips_exec_bits();
 test_no_exec_memory();
 test_builder_uses_exec();
 test_exec_free_masks_spawn_nothing();
+test_allow_exec_normalised();
+test_gaudi_neuron_no_exec();
 test_warnings_dedup_missing();
+test_warnings_log();
 test_tool_warnings_once();
 test_profiles_have_nvidia_gpu();
 test_nvlink_probe_needs_nvidia_gpu();
@@ -1117,6 +1461,8 @@ test_lazy_asic_query_no_nvidia_smi();
 test_monotonic_clock();
 test_cached_ttl();
 test_disk_cached_in_memory();
+test_cached_readers_concurrent();
+test_threaded_sync_fallback();
 test_detection_entry_points();
 test_vulkan_sysfs_leaves_amdgpu();
 test_totals_apple_unified();
@@ -1130,6 +1476,8 @@ test_placeholder_names();
 test_dedup_rocm_vulkan();
 test_dedup_cuda_keeps_other_gpus();
 test_dedup_two_vulkan_drivers();
+test_dedup_identical_placeholder_cards();
+test_dedup_zero_memory_twin();
 test_dedup_no_false_matches();
 test_dedup_apple();
 test_dedup_twin_ranks();
@@ -1143,6 +1491,7 @@ test_suggest_quant_gpu_small();
 test_suggest_quant_gpu_large();
 test_suggest_quant_tpu();
 test_suggest_quant_cpu_only();
+test_suggest_quant_ai_asics();
 test_estimate_memory();
 
 var fails = assert_summary();

@@ -92,6 +92,15 @@ class TestPlan(unittest.TestCase):
         self.assertIsInstance(plan.total_memory_bytes, int)
         self.assertTrue(len(plan.shards) >= 1)
         self.assertTrue(plan.shards[0].device)
+        # 70B BF16 fits no single host the fixture came from: 2.5.5 says so.
+        self.assertIs(plan.fits, False)
+
+    def test_fits_absent(self):
+        # A binary before 2.5.5 sends no "fits"; read it as a fitting plan.
+        plan = ShardingPlan.from_dict(
+            {"strategy": "None", "strategy_count": 1, "total_memory_bytes": 0, "shards": []}
+        )
+        self.assertIs(plan.fits, True)
 
     def test_est_tps_property(self):
         plan = ShardingPlan.from_dict(
@@ -124,6 +133,11 @@ class TestCost(unittest.TestCase):
         self.assertEqual(c.model, "70B")
         self.assertTrue(c.quantization)
         self.assertGreater(c.memory_required_bytes, 0)
+        # Through 2.5.4 the loader read 1 of the 18 instances in the
+        # catalogue, so the fixture held one recommendation.
+        self.assertGreater(len(c.recommendations), 1)
+        prices = [r.price_per_hour_usd_x100 for r in c.recommendations]
+        self.assertEqual(prices, sorted(prices))
         if c.recommendations:
             r = c.recommendations[0]
             self.assertTrue(r.instance)

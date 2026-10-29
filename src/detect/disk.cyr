@@ -1,46 +1,88 @@
 # disk.cyr — storage device detection via /sys/block/
 
-fn detect_storage(sio) {
-    var block_dir = str_from("/sys/block");
-    var entries = dir_list(block_dir);
+# 1 when /sys/block entry `name` (a Str) is not a storage device to list:
+# loop, device-mapper, RAM and compressed-RAM disks, optical (sr) and floppy
+# (fd) drives and md RAID, and since 2.5.5 network block devices (nbd), ZFS
+# zvols (zd), Ceph RBD (rbd), DRBD and MTD flash (mtdblock). The disks under
+# md, dm and a ZFS pool are listed in their own right. Pure.
+fn storage_name_skipped(name) {
+    if (str_starts_with(name, "loop") == 1) { return 1; }
+    if (str_starts_with(name, "dm-") == 1) { return 1; }
+    if (str_starts_with(name, "ram") == 1) { return 1; }
+    if (str_starts_with(name, "zram") == 1) { return 1; }
+    if (str_starts_with(name, "sr") == 1) { return 1; }
+    if (str_starts_with(name, "fd") == 1) { return 1; }
+    if (str_starts_with(name, "md") == 1) { return 1; }
+    if (str_starts_with(name, "nbd") == 1) { return 1; }
+    if (str_starts_with(name, "zd") == 1) { return 1; }
+    if (str_starts_with(name, "rbd") == 1) { return 1; }
+    if (str_starts_with(name, "drbd") == 1) { return 1; }
+    if (str_starts_with(name, "mtdblock") == 1) { return 1; }
+    return 0;
+}
+
+# The kind of /sys/block entry `name` (a Str), from its queue/rotational
+# flag `rot` (0, 1, or -1 when unreadable) and, for NVMe, its controller's
+# model and transport (Strs, or 0). An NVMe device is STK_NVME unless it is
+# backed by the network: NVMe over fabrics (transport tcp, rdma or fc), or an
+# AWS EBS volume on Nitro, whose model is "Amazon Elastic Block Store" and
+# whose gp3 baseline is 125 MB/s, not a local SSD's 3.5 GB/s (2.5.5). Those
+# are STK_UNKNOWN; there is no network kind in the schema. Pure.
+fn storage_classify(name, rot, model, transport) {
+    if (str_starts_with(name, "nvme") == 1) {
+        if (model != 0 && str_contains_cstr(model, "Elastic Block Store") == 1) { return STK_UNKNOWN; }
+        if (transport != 0) {
+            if (str_eq_cstr(transport, "tcp") == 1) { return STK_UNKNOWN; }
+            if (str_eq_cstr(transport, "rdma") == 1) { return STK_UNKNOWN; }
+            if (str_eq_cstr(transport, "fc") == 1) { return STK_UNKNOWN; }
+        }
+        return STK_NVME;
+    }
+    if (rot == 0) { return STK_SATA_SSD; }
+    if (rot == 1) { return STK_HDD; }
+    return STK_UNKNOWN;
+}
+
+# The nominal sequential bandwidth of a storage kind, in GB/s x1000. Pure.
+fn storage_kind_bw_x1000(kind) {
+    if (kind == STK_NVME) { return 3500; }
+    if (kind == STK_SATA_SSD) { return 550; }
+    if (kind == STK_HDD) { return 150; }
+    return 100;
+}
+
+# detect_storage over the block-device directory `root` (a cstr;
+# "/sys/block" on the system), so a test can point it at a fixture tree.
+# A device whose size is 0 holds no medium (a card reader with no card, an
+# nbd node with nothing attached) and is skipped; one whose size cannot be
+# read is kept.
+fn detect_storage_in(sio, root) {
+    var entries = sysfs_list_dir(root);
     var nent = vec_len(entries);
 
     var ei = 0;
     while (ei < nent) {
         var name = vec_get(entries, ei);
         ei = ei + 1;
+        if (storage_name_skipped(name) == 1) { continue; }
+        if (sysfs_read_int(sysfs_path_str(root, name, "size")) == 0) { continue; }
 
-        # Skip virtual devices: loop, dm-, ram, zram, sr, fd, md
-        if (str_starts_with(name, "loop") == 1) { continue; }
-        if (str_starts_with(name, "dm-") == 1) { continue; }
-        if (str_starts_with(name, "ram") == 1) { continue; }
-        if (str_starts_with(name, "zram") == 1) { continue; }
-        if (str_starts_with(name, "sr") == 1) { continue; }
-        if (str_starts_with(name, "fd") == 1) { continue; }
-        if (str_starts_with(name, "md") == 1) { continue; }
-
-        # Determine storage kind and bandwidth
-        var kind = STK_UNKNOWN;
-        var bw_x1000 = 100;
-
+        var rot = 0 - 1;
+        var model = 0;
+        var transport = 0;
         if (str_starts_with(name, "nvme") == 1) {
-            kind = STK_NVME;
-            bw_x1000 = 3500;
+            model = sysfs_read(sysfs_path_str(root, name, "device/model"));
+            transport = sysfs_read(sysfs_path_str(root, name, "device/transport"));
         } else {
-            # Check rotational flag
-            var rot_path = sysfs_path_str("/sys/block", name, "queue/rotational");
-            var rot = sysfs_read_int(rot_path);
-            if (rot == 0) {
-                kind = STK_SATA_SSD;
-                bw_x1000 = 550;
-            } elif (rot == 1) {
-                kind = STK_HDD;
-                bw_x1000 = 150;
-            }
+            rot = sysfs_read_int(sysfs_path_str(root, name, "queue/rotational"));
         }
-
-        var sd = storage_new(str_cstr(name), kind, bw_x1000);
+        var kind = storage_classify(name, rot, model, transport);
+        var sd = storage_new(str_cstr(name), kind, storage_kind_bw_x1000(kind));
         sio_add_storage(sio, sd);
     }
     return 0;
+}
+
+fn detect_storage(sio) {
+    return detect_storage_in(sio, "/sys/block");
 }

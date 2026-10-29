@@ -210,6 +210,38 @@ fn win_pnp_pci_id(s) {
     return pci_id_make(vendor, device);
 }
 
+# 1 when the `n` bytes at `d` start with cstr `prefix`, ASCII letters in
+# either case. Pure.
+fn _win_starts_ci(d, n, prefix) {
+    var pl = strlen(prefix);
+    if (n < pl) { return 0; }
+    var i = 0;
+    while (i < pl) {
+        var a = load8(d + i);
+        var b = load8(prefix + i);
+        if (a >= 'a' && a <= 'z') { a = a - 32; }
+        if (b >= 'a' && b <= 'z') { b = b - 32; }
+        if (a != b) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+# 1 when a wmic PNPDeviceID (`n` bytes at `d`) is a virtual display adapter,
+# not a GPU (2.5.5): a software device (SWD\, such as an RDP session's
+# Microsoft Remote Display Adapter, or Miracast), a root-enumerated display
+# driver (ROOT\, the indirect-display drivers), or Hyper-V's synthetic video
+# (VMBUS\{DA0A7802-E377-4AAC-8E77-0558EB1073F8}). DXGI lists none of them as
+# an adapter. Every other ID is kept: PCI\, ACPI\ (Windows on Arm's Adreno
+# is ACPI\QCOM...) and any other VMBUS\ device, which a partitioned GPU may
+# be. Pure.
+fn win_pnp_is_virtual(d, n) {
+    if (_win_starts_ci(d, n, "SWD\\") == 1) { return 1; }
+    if (_win_starts_ci(d, n, "ROOT\\") == 1) { return 1; }
+    if (_win_starts_ci(d, n, "VMBUS\\{DA0A7802-E377-4AAC-8E77-0558EB1073F8}") == 1) { return 1; }
+    return 0;
+}
+
 # Push an ACCEL_WIN_GPU profile (name copied to a NUL-terminated cstr).
 fn win_emit_gpu(profiles, dev_id, name, ram, pci_id) {
     var mem = ram;
@@ -225,7 +257,8 @@ fn win_emit_gpu(profiles, dev_id, name, ram, pci_id) {
 # Parse `wmic ... win32_VideoController get Name,AdapterRAM,PNPDeviceID
 # /format:list` output into ACCEL_WIN_GPU profiles. Each controller is a block
 # of `Key=Value` lines (AdapterRAM=, Name= and PNPDeviceID=, any order)
-# separated by blank lines; PNPDeviceID gives the pci_id (2.5.3). Returns the
+# separated by blank lines; PNPDeviceID gives the pci_id (2.5.3), and a
+# virtual adapter's (win_pnp_is_virtual) block is skipped (2.5.5). Returns the
 # count of GPUs pushed. Pure — no I/O. Only reached when DXGI is unavailable
 # (see detect_windows).
 fn win_parse_videocontrollers(out, profiles) {
@@ -237,20 +270,22 @@ fn win_parse_videocontrollers(out, profiles) {
     var cur_name = 0;
     var cur_ram = 0;
     var cur_pci = 0;
+    var cur_virtual = 0;
     var count = 0;
     while (i < nl) {
         var line = str_trim(vec_get(lines, i));
         var ld = str_data(line);
         var ll = str_len(line);
         if (ll == 0) {
-            if (have_name == 1) {
+            if (have_name == 1 && cur_virtual == 0) {
                 win_emit_gpu(profiles, dev_id, cur_name, cur_ram, cur_pci);
                 dev_id = dev_id + 1;
                 count = count + 1;
-                have_name = 0;
-                cur_ram = 0;
-                cur_pci = 0;
             }
+            have_name = 0;
+            cur_ram = 0;
+            cur_pci = 0;
+            cur_virtual = 0;
         } else {
             if (ll >= 11) {
                 if (memeq(ld, "AdapterRAM=", 11) == 1) {
@@ -266,12 +301,13 @@ fn win_parse_videocontrollers(out, profiles) {
             if (ll >= 12) {
                 if (memeq(ld, "PNPDeviceID=", 12) == 1) {
                     cur_pci = win_pnp_pci_id(str_new(ld + 12, ll - 12));
+                    cur_virtual = win_pnp_is_virtual(ld + 12, ll - 12);
                 }
             }
         }
         i = i + 1;
     }
-    if (have_name == 1) {
+    if (have_name == 1 && cur_virtual == 0) {
         win_emit_gpu(profiles, dev_id, cur_name, cur_ram, cur_pci);
         count = count + 1;
     }
@@ -429,37 +465,29 @@ fn detect_windows_opts(profiles, warnings, allow_exec) {
         return 0;
     }
     hwlog_debug("windows: dxgi unavailable, falling back to wmic");
-    var wmic = which("wmic");
-    if (wmic == 0) {
-        if (warnings != 0) { vec_push(warnings, warning_tool_not_found("wmic")); }
-        return 0;
-    }
+    # Through run_tool_status (2.5.5), as every other tool runs: which(), the
+    # quoted program token, the deadline, the capture buffer and its
+    # warnings. Through 2.5.4 this was a hand-made copy of it that pushed no
+    # "exec failed" or output-cut warning, and both an exit-status warning and
+    # "query failed" when wmic failed silently.
     var args = vec_new();
-    vec_push(args, cmd_win_program_token(wmic));
     vec_push(args, "path");
     vec_push(args, "win32_VideoController");
     vec_push(args, "get");
     vec_push(args, "Name,AdapterRAM,PNPDeviceID");
     vec_push(args, "/format:list");
-    var buf = alloc(CMD_MAX_STDOUT);
     var st[16];
-    # One byte short of the buffer, so the NUL below always fits. Under the
-    # tool deadline (cmd_capture).
-    var got = cmd_capture(args, buf, CMD_MAX_STDOUT - 1, &st);
-    if (load64(&st) == 0 - 2) {
-        if (warnings != 0) { vec_push(warnings, warning_timeout("wmic", CMD_DEFAULT_TIMEOUT_MS)); }
-        return 0;
-    }
-    var ew = tool_exit_warning("wmic", load64(&st), load64(&st + 8));
+    var out = run_tool_status("wmic", args, warnings, &st);
+    if (out == 0) { return 0; }
+    var ew = tool_run_warning("wmic", out, &st);
     if (ew != 0 && warnings != 0) { vec_push(warnings, ew); }
-    if (got <= 0) {
-        if (warnings != 0) {
+    if (str_len(out) == 0) {
+        if (ew == 0 && warnings != 0) {
             vec_push(warnings, warning_tool_failed("wmic", 0 - 1, "win32_VideoController query failed"));
         }
         return 0;
     }
-    store8(buf + got, 0);
-    return win_parse_videocontrollers(str_new(buf, got), profiles);
+    return win_parse_videocontrollers(out, profiles);
 }
 
 # detect_windows_opts with exec allowed (the wmic fallback may run).

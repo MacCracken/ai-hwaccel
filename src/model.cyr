@@ -16,7 +16,8 @@ struct model {
     dtype;
 }
 
-var MODEL_PROFILE_SIZE = 32;
+# sizeof, not a literal (2.5.5); the var stays for consumers.
+var MODEL_PROFILE_SIZE = sizeof(model);
 
 # Total parameter count (not billions)
 fn model_param_count(m) {
@@ -62,6 +63,12 @@ fn model_can_run(m, quant, avail_bytes) {
 # The function has no callers inside ai-hwaccel, which is why the suite stayed
 # green through all four: it is shipped API exercised only downstream (hoosh
 # hit (2) and vendors an unwrapped copy to work around it).
+#
+# 2.5.5 — the scan goes through cost.cyr's string-aware `_js_*` helpers,
+# shared with load_cloud_instances (which had kept defect (2) until then).
+# A key is matched only as a key, and a null or missing field stays unset
+# instead of taking the next key's text. The file is read on every call:
+# load it once and keep the vec.
 var MODELS_BUF = 32768;
 
 fn load_models() {
@@ -72,129 +79,39 @@ fn load_models() {
     if (n >= MODELS_BUF - 1) {
         hwlog_warn("load_models: models.json filled the read buffer — catalogue may be truncated");
     }
+    return models_parse(buf, n);
+}
 
-    # Skip a `{"models": [` wrapper if present; a top-level array starts at 0.
-    var pos = 0;
-    var wi = 0;
-    while (wi + 8 < n) {
-        if (load8(buf + wi) == 34) {
-            if (memeq(buf + wi + 1, "models", 6) == 1) {
-                if (load8(buf + wi + 7) == 34) {
-                    var bi = wi + 8;
-                    while (bi < n && load8(buf + bi) != 91) { bi = bi + 1; }
-                    if (bi < n) { pos = bi + 1; }
-                    break;
-                }
-            }
-        }
-        wi = wi + 1;
-    }
-
+# Model profiles in [buf, buf + n): a `{"models": [...]}` wrapper or a bare
+# array of objects. Entries without a name are skipped.
+fn models_parse(buf, n) {
     var models = vec_new();
+    var pos = _js_array_start(buf, n, "models");
     while (pos < n) {
-        if (load8(buf + pos) != 123) { pos = pos + 1; continue; }
-
-        var m = alloc(MODEL_PROFILE_SIZE);
-        memset(m, 0, MODEL_PROFILE_SIZE);
-
-        # Find object end
-        var obj_end = pos + 1;
-        var depth = 1;
-        while (obj_end < n && depth > 0) {
-            var c = load8(buf + obj_end);
-            if (c == 123) { depth = depth + 1; }
-            if (c == 125) { depth = depth - 1; }
-            obj_end = obj_end + 1;
+        var c = load8(buf + pos);
+        if (c == 93) { break; }
+        if (c != 123) {
+            pos = pos + 1;
+            continue;
         }
-
-        var obj = str_new(buf + pos, obj_end - pos);
-        _parse_model_field_str(obj, "name", m, 0);
-        _parse_model_field_str(obj, "family", m, 8);
-        _parse_model_field_str(obj, "default_dtype", m, 24);
-        _parse_model_params(obj, m);
-
-        if (model_name(m) != 0) {
+        var obj_end = _js_object_end(buf, n, pos);
+        var od = buf + pos;
+        var ol = obj_end - pos;
+        var name = _js_str(od, ol, "name");
+        if (name != 0) {
+            var m = alloc(sizeof(model));
+            model_set_name(m, name);
+            model_set_family(m, _js_str(od, ol, "family"));
+            # params_billions as x1000 (70.0 -> 70000)
+            var pb = _js_fixed(od, ol, "params_billions", 3);
+            if (pb < 0) { pb = 0; }
+            model_set_params_b_x1000(m, pb);
+            model_set_dtype(m, _js_str(od, ol, "default_dtype"));
             vec_push(models, m);
         }
         pos = obj_end;
     }
     return models;
-}
-
-fn _parse_model_field_str(obj, key, m, offset) {
-    var od = str_data(obj);
-    var ol = str_len(obj);
-    var klen = strlen(key);
-    var pi = 0;
-    while (pi < ol - klen - 4) {
-        if (load8(od + pi) == 34) {
-            if (memeq(od + pi + 1, key, klen) == 1) {
-                if (load8(od + pi + 1 + klen) == 34) {
-                    var vi = pi + klen + 2;
-                    while (vi < ol && load8(od + vi) != 34) { vi = vi + 1; }
-                    vi = vi + 1;
-                    var vstart = vi;
-                    while (vi < ol && load8(od + vi) != 34) { vi = vi + 1; }
-                    var vlen = vi - vstart;
-                    if (vlen > 0) {
-                        var val = alloc(vlen + 1);
-                        memcpy(val, od + vstart, vlen);
-                        store8(val + vlen, 0);
-                        store64(m + offset, val);
-                    }
-                    return 0;
-                }
-            }
-        }
-        pi = pi + 1;
-    }
-    return 0;
-}
-
-# Parse params_billions as x1000 integer (e.g., 70.0 -> 70000)
-fn _parse_model_params(obj, m) {
-    var od = str_data(obj);
-    var ol = str_len(obj);
-    var key = "params_billions";
-    var klen = 15;
-    var pi = 0;
-    while (pi < ol - klen - 3) {
-        if (load8(od + pi) == 34) {
-            if (memeq(od + pi + 1, key, klen) == 1) {
-                var vi = pi + klen + 3;
-                while (vi < ol) {
-                    var c = load8(od + vi);
-                    if (c >= 48 && c <= 57) { break; }
-                    vi = vi + 1;
-                }
-                var whole = 0;
-                while (vi < ol) {
-                    var c2 = load8(od + vi);
-                    if (c2 >= 48 && c2 <= 57) { whole = whole * 10 + c2 - 48; vi = vi + 1; }
-                    else { break; }
-                }
-                var frac = 0;
-                var frac_digits = 0;
-                if (vi < ol && load8(od + vi) == 46) {
-                    vi = vi + 1;
-                    while (vi < ol && frac_digits < 3) {
-                        var c3 = load8(od + vi);
-                        if (c3 >= 48 && c3 <= 57) {
-                            frac = frac * 10 + c3 - 48;
-                            vi = vi + 1;
-                            frac_digits = frac_digits + 1;
-                        }
-                        else { break; }
-                    }
-                    while (frac_digits < 3) { frac = frac * 10; frac_digits = frac_digits + 1; }
-                }
-                model_set_params_b_x1000(m, whole * 1000 + frac);
-                return 0;
-            }
-        }
-        pi = pi + 1;
-    }
-    return 0;
 }
 
 # Find all models that fit in available memory at given quantization
@@ -215,6 +132,7 @@ fn compatible_models(models, quant, avail_bytes) {
 # Find a model by name (substring match)
 fn find_model(models, name) {
     var nm = vec_len(models);
+    var name_str = str_from(name);
     var i = 0;
     while (i < nm) {
         var m = vec_get(models, i);
@@ -222,7 +140,6 @@ fn find_model(models, name) {
         var mn = model_name(m);
         if (mn != 0) {
             var mn_str = str_from(mn);
-            var name_str = str_from(name);
             if (str_contains(mn_str, name_str) == 1) { return m; }
         }
     }

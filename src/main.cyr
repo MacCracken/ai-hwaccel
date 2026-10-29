@@ -1,14 +1,16 @@
 # main.cyr — CLI entry point for ai-hwaccel
 #
-# Usage:
+# Usage (cli_help in src/cli.cyr has all of it):
 #   ai-hwaccel                  # Full registry JSON
 #   ai-hwaccel --summary        # Compact summary JSON
 #   ai-hwaccel --table          # Human-readable table
-#   ai-hwaccel --threaded       # Any detecting mode, tools run in parallel
+#   ai-hwaccel --plan 70B       # Sharding plan JSON
 #   ai-hwaccel --cost 70B       # Cloud instance recommendation
+#   ai-hwaccel --train 70B      # Training memory JSON
 #   ai-hwaccel --version        # Print version
-
-# Stdlib auto-included via cyrius.toml
+#
+# The stdlib comes from cyrius.cyml's [deps].stdlib, which `cyrius build`
+# includes ahead of this file.
 
 include "src/log.cyr"
 include "src/units.cyr"
@@ -49,43 +51,61 @@ include "src/cache.cyr"
 include "src/lazy.cyr"
 include "src/json_out.cyr"
 
-# --- CLI argument helpers (using lib/args.cyr) ---
+include "src/cli.cyr"
 
-fn _has_flag(flag) {
+# --- CLI arguments (src/cli.cyr) ---
+
+# argv without the program name, set once at startup.
+var _args = 0;
+
+fn _argv_vec() {
+    var v = vec_new();
     var n = argc();
     var i = 1;
     while (i < n) {
-        var arg = argv(i);
-        if (arg != 0) {
-            if (streq(arg, flag) == 1) { return 1; }
-        }
+        vec_push(v, argv(i));
         i = i + 1;
     }
-    return 0;
+    return v;
+}
+
+fn _has_flag(flag) {
+    return cli_has_flag(_args, flag);
 }
 
 fn _get_val(flag) {
-    var n = argc();
-    var i = 1;
-    while (i < n) {
-        var arg = argv(i);
-        if (arg != 0) {
-            if (streq(arg, flag) == 1) {
-                if (i + 1 < n) { return argv(i + 1); }
-                return 0;
-            }
-        }
-        i = i + 1;
-    }
+    return cli_get_val(_args, flag);
+}
+
+# Print "ai-hwaccel: <reason> (see --help)" on stderr and exit 2: a usage
+# error, which the Python wrapper raises as CommandError. Written straight
+# to fd 2 so -q cannot hide why the run stopped.
+fn _usage_die(reason) {
+    syscall(1, 2, "ai-hwaccel: ", 12);
+    syscall(1, 2, reason, strlen(reason));
+    syscall(1, 2, " (see --help)\n", 14);
+    syscall(60, 2);
     return 0;
+}
+
+# The --quant value as a Quantization, BF16 when absent. cli_check_args has
+# refused an unknown name.
+fn _quant_arg() {
+    var qs = _get_val("--quant");
+    if (qs == 0) { return QUANT_BF16; }
+    return quant_from_str(qs);
 }
 
 # --- Output helpers ---
 
 fn _print_str(s) {
-    var data = str_data(s);
-    var len = str_len(s);
-    syscall(1, 1, data, len);
+    syscall(1, 1, str_data(s), str_len(s));
+    return 0;
+}
+
+fn _print_line(s) {
+    _print_str(s);
+    syscall(1, 1, "\n", 1);
     return 0;
 }
 
@@ -97,13 +117,17 @@ fn _println_cstr(s) {
 
 # --- Table output ---
 
-fn _print_table(r) {
-    # Header
-    var hdr = "ID     Device                       Memory     Free       Family   Status";
-    _println_cstr(hdr);
-    var sep = "-----  ---------------------------  ---------  ---------  -------  ------";
-    _println_cstr(sep);
+# "<n> GiB" for `bytes`, as a cstr.
+fn _gib_cstr(bytes) {
+    var sb = str_builder_new();
+    str_builder_add_int(sb, bytes / BYTES_PER_GIB);
+    str_builder_add_cstr(sb, " GiB");
+    return str_data(str_builder_build(sb));
+}
 
+fn _print_table(r) {
+    _println_cstr("ID     Device                                Memory     Free       Family   Status");
+    _println_cstr("-----  ------------------------------------  ---------  ---------  -------  ------");
     var profs = reg_profiles(r);
     var np = vec_len(profs);
     var i = 0;
@@ -111,83 +135,57 @@ fn _print_table(r) {
         var p = vec_get(profs, i);
         i = i + 1;
         var sb = str_builder_new();
-
-        # ID (device_id, 5 chars padded)
-        str_builder_add_int(sb, profile_device_id(p));
-        str_builder_add_cstr(sb, "      ");
-
-        # Device name (27 chars)
+        var id = str_builder_new();
+        str_builder_add_int(id, profile_device_id(p));
+        cli_table_cell(sb, str_data(str_builder_build(id)), 5);
         var dn = profile_device_name(p);
-        if (dn != 0) {
-            str_builder_add_cstr(sb, dn);
-        } else {
-            str_builder_add_cstr(sb, accel_name(profile_accel_type(p)));
-        }
-        str_builder_add_cstr(sb, "  ");
-
-        # Memory (GiB)
-        var mem_gib = profile_memory_bytes(p) / BYTES_PER_GIB;
-        str_builder_add_int(sb, mem_gib);
-        str_builder_add_cstr(sb, " GiB     ");
-
-        # Free memory
+        if (dn == 0) { dn = accel_name(profile_accel_type(p)); }
+        cli_table_cell(sb, dn, 36);
+        cli_table_cell(sb, _gib_cstr(profile_memory_bytes(p)), 9);
         var mem_free = profile_mem_free(p);
-        if (mem_free != PROFILE_NONE) {
-            str_builder_add_int(sb, mem_free / BYTES_PER_GIB);
-            str_builder_add_cstr(sb, " GiB     ");
-        } else {
-            str_builder_add_cstr(sb, "-          ");
-        }
-
-        # Family
-        str_builder_add_cstr(sb, family_name(profile_family(p)));
-        str_builder_add_cstr(sb, "    ");
-
-        # Status
-        if (profile_available(p) == 1) {
-            str_builder_add_cstr(sb, "OK");
-        } else {
-            str_builder_add_cstr(sb, "N/A");
-        }
-
-        var line = str_builder_build(sb);
-        _print_str(line);
-        syscall(1, 1, "\n", 1);
+        if (mem_free != PROFILE_NONE) { cli_table_cell(sb, _gib_cstr(mem_free), 9); }
+        else { cli_table_cell(sb, "-", 9); }
+        cli_table_cell(sb, family_name(profile_family(p)), 7);
+        if (profile_available(p) == 1) { str_builder_add_cstr(sb, "OK"); }
+        else { str_builder_add_cstr(sb, "N/A"); }
+        _print_line(str_builder_build(sb));
     }
     return 0;
 }
 
 # --- Cost mode ---
 
+# 1 when the --cost pricing catalogue has rows, else 0 after a warning that
+# names the file. Without one every list is empty, which through 2.5.4 read
+# as "nothing fits" (the JSON's "recommendations":[]) with nothing on stderr.
+fn _catalogue_ok() {
+    if (vec_len(_cloud_instances_cached()) > 0) { return 1; }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "--cost: no cloud pricing rows in ");
+    str_builder_add_cstr(sb, data_file_path("data/cloud_pricing.json"));
+    str_builder_add_cstr(sb, " (pass --data-dir <dir> or set AI_HWACCEL_DATA_DIR)");
+    hwlog_warn(str_data(str_builder_build(sb)));
+    return 0;
+}
+
 fn _handle_cost(model_str) {
+    var quant = _quant_arg();
+    var params = model_params_from_str(model_str);
+    var needed = quant_model_bytes_with_overhead(params, quant);
+    # Rounded up, as the instance check is: "640 GiB" never sits next to a
+    # list that leaves out the 640 GB instances.
+    var needed_gib = needed / BYTES_PER_GIB;
+    if (needed % BYTES_PER_GIB != 0) { needed_gib = needed_gib + 1; }
+    var have = _catalogue_ok();
+
     var sb = str_builder_new();
     str_builder_add_cstr(sb, "Model: ");
     str_builder_add_cstr(sb, model_str);
     str_builder_add_cstr(sb, "\n");
-
-    var quant_str = _get_val("--quant");
-    var quant = QUANT_BF16;
-    if (quant_str != 0) {
-        var q = quant_from_str(quant_str);
-        if (q >= 0) { quant = q; }
-    }
-
-    # Parse model size
-    var num = 0;
-    var pi = 0;
-    while (load8(model_str + pi) != 0) {
-        var c = load8(model_str + pi);
-        if (c >= 48 && c <= 57) { num = num * 10 + c - 48; }
-        elif (c == 66 || c == 98) { break; }
-        pi = pi + 1;
-    }
-    var params = num * 1000000000;
-    var needed = quant_model_bytes_with_overhead(params, quant);
-
     str_builder_add_cstr(sb, "Quantization: ");
     str_builder_add_cstr(sb, quant_name(quant));
     str_builder_add_cstr(sb, "\nMemory required: ");
-    str_builder_add_int(sb, needed / BYTES_PER_GIB);
+    str_builder_add_int(sb, needed_gib);
     str_builder_add_cstr(sb, " GiB\n");
 
     # Recommend cloud instances
@@ -220,85 +218,39 @@ fn _handle_cost(model_str) {
             str_builder_add_cstr(sb, "/hr\n");
             ri = ri + 1;
         }
+    } elif (have == 1) {
+        str_builder_add_cstr(sb, "\nNo instance in the pricing catalogue holds the model.\n");
     } else {
-        str_builder_add_cstr(sb, "\nNo matching instances found. Check data/cloud_pricing.json.\n");
+        str_builder_add_cstr(sb, "\nNo pricing catalogue was read (see the warning above).\n");
     }
 
     _print_str(str_builder_build(sb));
     return 0;
 }
 
-# --- Shared CLI parse helpers ---
-
-# Resolve the --quant arg to a Quantization enum (default BF16).
-fn _quant_arg() {
-    var quant = QUANT_BF16;
-    var qs = _get_val("--quant");
-    if (qs != 0) {
-        var q = quant_from_str(qs);
-        if (q >= 0) { quant = q; }
-    }
-    return quant;
-}
-
-# Parse a "<N>B" model size string to its billions count (e.g. "70B"
-# -> 70). Digits are read until a 'B'/'b' or end of string.
-fn _parse_model_b(model_str) {
-    var num = 0;
-    var pi = 0;
-    while (load8(model_str + pi) != 0) {
-        var c = load8(model_str + pi);
-        if (c >= 48 && c <= 57) { num = num * 10 + c - 48; }
-        elif (c == 66 || c == 98) { break; }
-        pi = pi + 1;
-    }
-    return num;
-}
-
 # --- Training memory mode (--train) ---
 
+# The estimate is for a GPU target (TARGET_GPU): bf16 weights, or the 4- and
+# 8-bit ones a QLoRA method picks.
 fn _handle_train(model_str) {
     var method = TRAIN_FULL;
     var ms = _get_val("--method");
-    if (ms != 0) {
-        var m = training_method_from_str(ms);
-        if (m >= 0) { method = m; }
-    }
-    var params_m = _parse_model_b(model_str) * 1000;
+    if (ms != 0) { method = training_method_from_str(ms); }
+    var params_m = model_params_from_str(model_str) / PARAMS_PER_MILLION;
     var est = estimate_training_memory(params_m, method, TARGET_GPU);
     var sb = str_builder_new();
     training_to_json(sb, est);
-    _print_str(str_builder_build(sb));
-    syscall(1, 1, "\n", 1);
+    _print_line(str_builder_build(sb));
     return 0;
 }
 
 # --- Sharding plan mode (--plan) ---
 
 fn _handle_plan(registry, model_str) {
-    var params = _parse_model_b(model_str) * 1000000000;
-    var plan = reg_plan_sharding(registry, params, _quant_arg());
+    var plan = reg_plan_sharding(registry, model_params_from_str(model_str), _quant_arg());
     var sb = str_builder_new();
     plan_to_json(sb, plan);
-    _print_str(str_builder_build(sb));
-    syscall(1, 1, "\n", 1);
-    return 0;
-}
-
-# --- Version ---
-
-fn _print_version() {
-    var buf = alloc(64);
-    var n = file_read_all(data_file_path("VERSION"), buf, 63);
-    if (n > 0) {
-        store8(buf + n, 0);
-        # Trim newline
-        if (n > 0 && load8(buf + n - 1) == 10) { store8(buf + n - 1, 0); n = n - 1; }
-        syscall(1, 1, buf, n);
-        syscall(1, 1, "\n", 1);
-    } else {
-        _println_cstr("unknown");
-    }
+    _print_line(str_builder_build(sb));
     return 0;
 }
 
@@ -306,6 +258,12 @@ fn _print_version() {
 
 args_init();
 alloc_init();
+_args = _argv_vec();
+
+# A command line that would run with a silent default is refused before any
+# detection or tool run (cli_check_args).
+var bad_args = cli_check_args(_args);
+if (bad_args != 0) { _usage_die(bad_args); }
 
 # Logging: stderr, WARN+ by default. env (read in hwlog_init) sets the
 # floor; CLI flags below override it. stdout stays clean for JSON.
@@ -315,38 +273,26 @@ if (_has_flag("-v") == 1) { sakshi_set_level(SK_DEBUG); }
 if (_has_flag("-vv") == 1) { sakshi_set_level(SK_TRACE); }
 if (_has_flag("-q") == 1) { sakshi_set_level(0 - 1); }
 
+# --data-dir: where data_file_path reads data/ from (--cost). The library
+# never reads argv itself (2.5.5), so the CLI hands it over.
+data_dir_set(_get_val("--data-dir"));
+
 if (_has_flag("--version") == 1) {
-    _print_version();
+    _println_cstr(cli_version());
     syscall(60, 0);
 }
 
 if (_has_flag("--help") == 1) {
-    _println_cstr("ai-hwaccel — universal AI hardware accelerator detection");
-    _println_cstr("");
-    _println_cstr("Usage:");
-    _println_cstr("  ai-hwaccel              Full registry JSON");
-    _println_cstr("  ai-hwaccel --summary    Compact summary JSON");
-    _println_cstr("  ai-hwaccel --table      Human-readable table");
-    _println_cstr("  ai-hwaccel --cost 70B   Cloud instance recommendation (text)");
-    _println_cstr("  ai-hwaccel --cost 70B --json   Same, as JSON");
-    _println_cstr("  ai-hwaccel --plan 70B   Sharding plan JSON");
-    _println_cstr("  ai-hwaccel --train 70B [--method lora]   Training memory JSON");
-    _println_cstr("  ai-hwaccel --version    Print version");
-    _println_cstr("");
-    _println_cstr("Options: --quant <fp16|bf16|int8|int4>  --method <full|lora|qlora-4bit|...>");
-    _println_cstr("         --threaded          Run the vendor tools in parallel threads; the same");
-    _println_cstr("                             registry, sooner when several tools are installed");
-    _println_cstr("         --data-dir <path>   Dir holding VERSION + data/ (for --version/--cost");
-    _println_cstr("                             outside the project root); AI_HWACCEL_DATA_DIR");
-    _println_cstr("                             does the same, and the flag wins");
+    var help = cli_help();
+    syscall(1, 1, help, strlen(help));
     syscall(60, 0);
 }
 
 var cost_val = _get_val("--cost");
 if (cost_val != 0) {
     if (_has_flag("--json") == 1) {
-        _print_str(cost_to_json(cost_val, _quant_arg()));
-        syscall(1, 1, "\n", 1);
+        _catalogue_ok();
+        _print_line(cost_to_json(cost_val, _quant_arg()));
     } else {
         _handle_cost(cost_val);
     }
@@ -359,9 +305,10 @@ if (train_val != 0) {
     syscall(60, 0);
 }
 
-# Detect hardware. --threaded (2.5.4) runs the vendor tools in parallel
-# threads, registry_detect_threaded; the registry holds the same profiles and
-# warnings, in another order. CI's smoke jobs run both on macOS and Windows.
+# Detect hardware. --threaded (2.5.4) runs the detectors on threads of their
+# own, registry_detect_threaded; the vendor tools themselves run one at a
+# time (2.5.5). The registry holds the same profiles and warnings, in another
+# order. CI's smoke jobs run both on macOS and Windows.
 var registry = 0;
 if (_has_flag("--threaded") == 1) {
     registry = registry_detect_threaded();
@@ -378,14 +325,10 @@ if (plan_val != 0) {
 if (_has_flag("--table") == 1) {
     _print_table(registry);
 } elif (_has_flag("--summary") == 1) {
-    var json = registry_to_summary_json(registry);
-    _print_str(json);
-    syscall(1, 1, "\n", 1);
+    _print_line(registry_to_summary_json(registry));
 } else {
     # Default: full JSON
-    var json = registry_to_json(registry);
-    _print_str(json);
-    syscall(1, 1, "\n", 1);
+    _print_line(registry_to_json(registry));
 }
 
 syscall(60, 0);

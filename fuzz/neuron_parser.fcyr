@@ -1,5 +1,7 @@
 # Fuzz: AWS Neuron JSON parser
-# Exercises _parse_neuron_json with valid, empty, and malformed inputs
+# Exercises parse_neuron_ls_json with the shape AWS documents for
+# `neuron-ls --json-output`, the older "model" shape, and empty, malformed,
+# truncated and mutated input.
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
@@ -22,30 +24,96 @@ include "src/detect/platform.cyr"
 include "src/detect/command.cyr"
 include "src/detect/neuron.cyr"
 
+# Every profile has memory in (0, 16 TiB], 1 to 128 cores, an id in
+# 0..CMD_MAX_DEVICE_ID and a known chip.
+fn fz_check(profs) {
+    var i = 0;
+    while (i < vec_len(profs)) {
+        var p = vec_get(profs, i);
+        var m = profile_memory_bytes(p);
+        if (m <= 0 || m > 16 * 1024 * BYTES_PER_GIB) { return 0; }
+        var c = profile_neuron_cores(p);
+        if (c < 1 || c > 128) { return 0; }
+        var id = profile_device_id(p);
+        if (id < 0 || id > CMD_MAX_DEVICE_ID) { return 0; }
+        var chip = profile_neuron_chip(p);
+        if (chip != NEURON_INFERENTIA && chip != NEURON_TRAINIUM) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
 alloc_init();
 
-# Valid neuron-ls JSON
+# The documented shape: two trn1 devices, a process whose command holds a
+# quoted key and a brace.
+var good = "[{\"neuron_device\":0,\"bdf\":\"10:1c.0\",\"connected_to\":[12,3,4,1],\"nc_count\":2,\"memory_size\":34359738368,\"neuron_processes\":[{\"pid\":7,\"command\":\"run \\\"nc_count\\\": 99}\"}]},{\"neuron_device\":1,\"connected_to\":null,\"nc_count\":2,\"memory_size\":34359738368,\"neuron_processes\":[]}]";
 var p1 = vec_new();
-var json1 = str_from("[{\"model\":\"trn1\",\"nc_count\":2,\"memory_per_nc_mb\":32768}]");
-_parse_neuron_json(json1, p1);
-if (vec_len(p1) < 1) { syscall(60, 1); }
+if (parse_neuron_ls_json(str_from(good), NEURON_TRAINIUM, p1, vec_new()) != 2) { syscall(60, 1); }
+if (fz_check(p1) == 0) { syscall(60, 2); }
+if (profile_neuron_cores(vec_get(p1, 0)) != 2) { syscall(60, 2); }
 
-# Inferentia
+# The older "model" shape (the bench's input).
 var p2 = vec_new();
-var json2 = str_from("[{\"model\":\"inf2\",\"nc_count\":1,\"memory_per_nc_mb\":16384}]");
-_parse_neuron_json(json2, p2);
+_parse_neuron_json(str_from("[{\"model\":\"trn1\",\"nc_count\":2,\"memory_per_nc_mb\":32768}]"), p2);
+if (vec_len(p2) != 1) { syscall(60, 3); }
+_parse_neuron_json(str_from("[{\"model\":\"inf2\",\"nc_count\":1,\"memory_per_nc_mb\":16384}]"), p2);
+if (fz_check(p2) == 0) { syscall(60, 3); }
 
-# Empty input
+# Empty, garbage, an empty array, a bare object, deep nesting, unterminated
+# strings and arrays, huge numbers.
 var p3 = vec_new();
 _parse_neuron_json(str_from(""), p3);
-if (vec_len(p3) != 0) { syscall(60, 3); }
+if (vec_len(p3) != 0) { syscall(60, 4); }
+_parse_neuron_json(str_from("not json at all"), p3);
+_parse_neuron_json(str_from("[]"), p3);
+_parse_neuron_json(str_from("[[[[[[[[{{{{{{{{"), p3);
+_parse_neuron_json(str_from("[{\"neuron_device\":\"0"), p3);
+_parse_neuron_json(str_from("[{\"nc_count\":2,\"x\":[1,2,"), p3);
+_parse_neuron_json(str_from("[{\"neuron_device\":99999999999999999999999,\"nc_count\":99999999999999999999,\"memory_size\":99999999999999999999}]"), p3);
+_parse_neuron_json(str_from("{\"neuron_device\":0,\"nc_count\":4}"), p3);
+_parse_neuron_json(str_from("[{\"\\\\\":1,\"nc_count\":2},,,{:},{\"nc_count\"}]"), p3);
+if (fz_check(p3) == 0) { syscall(60, 5); }
 
-# Garbage
+# Every byte replaced in turn by each of a few structural bytes, then cut
+# short there: nothing may crash, at most one device per object, and every
+# profile keeps its invariants.
+var subs = "{}[]\",:\\0";
+var nsub = strlen(subs);
+var glen = strlen(good);
+var pos = 0;
+while (pos < glen) {
+    var si = 0;
+    while (si < nsub) {
+        var buf = alloc(glen + 1);
+        memcpy(buf, good, glen);
+        store8(buf + glen, 0);
+        store8(buf + pos, load8(subs + si));
+        var pm = vec_new();
+        parse_neuron_ls_json(str_new(buf, glen), NEURON_INFERENTIA, pm, vec_new());
+        if (vec_len(pm) > 4) { syscall(60, 6); }
+        if (fz_check(pm) == 0) { syscall(60, 7); }
+        var pc = vec_new();
+        parse_neuron_ls_json(str_new(buf, pos), NEURON_TRAINIUM, pc, vec_new());
+        if (fz_check(pc) == 0) { syscall(60, 7); }
+        si = si + 1;
+    }
+    pos = pos + 1;
+}
+
+# Many devices: capped at 256.
+var sb = str_builder_new();
+str_builder_putc(sb, 91);
+var di = 0;
+while (di < 300) {
+    if (di > 0) { str_builder_putc(sb, 44); }
+    str_builder_add_cstr(sb, "{\"neuron_device\":");
+    str_builder_add_int(sb, di);
+    str_builder_add_cstr(sb, ",\"nc_count\":2}");
+    di = di + 1;
+}
+str_builder_putc(sb, 93);
 var p4 = vec_new();
-_parse_neuron_json(str_from("not json at all"), p4);
-
-# Empty array
-var p5 = vec_new();
-_parse_neuron_json(str_from("[]"), p5);
+if (parse_neuron_ls_json(str_builder_build(sb), NEURON_TRAINIUM, p4, vec_new()) != 256) { syscall(60, 8); }
 
 syscall(60, 0);

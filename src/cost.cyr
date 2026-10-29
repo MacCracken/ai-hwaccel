@@ -9,11 +9,9 @@
 # Note the field-name mapping: layout had `gpu_mem_gb` and
 # `total_gpu_mem_gb`; we keep those names. `price_x100` is cents
 # per hour (x100 fixed-point) to avoid floats.
-# Construction goes through the JSON loader in `load_cloud_instances`
-# below — no public constructor, so the per-file `_parse_cloud_field_*`
-# helpers (which take an offset parameter for generic dispatch)
-# remain on raw `store64(ci + offset, …)`. Those stay inside the
-# defining file and are accepted by the cross-file CI guard.
+# Construction goes through `cloud_instances_parse` below; there is no
+# public constructor. The string fields are never 0 ("" when the file
+# leaves them out).
 
 #derive(accessors)
 struct cloud_inst {
@@ -29,7 +27,8 @@ struct cloud_inst {
     price_x100;
 }
 
-var CLOUD_INST_SIZE = 80;
+# sizeof, not a literal (2.5.5); the var stays for consumers.
+var CLOUD_INST_SIZE = sizeof(cloud_inst);
 
 # CloudProvider enum
 enum CloudProvider {
@@ -57,10 +56,11 @@ struct rec {
     headroom_x100;
 }
 
-var INST_REC_SIZE = 24;
+# sizeof, not a literal (2.5.5); the var stays for consumers.
+var INST_REC_SIZE = sizeof(rec);
 
 fn inst_rec_new(inst, mem_req) {
-    var rec = alloc(INST_REC_SIZE);
+    var rec = alloc(sizeof(rec));
     rec_set_instance(rec, inst);
     rec_set_mem_required(rec, mem_req);
     var total_mem = cloud_inst_total_mem_gb(inst) * BYTES_PER_GIB;
@@ -72,236 +72,338 @@ fn inst_rec_new(inst, mem_req) {
     return rec;
 }
 
-# Load cloud pricing from JSON file
-# Returns vec of CloudGpuInstance pointers
-fn load_cloud_instances() {
+# --- Flat JSON scanning ---
+# data/cloud_pricing.json and data/models.json (model.cyr uses these too)
+# are arrays of flat objects, each under a {"instances": [...]} or
+# {"models": [...]} wrapper. The scanners skip quoted strings, so a brace or
+# a key name inside a value cannot throw them off; they take a key only
+# where it is a key (a whole quoted name followed by ':'); and they check
+# the value's type, so a null or a missing field leaves the default instead
+# of borrowing the next key's name or a later number (2.5.4 did both).
+
+fn _js_ws(c) {
+    return c == 32 || c == 9 || c == 10 || c == 13;
+}
+
+fn _js_skip_ws(buf, n, i) {
+    while (i < n && _js_ws(load8(buf + i)) == 1) { i = i + 1; }
+    return i;
+}
+
+# Index of the quote that closes the string whose body starts at `i`, or `n`
+# when it is unterminated.
+fn _js_string_end(buf, n, i) {
+    while (i < n) {
+        var c = load8(buf + i);
+        if (c == 34) { return i; }
+        if (c == 92) { i = i + 1; }
+        i = i + 1;
+    }
+    return n;
+}
+
+# Index just past the object that opens at `pos`, or `n` if it never closes.
+fn _js_object_end(buf, n, pos) {
+    var depth = 0;
+    var i = pos;
+    while (i < n) {
+        var c = load8(buf + i);
+        if (c == 34) {
+            i = _js_string_end(buf, n, i + 1) + 1;
+            continue;
+        }
+        if (c == 123) { depth = depth + 1; }
+        elif (c == 125) {
+            depth = depth - 1;
+            if (depth == 0) { return i + 1; }
+        }
+        i = i + 1;
+    }
+    return n;
+}
+
+# Offset of the value of `key` among the top-level keys of the object at
+# [buf, buf + n) (or of a whole document), or -1.
+fn _js_value_at(buf, n, key) {
+    var klen = strlen(key);
+    var depth = 0;
+    var i = 0;
+    while (i < n) {
+        var c = load8(buf + i);
+        if (c == 34) {
+            var ks = i + 1;
+            var ke = _js_string_end(buf, n, ks);
+            i = _js_skip_ws(buf, n, ke + 1);
+            if (i < n && load8(buf + i) == 58) {
+                i = _js_skip_ws(buf, n, i + 1);
+                if (depth == 1 && ke - ks == klen && memeq(buf + ks, key, klen) == 1) {
+                    if (i < n) { return i; }
+                    return 0 - 1;
+                }
+            }
+            continue;
+        }
+        if (c == 123 || c == 91) { depth = depth + 1; }
+        elif (c == 125 || c == 93) { depth = depth - 1; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+# Offset just past the '[' of a top-level `"key": [` wrapper, or 0 for a
+# document with none (a bare top-level array).
+fn _js_array_start(buf, n, key) {
+    var vi = _js_value_at(buf, n, key);
+    if (vi >= 0 && load8(buf + vi) == 91) { return vi + 1; }
+    return 0;
+}
+
+# The string value of `key` as a fresh C string, its common escapes decoded
+# (a \u escape is kept as written), or 0 when the key is missing, its value
+# is not a string, or the string is empty.
+fn _js_str(buf, n, key) {
+    var vi = _js_value_at(buf, n, key);
+    if (vi < 0 || load8(buf + vi) != 34) { return 0; }
+    var vs = vi + 1;
+    var ve = _js_string_end(buf, n, vs);
+    if (ve >= n || ve == vs) { return 0; }
+    var out = alloc(ve - vs + 1);
+    var o = 0;
+    var i = vs;
+    while (i < ve) {
+        var c = load8(buf + i);
+        if (c == 92 && i + 1 < ve) {
+            i = i + 1;
+            c = load8(buf + i);
+            if (c == 110) { c = 10; }
+            elif (c == 116) { c = 9; }
+            elif (c == 114) { c = 13; }
+            elif (c == 98) { c = 8; }
+            elif (c == 102) { c = 12; }
+            elif (c == 117) {
+                store8(out + o, 92);
+                o = o + 1;
+            }
+        }
+        store8(out + o, c);
+        o = o + 1;
+        i = i + 1;
+    }
+    store8(out + o, 0);
+    return out;
+}
+
+# The non-negative decimal value of `key` scaled by 10^places ("98.32" at
+# 2 -> 9832, "70" at 3 -> 70000; finer fraction digits are dropped), or -1
+# when the key is missing, its value is not a number, or it passes 1e15.
+fn _js_fixed(buf, n, key, places) {
+    var vi = _js_value_at(buf, n, key);
+    if (vi < 0) { return 0 - 1; }
+    var c = load8(buf + vi);
+    if (c < 48 || c > 57) { return 0 - 1; }
+    var whole = 0;
+    while (vi < n) {
+        c = load8(buf + vi);
+        if (c < 48 || c > 57) { break; }
+        if (whole > 100000000000000) { return 0 - 1; }
+        whole = whole * 10 + c - 48;
+        vi = vi + 1;
+    }
+    var frac = 0;
+    var fd = 0;
+    if (vi < n && load8(buf + vi) == 46) {
+        vi = vi + 1;
+        while (vi < n) {
+            c = load8(buf + vi);
+            if (c < 48 || c > 57) { break; }
+            if (fd < places) {
+                frac = frac * 10 + c - 48;
+                fd = fd + 1;
+            }
+            vi = vi + 1;
+        }
+    }
+    var scale = 1;
+    var k = 0;
+    while (k < places) {
+        scale = scale * 10;
+        k = k + 1;
+    }
+    while (fd < places) {
+        frac = frac * 10;
+        fd = fd + 1;
+    }
+    return whole * scale + frac;
+}
+
+# --- Pricing table ---
+
+# A row whose total_gpu_memory_gb is past this (about 98 TiB) is a typo, and
+# refusing it keeps inst_rec_new's bytes * 10000 headroom product in i64.
+enum CloudLimits {
+    CLOUD_MAX_TOTAL_GB = 100000;
+}
+
+fn _cloud_str(od, ol, key) {
+    var v = _js_str(od, ol, key);
+    if (v == 0) { return ""; }
+    return v;
+}
+
+fn _cloud_count(od, ol, key) {
+    var v = _js_fixed(od, ol, key, 0);
+    if (v < 0) { return 0; }
+    return v;
+}
+
+# One pricing row from the object at [od, od + ol), or 0 when it has no
+# name, no price_per_hour or no usable total_gpu_memory_gb. Missing strings
+# are "": through 2.5.4 a row without "gpu" crashed the --cost text output.
+fn _cloud_inst_parse(od, ol) {
+    var name = _js_str(od, ol, "name");
+    var price = _js_fixed(od, ol, "price_per_hour", 2);
+    var total = _js_fixed(od, ol, "total_gpu_memory_gb", 0);
+    if (name == 0 || price < 0) { return 0; }
+    if (total <= 0 || total > CLOUD_MAX_TOTAL_GB) { return 0; }
+    var ci = alloc(sizeof(cloud_inst));
+    cloud_inst_set_name(ci, name);
+    cloud_inst_set_provider(ci, _cloud_str(od, ol, "provider"));
+    cloud_inst_set_gpu(ci, _cloud_str(od, ol, "gpu"));
+    cloud_inst_set_gpu_count(ci, _cloud_count(od, ol, "gpu_count"));
+    cloud_inst_set_gpu_mem_gb(ci, _cloud_count(od, ol, "gpu_memory_gb"));
+    cloud_inst_set_total_mem_gb(ci, total);
+    cloud_inst_set_vcpus(ci, _cloud_count(od, ol, "vcpus"));
+    cloud_inst_set_ram_gb(ci, _cloud_count(od, ol, "ram_gb"));
+    cloud_inst_set_interconnect(ci, _cloud_str(od, ol, "interconnect"));
+    cloud_inst_set_price_x100(ci, price);
+    return ci;
+}
+
+# Pricing rows in [buf, buf + n): the shipped {"instances": [...]} wrapper or
+# a bare array of objects. Returns a vec of cloud_inst pointers. Through
+# 2.5.4 the wrapper was brace-matched as one object and only the first of
+# the file's rows came back (load_models had the same defect until 2.3.22).
+fn cloud_instances_parse(buf, n) {
+    var instances = vec_new();
+    var skipped = 0;
+    var pos = _js_array_start(buf, n, "instances");
+    while (pos < n) {
+        var c = load8(buf + pos);
+        if (c == 93) { break; }
+        if (c != 123) {
+            pos = pos + 1;
+            continue;
+        }
+        var obj_end = _js_object_end(buf, n, pos);
+        var ci = _cloud_inst_parse(buf + pos, obj_end - pos);
+        if (ci != 0) { vec_push(instances, ci); }
+        else { skipped = skipped + 1; }
+        pos = obj_end;
+    }
+    if (skipped > 0) {
+        hwlog_warn("cloud_pricing.json: skipped rows without name, price_per_hour or total_gpu_memory_gb");
+    }
+    return instances;
+}
+
+# Load cloud pricing from a JSON file at `path`.
+# Returns vec of CloudGpuInstance pointers (empty when unreadable).
+fn load_cloud_instances_from(path) {
     # One byte short of the buffer, so the NUL below always fits (through
     # 2.5.0 a 32 KiB file put it one byte past), and a warning when the file
     # fills it, as load_models has done since 2.3.22.
     var buf = alloc(32768);
-    var n = file_read_all(data_file_path("data/cloud_pricing.json"), buf, 32767);
+    var n = file_read_all(path, buf, 32767);
     if (n <= 0) { return vec_new(); }
     store8(buf + n, 0);
     if (n >= 32767) {
         hwlog_warn("load_cloud_instances: cloud_pricing.json filled the read buffer — instances may be missing");
     }
-
-    var instances = vec_new();
-    # Simple JSON array parsing — find each { ... } object
-    var pos = 0;
-    while (pos < n) {
-        # Find opening brace
-        if (load8(buf + pos) != 123) { pos = pos + 1; continue; }
-
-        var ci = alloc(CLOUD_INST_SIZE);
-        memset(ci, 0, CLOUD_INST_SIZE);
-
-        # Parse key-value pairs within this object
-        var obj_end = pos;
-        var depth = 1;
-        obj_end = obj_end + 1;
-        while (obj_end < n && depth > 0) {
-            if (load8(buf + obj_end) == 123) { depth = depth + 1; }
-            if (load8(buf + obj_end) == 125) { depth = depth - 1; }
-            obj_end = obj_end + 1;
-        }
-
-        # Extract fields using simple string scanning
-        var obj = str_new(buf + pos, obj_end - pos);
-        _parse_cloud_field_str(obj, "name", ci, 0);
-        _parse_cloud_field_str(obj, "provider", ci, 8);
-        _parse_cloud_field_str(obj, "gpu", ci, 16);
-        _parse_cloud_field_int(obj, "gpu_count", ci, 24);
-        _parse_cloud_field_int(obj, "gpu_memory_gb", ci, 32);
-        _parse_cloud_field_int(obj, "total_gpu_memory_gb", ci, 40);
-        _parse_cloud_field_int(obj, "vcpus", ci, 48);
-        _parse_cloud_field_int(obj, "ram_gb", ci, 56);
-        _parse_cloud_field_str(obj, "interconnect", ci, 64);
-        _parse_cloud_field_price(obj, ci);
-
-        if (cloud_inst_name(ci) != 0) {
-            vec_push(instances, ci);
-        }
-        pos = obj_end;
-    }
-    return instances;
+    return cloud_instances_parse(buf, n);
 }
 
-# Helper: extract a string value for a key from JSON object
-fn _parse_cloud_field_str(obj, key, ci, offset) {
-    var od = str_data(obj);
-    var ol = str_len(obj);
-    var klen = strlen(key);
-    var pi = 0;
-    while (pi < ol - klen - 4) {
-        if (load8(od + pi) == 34) {
-            if (memeq(od + pi + 1, key, klen) == 1) {
-                if (load8(od + pi + 1 + klen) == 34) {
-                    # Found key, find value string
-                    var vi = pi + klen + 2;
-                    while (vi < ol && load8(od + vi) != 34) { vi = vi + 1; }
-                    vi = vi + 1;
-                    var vstart = vi;
-                    while (vi < ol && load8(od + vi) != 34) { vi = vi + 1; }
-                    var vlen = vi - vstart;
-                    if (vlen > 0) {
-                        var val = alloc(vlen + 1);
-                        memcpy(val, od + vstart, vlen);
-                        store8(val + vlen, 0);
-                        store64(ci + offset, val);
-                    }
-                    return 0;
-                }
-            }
-        }
-        pi = pi + 1;
-    }
-    return 0;
+# Load data/cloud_pricing.json from the data dir (see data_file_path).
+fn load_cloud_instances() {
+    return load_cloud_instances_from(data_file_path("data/cloud_pricing.json"));
 }
 
-# Helper: extract an integer value for a key
-fn _parse_cloud_field_int(obj, key, ci, offset) {
-    var od = str_data(obj);
-    var ol = str_len(obj);
-    var klen = strlen(key);
-    var pi = 0;
-    while (pi < ol - klen - 3) {
-        if (load8(od + pi) == 34) {
-            if (memeq(od + pi + 1, key, klen) == 1) {
-                if (load8(od + pi + 1 + klen) == 34) {
-                    var vi = pi + klen + 3;
-                    while (vi < ol) {
-                        var c = load8(od + vi);
-                        if (c >= 48 && c <= 57) { break; }
-                        vi = vi + 1;
-                    }
-                    var num = 0;
-                    while (vi < ol) {
-                        var c2 = load8(od + vi);
-                        if (c2 >= 48 && c2 <= 57) { num = num * 10 + c2 - 48; vi = vi + 1; }
-                        else { break; }
-                    }
-                    store64(ci + offset, num);
-                    return 0;
-                }
-            }
-        }
-        pi = pi + 1;
+# recommend_instances parses the pricing file once per data path, so a
+# long-lived caller does not re-read and re-allocate it on every query. A
+# caller that replaces the file at run time loads it again itself and uses
+# recommend_instances_from.
+var _cloud_cache = 0;
+var _cloud_cache_path = 0;
+
+fn _cloud_instances_cached() {
+    var path = data_file_path("data/cloud_pricing.json");
+    if (_cloud_cache != 0 && streq(path, _cloud_cache_path) == 1) { return _cloud_cache; }
+    var v = load_cloud_instances_from(path);
+    if (vec_len(v) > 0) {
+        _cloud_cache = v;
+        _cloud_cache_path = path;
     }
-    return 0;
+    return v;
 }
 
-# Parse price_per_hour as cents (x100)
-fn _parse_cloud_field_price(obj, ci) {
-    var od = str_data(obj);
-    var ol = str_len(obj);
-    var key = "price_per_hour";
-    var klen = 14;
-    var pi = 0;
-    while (pi < ol - klen - 3) {
-        if (load8(od + pi) == 34) {
-            if (memeq(od + pi + 1, key, klen) == 1) {
-                var vi = pi + klen + 3;
-                while (vi < ol) {
-                    var c = load8(od + vi);
-                    if (c >= 48 && c <= 57) { break; }
-                    vi = vi + 1;
-                }
-                # Parse dollars.cents as integer cents
-                var dollars = 0;
-                while (vi < ol) {
-                    var c2 = load8(od + vi);
-                    if (c2 >= 48 && c2 <= 57) { dollars = dollars * 10 + c2 - 48; vi = vi + 1; }
-                    else { break; }
-                }
-                var cents = 0;
-                if (vi < ol && load8(od + vi) == 46) {
-                    vi = vi + 1;
-                    var dec_places = 0;
-                    while (vi < ol && dec_places < 2) {
-                        var c3 = load8(od + vi);
-                        if (c3 >= 48 && c3 <= 57) {
-                            cents = cents * 10 + c3 - 48;
-                            vi = vi + 1;
-                            dec_places = dec_places + 1;
-                        }
-                        else { break; }
-                    }
-                    if (dec_places == 1) { cents = cents * 10; }
-                }
-                store64(ci + 72, dollars * 100 + cents);
-                return 0;
-            }
-        }
-        pi = pi + 1;
-    }
-    return 0;
-}
-
-# Recommend instances for a model, sorted by price (cheapest first)
-# provider_filter: -1 for any, or CloudProvider enum value
-fn recommend_instances(model_params, quant, provider_filter) {
-    var instances = load_cloud_instances();
-    var needed = reg_estimate_memory(model_params, quant);
-    var needed_gb = needed / BYTES_PER_GIB;
-
+# Recommend instances from `instances` for a model, sorted by price
+# (cheapest first, file order on a tie). provider_filter: -1 for any, or a
+# CloudProvider value. Empty for model_params <= 0.
+fn recommend_instances_from(instances, model_params, quant, provider_filter) {
     var recs = vec_new();
+    if (model_params <= 0) { return recs; }
+    var needed = reg_estimate_memory(model_params, quant);
+    # Whole GB the model needs, rounded up, so the check is exact in bytes:
+    # through 2.5.4 it rounded down and a 640.4 GiB need got a 640 GB
+    # instance with negative headroom.
+    var needed_gb = needed / BYTES_PER_GIB;
+    if (needed % BYTES_PER_GIB != 0) { needed_gb = needed_gb + 1; }
+    var target = 0;
+    if (provider_filter >= 0) { target = cloud_provider_str(provider_filter); }
+
     var ni = vec_len(instances);
     var i = 0;
     while (i < ni) {
         var inst = vec_get(instances, i);
         i = i + 1;
-
-        # Provider filter
-        if (provider_filter >= 0) {
+        if (target != 0) {
             var prov = cloud_inst_provider(inst);
-            var target = cloud_provider_str(provider_filter);
-            if (streq(prov, target) != 1) { continue; }
+            if (prov == 0 || streq(prov, target) != 1) { continue; }
         }
-
-        # Memory check
         if (cloud_inst_total_mem_gb(inst) < needed_gb) { continue; }
-
         vec_push(recs, inst_rec_new(inst, needed));
     }
 
-    # Sort by price (bubble sort — small list, no vec_set needed)
+    # Insertion sort by price: a short list, and stable.
     var nr = vec_len(recs);
-    var si = 0;
+    var si = 1;
     while (si < nr) {
-        var sj = 0;
-        while (sj < nr - si - 1) {
-            var ra = vec_get(recs, sj);
-            var rb = vec_get(recs, sj + 1);
-            if (cloud_inst_price_x100(rec_instance(ra)) > cloud_inst_price_x100(rec_instance(rb))) {
-                # Swap via internal vec data pointer
-                var vdata = load64(recs);
-                var tmp = load64(vdata + sj * 8);
-                store64(vdata + sj * 8, load64(vdata + (sj + 1) * 8));
-                store64(vdata + (sj + 1) * 8, tmp);
-            }
-            sj = sj + 1;
+        var cur = vec_get(recs, si);
+        var cp = cloud_inst_price_x100(rec_instance(cur));
+        var sj = si;
+        while (sj > 0 && cloud_inst_price_x100(rec_instance(vec_get(recs, sj - 1))) > cp) {
+            vec_set(recs, sj, vec_get(recs, sj - 1));
+            sj = sj - 1;
         }
+        vec_set(recs, sj, cur);
         si = si + 1;
     }
-
     return recs;
 }
 
+# Recommend instances from data/cloud_pricing.json, as recommend_instances_from.
+fn recommend_instances(model_params, quant, provider_filter) {
+    return recommend_instances_from(_cloud_instances_cached(), model_params, quant, provider_filter);
+}
+
 # Serialize a cost recommendation to JSON (schema v4, 2.3.1).
-# Mirrors the --cost text path in main.cyr (_handle_cost): parses the
-# "<N>B" model string, computes the memory requirement, and lists the
-# cheapest matching instances (capped at 5, like the text output).
+# Mirrors the --cost text path in main.cyr (_handle_cost): parses the model
+# size ("70B", "1.5B", "350M"; model_params_from_str), computes the memory
+# requirement, and lists the cheapest matching instances (capped at 5, like
+# the text output). An invalid size reports 0 bytes and no instances; the
+# CLI rejects it before it gets here.
 fn cost_to_json(model_str, quant) {
-    var num = 0;
-    var pi = 0;
-    while (load8(model_str + pi) != 0) {
-        var c = load8(model_str + pi);
-        if (c >= 48 && c <= 57) { num = num * 10 + c - 48; }
-        elif (c == 66 || c == 98) { break; }
-        pi = pi + 1;
-    }
-    var params = num * 1000000000;
+    var params = model_params_from_str(model_str);
+    if (params < 0) { params = 0; }
     var needed = quant_model_bytes_with_overhead(params, quant);
 
     var sb = str_builder_new();

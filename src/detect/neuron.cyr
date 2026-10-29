@@ -1,118 +1,278 @@
 # neuron.cyr — AWS Inferentia/Trainium detection via neuron-ls + sysfs fallback
 
-fn detect_neuron(profiles, warnings) {
-    # Try neuron-ls --json-output first
-    var result = run_tool1("neuron-ls", "--json-output", warnings);
-    if (result != 0) {
-        if (str_len(result) > 2) {
-            _parse_neuron_json(result, profiles);
-            return 0;
+# Chip from the DMI product name ("trn1.32xlarge"), else Inferentia.
+fn _neuron_dmi_chip() {
+    var dmi = sysfs_read("/sys/devices/virtual/dmi/id/product_name");
+    if (dmi != 0) {
+        if (str_contains_cstr(dmi, "trn") == 1) { return NEURON_TRAINIUM; }
+        if (str_contains_cstr(dmi, "Trn") == 1) { return NEURON_TRAINIUM; }
+    }
+    return NEURON_INFERENTIA;
+}
+
+# A Neuron profile named "AWS Inferentia" / "AWS Trainium".
+fn _neuron_profile(dev_id, chip, cores) {
+    var p = profile_neuron(dev_id, chip, cores);
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "AWS ");
+    str_builder_add_cstr(sb, neuron_chip_name(chip));
+    profile_set_device_name(p, str_data(str_builder_build(sb)));
+    return p;
+}
+
+# neuron-ls first, with `allow_exec` 1; when it lists no device (missing,
+# failed, or output this parser does not read), or with `allow_exec` 0,
+# /dev/neuronN, two cores each, the chip from DMI. A run that exits non-zero
+# is reported once, by its exit-status warning (as detect_cuda does).
+# Through 2.5.4 any output over 2 bytes ended detection there, so a host
+# whose neuron-ls printed nothing usable reported no device, and no-exec mode
+# skipped Neuron.
+fn detect_neuron_opts(profiles, warnings, allow_exec) {
+    var chip = 0 - 1;
+    if (allow_exec == 1) {
+        var args = vec_new();
+        vec_push(args, "--json-output");
+        var st[16];
+        var result = run_tool_status("neuron-ls", args, warnings, &st);
+        var w = tool_run_warning("neuron-ls", result, &st);
+        if (w != 0 && warnings != 0) { vec_push(warnings, w); }
+        if (result != 0) {
+            if (str_len(result) > 0) {
+                chip = _neuron_dmi_chip();
+                var pw = warnings;
+                if (w != 0) { pw = vec_new(); }
+                if (parse_neuron_ls_json(result, chip, profiles, pw) > 0) { return 0; }
+            }
         }
     }
 
-    # Fallback: scan /dev/neuron*
     var ids = scan_dev_devices("neuron");
-    if (vec_len(ids) == 0) { return 0; }
-
-    # Detect chip type from DMI product name
-    var chip = NEURON_INFERENTIA;
-    var dmi = sysfs_read("/sys/devices/virtual/dmi/id/product_name");
-    if (dmi != 0) {
-        if (str_contains_cstr(dmi, "trn") == 1) { chip = NEURON_TRAINIUM; }
-        elif (str_contains_cstr(dmi, "Trn") == 1) { chip = NEURON_TRAINIUM; }
-    }
-
-    var ni = 0;
     var nids = vec_len(ids);
+    if (nids == 0) { return 0; }
+    if (chip < 0) { chip = _neuron_dmi_chip(); }
+    var ni = 0;
     while (ni < nids) {
-        var dev_id = vec_get(ids, ni);
-        var p = profile_neuron(dev_id, chip, 2);
-        # Device name: "AWS Inferentia" / "AWS Trainium" via the
-        # chip-enum → string helper. 2.2.5 left this null.
-        var sb = str_builder_new();
-        str_builder_add_cstr(sb, "AWS ");
-        str_builder_add_cstr(sb, neuron_chip_name(chip));
-        var nnm = str_builder_build(sb);
-        profile_set_device_name(p, str_data(nnm));
-        vec_push(profiles, p);
+        vec_push(profiles, _neuron_profile(vec_get(ids, ni), chip, 2));
         ni = ni + 1;
     }
     return 0;
 }
 
-# Parse neuron-ls JSON output (simplified — extract model, nc_count, memory)
-# JSON format: [{"model":"trn1","nc_count":2,"memory_per_nc_mb":32768},...]
-fn _parse_neuron_json(output, profiles) {
-    var data = str_data(output);
-    var dlen = str_len(output);
-    var pos = 0;
+# detect_neuron_opts with exec allowed.
+fn detect_neuron(profiles, warnings) {
+    return detect_neuron_opts(profiles, warnings, 1);
+}
 
-    while (pos < dlen) {
-        # Find next "model"
-        var found_model = 0;
-        while (pos < dlen - 7) {
-            if (memeq(data + pos, "\"model\"", 7) == 1) { found_model = 1; break; }
-            pos = pos + 1;
-        }
-        if (found_model == 0) { break; }
+# --- neuron-ls --json-output ---
+#
+# AWS documents the output as an array of one object per device, with
+# neuron_device (its index), bdf, connected_to, nc_count (its NeuronCores),
+# memory_size (its memory, in bytes) and neuron_processes, a list of objects
+# whose `command` is free text. Nothing in it names the chip, so that comes
+# from DMI; a "model" member, if one is there, still names it. Through 2.5.4
+# the parser keyed on "model", which that output does not have, read nc_count
+# only within 200 bytes of it, ignored memory_size, and numbered devices by
+# the length of the caller's vec (so after the CPU and any GPU). Members are
+# now read at each device object's own level. From the AWS docs, not a
+# capture.
 
-        # Determine chip type from model value
-        var chip = NEURON_INFERENTIA;
-        # Scan ahead for "trn" in the model value
-        var scan = pos;
-        var scan_end = pos + 50;
-        if (scan_end > dlen) { scan_end = dlen; }
-        while (scan < scan_end) {
-            if (memeq(data + scan, "trn", 3) == 1) { chip = NEURON_TRAINIUM; break; }
-            if (memeq(data + scan, "Trn", 3) == 1) { chip = NEURON_TRAINIUM; break; }
-            scan = scan + 1;
-        }
-
-        # Find nc_count
-        var cores = 2;
-        var nc_scan = pos;
-        var nc_end = pos + 200;
-        if (nc_end > dlen) { nc_end = dlen; }
-        while (nc_scan < nc_end - 10) {
-            if (memeq(data + nc_scan, "\"nc_count\"", 10) == 1) {
-                # Find the colon then the number
-                var ns = nc_scan + 10;
-                while (ns < nc_end) {
-                    var c = load8(data + ns);
-                    if (c >= 48) {
-                        if (c <= 57) {
-                            # Parse number
-                            var num = 0;
-                            while (ns < nc_end) {
-                                var d = load8(data + ns);
-                                if (d >= 48) {
-                                    if (d <= 57) { num = num * 10 + d - 48; ns = ns + 1; continue; }
-                                }
-                                break;
-                            }
-                            cores = num;
-                            break;
-                        }
-                    }
-                    ns = ns + 1;
-                }
-                break;
-            }
-            nc_scan = nc_scan + 1;
-        }
-
-        var dev_id = vec_len(profiles);
-        var p = profile_neuron(dev_id, chip, cores);
-        # Device name: "AWS Inferentia" / "AWS Trainium" — same shape
-        # as the sysfs-fallback path. 2.2.5 left this null too.
-        var jnm_sb = str_builder_new();
-        str_builder_add_cstr(jnm_sb, "AWS ");
-        str_builder_add_cstr(jnm_sb, neuron_chip_name(chip));
-        var jnm = str_builder_build(jnm_sb);
-        profile_set_device_name(p, str_data(jnm));
-        vec_push(profiles, p);
-
-        pos = pos + 10;
+# Index past blanks (space, tab, CR, LF) from d[i], at most `end`. Pure.
+fn _nj_skip_ws(d, i, end) {
+    while (i < end) {
+        var c = load8(d + i);
+        if (c != 32 && c != 9 && c != 10 && c != 13) { return i; }
+        i = i + 1;
     }
-    return 0;
+    return end;
+}
+
+# Index past the JSON string whose opening quote is d[i], escapes honoured;
+# `end` when it is unterminated. Pure.
+fn _nj_skip_string(d, i, end) {
+    i = i + 1;
+    while (i < end) {
+        var c = load8(d + i);
+        if (c == 92) {
+            i = i + 2;
+            continue;
+        }
+        if (c == 34) { return i + 1; }
+        i = i + 1;
+    }
+    return end;
+}
+
+# Index past the JSON value at d[i]: a string, a balanced {...} or [...]
+# (strings inside skipped), or a scalar up to ',', '}' or ']'. Pure.
+fn _nj_skip_value(d, i, end) {
+    if (i >= end) { return end; }
+    var c = load8(d + i);
+    if (c == 34) { return _nj_skip_string(d, i, end); }
+    if (c == 123 || c == 91) {
+        var depth = 0;
+        while (i < end) {
+            var b = load8(d + i);
+            if (b == 34) {
+                i = _nj_skip_string(d, i, end);
+                continue;
+            }
+            if (b == 123 || b == 91) { depth = depth + 1; }
+            elif (b == 125 || b == 93) {
+                depth = depth - 1;
+                if (depth == 0) { return i + 1; }
+            }
+            i = i + 1;
+        }
+        return end;
+    }
+    while (i < end) {
+        var s = load8(d + i);
+        if (s == 44 || s == 125 || s == 93) { return i; }
+        i = i + 1;
+    }
+    return end;
+}
+
+# Where the value of member `key` (a cstr, unquoted) of the object d[s..e)
+# starts, at the object's own level (not inside a nested value), or -1. Pure.
+fn _nj_member(d, s, e, key) {
+    var klen = strlen(key);
+    var i = s + 1;
+    while (i < e) {
+        i = _nj_skip_ws(d, i, e);
+        if (i >= e) { return 0 - 1; }
+        var c = load8(d + i);
+        if (c == 125) { return 0 - 1; }
+        if (c == 44) {
+            i = i + 1;
+            continue;
+        }
+        if (c != 34) { return 0 - 1; }
+        var ks = i + 1;
+        var ke = _nj_skip_string(d, i, e);
+        i = _nj_skip_ws(d, ke, e);
+        if (i >= e) { return 0 - 1; }
+        if (load8(d + i) != 58) { return 0 - 1; }
+        var vs = _nj_skip_ws(d, i + 1, e);
+        if (ke - 1 - ks == klen && memeq(d + ks, key, klen) == 1) { return vs; }
+        var ve = _nj_skip_value(d, vs, e);
+        if (ve <= vs) { ve = vs + 1; }
+        i = ve;
+    }
+    return 0 - 1;
+}
+
+# The unsigned integer at d[i] (1 to 18 digits, up to the first non-digit),
+# or -1: none there ("null", a string), or `i` is -1. Pure.
+fn _nj_uint(d, i, e) {
+    if (i < 0) { return 0 - 1; }
+    var v = 0;
+    var nd = 0;
+    while (i < e) {
+        var c = load8(d + i);
+        if (c < 48 || c > 57) { break; }
+        if (nd >= 18) { return 0 - 1; }
+        v = v * 10 + c - 48;
+        nd = nd + 1;
+        i = i + 1;
+    }
+    if (nd == 0) { return 0 - 1; }
+    return v;
+}
+
+# The chip a "model" string at d[i] names ("trn1", "inf2"), else `dflt`
+# (also when `i` is -1 or not a string). Pure.
+fn _nj_model_chip(d, i, e, dflt) {
+    if (i < 0 || i >= e) { return dflt; }
+    if (load8(d + i) != 34) { return dflt; }
+    var j = _nj_skip_string(d, i, e);
+    var k = i;
+    while (k + 3 <= j) {
+        if (memeq(d + k, "trn", 3) == 1 || memeq(d + k, "Trn", 3) == 1) { return NEURON_TRAINIUM; }
+        if (memeq(d + k, "inf", 3) == 1 || memeq(d + k, "Inf", 3) == 1) { return NEURON_INFERENTIA; }
+        k = k + 1;
+    }
+    return dflt;
+}
+
+# Push the device the object d[s..e) describes, the `index`th of the array.
+# An object with neither neuron_device nor nc_count is not a device (0). The
+# id is neuron_device, else `index`; an nc_count that is missing or past 128
+# is taken as 2, with a parse warning, so the device is still listed. Memory
+# is memory_size, else memory_per_nc_mb per core, else the chip's per-core
+# HBM; a figure past 16 TiB is not used. Returns 1 when it pushed one.
+fn _neuron_json_device(d, s, e, index, chip, profiles, warnings) {
+    var id_at = _nj_member(d, s, e, "neuron_device");
+    var nc_at = _nj_member(d, s, e, "nc_count");
+    if (id_at < 0 && nc_at < 0) { return 0; }
+    var dev_id = _nj_uint(d, id_at, e);
+    if (dev_id < 0 || dev_id > CMD_MAX_DEVICE_ID) { dev_id = index; }
+    var cores = _nj_uint(d, nc_at, e);
+    if (cores <= 0 || cores > 128) {
+        if (warnings != 0) {
+            vec_push(warnings, warning_parse("neuron", "nc_count missing or out of range; 2 NeuronCores assumed"));
+        }
+        cores = 2;
+    }
+    var c = _nj_model_chip(d, _nj_member(d, s, e, "model"), e, chip);
+    var p = _neuron_profile(dev_id, c, cores);
+    var cap = 16 * BYTES_PER_GIB * 1024;
+    var mem = _nj_uint(d, _nj_member(d, s, e, "memory_size"), e);
+    if (mem <= 0 || mem > cap) {
+        mem = 0;
+        var per_mb = _nj_uint(d, _nj_member(d, s, e, "memory_per_nc_mb"), e);
+        if (per_mb > 0 && per_mb <= 16 * 1024 * 1024) { mem = per_mb * 1024 * 1024 * cores; }
+        if (mem > cap) { mem = 0; }
+    }
+    if (mem > 0) { profile_set_memory_bytes(p, mem); }
+    vec_push(profiles, p);
+    return 1;
+}
+
+# Parse `neuron-ls --json-output` (see above) into ACCEL_NEURON profiles of
+# chip `chip` (NEURON_*), at most 256. Output that is not an empty array but
+# yields no device pushes a parse warning. Returns the number pushed. Pure.
+fn parse_neuron_ls_json(output, chip, profiles, warnings) {
+    var d = str_data(output);
+    var e = str_len(output);
+    var i = _nj_skip_ws(d, 0, e);
+    if (i >= e) { return 0; }
+    var added = 0;
+    var empty = 0;
+    var c = load8(d + i);
+    if (c == 123) {
+        added = _neuron_json_device(d, i, _nj_skip_value(d, i, e), 0, chip, profiles, warnings);
+    } elif (c == 91) {
+        var first = _nj_skip_ws(d, i + 1, e);
+        if (first < e && load8(d + first) == 93) { empty = 1; }
+        var index = 0;
+        i = i + 1;
+        while (i < e && added < 256) {
+            i = _nj_skip_ws(d, i, e);
+            if (i >= e) { break; }
+            var b = load8(d + i);
+            if (b == 93) { break; }
+            if (b == 44) {
+                i = i + 1;
+                continue;
+            }
+            var ve = _nj_skip_value(d, i, e);
+            if (ve <= i) { ve = i + 1; }
+            if (b == 123) {
+                added = added + _neuron_json_device(d, i, ve, index, chip, profiles, warnings);
+            }
+            index = index + 1;
+            i = ve;
+        }
+    }
+    if (added == 0 && empty == 0 && warnings != 0) {
+        vec_push(warnings, warning_parse("neuron", "no device in `neuron-ls --json-output` output"));
+    }
+    return added;
+}
+
+# parse_neuron_ls_json with no DMI chip (Inferentia, unless a "model" says
+# otherwise) and no warnings.
+fn _parse_neuron_json(output, profiles) {
+    return parse_neuron_ls_json(output, NEURON_INFERENTIA, profiles, 0);
 }

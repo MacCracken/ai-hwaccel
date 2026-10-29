@@ -1,0 +1,140 @@
+# Fuzz: profile_from_json_str, the untrusted-JSON entry point (threat model).
+# Feeds it fixed adversarial documents, then a seeded flip / overwrite /
+# truncate loop over five valid profile documents. A document it accepts
+# must hold values inside profile_from_json's ranges, must re-serialize to
+# JSON bayan parses, and must read back as the same profile. Added 2.5.5;
+# a distinct exit code names the check that failed.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+include "lib/sakshi.cyr"
+
+include "src/log.cyr"
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/training.cyr"
+include "src/registry.cyr"
+include "src/json_out.cyr"
+
+alloc_init();
+
+# Check an accepted profile and its round trip; exits 10+ on a failure.
+fn check_profile(p) {
+    if (profile_accel_type(p) < 0) { syscall(60, 10); }
+    if (profile_device_id(p) < 0 || profile_device_id(p) > PJ_MAX_DEVICE_ID) { syscall(60, 11); }
+    if (profile_memory_bytes(p) < 0 || profile_memory_bytes(p) > PJ_MAX_HOST_MEMORY) { syscall(60, 12); }
+    if (profile_tpu_chips(p) < 0 || profile_tpu_chips(p) > PJ_MAX_DEVICE_ID) { syscall(60, 13); }
+    if (profile_neuron_cores(p) < 0 || profile_neuron_cores(p) > PJ_MAX_DEVICE_ID) { syscall(60, 14); }
+    if (profile_shared_bytes(p) > profile_memory_bytes(p)) { syscall(60, 15); }
+    var sb = str_builder_new();
+    profile_to_json(sb, p);
+    var js = str_builder_build(sb);
+    if (bayan_json_v_parse_buf(str_data(js), str_len(js)) == 0) { syscall(60, 16); }
+    var q = profile_from_json_str(str_data(js));
+    if (q == 0) { syscall(60, 17); }
+    if (profile_accel_type(q) != profile_accel_type(p)) { syscall(60, 18); }
+    if (profile_device_id(q) != profile_device_id(p)) { syscall(60, 19); }
+    if (profile_memory_bytes(q) != profile_memory_bytes(p)) { syscall(60, 20); }
+    if (profile_available(q) != profile_available(p)) { syscall(60, 21); }
+    if (profile_tpu_chips(q) != profile_tpu_chips(p)) { syscall(60, 22); }
+    if (profile_shared_bytes(q) != profile_shared_bytes(p)) { syscall(60, 23); }
+    var a = profile_device_name(p);
+    var b = profile_device_name(q);
+    if ((a == 0) != (b == 0)) { syscall(60, 24); }
+    if (a != 0 && streq(a, b) == 0) { syscall(60, 25); }
+    return 0;
+}
+
+# --- Fixed cases ---
+
+if (profile_from_json_str(0) != 0) { syscall(60, 1); }
+if (profile_from_json_str("") != 0) { syscall(60, 2); }
+if (profile_from_json_str("{") != 0) { syscall(60, 3); }
+if (profile_from_json_str("null") != 0) { syscall(60, 4); }
+# Escapes that decode to a NUL, a lone surrogate, a quote and a backslash.
+var fx = profile_from_json_str("{\"accel_type_id\":1,\"device_name\":\"\\u0000x\\ud800\\\"\\\\\"}");
+if (fx != 0) { check_profile(fx); }
+# An accel_type_id this build does not know, and the counts at their bound.
+var fy = profile_from_json_str("{\"accel_type_id\":99999999999,\"tpu_chips\":1024,\"neuron_cores\":1024}");
+if (fy == 0) { syscall(60, 5); }
+check_profile(fy);
+
+# --- Templates ---
+
+var tmpl = vec_new();
+var c = profile_cuda(3, 24 * BYTES_PER_GIB);
+profile_set_device_name(c, "NVIDIA \"GeForce\" RTX 4090\t\\");
+profile_set_compute_cap(c, "8.9");
+profile_set_driver_version(c, "550.54.15");
+profile_set_temp_c(c, 65);
+profile_set_mem_used(c, BYTES_PER_GIB);
+profile_set_mem_free(c, 23 * BYTES_PER_GIB);
+profile_set_shared_mem(c, BYTES_PER_GIB);
+var t = profile_tpu(0, 8, TPU_V5P);
+var m = profile_new(ACCEL_METAL, 0, 48 * BYTES_PER_GIB);
+var n = profile_neuron(1, 0, 2);
+var ti = 0;
+while (ti < 4) {
+    var src = c;
+    if (ti == 1) { src = t; }
+    if (ti == 2) { src = m; }
+    if (ti == 3) { src = n; }
+    var sb0 = str_builder_new();
+    profile_to_json(sb0, src);
+    vec_push(tmpl, str_builder_build(sb0));
+    ti = ti + 1;
+}
+vec_push(tmpl, str_from("{\"accel_type_id\":0,\"device_id\":0,\"available\":true,\"memory_bytes\":1099511627776,\"device_name\":\"h\\u00e9\\n\",\"numa_node\":null,\"tpu_chips\":0}")); #skip-lint
+
+# Bytes JSON gives a meaning to, so a mutation reaches the parser's branches.
+var special = "\"\\{}[],:-0129e.ntfu\x01\x7f\x80\xff ";
+var nspecial = strlen(special);
+
+var work = alloc(1024);
+var scratch = arena_allocator_growable(65536);
+var seed = 88172645463325252;
+var round = 0;
+while (round < 150000) {
+    var js = vec_get(tmpl, round % vec_len(tmpl));
+    var slen = str_len(js);
+    memcpy(work, str_data(js), slen);
+    var muts = round % 6;
+    var mi = 0;
+    while (mi < muts) {
+        seed = seed * 6364136223846793005 + 1442695040888963407;
+        var r = (seed >> 33) & 0x7FFFFFFF;
+        var at = r % slen;
+        var kind = (r >> 24) & 3;
+        if (kind == 0) { store8(work + at, load8(work + at) ^ (1 << (r & 7))); }
+        elif (kind == 1) { store8(work + at, (r >> 8) & 255); }
+        else { store8(work + at, load8(special + ((r >> 8) % nspecial))); }
+        mi = mi + 1;
+    }
+    seed = seed * 6364136223846793005 + 1442695040888963407;
+    var len = slen;
+    if ((round & 3) == 3) { len = ((seed >> 33) & 0x7FFFFFFF) % (slen + 1); }
+    store8(work + len, 0);
+    var p = 0;
+    if ((round & 1) == 1) {
+        p = profile_from_json_str_a(scratch, work);
+        reset_via(scratch);
+    } else {
+        p = profile_from_json_str(work);
+    }
+    if (p != 0) { check_profile(p); }
+    round = round + 1;
+}
+
+syscall(60, 0);

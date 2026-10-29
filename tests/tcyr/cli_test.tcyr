@@ -1,0 +1,261 @@
+# cli_test.tcyr — the command line (src/cli.cyr) and the logging shim
+# (src/log.cyr), added 2.5.5.
+#
+# main.cyr is top-level code, so its argument handling lives in cli.cyr,
+# pure over a vec of argument cstrs; these cases are the command lines
+# through 2.5.4 ran with a silent default. The log cases need the unit to
+# compile out debug lines, so SAKSHI_DISABLE_DEBUG is defined before sakshi
+# is included. Run from the repo root (the VERSION check reads it).
+
+#define SAKSHI_DISABLE_DEBUG 1
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/sakshi.cyr"
+
+include "src/log.cyr"
+include "src/units.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/training.cyr"
+include "src/cli.cyr"
+
+# Read before alloc_init or any hwlog call: the level a library consumer
+# that never calls hwlog_init runs at.
+var _level_at_start = sakshi_get_level();
+
+# A vec of the given argument cstrs (0 ends the list early).
+fn _args(a, b, c, d) {
+    var v = vec_new();
+    if (a != 0) { vec_push(v, a); }
+    if (b != 0) { vec_push(v, b); }
+    if (c != 0) { vec_push(v, c); }
+    if (d != 0) { vec_push(v, d); }
+    return v;
+}
+
+# 1 if `args` passes cli_check_args.
+fn _ok(args) {
+    if (cli_check_args(args) == 0) { return 1; }
+    return 0;
+}
+
+# 1 if `args` is refused with a reason containing `want`.
+fn _refused(args, want) {
+    var r = cli_check_args(args);
+    if (r == 0) { return 0; }
+    return str_contains_cstr(str_from(r), want);
+}
+
+# --- Command lines that run ---
+
+fn test_valid_lines() {
+    assert_eq(_ok(vec_new()), 1, "no arguments");
+    assert_eq(_ok(_args("--summary", 0, 0, 0)), 1, "--summary");
+    assert_eq(_ok(_args("--table", "--threaded", 0, 0)), 1, "--table --threaded");
+    assert_eq(_ok(_args("--cost", "7B", "--json", 0)), 1, "--cost 7B --json");
+    assert_eq(_ok(_args("--cost", "7B", "--quant", "Int8")), 1, "--quant in any case");
+    assert_eq(_ok(_args("--plan", "1.5B", 0, 0)), 1, "--plan 1.5B");
+    assert_eq(_ok(_args("--train", "7B", "--method", "LoRA")), 1, "--method in any case");
+    assert_eq(_ok(_args("--log-level", "DEBUG", 0, 0)), 1, "--log-level in any case");
+    assert_eq(_ok(_args("-v", "-vv", "-q", 0)), 1, "-v -vv -q");
+    assert_eq(_ok(_args("--data-dir", "/opt/ai-hwaccel", "--cost", "70B")), 1, "--data-dir before a mode");
+    assert_eq(_ok(_args("--version", 0, 0, 0)), 1, "--version");
+    assert_eq(_ok(_args("--help", 0, 0, 0)), 1, "--help");
+    return 0;
+}
+
+# --- Command lines that are refused (exit 2) ---
+
+fn test_structure_refused() {
+    assert_eq(_refused(_args("--sumary", 0, 0, 0), "unknown argument '--sumary'"), 1, "typo refused");
+    assert_eq(_refused(_args("70B", 0, 0, 0), "unknown argument '70B'"), 1, "bare value refused");
+    assert_eq(_refused(_args("--cost", 0, 0, 0), "missing value for '--cost'"), 1, "value flag last");
+    assert_eq(_refused(_args("--cost", "--json", 0, 0), "missing value for '--cost'"), 1, "value flag before a flag");
+    assert_eq(_refused(_args("--cost", "-q", 0, 0), "missing value for '--cost'"), 1, "value flag before a short flag");
+    assert_eq(_refused(_args("--cost", "", 0, 0), "missing value for '--cost'"), 1, "empty value");
+    assert_eq(_refused(_args("--summary", "--data-dir", 0, 0), "missing value for '--data-dir'"), 1, "--data-dir last");
+    var unreadable = vec_new();
+    vec_push(unreadable, 0);
+    assert_eq(_refused(unreadable, "unreadable argument"), 1, "unreadable argv entry");
+    return 0;
+}
+
+fn test_values_refused() {
+    assert_eq(_refused(_args("--plan", "70B", "--quant", "fp8"), "unknown --quant 'fp8'"), 1, "unsupported quant");
+    assert_eq(_refused(_args("--train", "7B", "--method", "qlora"), "unknown --method 'qlora'"), 1, "unknown method");
+    assert_eq(_refused(_args("--log-level", "loud", 0, 0), "unknown --log-level 'loud'"), 1, "unknown log level");
+    assert_eq(_refused(_args("--plan", "8x7B", 0, 0), "invalid model size '8x7B'"), 1, "--plan size checked");
+    var cj = _args("--cost", "1.5.B", "--json", 0);
+    assert_eq(_refused(cj, "invalid model size '1.5.B'"), 1, "--cost --json size checked");
+    assert_eq(_refused(_args("--train", "0B", 0, 0), "invalid model size '0B'"), 1, "--train size checked");
+    # 2.5.5 keeps taking --quant with --train (ignored): the 2.5.4 Python
+    # wheel's training_memory() sends it.
+    var tq = _args("--train", "7B", "--quant", "int4");
+    assert_eq(cli_check_args(tq), 0, "--quant under --train accepted");
+    assert_eq(_refused(_args("--summary", "--quant", "int8", 0), "--quant applies"), 1, "--quant without a mode");
+    var pm = _args("--plan", "7B", "--method", "lora");
+    assert_eq(_refused(pm, "--method applies to --train only"), 1, "--method under --plan");
+    return 0;
+}
+
+fn test_flag_lookup() {
+    var a = _args("--data-dir", "/d", "--plan", "70B");
+    assert_eq(streq(cli_get_val(a, "--plan"), "70B"), 1, "value of a flag");
+    assert_eq(streq(cli_get_val(a, "--data-dir"), "/d"), 1, "value of the first flag");
+    assert_eq(cli_get_val(a, "--cost"), 0, "absent flag has no value");
+    assert_eq(cli_get_val(_args("--plan", 0, 0, 0), "--plan"), 0, "last flag has no value");
+    assert_eq(cli_has_flag(a, "--plan"), 1, "has --plan");
+    assert_eq(cli_has_flag(a, "--json"), 0, "no --json");
+    return 0;
+}
+
+# --- --table cells ---
+
+# One cell of `s` at `width`, as a Str.
+fn _cell(s, width) {
+    var sb = str_builder_new();
+    cli_table_cell(sb, s, width);
+    return str_builder_build(sb);
+}
+
+# Each cell is its width plus the gutter, whatever it holds: through 2.5.4
+# fixed runs of spaces followed each value, so the columns after a long or
+# short name moved.
+fn test_table_cells() {
+    assert_eq(str_eq_cstr(_cell("GPU", 7), "GPU      "), 1, "short value padded to width + 2");
+    assert_eq(str_eq_cstr(_cell("", 5), "       "), 1, "empty value padded");
+    assert_eq(str_eq_cstr(_cell("ABCDEFGH", 8), "ABCDEFGH  "), 1, "exact fit");
+    assert_eq(str_eq_cstr(_cell("ABCDEFGHI", 8), "ABCDE...  "), 1, "long value cut with ...");
+    assert_eq(str_eq_cstr(_cell("a\tb\x1b[2Jc\x7f", 12), "a?b?[2Jc?     "), 1, "control bytes print as ?");
+    # "Radeon\xc3\xa9" is 7 characters in 8 bytes: padded by characters.
+    assert_eq(str_len(_cell("Radeon\xc3\xa9", 9)), 8 + 2 + 2, "UTF-8 counted by code point");
+    var five = _cell("\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9", 4);
+    assert_eq(str_eq_cstr(five, "\xc3\xa9...  "), 1, "cut on a code point");
+    return 0;
+}
+
+# --- Version and help ---
+
+# The built-in version is VERSION's, from any working directory: through
+# 2.5.4 it was read from ./VERSION at run time, "unknown" elsewhere.
+fn test_version_builtin() {
+    var buf = alloc(64);
+    var n = file_read_all("VERSION", buf, 63);
+    assert(n > 0, "VERSION readable (run from the repo root)");
+    if (n > 0) {
+        while (n > 0 && (load8(buf + n - 1) == 10 || load8(buf + n - 1) == 13)) { n = n - 1; }
+        store8(buf + n, 0);
+        sys_chdir("/");
+        assert_eq(streq(cli_version(), buf), 1, "version matches VERSION from another cwd");
+    }
+    return 0;
+}
+
+# --help names every flag the CLI takes, and what --threaded and --train do.
+fn test_help_complete() {
+    var h = str_from(cli_help());
+    assert(str_contains_cstr(h, "--log-level <off|fatal|error|warn|info|debug|trace>") == 1, "help: --log-level");
+    assert(str_contains_cstr(h, "-v, -vv, -q") == 1, "help: -v -vv -q");
+    assert(str_contains_cstr(h, "--quant <fp32|fp16|bf16|int8|int4>") == 1, "help: fp32");
+    assert(str_contains_cstr(h, "qlora-8bit|prefix|dpo|rlhf|distillation") == 1, "help: every method");
+    assert(str_contains_cstr(h, "detectors in parallel threads") == 1, "help: --threaded threads");
+    assert(str_contains_cstr(h, "the vendor tools") == 1, "help: names the tools");
+    assert(str_contains_cstr(h, "still run one at a time") == 1, "help: tools serialised");
+    assert(str_contains_cstr(h, "estimated for a GPU") == 1, "help: --train target");
+    assert(str_contains_cstr(h, "--data-dir <dir>") == 1, "help: --data-dir");
+    assert(str_contains_cstr(h, "Exit status") == 1, "help: exit status");
+    return 0;
+}
+
+# --- Logging (log.cyr) ---
+
+# WARN without hwlog_init: through 2.5.4 a library consumer ran at sakshi's
+# INFO default and got an INFO line per detection.
+fn test_log_default_level() {
+    assert_eq(_level_at_start, SK_WARN, "default level is WARN without hwlog_init");
+    return 0;
+}
+
+fn test_log_level_names() {
+    assert_eq(hwlog_level_from_name("off"), 0 - 1, "off");
+    assert_eq(hwlog_level_from_name("Off"), 0 - 1, "Off");
+    assert_eq(hwlog_level_from_name("fatal"), SK_FATAL, "fatal");
+    assert_eq(hwlog_level_from_name("ERROR"), SK_ERROR, "ERROR");
+    assert_eq(hwlog_level_from_name("Warn"), SK_WARN, "Warn");
+    assert_eq(hwlog_level_from_name("info"), SK_INFO, "info");
+    assert_eq(hwlog_level_from_name("DEBUG"), SK_DEBUG, "DEBUG");
+    assert_eq(hwlog_level_from_name("trace"), SK_TRACE, "trace");
+    assert_eq(hwlog_level_from_name("loud"), 0 - 100, "unknown name");
+    assert_eq(hwlog_level_from_name("debugx"), 0 - 100, "longer name");
+    assert_eq(hwlog_level_from_name(0), 0 - 100, "no name");
+    return 0;
+}
+
+# hwlog_apply_level_name: 0 leaves the level, a name sets it, an unknown
+# name leaves it and says so.
+fn test_log_apply_level() {
+    sakshi_set_level(SK_WARN);
+    hwlog_apply_level_name(0);
+    assert_eq(sakshi_get_level(), SK_WARN, "absent flag keeps the level");
+    hwlog_apply_level_name("Info");
+    assert_eq(sakshi_get_level(), SK_INFO, "Info applied");
+    sakshi_output_buffer();
+    sakshi_ring_clear();
+    hwlog_apply_level_name("verbose");
+    assert_eq(sakshi_get_level(), SK_INFO, "unknown name keeps the level");
+    assert_eq(sakshi_ring_event_count(), 1, "unknown name warns");
+    assert_eq(hwlog_enabled(SK_WARN), 1, "warn enabled at info");
+    assert_eq(hwlog_enabled(SK_INFO), 1, "info enabled at info");
+    assert_eq(hwlog_enabled(SK_DEBUG), 0, "debug off at info");
+    sakshi_set_level(SK_WARN);
+    sakshi_set_output(SK_OUT_STDERR);
+    return 0;
+}
+
+# hwlog_*_n honour sakshi's compile-time gates, as the static helpers do.
+# This unit defines SAKSHI_DISABLE_DEBUG: through 2.5.4 hwlog_debug_n called
+# sakshi's private _sk_log and emitted the line anyway.
+fn test_log_n_gates() {
+    sakshi_set_level(SK_TRACE);
+    sakshi_output_buffer();
+    sakshi_ring_clear();
+    hwlog_debug("static debug");
+    hwlog_debug_n("debug n=", 1);
+    assert_eq(sakshi_ring_event_count(), 0, "debug lines compiled out");
+    hwlog_info_n("info n=", 2);
+    hwlog_warn_n("warn n=", 3);
+    assert_eq(sakshi_ring_event_count(), 2, "info and warn lines emitted");
+    sakshi_set_level(SK_WARN);
+    sakshi_ring_clear();
+    hwlog_info_n("info n=", 4);
+    assert_eq(sakshi_ring_event_count(), 0, "info line below the level");
+    sakshi_set_output(SK_OUT_STDERR);
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    test_log_default_level();
+    test_valid_lines();
+    test_structure_refused();
+    test_values_refused();
+    test_flag_lookup();
+    test_table_cells();
+    test_help_complete();
+    test_log_level_names();
+    test_log_apply_level();
+    test_log_n_gates();
+    test_version_builtin();
+    return assert_summary();
+}
+
+var r = main();
+syscall(60, r);

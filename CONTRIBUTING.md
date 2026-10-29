@@ -42,8 +42,8 @@ distlib's check, so the bundle's `# Requires` block covers a consumer that
 does not use bayan.
 
 CI (`.github/workflows/ci.yml`) runs these checks plus the raw-offset guard,
-the `dist/` drift check and the `cyrius.lock` hash check. CI runs lint without
-`--strict`, so a lint warning does not fail it yet: check lint yourself.
+the `dist/` drift check, the `cyrius.lock` hash check and the Python bindings'
+tests. CI runs lint with `--strict`, so a lint warning fails it.
 
 ## What to contribute
 

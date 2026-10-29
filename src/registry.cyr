@@ -20,10 +20,11 @@ struct reg {
     schema;
 }
 
-var REGISTRY_SIZE = 32;
+# sizeof, not a literal (2.5.5); REGISTRY_SIZE stays for consumers.
+var REGISTRY_SIZE = sizeof(reg);
 
 fn hw_registry_new() {
-    var r = alloc(REGISTRY_SIZE);
+    var r = alloc(sizeof(reg));
     reg_set_profiles(r, vec_new());
     reg_set_warnings(r, vec_new());
     reg_set_system_io(r, system_io_new());
@@ -42,15 +43,21 @@ fn reg_num_profiles(r) {
     return vec_len(reg_profiles(r));
 }
 
+# The profile at `idx`, or 0 when `idx` is outside [0, reg_num_profiles(r))
+# (2.5.5). Through 2.5.4 a stale index reached vec_get's abort, which exits
+# the calling thread, so a library consumer lost its thread, or its process.
 fn reg_get_profile(r, idx) {
-    return vec_get(reg_profiles(r), idx);
+    var profs = reg_profiles(r);
+    if (idx < 0 || idx >= vec_len(profs)) { return 0; }
+    return vec_get(profs, idx);
 }
 
 fn reg_num_warnings(r) {
     return vec_len(reg_warnings(r));
 }
 
-# Total memory across all available devices, counting system RAM once.
+# Total memory of the available devices (`skip_cpu` 1: the accelerators
+# only), counting system RAM once.
 #
 # A profile's `shared_mem` part is system RAM (see src/profile.cyr): all of the
 # CPU's memory, all of a unified-memory device's (Apple Silicon's GPU and
@@ -59,38 +66,9 @@ fn reg_num_warnings(r) {
 # 100 GiB in 2.3.27 (CPU 48 + GPU 48 + Neural Engine 4). So the shared parts
 # fold into one pool, the largest of them, and only the rest adds up. With no
 # shared-memory device the pool is the CPU's RAM and the result is the plain
-# sum, as before. One host per registry: the pool is a max, not a sum.
-fn reg_total_memory(r) {
-    var profs = reg_profiles(r);
-    var total = 0;
-    var pool = 0;
-    var n = vec_len(profs);
-    var i = 0;
-    while (i < n) {
-        var p = vec_get(profs, i);
-        i = i + 1;
-        if (profile_available(p) == 1) {
-            # profile_shared_bytes, inlined: a call per profile cost +70% on
-            # total_memory_13dev. A device that shares nothing adds its memory
-            # as before, for one extra load and compare.
-            if (profile_shared_mem(p) == 0) {
-                total = total + profile_memory_bytes(p);
-            } else {
-                var part = profile_shared_mem(p);
-                if (part > profile_memory_bytes(p)) { part = profile_memory_bytes(p); }
-                if (part < 0) { part = 0; }
-                if (part > pool) { pool = part; }
-                total = total + profile_memory_bytes(p) - part;
-            }
-        }
-    }
-    return total + pool;
-}
-
-# Total accelerator memory (excludes CPU), counting shared system RAM once:
-# dedicated accelerator memory plus the largest shared part any accelerator
-# can address (48 GiB on that M5 Pro, not GPU 48 + Neural Engine 4).
-fn reg_total_accel_memory(r) {
+# sum, as before. One host per registry: the pool is a max, not a sum. Both
+# totals used a copy of this loop through 2.5.4.
+fn _reg_total_mem(r, skip_cpu) {
     var profs = reg_profiles(r);
     var total = 0;
     var pool = 0;
@@ -100,7 +78,12 @@ fn reg_total_accel_memory(r) {
         var p = vec_get(profs, i);
         i = i + 1;
         if (profile_available(p) != 1) { continue; }
-        if (profile_accel_type(p) == ACCEL_CPU) { continue; }
+        if (skip_cpu == 1) {
+            if (profile_accel_type(p) == ACCEL_CPU) { continue; }
+        }
+        # profile_shared_bytes, inlined: a call per profile cost +70% on
+        # total_memory_13dev. A device that shares nothing adds its memory
+        # as before, for one extra load and compare.
         if (profile_shared_mem(p) == 0) {
             total = total + profile_memory_bytes(p);
             continue;
@@ -112,6 +95,18 @@ fn reg_total_accel_memory(r) {
         total = total + profile_memory_bytes(p) - part;
     }
     return total + pool;
+}
+
+# Total memory across all available devices, counting system RAM once.
+fn reg_total_memory(r) {
+    return _reg_total_mem(r, 0);
+}
+
+# Total accelerator memory (excludes CPU), counting shared system RAM once:
+# dedicated accelerator memory plus the largest shared part any accelerator
+# can address (48 GiB on that M5 Pro, not GPU 48 + Neural Engine 4).
+fn reg_total_accel_memory(r) {
+    return _reg_total_mem(r, 1);
 }
 
 # Whether any non-CPU accelerator is available
@@ -148,9 +143,8 @@ fn reg_best_available(r) {
     return best;
 }
 
-# Count profiles by family
-fn reg_count_by_family(r, family) {
-    var profs = reg_profiles(r);
+# How many profiles in `profs` are available and of `family`.
+fn _profiles_count_by_family(profs, family) {
     var count = 0;
     var n = vec_len(profs);
     var i = 0;
@@ -163,19 +157,40 @@ fn reg_count_by_family(r, family) {
     return count;
 }
 
-# Collect available profiles by family into a vec
-fn reg_by_family(r, family) {
-    var profs = reg_profiles(r);
-    var result = vec_new();
+# Count available profiles by family
+fn reg_count_by_family(r, family) {
+    return _profiles_count_by_family(reg_profiles(r), family);
+}
+
+# Refill vec `out` with the available profiles of `family` in `profs`, in
+# order, and return it. The one family filter, behind reg_by_family_into and
+# lazy_by_family_into (through 2.5.4 lazy.cyr had its own copy).
+fn _profiles_by_family_into(profs, family, out) {
+    vec_truncate(out, 0);
     var n = vec_len(profs);
     var i = 0;
     while (i < n) {
         var p = vec_get(profs, i);
         i = i + 1;
         if (profile_available(p) != 1) { continue; }
-        if (profile_family(p) == family) { vec_push(result, p); }
+        if (profile_family(p) == family) { vec_push(out, p); }
     }
-    return result;
+    return out;
+}
+
+# The available profiles of `family`, into the caller's vec `out` (emptied
+# first), which is returned. A reused `out` keeps its buffer, so a consumer
+# that queries a long-lived registry per request stops allocating once it
+# has grown (2.5.5).
+fn reg_by_family_into(r, family, out) {
+    return _profiles_by_family_into(reg_profiles(r), family, out);
+}
+
+# The available profiles of `family`, in a new vec. Allocates a vec per
+# call, which the bump allocator never frees; repeat queries use
+# reg_by_family_into.
+fn reg_by_family(r, family) {
+    return reg_by_family_into(r, family, vec_new());
 }
 
 # Estimate memory for model_params at given quantization
@@ -183,11 +198,22 @@ fn reg_estimate_memory(model_params, quant) {
     return quant_model_bytes_with_overhead(model_params, quant);
 }
 
-# Suggest quantization level based on available hardware
+# Suggest a quantization level for `model_params` from the available
+# hardware: the largest device of the first kind that holds the model, at
+# that kind's preferred level or the next one down it supports. The kinds, in
+# order: TPU (BF16, INT8); the BF16 AI ASICs, Gaudi, Neuron and Cerebras
+# (BF16, INT8); GPU (FP16, INT8, INT4); Graphcore (FP16, INT8); Qualcomm and
+# Groq (INT8, INT4); NPU (INT8, INT4); then the CPU's RAM (FP16, INT8, INT4).
+# Through 2.5.4 only Gaudi counted among the AI ASICs, so a Trainium,
+# Inferentia, Cloud AI 100, Cerebras, Graphcore or Groq host was answered
+# from its host RAM. An accel type this build does not know counts as
+# nothing.
 fn reg_suggest_quant(r, model_params) {
     var best_tpu = 0;
-    var best_gaudi = 0;
+    var best_asic_bf16 = 0;
     var best_gpu = 0;
+    var best_asic_fp16 = 0;
+    var best_asic_int8 = 0;
     var best_npu = 0;
     var best_cpu = 0;
 
@@ -205,9 +231,10 @@ fn reg_suggest_quant(r, model_params) {
         elif (fam == FAMILY_NPU) { if (mem > best_npu) { best_npu = mem; } }
         elif (fam == FAMILY_CPU) { if (mem > best_cpu) { best_cpu = mem; } }
         elif (fam == FAMILY_AI_ASIC) {
-            if (profile_accel_type(p) == ACCEL_GAUDI) {
-                if (mem > best_gaudi) { best_gaudi = mem; }
-            }
+            var pq = profile_preferred_quant(p);
+            if (pq == QUANT_BF16) { if (mem > best_asic_bf16) { best_asic_bf16 = mem; } }
+            elif (pq == QUANT_INT8) { if (mem > best_asic_int8) { best_asic_int8 = mem; } }
+            elif (mem > best_asic_fp16) { best_asic_fp16 = mem; }
         }
     }
 
@@ -221,16 +248,26 @@ fn reg_suggest_quant(r, model_params) {
         if (est_bf16 <= best_tpu) { return QUANT_BF16; }
         if (est_int8 <= best_tpu) { return QUANT_INT8; }
     }
-    # Gaudi -> BF16
-    if (best_gaudi > 0) {
-        if (est_bf16 <= best_gaudi) { return QUANT_BF16; }
-        if (est_int8 <= best_gaudi) { return QUANT_INT8; }
+    # Gaudi, Neuron, Cerebras -> BF16
+    if (best_asic_bf16 > 0) {
+        if (est_bf16 <= best_asic_bf16) { return QUANT_BF16; }
+        if (est_int8 <= best_asic_bf16) { return QUANT_INT8; }
     }
     # GPU -> FP16
     if (best_gpu > 0) {
         if (est_fp16 <= best_gpu) { return QUANT_FP16; }
         if (est_int8 <= best_gpu) { return QUANT_INT8; }
         if (est_int4 <= best_gpu) { return QUANT_INT4; }
+    }
+    # Graphcore -> FP16 (no INT4)
+    if (best_asic_fp16 > 0) {
+        if (est_fp16 <= best_asic_fp16) { return QUANT_FP16; }
+        if (est_int8 <= best_asic_fp16) { return QUANT_INT8; }
+    }
+    # Qualcomm, Groq -> INT8/INT4
+    if (best_asic_int8 > 0) {
+        if (est_int8 <= best_asic_int8) { return QUANT_INT8; }
+        if (est_int4 <= best_asic_int8) { return QUANT_INT4; }
     }
     # NPU -> INT8/INT4
     if (best_npu > 0) {
@@ -307,13 +344,24 @@ fn profile_name_is_placeholder(name) {
     return 0;
 }
 
+# 1 if profile `q` lacks what a dropped view hands its twin: a model name
+# (its name is a placeholder) or a memory figure (0). Pure.
+fn _dedup_unfilled(q) {
+    if (profile_memory_bytes(q) == 0) { return 1; }
+    return profile_name_is_placeholder(profile_device_name(q));
+}
+
 # The profile that `p` is another view of, or 0 (2.5.3). Several backends can
 # report one GPU, and they rank: a vendor backend (CUDA, ROCm, oneAPI) above
 # Windows's DXGI above Vulkan. For a Vulkan or Windows GPU profile with a
 # nonzero pci_id, the twin is the best-ranked profile above it with that
-# pci_id: the first vendor profile, else (for Vulkan) the first Windows GPU.
-# For a Vulkan integrated GPU on system RAM with no such profile, it is the
-# first Apple Metal profile. Every other type has no twin. Pure.
+# pci_id: a vendor profile, else (for Vulkan) the first Windows GPU. Among
+# vendor profiles it is the first one that still lacks what a view gives
+# (_dedup_unfilled), else the first: pci_id is the PCI model ID, so identical
+# cards share it, and through 2.5.4 every view paired with the first card,
+# which left the second card's placeholder name in place. For a Vulkan
+# integrated GPU on system RAM with no such profile, it is the first Apple
+# Metal profile. Every other type has no twin. Pure.
 #
 # The ranks are inline type tests, not a rank function: the pass runs once
 # per detection, and dedup_17dev measured a call per profile at +6% (2.5.3).
@@ -327,6 +375,7 @@ fn _dedup_twin(profiles, p) {
     if (is_vk == 1) {
         if (profile_shared_bytes(p) > 0) { on_ram = 1; }
     }
+    var vend = 0;
     var win = 0;
     var metal = 0;
     var n = vec_len(profiles);
@@ -337,7 +386,10 @@ fn _dedup_twin(profiles, p) {
         var t = profile_accel_type(q);
         if (pid != 0) {
             if (profile_pci_id(q) == pid) {
-                if (t == ACCEL_CUDA || t == ACCEL_ROCM || t == ACCEL_INTEL_ONEAPI) { return q; }
+                if (t == ACCEL_CUDA || t == ACCEL_ROCM || t == ACCEL_INTEL_ONEAPI) {
+                    if (_dedup_unfilled(q) == 1) { return q; }
+                    if (vend == 0) { vend = q; }
+                }
                 if (t == ACCEL_WIN_GPU && is_vk == 1 && win == 0) { win = q; }
             }
         }
@@ -345,6 +397,7 @@ fn _dedup_twin(profiles, p) {
             if (metal == 0 && t == ACCEL_METAL) { metal = q; }
         }
     }
+    if (vend != 0) { return vend; }
     if (win != 0) { return win; }
     return metal;
 }
@@ -365,9 +418,9 @@ fn _dedup_log(p, twin, renamed, took_mem) {
     if (profile_device_name(twin) != 0) { str_builder_add_cstr(sb, profile_device_name(twin)); }
     str_builder_add_cstr(sb, "; dropped");
     if (renamed == 1) { str_builder_add_cstr(sb, ", its name kept"); }
-    if (took_mem == 1) { str_builder_add_cstr(sb, ", its system-memory size kept"); }
+    if (took_mem == 1) { str_builder_add_cstr(sb, ", its memory size kept"); }
     var m = str_builder_build(sb);
-    _sk_log(SK_DEBUG, str_data(m), str_len(m));
+    sakshi_debug(str_data(m), str_len(m));
     return 0;
 }
 
@@ -390,9 +443,12 @@ fn _dedup_log(p, twin, renamed, took_mem) {
 # RENOIR)". A Windows GPU survivor of a Vulkan view on system RAM takes that
 # view's memory and shared part: DXGI gives an integrated GPU its boot-time
 # carve-out, and vulkaninfo its heap (cass's UHD 600: 128 MiB becomes
-# 4 202 799 104 bytes, all shared). Order is kept; `profiles` is compacted in
-# place. Returns the number of profiles dropped. Through 2.3.29 nothing was
-# dropped: the dev host listed its one iGPU twice and counted its 8 GiB twice.
+# 4 202 799 104 bytes, all shared). So does a survivor with no memory figure
+# (2.5.5) from a view vulkaninfo named, such as a GB10 from nvidia-smi's
+# "[N/A]" that nothing sized from system RAM. Order is kept; `profiles` is
+# compacted in place. Returns the number of profiles dropped. Through 2.3.29
+# nothing was dropped: the dev host listed its one iGPU twice and counted its
+# 8 GiB twice.
 fn profiles_dedup(profiles) {
     var n = vec_len(profiles);
     if (n < 2) { return 0; }
@@ -413,6 +469,11 @@ fn profiles_dedup(profiles) {
                 var take_mem = 0;
                 if (profile_accel_type(twin) == ACCEL_WIN_GPU) {
                     if (profile_shared_bytes(p) > 0) { take_mem = 1; }
+                }
+                # A twin with no memory figure takes a vulkaninfo view's heap;
+                # the sysfs scan's figure is a guess, and its name says so.
+                if (profile_memory_bytes(twin) == 0 && profile_memory_bytes(p) > 0) {
+                    if (profile_name_is_placeholder(profile_device_name(p)) == 0) { take_mem = 1; }
                 }
                 _dedup_log(p, twin, rename, take_mem);
                 if (rename == 1) { profile_set_device_name(twin, profile_device_name(p)); }
@@ -435,6 +496,57 @@ fn profiles_dedup(profiles) {
     }
     vec_truncate(profiles, kept);
     return n - kept;
+}
+
+# --- Logging the detectors' diagnostics ---
+
+# Log each warning in `warns` from index `from` on that says something went
+# wrong: at warn, a parse warning as "<tool>: <message>" and a tool killed at
+# its deadline as warning_describe gives it ("hl-smi: timed out after 10s");
+# at info, a tool that ran and failed ("nvidia-smi: exited with status 9").
+# Tool-not-found and sysfs warnings stay in the JSON `warnings` array only,
+# so a host without a vendor tool stays silent at the default WARN level. The JSON lists tool names
+# only, so through 2.5.4, which logged parse warnings alone, a failing tool
+# looked the same as a missing one to a CLI or wheel user.
+#
+# Every entry point calls this on its own thread after the detectors are
+# done (2.3.21): lib/sakshi.cyr's logger is single-threaded, and the parsers
+# run on registry_detect_threaded's detector threads, so they push warnings
+# and never log. It lives here, not in error.cyr, because it needs log.cyr,
+# which units that test error.cyr alone do not include (2.5.5). Issue
+# 2026-09-07-threaded-detect-vs-single-threaded-sakshi.
+fn warnings_log_parse(warns, from) {
+    if (hwlog_enabled(SK_WARN) == 0) { return 0; }
+    var n = vec_len(warns);
+    var i = from;
+    while (i < n) {
+        var w = vec_get(warns, i);
+        i = i + 1;
+        var code = warning_code(w);
+        var m = 0;
+        var info = 0;
+        if (code == HWA_ERR_PARSE) {
+            var sb = str_builder_new();
+            str_builder_add_cstr(sb, warning_tool(w));
+            str_builder_add_cstr(sb, ": ");
+            if (warning_message(w) != 0) { str_builder_add_cstr(sb, warning_message(w)); }
+            m = str_builder_build(sb);
+        } elif (code == HWA_ERR_TIMEOUT) {
+            m = warning_describe(w);
+        } elif (code == HWA_ERR_TOOL_FAILED) {
+            # At INFO (-v), not the default WARN: vulkaninfo exits 1 on any
+            # host without a Vulkan GPU, which is no news worth a line there.
+            # The JSON warnings array names the tool either way.
+            if (hwlog_enabled(SK_INFO) == 1) {
+                m = warning_describe(w);
+                info = 1;
+            }
+        }
+        if (m != 0) {
+            if (info == 1) { hwlog_info(str_data(m)); } else { hwlog_warn(str_data(m)); }
+        }
+    }
+    return 0;
 }
 
 # --- Full detection orchestration ---
@@ -467,15 +579,14 @@ fn registry_profile_passes(profs) {
 # registry's system_io, NOT the registry — through 2.3.24 the threaded and lazy
 # paths passed `r`, which pushed interconnects into profiles and storage into
 # warnings and replaced system_io with the environment struct, so serializing
-# that registry segfaulted. detect_interconnects can run `nvidia-smi nvlink -s`
-# (InfiniBand, NVSwitch and XGMI it reads from sysfs), so it runs only when
-# `allow_exec` is 1.
+# that registry segfaulted. The interconnect pass runs either way, and
+# `allow_exec` 0 leaves out only its `nvidia-smi nvlink -s` run (InfiniBand,
+# NVSwitch and XGMI it reads from sysfs, ICI from the TPU profiles); through
+# 2.5.4 it was skipped whole without exec.
 fn registry_system_passes(r, allow_exec) {
     var profs = reg_profiles(r);
     var sio = reg_system_io(r);
-    if (allow_exec == 1) {
-        detect_interconnects(sio, profs, reg_warnings(r));
-    }
+    detect_interconnects_opts(sio, profs, reg_warnings(r), allow_exec);
     detect_storage(sio);
     detect_environment(sio);
     # Last, so the interconnect pass's own "nvidia-smi not found" folds into
@@ -486,9 +597,11 @@ fn registry_system_passes(r, allow_exec) {
 
 # Run the detectors `builder_mask` enables, pushing their profiles onto `profs`
 # and their diagnostics onto `warns`; no CPU profile, no post-passes. Every
-# entry point but the threaded one detects through this, the lazy registry one
-# family's backends at a time (2.5.2). `allow_exec` is passed down as is, and
-# a caller that forbids exec strips the exec backends from the mask itself.
+# entry point detects through this: the threaded one per thread, the lazy
+# registry one family's backends at a time (2.5.2). `allow_exec` (0 or 1) is
+# passed down as is: the native backends that can run a tool (Apple, Vulkan,
+# Gaudi, Neuron, Windows) run it only with 1, and a caller that forbids exec
+# strips the exec backends from the mask itself.
 fn registry_run_detectors(profs, warns, builder_mask, allow_exec) {
     if (builder_is_enabled(builder_mask, BACKEND_CUDA) == 1) { detect_cuda(profs, warns); }
     if (builder_is_enabled(builder_mask, BACKEND_ROCM) == 1) { detect_rocm(profs, warns); }
@@ -511,8 +624,15 @@ fn registry_run_detectors(profs, warns, builder_mask, allow_exec) {
         detect_amd_xdna(profs, warns);
     }
     if (builder_is_enabled(builder_mask, BACKEND_TPU) == 1) { detect_tpu(profs, warns); }
-    if (builder_is_enabled(builder_mask, BACKEND_GAUDI) == 1) { detect_gaudi(profs, warns); }
-    if (builder_is_enabled(builder_mask, BACKEND_NEURON) == 1) { detect_neuron(profs, warns); }
+    # hl-smi, neuron-ls, cerebras_cli and gc-info only with exec; otherwise
+    # the habanalabs accel nodes, /dev/neuron<N>, /dev/cerebras* and
+    # /dev/ipu<N> (2.5.5: through 2.5.4 no-exec mode skipped all four).
+    if (builder_is_enabled(builder_mask, BACKEND_GAUDI) == 1) {
+        detect_gaudi_opts(profs, warns, allow_exec);
+    }
+    if (builder_is_enabled(builder_mask, BACKEND_NEURON) == 1) {
+        detect_neuron_opts(profs, warns, allow_exec);
+    }
     if (builder_is_enabled(builder_mask, BACKEND_INTEL_ONEAPI) == 1) {
         detect_intel_oneapi(profs, warns);
     }
@@ -520,10 +640,10 @@ fn registry_run_detectors(profs, warns, builder_mask, allow_exec) {
         detect_qualcomm(profs, warns);
     }
     if (builder_is_enabled(builder_mask, BACKEND_CEREBRAS) == 1) {
-        detect_cerebras(profs, warns);
+        detect_cerebras_opts(profs, warns, allow_exec);
     }
     if (builder_is_enabled(builder_mask, BACKEND_GRAPHCORE) == 1) {
-        detect_graphcore(profs, warns);
+        detect_graphcore_opts(profs, warns, allow_exec);
     }
     if (builder_is_enabled(builder_mask, BACKEND_GROQ) == 1) {
         detect_groq(profs, warns);
@@ -552,7 +672,8 @@ fn registry_detect() {
 
 # Detect with only the backends in `builder_mask`. A mask that holds no exec
 # backend (backend_uses_exec) spawns nothing: it runs with allow_exec 0, so
-# Vulkan uses its sysfs scan instead of `vulkaninfo`, the system_profiler and
+# Vulkan uses its sysfs scan instead of `vulkaninfo`, Gaudi and Neuron their
+# device nodes instead of `hl-smi` and `neuron-ls`, the system_profiler and
 # wmic fallbacks are skipped, and so is the interconnect pass's
 # `nvidia-smi nvlink -s`. Through 2.5.0 every mask ran with exec allowed, so
 # registry_detect_with(builder_no_exec()) still spawned all four. For tools
@@ -562,16 +683,21 @@ fn registry_detect_with(builder_mask) {
 }
 
 # No-subprocess detection — masks off exec-shelling backends (defense
-# in depth: even if the caller's mask had them set) and skips the only
-# exec-shaped post-pass (detect_interconnects, which runs
-# `nvidia-smi nvlink -s`). Safe to call from contexts that
-# forbid process spawning, e.g. mihi probes. See backend_uses_exec()
-# in types.cyr for the per-backend classification.
+# in depth: even if the caller's mask had them set), runs the native ones
+# without their tools, and runs the interconnect pass without its
+# `nvidia-smi nvlink -s` (InfiniBand, NVSwitch, XGMI and ICI come from sysfs
+# and the profiles). Safe to call from contexts that forbid process
+# spawning, e.g. mihi probes. See backend_uses_exec() in types.cyr for the
+# per-backend classification.
 fn registry_detect_no_exec() {
     return registry_detect_with_opts(builder_no_exec(), 0);
 }
 
 fn registry_detect_with_opts(builder_mask, allow_exec) {
+    # Any nonzero allow_exec is 1 (2.5.5): the detectors and passes test
+    # `== 1`, so through 2.5.4 a 2 kept the exec backends but ran Vulkan,
+    # Apple and the interconnect pass as if exec were off.
+    if (allow_exec != 0) { allow_exec = 1; }
     # When exec is forbidden, force-strip any exec backends the caller
     # may have enabled. backend_uses_exec() is the source of truth.
     if (allow_exec == 0) {
@@ -592,14 +718,14 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
 
     registry_run_detectors(profs, warns, builder_mask, allow_exec);
 
-    # Post-passes: enrich profiles, then system I/O (interconnects only with
-    # allow_exec).
+    # Post-passes: enrich profiles, then system I/O (the interconnect pass
+    # runs `nvidia-smi nvlink -s` only with allow_exec).
     registry_post_passes(r, allow_exec);
 
-    # One summary line per detection pass (info), plus a warn when a
-    # detector pushed diagnostics. Counts are cheap (vec_len); the
-    # messages are guarded inside hwlog_*_n so nothing builds when
-    # suppressed.
+    # The warnings that say something went wrong, at warn (warnings_log_parse),
+    # then one summary line per detection pass at info. Counts are cheap
+    # (vec_len); the messages are guarded inside hwlog_*_n so nothing builds
+    # when suppressed.
     var nwarn = vec_len(warns);
     warnings_log_parse(warns, 0);
     if (nwarn > 0) { hwlog_info_n("detect: warnings=", nwarn); }

@@ -1,45 +1,124 @@
-# tpu.cyr — Google TPU detection via sysfs
+# tpu.cyr — Google TPU detection via sysfs, and the DRM accel class walk
+
+# --- DRM accel class ---
+#
+# /sys/class/accel is the kernel's DRM compute-accel class (drivers/accel,
+# Linux 6.2+), shared by every driver there: intel_vpu (the Core Ultra NPU),
+# amdxdna (Ryzen AI), habanalabs (Gaudi), qaic (Cloud AI 100), ethosu and
+# rocket (Arm Ethos-U, Rockchip). Through 2.5.4 detect_tpu took every node but
+# amdxdna's as a 32 GiB "Google TPU v4", which outranked a real GPU in
+# best_available and gained a 192 GB/s ICI link, and detect_intel_npu looked
+# for /sys/class/misc/intel_npu, which intel_vpu never creates. Each node now
+# goes to the backend its driver belongs to. The helpers live here because
+# tpu.cyr comes first of the accel-class detectors in every include list.
+
+enum AccelPciVendor {
+    PCI_VENDOR_GOOGLE = 0x1ae0;
+}
+
+# The backend an accel node belongs to, from the basename of its
+# device/driver link (a Str, or 0 when the link cannot be read) and its PCI
+# vendor ID (-1 when device/vendor cannot be read). A known driver names its
+# backend; ethosu and rocket have none (-1). An unknown driver is a TPU
+# candidate unless a PCI vendor other than Google's (0x1ae0) says otherwise.
+# Pure.
+fn accel_driver_backend(drv, vendor) {
+    if (drv != 0) {
+        if (str_eq_cstr(drv, "intel_vpu") == 1) { return BACKEND_INTEL_NPU; }
+        if (str_eq_cstr(drv, "amdxdna") == 1) { return BACKEND_AMD_XDNA; }
+        if (str_eq_cstr(drv, "habanalabs") == 1) { return BACKEND_GAUDI; }
+        if (str_eq_cstr(drv, "qaic") == 1) { return BACKEND_QUALCOMM; }
+        if (str_eq_cstr(drv, "ethosu") == 1) { return 0 - 1; }
+        if (str_eq_cstr(drv, "rocket") == 1) { return 0 - 1; }
+    }
+    if (vendor >= 0 && vendor != PCI_VENDOR_GOOGLE) { return 0 - 1; }
+    return BACKEND_TPU;
+}
+
+# N of an accel class node named "accelN" (a Str), or -1 for any other name
+# or an N past CMD_MAX_DEVICE_ID. Pure.
+fn accel_node_index(name) {
+    var n = str_len(name);
+    if (n <= 5) { return 0 - 1; }
+    if (memeq(str_data(name), "accel", 5) != 1) { return 0 - 1; }
+    var id = parse_field_int(str_sub(name, 5, n - 5));
+    if (id > CMD_MAX_DEVICE_ID) { return 0 - 1; }
+    return id;
+}
+
+# accel_driver_backend for node `name` (a Str) of the accel class at `root`
+# (a cstr). The PCI vendor is read only for a driver it does not know.
+fn accel_node_backend(root, name) {
+    var drv = 0;
+    var link = read_symlink(sysfs_path_str(root, name, "device/driver"));
+    if (link != 0) { drv = path_basename(link); }
+    var b = accel_driver_backend(drv, 0 - 1);
+    if (b == BACKEND_TPU) {
+        var vs = sysfs_read(sysfs_path_str(root, name, "device/vendor"));
+        if (vs != 0) { b = accel_driver_backend(drv, parse_hex_field(vs)); }
+    }
+    return b;
+}
+
+# The accelN nodes (their names, as Strs) of the accel class at `root` (a
+# cstr: "/sys/class/accel", or a test's fake tree) that belong to `backend`,
+# in directory order. Every accel-class detector walks it through here.
+fn accel_class_nodes(root, backend) {
+    var out = vec_new();
+    var entries = sysfs_list_dir(root);
+    var n = vec_len(entries);
+    var i = 0;
+    while (i < n) {
+        var name = vec_get(entries, i);
+        i = i + 1;
+        if (accel_node_index(name) < 0) { continue; }
+        if (accel_node_backend(root, name) == backend) { vec_push(out, name); }
+    }
+    return out;
+}
+
+# --- Google TPU ---
+
+# TPU version from a Google PCI device ID, as Google's tpu-info maps them
+# (0x005e v4, 0x0063 v5e, 0x0062 v5p), or -1 for any other ID. From the
+# tool's source, not a capture. Pure.
+fn tpu_version_from_pci_device(dev) {
+    if (dev == 0x005e) { return TPU_V4; }
+    if (dev == 0x0063) { return TPU_V5E; }
+    if (dev == 0x0062) { return TPU_V5P; }
+    return 0 - 1;
+}
 
 fn detect_tpu(profiles, warnings) {
-    var accel_dir = str_from("/sys/class/accel");
-    var entries = dir_list(accel_dir);
-    var nent = vec_len(entries);
+    return detect_tpu_at("/sys/class/accel", profiles, warnings);
+}
 
-    var ei = 0;
-    while (ei < nent) {
-        var name = vec_get(entries, ei);
-        ei = ei + 1;
+# detect_tpu over the accel class at `root` (a cstr). The version comes from
+# the PCI device ID, then a tpu_version file, else v4; chip_count defaults to
+# 1, and so does one past CMD_MAX_DEVICE_ID.
+fn detect_tpu_at(root, profiles, warnings) {
+    var nodes = accel_class_nodes(root, BACKEND_TPU);
+    var nn = vec_len(nodes);
+    var ni = 0;
+    while (ni < nn) {
+        var name = vec_get(nodes, ni);
+        ni = ni + 1;
+        var dev_id = accel_node_index(name);
 
-        # Must start with "accel"
-        if (str_starts_with(name, "accel") != 1) { continue; }
-
-        # Skip AMD XDNA devices (check driver)
-        var drv_path = sysfs_path_str("/sys/class/accel", name, "device/driver");
-        var drv_link = read_symlink(drv_path);
-        if (drv_link != 0) {
-            var drv_base = path_basename(drv_link);
-            if (memeq(str_data(drv_base), "amdxdna", 7) == 1) { continue; }
+        var pci_dev = parse_hex_field(sysfs_read(sysfs_path_str(root, name, "device/device")));
+        var version = tpu_version_from_pci_device(pci_dev);
+        if (version < 0) {
+            version = TPU_V4;
+            var ver_str = sysfs_read(sysfs_path_str(root, name, "device/tpu_version"));
+            if (ver_str != 0) {
+                if (str_contains_cstr(ver_str, "v5p") == 1) { version = TPU_V5P; }
+                elif (str_contains_cstr(ver_str, "v5e") == 1) { version = TPU_V5E; }
+                elif (str_contains_cstr(ver_str, "v5litepod") == 1) { version = TPU_V5E; }
+            }
         }
 
-        # Parse device ID from "accelN"
-        var dev_id_str = str_sub(name, 5, str_len(name) - 5);
-        var dev_id = str_to_int(dev_id_str);
-        if (dev_id < 0) { continue; }
-
-        # Read TPU version
-        var ver_path = sysfs_path_str("/sys/class/accel", name, "device/tpu_version");
-        var ver_str = sysfs_read(ver_path);
-        var version = TPU_V4;
-        if (ver_str != 0) {
-            if (str_contains_cstr(ver_str, "v5p") == 1) { version = TPU_V5P; }
-            elif (str_contains_cstr(ver_str, "v5e") == 1) { version = TPU_V5E; }
-            elif (str_contains_cstr(ver_str, "v5litepod") == 1) { version = TPU_V5E; }
-        }
-
-        # Read chip count
-        var chip_path = sysfs_path_str("/sys/class/accel", name, "device/chip_count");
-        var chip_count = sysfs_read_int(chip_path);
-        if (chip_count <= 0) { chip_count = 1; }
+        var chip_count = str_leading_uint(sysfs_read(sysfs_path_str(root, name, "device/chip_count")));
+        if (chip_count <= 0 || chip_count > CMD_MAX_DEVICE_ID) { chip_count = 1; }
 
         var p = profile_tpu(dev_id, chip_count, version);
         # Device name: "Google TPU v4" / "v5e" / "v5p" via the

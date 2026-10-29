@@ -8,15 +8,18 @@ Build the binary from source with the toolchain `cyrius.cyml` pins:
 
 ```sh
 cyrius lib sync && cyrius deps
-CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # ≈236 KB, x86_64
+CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # ≈216 KB, x86_64
 ```
 
 `CYRIUS_DCE=1` drops unreachable code and gives the smallest binary. Every
 backend is compiled in; which ones run is chosen at run time (see *Selective
 detection*).
 
-Python users can `pip install ai-hwaccel` instead: the wheels bundle the
-binary for Linux, macOS (arm64) and Windows.
+Python users can install the Python package from a wheel instead: the wheels
+bundle the binary for Linux, macOS (arm64) and Windows. They come from the
+Wheels workflow's artifacts, not from PyPI, where the project does not own the
+name `ai-hwaccel`; never install it by name from an index (see
+[bindings/python](../../bindings/python/README.md#install)).
 
 `--version` reads the `VERSION` file and `--cost` reads
 `data/cloud_pricing.json`. When the binary runs outside the repository, point
@@ -134,7 +137,8 @@ variables are not passed to it.
 Values parsed from tool output are range-checked:
 - Device IDs: 0 to 1024
 - Memory sizes: 0 to 16 TiB
-- Tool stdout is capped at 1 MiB; stderr is discarded
+- Tool stdout is capped at 1 MiB. stderr is discarded on Linux and macOS; on
+  Windows it shares the stdout pipe and counts toward the 1 MiB cap
 
 ### Deserialization
 
@@ -193,22 +197,29 @@ CMD ["ai-hwaccel", "--table"]
 
 ### Kubernetes
 
-Use `ai-hwaccel --summary` in an init container to check GPU availability
-before the workload starts:
+The CLI exits 0 whether or not it finds an accelerator (detection does not
+fail), so an init container that only runs `ai-hwaccel --summary` always
+succeeds. Make the check read the JSON: here the init container fails, and the
+workload does not start, when no GPU is found. The image needs `sh` and `jq`:
 
 ```yaml
 initContainers:
   - name: gpu-check
     image: your-image
-    command: ["ai-hwaccel", "--summary"]
+    command: ["sh", "-c", "ai-hwaccel --summary | tee /dev/stderr | jq -e '.gpu_count > 0' > /dev/null"]
 ```
+
+Use `.has_accelerator` instead of `.gpu_count > 0` when any accelerator family
+will do.
 
 ### Resource requirements
 
 - **Time:** on the Linux dev host, a whole CLI run takes about 22 ms, most of
   it in `vulkaninfo`. With no vendor tool on `PATH` it takes under 2 ms.
 - **Threads:** `registry_detect()` uses one thread. `registry_detect_threaded()`
-  (the CLI's `--threaded`) starts one per tool-based backend, briefly.
+  (the CLI's `--threaded`) briefly starts one each for the CUDA, Gaudi, Neuron,
+  Vulkan, oneAPI and Apple backends. Cerebras and Graphcore run their tools on
+  the calling thread, with the sysfs backends.
 - **I/O:** sysfs reads, plus one run of each vendor tool that is installed.
 
 ## Other languages

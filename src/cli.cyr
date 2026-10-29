@@ -1,0 +1,228 @@
+# cli.cyr — the ai-hwaccel command line: its flags, their checks, --help.
+#
+# CLI only, like src/main.cyr: not a [lib] module, so the bundle never
+# carries it. Pure over a vec of argument cstrs (argv without the program
+# name), so tests/tcyr/cli_test.tcyr runs it without starting a process.
+#
+# Through 2.5.4 main.cyr read argv as it went and checked nothing: a value
+# flag at the end ("--cost") or before another flag ("--cost --json") fell
+# through to a full detection or took the flag as its value, a typo such as
+# "--sumary" printed the registry, a bad --quant, --method or --log-level
+# was dropped for the default, and every run exited 0. cli_check_args now
+# refuses each of these before anything runs; main.cyr prints the reason
+# and exits 2, which the Python wrapper raises as CommandError.
+
+# --- Flags ---
+
+# 1 if `a` is a flag that takes a value (the next argument).
+fn cli_is_value_flag(a) {
+    if (streq(a, "--cost") == 1) { return 1; }
+    if (streq(a, "--plan") == 1) { return 1; }
+    if (streq(a, "--train") == 1) { return 1; }
+    if (streq(a, "--quant") == 1) { return 1; }
+    if (streq(a, "--method") == 1) { return 1; }
+    if (streq(a, "--data-dir") == 1) { return 1; }
+    if (streq(a, "--log-level") == 1) { return 1; }
+    return 0;
+}
+
+# 1 if `a` is a flag that takes no value.
+fn cli_is_bool_flag(a) {
+    if (streq(a, "--summary") == 1) { return 1; }
+    if (streq(a, "--table") == 1) { return 1; }
+    if (streq(a, "--threaded") == 1) { return 1; }
+    if (streq(a, "--json") == 1) { return 1; }
+    if (streq(a, "--version") == 1) { return 1; }
+    if (streq(a, "--help") == 1) { return 1; }
+    if (streq(a, "-v") == 1) { return 1; }
+    if (streq(a, "-vv") == 1) { return 1; }
+    if (streq(a, "-q") == 1) { return 1; }
+    return 0;
+}
+
+# 1 if `flag` is one of `args`. Once cli_check_args passed, no value can be
+# mistaken for a flag: every flag starts with '-' and no value does.
+fn cli_has_flag(args, flag) {
+    var n = vec_len(args);
+    var i = 0;
+    while (i < n) {
+        var a = vec_get(args, i);
+        if (a != 0 && streq(a, flag) == 1) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# The argument after the first `flag` in `args`, or 0 when `flag` is absent
+# or last.
+fn cli_get_val(args, flag) {
+    var n = vec_len(args);
+    var i = 0;
+    while (i + 1 < n) {
+        var a = vec_get(args, i);
+        if (a != 0 && streq(a, flag) == 1) { return vec_get(args, i + 1); }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# --- Checks ---
+
+# "<what> '<arg>'<tail>" as a fresh cstr: one of cli_check_args' reasons.
+fn _cli_reason(what, arg, tail) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, what);
+    str_builder_add_cstr(sb, " '");
+    str_builder_add_cstr(sb, arg);
+    str_builder_putc(sb, 39);
+    str_builder_add_cstr(sb, tail);
+    return str_data(str_builder_build(sb));
+}
+
+# The reason a model size given to `flag` is not one, or 0 when it is.
+fn _cli_size_reason(args, flag) {
+    var v = cli_get_val(args, flag);
+    if (v == 0 || model_params_from_str(v) > 0) { return 0; }
+    return _cli_reason("invalid model size", v, " (expected e.g. 70B, 1.5B, 350M or 1.2T)");
+}
+
+# 0 when `args` is a command line main.cyr can run, else why not, as a cstr
+# for "ai-hwaccel: <reason>". The structure first (every argument a known
+# flag, every value flag followed by a value), then the values themselves,
+# then the flags only one mode reads. Allocates only for a reason.
+fn cli_check_args(args) {
+    var n = vec_len(args);
+    var i = 0;
+    while (i < n) {
+        var a = vec_get(args, i);
+        if (a == 0) { return "unreadable argument"; }
+        if (cli_is_value_flag(a) == 1) {
+            var v = 0;
+            if (i + 1 < n) { v = vec_get(args, i + 1); }
+            # A value never starts with '-': "--cost --json" and "--cost -q"
+            # are a missing value, not the model "--json".
+            if (v == 0 || load8(v) == 0 || load8(v) == 45) {
+                return _cli_reason("missing value for", a, "");
+            }
+            i = i + 2;
+        } elif (cli_is_bool_flag(a) == 1) {
+            i = i + 1;
+        } else {
+            return _cli_reason("unknown argument", a, "");
+        }
+    }
+    var qs = cli_get_val(args, "--quant");
+    if (qs != 0 && quant_from_str(qs) < 0) {
+        return _cli_reason("unknown --quant", qs, " (fp32|fp16|bf16|int8|int4)");
+    }
+    var ms = cli_get_val(args, "--method");
+    if (ms != 0 && training_method_from_str(ms) < 0) {
+        return _cli_reason("unknown --method", ms, " (full|lora|qlora-4bit|qlora-8bit|prefix|dpo|rlhf|distillation)");
+    }
+    var ls = cli_get_val(args, "--log-level");
+    if (ls != 0 && hwlog_level_from_name(ls) == (0 - 100)) {
+        return _cli_reason("unknown --log-level", ls, " (off|fatal|error|warn|info|debug|trace)");
+    }
+    var r = _cli_size_reason(args, "--cost");
+    if (r == 0) { r = _cli_size_reason(args, "--plan"); }
+    if (r == 0) { r = _cli_size_reason(args, "--train"); }
+    if (r != 0) { return r; }
+    # A flag the chosen mode never reads would change nothing: through 2.5.4
+    # "--train 7B --quant int4" printed the bf16 estimate.
+    # --train takes and ignores --quant: every Python wheel through 2.5.4 sends
+    # it with training_memory(), and refusing it would break those callers.
+    var quant_ok = cli_has_flag(args, "--plan") + cli_has_flag(args, "--cost") + cli_has_flag(args, "--train");
+    if (qs != 0 && quant_ok == 0) { return "--quant applies to --plan and --cost only"; }
+    if (ms != 0 && cli_has_flag(args, "--train") == 0) { return "--method applies to --train only"; }
+    return 0;
+}
+
+# --- --table ---
+
+# Append cstr `s` as a cell `width` characters wide and the two-space gutter
+# after it: padded with spaces, or cut to width - 3 characters and "..."
+# when longer. Characters are UTF-8 code points. A byte below 0x20 or 0x7F
+# prints as '?': names come from tool output and must not reach the
+# terminal as control sequences. Through 2.5.4 fixed runs of spaces followed
+# each value, so a column started wherever the name before it ended.
+fn cli_table_cell(sb, s, width) {
+    var chars = 0;
+    var i = 0;
+    while (load8(s + i) != 0) {
+        if ((load8(s + i) & 0xC0) != 0x80) { chars = chars + 1; }
+        i = i + 1;
+    }
+    var keep = chars;
+    if (chars > width) { keep = width - 3; }
+    var put = 0;
+    i = 0;
+    while (load8(s + i) != 0) {
+        var c = load8(s + i);
+        if ((c & 0xC0) != 0x80) {
+            if (put == keep) { break; }
+            put = put + 1;
+        }
+        if (c < 32 || c == 127) { c = 63; }
+        str_builder_putc(sb, c);
+        i = i + 1;
+    }
+    if (chars > width) {
+        str_builder_add_cstr(sb, "...");
+        put = put + 3;
+    }
+    while (put < width + 2) {
+        str_builder_putc(sb, 32);
+        put = put + 1;
+    }
+    return 0;
+}
+
+# --- Version and help ---
+
+# The version this binary was built as. The cyrius build wrapper defines
+# CYRIUS_PKG_VERSION from cyrius.cyml's version, which reads VERSION. Through
+# 2.5.4 --version read VERSION at run time, cwd-relative unless --data-dir
+# said otherwise, so the release binary printed "unknown" anywhere but a
+# checkout.
+fn cli_version() {
+    return CYRIUS_PKG_VERSION;
+}
+
+# The --help text.
+fn cli_help() {
+    return "ai-hwaccel — universal AI hardware accelerator detection
+
+Usage:
+  ai-hwaccel                    Full registry JSON
+  ai-hwaccel --summary          Compact summary JSON
+  ai-hwaccel --table            Human-readable table
+  ai-hwaccel --plan 70B         Sharding plan JSON for the detected devices
+  ai-hwaccel --cost 70B         Cloud instance recommendation (text)
+  ai-hwaccel --cost 70B --json  Same, as JSON
+  ai-hwaccel --train 70B        Training memory JSON, estimated for a GPU
+  ai-hwaccel --version          Print the version
+  ai-hwaccel --help             Print this help
+
+A model size is a number and a unit: 70B, 1.5B, 350M, 1.2T (a bare number is
+billions).
+
+Options:
+  --quant <fp32|fp16|bf16|int8|int4>
+                    Weight precision for --plan and --cost (default bf16)
+  --method <full|lora|qlora-4bit|qlora-8bit|prefix|dpo|rlhf|distillation>
+                    Fine-tuning method for --train (default full); QLoRA
+                    picks its own 4- or 8-bit weights, the rest are bf16
+  --threaded        Run the detectors in parallel threads; the vendor tools
+                    still run one at a time. The registry is the same
+  --data-dir <dir>  Directory holding data/ (cloud_pricing.json for --cost
+                    outside the project root); AI_HWACCEL_DATA_DIR does the
+                    same, and the flag wins
+  --log-level <off|fatal|error|warn|info|debug|trace>
+                    Logging on stderr (default warn); AI_HWACCEL_LOG sets it
+                    too, and the flag wins
+  -v, -vv, -q       --log-level debug, trace and off
+
+Exit status: 0 on success, 2 on a usage error (an unknown argument, a
+missing or invalid value)
+";
+}

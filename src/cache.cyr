@@ -6,6 +6,12 @@
 #   var r = cached_get(c);            # first call: detects
 #   var r = cached_get(c);            # within TTL: returns cached
 #   cached_invalidate(c);             # force re-detect on next get
+#
+# Memory: the allocator frees nothing, and a caller may still hold the
+# registry a re-detection replaces, so every expiry keeps one detection's
+# heap: the registry with its strings and vecs, about 40 KB on the dev host
+# (2.5.5; 1.28 MB through 2.5.4, most of it a 1 MiB buffer per tool run, see
+# run_tool_status). Choose the TTL with that in mind.
 
 # Monotonic clock → whole seconds. Used only for TTL expiry, so second
 # resolution is enough and a monotonic-since-boot source is fine.
@@ -18,10 +24,8 @@
 #   Linux   — 228 fills the timespec at &ts; CLOCK_MONOTONIC is 1.
 #   macOS   — arm64 routes 228 to libSystem `_clock_gettime_nsec_np(clock_id)`,
 #             which RETURNS the ns count and does NOT touch &ts; and Darwin's
-#             CLOCK_MONOTONIC is **6**, not 1. (x86-macOS does not route 228 at
-#             all — that arch is held upstream; it falls through to 0, i.e.
-#             "no clock", which makes the TTL always-expired rather than
-#             arbitrary.)
+#             CLOCK_MONOTONIC is **6**, not 1. x86-macOS has routed 228 since
+#             cyrius 6.5.16, with the same return-value contract (lib/chrono.cyr).
 #   Windows — 228 routes to kernel32!GetTickCount64, which RETURNS ms since
 #             boot and does NOT touch &ts.
 #   AGNOS   — no 228; `sys_uptime_ms()` is the peer.
@@ -29,6 +33,7 @@
 # Unguarded, the two return-value targets returned `load64(&ts)` on a timespec
 # nothing had written — an uninitialised stack read, so TTL expiry was
 # undefined on both. Issue 2026-09-07-monotonic-secs-unguarded-on-macos-windows.
+# A clock that reads 0 or less is "no clock" (see _cache_fresh).
 fn _monotonic_secs() {
     #ifdef CYRIUS_TARGET_AGNOS
     return sys_uptime_ms() / 1000;
@@ -64,8 +69,20 @@ struct cached {
     mutex;
 }
 
+# 1 when registry `reg` (or 0), stored at `last` seconds, is still fresh at
+# `now` for a TTL of `ttl` seconds. A clock that reads 0 or less is no clock,
+# and then nothing is fresh, so every get detects (2.5.5): through 2.5.4 the
+# store time was 0 too, `0 - 0 < ttl` held for any TTL, and the first
+# registry was served for ever. Pure.
+fn _cache_fresh(reg, last, ttl, now) {
+    if (reg == 0) { return 0; }
+    if (now <= 0) { return 0; }
+    if (now - last < ttl) { return 1; }
+    return 0;
+}
+
 fn cached_registry_new(ttl_secs) {
-    var c = alloc(32);
+    var c = alloc(sizeof(cached));
     cached_set_registry(c, 0);
     cached_set_last_detect_secs(c, 0);
     cached_set_ttl_secs(c, ttl_secs);
@@ -78,32 +95,28 @@ fn cached_get(c) {
     mutex_lock(mtx);
 
     var reg = cached_registry(c);
-    var last = cached_last_detect_secs(c);
-    var ttl = cached_ttl_secs(c);
-    var now = _monotonic_secs();
-
-    # Cache hit: registry exists and within TTL
-    if (reg != 0 && now - last < ttl) {
+    if (_cache_fresh(reg, cached_last_detect_secs(c), cached_ttl_secs(c), _monotonic_secs()) == 1) {
         mutex_unlock(mtx);
         hwlog_debug("cache: hit (in-memory)");
         return reg;
     }
 
-    mutex_unlock(mtx);
-
-    # Cache miss: run detection (outside lock)
+    # Miss: detect UNDER the lock (2.5.5). A concurrent miss waits on the
+    # mutex and then takes this registry instead of running a detection of its
+    # own, and a cached_invalidate waits for this store and then clears it.
+    # Through 2.5.4 detection ran unlocked: N threads missing together each
+    # ran it, and an invalidate that landed mid-detection was overwritten by a
+    # registry detected before it, which was then served for a whole TTL.
     hwlog_debug("cache: miss -> detecting");
-    var new_reg = registry_detect();
-
-    # Store result
-    mutex_lock(mtx);
-    cached_set_registry(c, new_reg);
+    reg = registry_detect();
+    cached_set_registry(c, reg);
     cached_set_last_detect_secs(c, _monotonic_secs());
     mutex_unlock(mtx);
-
-    return new_reg;
+    return reg;
 }
 
+# Drop the cached registry, so the next cached_get detects. Waits for a
+# detection in flight to finish (2.5.5).
 fn cached_invalidate(c) {
     var mtx = cached_mutex(c);
     mutex_lock(mtx);
@@ -117,13 +130,10 @@ fn cached_ttl(c) {
     return cached_ttl_secs(c);
 }
 
+# 1 when cached_get would answer from the cache now. Unlocked: the answer
+# is advisory, and the lock would make it wait out a detection in flight.
 fn cached_is_valid(c) {
-    var reg = cached_registry(c);
-    if (reg == 0) { return 0; }
-    var last = cached_last_detect_secs(c);
-    var ttl = cached_ttl_secs(c);
-    var now = _monotonic_secs();
-    return now - last < ttl;
+    return _cache_fresh(cached_registry(c), cached_last_detect_secs(c), cached_ttl_secs(c), _monotonic_secs());
 }
 
 # --- Disk-backed cache (deprecated, 2.5.1) ---
@@ -149,7 +159,7 @@ struct disk_cached {
 # cache_path is 0: there is no file.
 #deprecated("the disk cache never read its file and now caches in memory only; use cached_registry_new")
 fn disk_cached_new(ttl_secs) {
-    var c = alloc(40);
+    var c = alloc(sizeof(disk_cached));
     disk_cached_set_registry(c, 0);
     disk_cached_set_last_detect_secs(c, 0);
     disk_cached_set_ttl_secs(c, ttl_secs);
@@ -164,27 +174,19 @@ fn disk_cached_get(c) {
     mutex_lock(mtx);
 
     var reg = disk_cached_registry(c);
-    var last = disk_cached_last_detect_secs(c);
-    var ttl = disk_cached_ttl_secs(c);
-    var now = _monotonic_secs();
-
-    if (reg != 0 && now - last < ttl) {
+    if (_cache_fresh(reg, disk_cached_last_detect_secs(c), disk_cached_ttl_secs(c), _monotonic_secs()) == 1) {
         mutex_unlock(mtx);
         hwlog_debug("disk_cache: hit (in-memory)");
         return reg;
     }
 
-    mutex_unlock(mtx);
-
+    # Detect under the lock, as cached_get does (2.5.5).
     hwlog_debug("disk_cache: miss -> detecting");
-    var new_reg = registry_detect();
-
-    mutex_lock(mtx);
-    disk_cached_set_registry(c, new_reg);
+    reg = registry_detect();
+    disk_cached_set_registry(c, reg);
     disk_cached_set_last_detect_secs(c, _monotonic_secs());
     mutex_unlock(mtx);
-
-    return new_reg;
+    return reg;
 }
 
 #deprecated("the disk cache never read its file and now caches in memory only; use cached_invalidate")

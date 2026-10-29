@@ -2,18 +2,38 @@
 # Qualcomm Cloud AI 100, Samsung Exynos NPU, MediaTek APU (MDLA)
 
 fn detect_qualcomm(profiles, warnings) {
+    detect_qualcomm_at("/sys/class/accel", profiles);
+    return 0;
+}
+
+fn _qualcomm_profile(dev_id) {
+    var p = profile_new(ACCEL_QUALCOMM, dev_id, 32 * BYTES_PER_GIB);
+    profile_set_device_name(p, "Qualcomm Cloud AI 100");
+    profile_set_compute_cap(p, "AI 100");
+    return p;
+}
+
+# One profile per qaic node of the accel class at `root` (a cstr; see
+# tpu.cyr), where the in-tree qaic driver (Linux 6.4+) registers each card.
+# Through 2.5.4 only /sys/class/qaic and /dev/qaic_* were checked, and a qaic
+# node became a TPU; they are still the fallback, for one card. Returns the
+# number pushed.
+fn detect_qualcomm_at(root, profiles) {
+    var nodes = accel_class_nodes(root, BACKEND_QUALCOMM);
+    var n = vec_len(nodes);
+    var i = 0;
+    while (i < n) {
+        vec_push(profiles, _qualcomm_profile(accel_node_index(vec_get(nodes, i))));
+        i = i + 1;
+    }
+    if (n > 0) { return n; }
     var found = 0;
     if (aihw_path_exists("/sys/class/qaic") == 1) { found = 1; }
     if (found == 0) {
         if (has_dev_device("qaic_") == 1) { found = 1; }
     }
-    if (found == 1) {
-        var p = profile_new(ACCEL_QUALCOMM, 0, 32 * BYTES_PER_GIB);
-        profile_set_device_name(p, "Qualcomm Cloud AI 100");
-        profile_set_compute_cap(p, "AI 100");
-        vec_push(profiles, p);
-    }
-    return 0;
+    if (found == 1) { vec_push(profiles, _qualcomm_profile(0)); }
+    return found;
 }
 
 fn detect_samsung_npu(profiles, warnings) {

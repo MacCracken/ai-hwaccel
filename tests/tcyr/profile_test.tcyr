@@ -85,8 +85,11 @@ fn test_profile_neuron() {
     assert_eq(profile_accel_type(p), ACCEL_NEURON, "Neuron type");
     assert_eq(profile_neuron_chip(p), NEURON_TRAINIUM, "Trainium chip");
     assert_eq(profile_neuron_cores(p), 2, "2 cores");
-    # 2 cores * 32 GiB = 64 GiB
-    assert_eq(profile_memory_bytes(p) / BYTES_PER_GIB, 64, "64 GiB HBM");
+    # A trn1 device is 2 cores * 16 GiB = 32 GiB, as data/cloud_pricing.json
+    # has it (trn1.32xlarge: 16 x 32 GB); through 2.5.4 it was 64 GiB.
+    assert_eq(profile_memory_bytes(p) / BYTES_PER_GIB, 32, "trn1 device: 32 GiB HBM");
+    var inf2 = profile_neuron(0, NEURON_INFERENTIA, 2);
+    assert_eq(profile_memory_bytes(inf2) / BYTES_PER_GIB, 32, "inf2 device: 32 GiB HBM");
     return 0;
 }
 
@@ -150,6 +153,19 @@ fn test_profile_pci_id() {
     return 0;
 }
 
+# pci_bdf (2.5.5): 0 until the CUDA or ROCm backend sets it. PROFILE_SIZE is
+# sizeof(profile), so a new field cannot outgrow the allocation: 23 fields.
+fn test_profile_pci_bdf() {
+    assert_eq(profile_pci_bdf(profile_cuda(0, BYTES_PER_GIB)), 0, "no address by default");
+    assert_eq(PROFILE_SIZE, sizeof(profile), "size from the struct");
+    assert_eq(PROFILE_SIZE, 23 * 8, "23 fields");
+    var p = profile_rocm(0, BYTES_PER_GIB);
+    profile_set_pci_bdf(p, "0000:04:00.0");
+    assert(streq(profile_pci_bdf(p), "0000:04:00.0") == 1, "address kept");
+    assert_eq(profile_pci_id(p), 0, "the field before it untouched");
+    return 0;
+}
+
 fn test_profile_rank() {
     var cuda = profile_cuda(0, 24 * BYTES_PER_GIB);
     var cpu = profile_cpu(16 * BYTES_PER_GIB);
@@ -168,6 +184,12 @@ fn test_profile_training() {
 
     var trn = profile_neuron(0, NEURON_TRAINIUM, 2);
     assert_eq(profile_supports_training(trn), 1, "Trainium trains");
+
+    # A Neuron profile with no chip (profile_new, or JSON without neuron_chip)
+    # is inference-only, at Inferentia's throughput (2.5.5).
+    var unk = profile_new(ACCEL_NEURON, 0, BYTES_PER_GIB);
+    assert_eq(profile_supports_training(unk), 0, "unknown Neuron chip: no train");
+    assert_eq(profile_throughput_x1000(unk), 15000, "unknown Neuron chip: Inferentia throughput");
     return 0;
 }
 
@@ -187,6 +209,18 @@ fn test_profile_quant_support() {
     var npu = profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB);
     assert_eq(profile_supports_quant(npu, QUANT_INT8), 1, "NPU INT8");
     assert_eq(profile_supports_quant(npu, QUANT_FP16), 0, "NPU no FP16");
+
+    # A type this build does not know (2.5.5): family Unknown, not CPU, and
+    # no level claimed for it. Through 2.5.4 it was a CPU and took them all.
+    var foreign = profile_new(ACCEL_TYPE_COUNT, 0, 64 * BYTES_PER_GIB);
+    assert_eq(profile_family(foreign), FAMILY_UNKNOWN, "foreign type: Unknown family");
+    var q = QUANT_NONE;
+    var claimed = 0;
+    while (q <= QUANT_INT4) {
+        claimed = claimed + profile_supports_quant(foreign, q);
+        q = q + 1;
+    }
+    assert_eq(claimed, 0, "foreign type: no level supported");
     return 0;
 }
 
@@ -219,7 +253,11 @@ fn test_system_io_interconnects() {
     var sio = system_io_new();
 
     var nvsw = interconnect_new(ICK_NVSWITCH, "nvswitch0", 900000);
-    ic_set_state(nvsw, "Active");
+    # The state is the port-state number (2.5.5), 4 for ACTIVE
+    # (IB_PORT_STATE_ACTIVE, interconnect.cyr); through 2.5.4 this stored a
+    # string's address.
+    ic_set_state(nvsw, 4);
+    assert_eq(ic_state(nvsw), 4, "nvswitch state: 4 (ACTIVE)");
     sio_add_interconnect(sio, nvsw);
 
     var ib = interconnect_new(ICK_INFINIBAND, "mlx5_0", 200000);
@@ -308,6 +346,71 @@ fn test_sharding_plan() {
     return 0;
 }
 
+# --- Each constructor allocates sizeof its struct (2.5.5) ---
+
+# Bytes `n` allocations of one empty vec take.
+fn _vec_bytes(n) {
+    var u0 = alloc_used();
+    var i = 0;
+    while (i < n) {
+        vec_new();
+        i = i + 1;
+    }
+    return alloc_used() - u0;
+}
+
+# Through 2.5.4 every constructor allocated a hand-kept literal, so a field
+# added without a bump would have had its setter write into the next
+# allocation. Each allocates sizeof(<struct>) now, plus the vecs it creates.
+fn test_constructor_sizes() {
+    var u = alloc_used();
+    profile_new(ACCEL_CUDA, 0, BYTES_PER_GIB);
+    assert_eq(alloc_used() - u, sizeof(profile), "profile_new: sizeof(profile)");
+    assert_eq(PROFILE_SIZE, sizeof(profile), "PROFILE_SIZE is sizeof(profile)");
+    u = alloc_used();
+    warning_tool_not_found("x");
+    assert_eq(alloc_used() - u, sizeof(warning), "warning_new: sizeof(warning)");
+    u = alloc_used();
+    interconnect_new(ICK_NVLINK, "nvlink0", 1);
+    assert_eq(alloc_used() - u, sizeof(ic), "interconnect_new: sizeof(ic)");
+    assert_eq(INTERCONNECT_SIZE, sizeof(ic), "INTERCONNECT_SIZE is sizeof(ic)");
+    u = alloc_used();
+    storage_new("nvme0n1", STK_NVME, 1);
+    assert_eq(alloc_used() - u, sizeof(storage), "storage_new: sizeof(storage)");
+    assert_eq(STORAGE_SIZE, sizeof(storage), "STORAGE_SIZE is sizeof(storage)");
+    u = alloc_used();
+    runtime_env_new();
+    assert_eq(alloc_used() - u, sizeof(env), "runtime_env_new: sizeof(env)");
+    assert_eq(RUNTIME_ENV_SIZE, sizeof(env), "RUNTIME_ENV_SIZE is sizeof(env)");
+    u = alloc_used();
+    model_shard_new(0, 0, 1, ACCEL_CUDA, 0, 1);
+    assert_eq(alloc_used() - u, sizeof(shard), "model_shard_new: sizeof(shard)");
+    assert_eq(MODEL_SHARD_SIZE, sizeof(shard), "MODEL_SHARD_SIZE is sizeof(shard)");
+    var v1 = _vec_bytes(1);
+    var v2 = _vec_bytes(2);
+    u = alloc_used();
+    sharding_plan_new(SHARD_NONE, 1);
+    assert_eq(alloc_used() - u, sizeof(plan) + v1, "sharding_plan_new: sizeof(plan) and its vec");
+    assert_eq(SHARDING_PLAN_SIZE, sizeof(plan), "SHARDING_PLAN_SIZE is sizeof(plan)");
+    u = alloc_used();
+    system_io_new();
+    assert_eq(alloc_used() - u, sizeof(sio) + v2, "system_io_new: sizeof(sio) and its vecs");
+    assert_eq(SYSTEM_IO_SIZE, sizeof(sio), "SYSTEM_IO_SIZE is sizeof(sio)");
+    return 0;
+}
+
+# plan_add_shard and plan_num_shards go through the derived plan_shards
+# accessor (2.5.5), so they follow plan_set_shards.
+fn test_plan_shards_accessor() {
+    var sp = sharding_plan_new(SHARD_PIPELINE, 2);
+    var v = vec_new();
+    plan_set_shards(sp, v);
+    plan_add_shard(sp, model_shard_new(0, 0, 1, ACCEL_CUDA, 0, 1));
+    assert_eq(vec_len(v), 1, "plan_add_shard: into plan_shards");
+    assert_eq(plan_num_shards(sp), 1, "plan_num_shards: of plan_shards");
+    return 0;
+}
+
 # --- Run all tests ---
 
 alloc_init();
@@ -315,6 +418,7 @@ alloc_init();
 test_profile_cpu();
 test_profile_shared_mem();
 test_profile_pci_id();
+test_profile_pci_bdf();
 test_profile_cuda();
 test_profile_tpu();
 test_profile_gaudi();
@@ -331,6 +435,8 @@ test_runtime_env();
 test_sharding_strategy();
 test_model_shard();
 test_sharding_plan();
+test_constructor_sizes();
+test_plan_shards_accessor();
 
 var fails = assert_summary();
 syscall(60, fails);

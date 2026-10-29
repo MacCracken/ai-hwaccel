@@ -1,6 +1,8 @@
 # Fuzz: model format detection (SafeTensors, GGUF, ONNX, PyTorch)
 # Exercises detect_format_from_bytes with valid headers, truncated
-# headers, random bytes, and adversarial inputs.
+# headers, random bytes, and adversarial inputs, then a seeded
+# truncate / bit-flip loop over four valid headers. Every case is checked;
+# a distinct exit code names the one that failed.
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
@@ -41,6 +43,7 @@ var buf3 = alloc(8);
 store64(buf3, 0);
 var m3 = detect_format_from_bytes(buf3, 8);
 # Should not match safetensors (header_size=0)
+if (m3 != 0) { syscall(60, 6); }
 
 # Huge header size (>100MB)
 var buf4 = alloc(8);
@@ -101,18 +104,157 @@ var zbuf = alloc(64);
 memset(zbuf, 0, 64);
 var zm = detect_format_from_bytes(zbuf, 64);
 # Should return 0 (no format match)
+if (zm != 0) { syscall(60, 40); }
 
 # All 0xFF
 var fbuf = alloc(64);
 memset(fbuf, 255, 64);
 var fm = detect_format_from_bytes(fbuf, 64);
+if (fm != 0) { syscall(60, 41); }
 
 # 1 byte
 var tbuf = alloc(1);
 store8(tbuf, 42);
 var tm = detect_format_from_bytes(tbuf, 1);
+if (tm != 0) { syscall(60, 42); }
 
 # 0 bytes
 var em = detect_format_from_bytes(zbuf, 0);
+if (em != 0) { syscall(60, 43); }
+
+# ONNX tag, a 10-byte varint reaching shift 63, then a valid field tag
+var obuf3 = alloc(12);
+store8(obuf3, 8);
+var oi = 1;
+while (oi < 10) {
+    store8(obuf3 + oi, 128);
+    oi = oi + 1;
+}
+store8(obuf3 + 10, 1);
+store8(obuf3 + 11, 18);
+if (detect_format_from_bytes(obuf3, 12) != 0) { syscall(60, 44); }
+
+# SafeTensors headers that end inside a string, buffer exactly 8 + size
+var uhdr = "{\"w\":{\"dtype\":\"F";
+var ubuf = alloc(8 + strlen(uhdr) + 2);
+store64(ubuf, strlen(uhdr));
+memcpy(ubuf + 8, uhdr, strlen(uhdr));
+store8(ubuf + 8 + strlen(uhdr), 90);
+store8(ubuf + 9 + strlen(uhdr), 34);
+var um = detect_format_from_bytes(ubuf, 8 + strlen(uhdr));
+if (um == 0) { syscall(60, 45); }
+if (meta_dtype(um) != 0) { syscall(60, 46); }
+var bhdr = "{\"w\":{\"dtype\":\"F\\";
+var bbuf = alloc(8 + strlen(bhdr) + 2);
+store64(bbuf, strlen(bhdr));
+memcpy(bbuf + 8, bhdr, strlen(bhdr));
+store8(bbuf + 8 + strlen(bhdr), 90);
+store8(bbuf + 9 + strlen(bhdr), 34);
+var bm = detect_format_from_bytes(bbuf, 8 + strlen(bhdr));
+if (bm == 0) { syscall(60, 47); }
+if (meta_dtype(bm) != 0) { syscall(60, 48); }
+
+# Overflowing shapes report an unknown count, never a negative one
+var ojson = "{\"a\":{\"dtype\":\"F16\",\"shape\":[4294967296,4294967297],\"data_offsets\":[0,2]},\"b\":{\"shape\":[99999999999999999999999]}}"; #skip-lint
+var ob = alloc(8 + strlen(ojson));
+store64(ob, strlen(ojson));
+memcpy(ob + 8, ojson, strlen(ojson));
+var omm = detect_format_from_bytes(ob, 8 + strlen(ojson));
+if (omm == 0) { syscall(60, 49); }
+if (meta_param_count(omm) != 0) { syscall(60, 50); }
+
+# --- Seeded mutation loop ---
+# Templates: a multi-tensor SafeTensors header, a GGUF header carrying
+# general.file_type, an ONNX prefix and a ZIP prefix. Each round copies one,
+# flips or overwrites up to four bytes, truncates it at a random length, and
+# requires a result that is 0 or a sane FMT_* metadata, whose SafeTensors
+# dtype lies inside the bytes it was given ('Z' sentinels follow them).
+var tjson = "{\"w1\":{\"dtype\":\"BF16\",\"shape\":[1024,512],\"data_offsets\":[0,1]},\"__metadata__\":{\"format\":\"pt\"},\"w2\":{\"dtype\":\"F16\",\"shape\":[],\"data_offsets\":[1,2]}}"; #skip-lint
+var tl0 = 8 + strlen(tjson);
+var t0 = alloc(tl0);
+store64(t0, strlen(tjson));
+memcpy(t0 + 8, tjson, strlen(tjson));
+var tl1 = 24 + 17 + 8;
+var t1 = alloc(tl1);
+memset(t1, 0, tl1);
+store8(t1, 71);
+store8(t1 + 1, 71);
+store8(t1 + 2, 85);
+store8(t1 + 3, 70);
+store8(t1 + 4, 3);
+store64(t1 + 8, 291);
+store64(t1 + 16, 1);
+memcpy(t1 + 24, "general.file_type", 17);
+store8(t1 + 41, 4);
+store8(t1 + 45, 32);
+var tl2 = 4;
+var t2 = alloc(tl2);
+store8(t2, 8);
+store8(t2 + 1, 7);
+store8(t2 + 2, 18);
+store8(t2 + 3, 5);
+var tl3 = 8;
+var t3 = alloc(tl3);
+memset(t3, 0, tl3);
+store8(t3, 80);
+store8(t3 + 1, 75);
+store8(t3 + 2, 3);
+store8(t3 + 3, 4);
+
+var work = alloc(tl0 + 16);
+var seed = 88172645463325252;
+var round = 0;
+while (round < 100000) {
+    var tsel = round % 4;
+    var src = t0;
+    var slen = tl0;
+    if (tsel == 1) {
+        src = t1;
+        slen = tl1;
+    } elif (tsel == 2) {
+        src = t2;
+        slen = tl2;
+    } elif (tsel == 3) {
+        src = t3;
+        slen = tl3;
+    }
+    memcpy(work, src, slen);
+    memset(work + slen, 90, 16);
+    var muts = round % 5;
+    var mi = 0;
+    while (mi < muts) {
+        seed = seed * 6364136223846793005 + 1442695040888963407;
+        var r = (seed >> 33) & 0x7FFFFFFF;
+        var at = r % slen;
+        if ((r & 0x100000) != 0) { store8(work + at, load8(work + at) ^ (1 << (r & 7))); }
+        else { store8(work + at, (r >> 8) & 255); }
+        mi = mi + 1;
+    }
+    seed = seed * 6364136223846793005 + 1442695040888963407;
+    var len = slen;
+    if ((round & 1) == 1) { len = ((seed >> 33) & 0x7FFFFFFF) % (slen + 1); }
+    var mm = detect_format_from_bytes(work, len);
+    if (mm != 0) {
+        var f = meta_format(mm);
+        if (f < FMT_SAFETENSORS || f > FMT_PYTORCH) { syscall(60, 60); }
+        if (meta_param_count(mm) < 0) { syscall(60, 61); }
+        if (meta_tensor_count(mm) < 0) { syscall(60, 62); }
+        var dt = meta_dtype(mm);
+        if (dt != 0 && f == FMT_SAFETENSORS) {
+            # A SafeTensors dtype is copied from the header, so it must occur
+            # inside [8, len); one that ran past `len` takes sentinel bytes.
+            var dl = strlen(dt);
+            var found = 0;
+            var o = 8;
+            while (found == 0 && o + dl <= len) {
+                if (memeq(work + o, dt, dl) == 1) { found = 1; }
+                o = o + 1;
+            }
+            if (found == 0) { syscall(60, 63); }
+        }
+        model_meta_to_json(mm);
+    }
+    round = round + 1;
+}
 
 syscall(60, 0);

@@ -20,6 +20,7 @@ include "src/profile.cyr"
 include "src/system_io.cyr"
 include "src/detect/platform.cyr"
 include "src/detect/command.cyr"
+include "src/detect/tpu.cyr"
 include "src/detect/vulkan.cyr"
 include "src/detect/intel.cyr"
 
@@ -87,6 +88,13 @@ if (fz_check(p6) == 0) { syscall(60, 6); }
 var p8 = vec_new();
 parse_xpu_smi_dump(str_from("Device ID,Memory Physical Size\n0,\"17592186044417.00 MiB\"\n"), p8, vec_new());
 if (profile_memory_bytes(vec_get(p8, 0)) != 16 * BYTES_PER_GIB) { syscall(60, 8); }
+
+# A message after the rows is not a device (2.5.5): one profile, a warning.
+var pt = vec_new();
+var wt = vec_new();
+var tail = "Device ID,Device Name,Memory Physical Size,PCI Device ID\n0,\"Intel(R) Arc(TM) A770 Graphics\",\"16288.00 MiB\",\"0x56a0\"\nWarning: the XPU Manager daemon is not running\n";
+if (parse_xpu_smi_dump(str_from(tail), pt, wt) != 1) { syscall(60, 9); }
+if (vec_len(wt) != 1) { syscall(60, 10); }
 
 # Many devices.
 var sb = str_builder_new();

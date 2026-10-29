@@ -1,12 +1,67 @@
 # environment.cyr — runtime environment detection
 # Docker, Kubernetes, cloud provider (AWS/GCP/Azure)
 
+# The GPU count an NVIDIA_VISIBLE_DEVICES value (a cstr, or 0) names, or
+# PROFILE_NONE when it does not enumerate devices. NVIDIA container toolkit
+# semantics: "", "void" and "none" expose no GPU; "all" exposes every GPU of
+# the node, a count the variable does not give; the device plugin's
+# volume-mounts strategy sets a path (/var/run/nvidia-container-devices).
+# Anything else is a comma list of indices or UUIDs, in which an empty item
+# ("0,,1", "0,1,") is not a device. Through 2.5.4 the count was the commas
+# plus one, so "all", "void", "none", "" and the path each read as 1 GPU.
+# Pure.
+fn visible_devices_count(v) {
+    if (v == 0) { return PROFILE_NONE; }
+    if (load8(v) == 0) { return 0; }
+    if (streq(v, "void") == 1) { return 0; }
+    if (streq(v, "none") == 1) { return 0; }
+    if (streq(v, "all") == 1) { return PROFILE_NONE; }
+    if (load8(v) == 47) { return PROFILE_NONE; }
+    var count = 0;
+    var in_item = 0;
+    var ci = 0;
+    while (load8(v + ci) != 0) {
+        var c = load8(v + ci);
+        if (c == 44) {
+            in_item = 0;
+        } elif (c != 32) {
+            if (in_item == 0) {
+                count = count + 1;
+                in_item = 1;
+            }
+        }
+        ci = ci + 1;
+    }
+    return count;
+}
+
+# The cloud provider DMI names, "aws" / "gcp" / "azure", or 0. Each argument
+# is the Str of one /sys/class/dmi/id file, or 0: sys_vendor, bios_vendor,
+# bios_version, product_name, chassis_asset_tag. The vendor alone is not
+# enough (2.5.5): Surface hardware and every local Hyper-V VM report
+# "Microsoft Corporation", and coreboot Chromebooks report "Google". So Azure
+# needs its chassis asset tag (the one cloud-init checks) and GCP its
+# product name. Nitro EC2 reports "Amazon EC2"; Xen-based EC2 (t2, m4, c4,
+# p2, p3, g3) reports "Xen", with "amazon" only in bios_version
+# ("4.11.amazon"), which through 2.5.4 was never read. Pure.
+fn dmi_cloud_provider(vendor, bios, biosver, product, asset) {
+    if (vendor != 0 && str_contains_cstr(vendor, "Amazon EC2") == 1) { return "aws"; }
+    if (bios != 0 && str_contains_cstr(bios, "Amazon EC2") == 1) { return "aws"; }
+    if (biosver != 0 && str_contains_cstr(biosver, "amazon") == 1) { return "aws"; }
+    if (product != 0 && str_contains_cstr(product, "Google Compute Engine") == 1) { return "gcp"; }
+    if (asset != 0 && str_contains_cstr(asset, "7783-7084-3265-9085-8269-3286-77") == 1) { return "azure"; }
+    return 0;
+}
+
 fn detect_environment(sio) {
     var env = runtime_env_new();
     var detected = 0;
 
-    # --- Docker detection ---
+    # --- Container detection: Docker, Podman ---
     if (aihw_path_exists("/.dockerenv") == 1) {
+        env_set_is_docker(env, 1);
+        detected = 1;
+    } elif (aihw_path_exists("/run/.containerenv") == 1) {
         env_set_is_docker(env, 1);
         detected = 1;
     } else {
@@ -36,49 +91,24 @@ fn detect_environment(sio) {
         # GPU count from env vars
         var nv_devs = cmd_getenv("NVIDIA_VISIBLE_DEVICES");
         if (nv_devs != 0) {
-            # Count commas + 1 = device count
-            var count = 1;
-            var ci = 0;
-            while (load8(nv_devs + ci) != 0) {
-                if (load8(nv_devs + ci) == 44) { count = count + 1; }
-                ci = ci + 1;
-            }
-            env_set_k8s_gpu_count(env, count);
+            env_set_k8s_gpu_count(env, visible_devices_count(nv_devs));
             env_set_k8s_gpu_source(env, "NVIDIA_VISIBLE_DEVICES");
         }
     }
 
     # --- Cloud provider detection via DMI ---
     var vendor = sysfs_read("/sys/class/dmi/id/sys_vendor");
-    var bios = sysfs_read("/sys/class/dmi/id/bios_vendor");
     var product = sysfs_read("/sys/class/dmi/id/product_name");
-
-    if (vendor != 0) {
-        if (str_contains_cstr(vendor, "Amazon") == 1) {
-            env_set_cloud_provider(env, "aws");
-            detected = 1;
-        } elif (str_contains_cstr(vendor, "Google") == 1) {
-            env_set_cloud_provider(env, "gcp");
-            detected = 1;
-        } elif (str_contains_cstr(vendor, "Microsoft") == 1) {
-            env_set_cloud_provider(env, "azure");
-            detected = 1;
-        }
-    }
-    if (env_cloud_provider(env) == 0 && bios != 0) {
-        if (str_contains_cstr(bios, "amazon") == 1) {
-            env_set_cloud_provider(env, "aws");
-            detected = 1;
-        } elif (str_contains_cstr(bios, "Amazon") == 1) {
-            env_set_cloud_provider(env, "aws");
-            detected = 1;
-        }
-    }
-
-    # Instance type from product name (AWS)
-    if (product != 0) {
-        if (env_cloud_provider(env) != 0) {
-            if (streq(env_cloud_provider(env), "aws") == 1) {
+    var bios = sysfs_read("/sys/class/dmi/id/bios_vendor");
+    var biosver = sysfs_read("/sys/class/dmi/id/bios_version");
+    var asset = sysfs_read("/sys/class/dmi/id/chassis_asset_tag");
+    var cloud = dmi_cloud_provider(vendor, bios, biosver, product, asset);
+    if (cloud != 0) {
+        env_set_cloud_provider(env, cloud);
+        detected = 1;
+        # Nitro names the instance type in product_name; Xen says "HVM domU".
+        if (streq(cloud, "aws") == 1 && vendor != 0 && product != 0) {
+            if (str_contains_cstr(vendor, "Amazon EC2") == 1) {
                 env_set_instance_type(env, str_cstr(product));
             }
         }

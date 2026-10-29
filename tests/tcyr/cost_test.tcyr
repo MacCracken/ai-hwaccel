@@ -1,0 +1,360 @@
+# cost_test.tcyr — cost recommendation against the REAL shipped pricing file,
+# plus crafted rows parsed in memory and from a temp file.
+#
+# Added 2.5.5. Through 2.5.4 nothing called load_cloud_instances,
+# recommend_instances or cost_to_json, and the loader had the {"instances":
+# [...]} wrapper defect load_models lost in 2.3.22: every --cost run saw one
+# instance of the file's 18 (the 8x H100 at $98.32/hr). Like
+# model_catalog_test, this unit asserts against data/cloud_pricing.json as
+# shipped, so loader and data stay gated together. Run from the repo root.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+include "lib/args.cyr"
+include "lib/assert.cyr"
+include "lib/sakshi.cyr"
+
+include "src/log.cyr"
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/registry.cyr"
+include "src/training.cyr"
+include "src/cost.cyr"
+include "src/model.cyr"
+include "src/json_out.cyr"
+
+# Stub detectors — registry.cyr references them but this unit never detects.
+# `data_file_path` is deliberately NOT stubbed: the loader resolves the data
+# file the way the CLI does.
+fn detect_cuda(p, w) { return 0; }
+fn detect_rocm(p, w) { return 0; }
+fn detect_apple_opts(p, w, a) { return 0; }
+fn detect_vulkan_opts(p, w, a, l) { return 0; }
+fn detect_intel_npu(p, w) { return 0; }
+fn detect_amd_xdna(p, w) { return 0; }
+fn detect_tpu(p, w) { return 0; }
+fn detect_gaudi_opts(p, w, a) { return 0; }
+fn detect_neuron_opts(p, w, a) { return 0; }
+fn detect_intel_oneapi(p, w) { return 0; }
+fn detect_qualcomm(p, w) { return 0; }
+fn detect_cerebras_opts(p, w, a) { return 0; }
+fn detect_graphcore_opts(p, w, a) { return 0; }
+fn detect_groq(p, w) { return 0; }
+fn detect_samsung_npu(p, w) { return 0; }
+fn detect_mediatek_apu(p, w) { return 0; }
+fn enrich_bandwidth(p) { return 0; }
+fn enrich_pcie(p) { return 0; }
+fn enrich_numa(p) { return 0; }
+fn detect_interconnects_opts(s, p, w, a) { return 0; }
+fn detect_storage(s) { return 0; }
+fn detect_environment(s) { return 0; }
+
+# 1 if every recommendation fits its instance (in bytes), cheapest first.
+fn _recs_sound(recs) {
+    var prev = 0;
+    var i = 0;
+    while (i < vec_len(recs)) {
+        var r = vec_get(recs, i);
+        var inst = rec_instance(r);
+        if (cloud_inst_total_mem_gb(inst) * BYTES_PER_GIB < rec_mem_required(r)) { return 0; }
+        if (rec_headroom_x100(r) < 0) { return 0; }
+        if (cloud_inst_price_x100(inst) < prev) { return 0; }
+        prev = cloud_inst_price_x100(inst);
+        i = i + 1;
+    }
+    return 1;
+}
+
+fn _has_instance(recs, name) {
+    var i = 0;
+    while (i < vec_len(recs)) {
+        if (streq(cloud_inst_name(rec_instance(vec_get(recs, i))), name) == 1) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn _parse(json) {
+    return cloud_instances_parse(json, strlen(json));
+}
+
+# --- The shipped file ---
+
+fn test_pricing_loads_every_instance() {
+    var v = load_cloud_instances();
+    # data/cloud_pricing.json ships 19 rows under {"_comment","instances":[…]}.
+    # Before 2.5.5 this returned 1.
+    assert_eq(vec_len(v), 19, "load_cloud_instances returns every row in data/cloud_pricing.json");
+    var i = 0;
+    var bad = 0;
+    while (i < vec_len(v)) {
+        var ci = vec_get(v, i);
+        var prov = cloud_inst_provider(ci);
+        if (streq(prov, "aws") != 1 && streq(prov, "gcp") != 1 && streq(prov, "azure") != 1) { bad = bad + 1; }
+        if (strlen(cloud_inst_gpu(ci)) == 0) { bad = bad + 1; }
+        if (cloud_inst_price_x100(ci) <= 0) { bad = bad + 1; }
+        # The data drift 2.5.5 fixed: a row's total must be count x per-GPU
+        if (cloud_inst_total_mem_gb(ci) != cloud_inst_gpu_count(ci) * cloud_inst_gpu_mem_gb(ci)) { bad = bad + 1; }
+        if (i > 0 && streq(cloud_inst_name(ci), cloud_inst_name(vec_get(v, i - 1))) == 1) { bad = bad + 1; }
+        i = i + 1;
+    }
+    assert_eq(bad, 0, "every row is complete, consistent and distinct");
+    return 0;
+}
+
+fn test_recommend_cheapest_7b() {
+    var r = recommend_instances(7000000000, QUANT_BF16, 0 - 1);
+    assert_gt(vec_len(r), 1, "7B BF16 has several fitting instances");
+    if (vec_len(r) > 0) {
+        var first = cloud_inst_name(rec_instance(vec_get(r, 0)));
+        assert_eq(streq(first, "g4dn.xlarge"), 1, "7B BF16 cheapest is g4dn.xlarge");
+    }
+    assert_eq(_recs_sound(r), 1, "7B: all fit, cheapest first");
+    # The memoised table is the same one on a second query
+    var r2 = recommend_instances(7000000000, QUANT_BF16, 0 - 1);
+    assert_eq(vec_len(r2), vec_len(r), "second query, same answer");
+    return 0;
+}
+
+fn test_recommend_gib_boundary() {
+    # Each need sits just over a whole GiB; 2.5.4 rounded it down and
+    # recommended an instance short of it (negative headroom).
+    var a = recommend_instances(573000000000, QUANT_INT8, 0 - 1);
+    assert_eq(_recs_sound(a), 1, "573B INT8 (640.38 GiB) gets no 640 GB instance");
+    assert_eq(_has_instance(a, "p5.48xlarge"), 0, "573B INT8: no p5.48xlarge");
+    var b = recommend_instances(36000000000, QUANT_BF16, 0 - 1);
+    assert_eq(_recs_sound(b), 1, "36B BF16 (80.47 GiB) gets no 80 GB instance");
+    assert_eq(_has_instance(b, "Standard_NC24ads_A100_v4"), 0, "36B BF16: no 80 GB A100");
+    var c = recommend_instances(72000000000, QUANT_INT4, 0 - 1);
+    assert_eq(_recs_sound(c), 1, "72B INT4 (40.23 GiB) gets no 40 GB instance");
+    assert_eq(_has_instance(c, "a2-highgpu-1g"), 0, "72B INT4: no 40 GB A100");
+    # 33B BF16 is 73.76 GiB: the 80 GB instances still fit
+    var d = recommend_instances(33000000000, QUANT_BF16, 0 - 1);
+    assert_eq(_has_instance(d, "Standard_NC24ads_A100_v4"), 1, "33B BF16 fits 80 GB");
+    return 0;
+}
+
+fn test_recommend_large_models() {
+    # 405B BF16 (905 GiB): only the MI300X VM, under its own name
+    var r = recommend_instances(405000000000, QUANT_BF16, 0 - 1);
+    assert_eq(vec_len(r), 1, "405B BF16: one instance fits");
+    if (vec_len(r) == 1) {
+        var inst = rec_instance(vec_get(r, 0));
+        assert_eq(streq(cloud_inst_name(inst), "Standard_ND96isr_MI300X_v5"), 1, "405B BF16 on the MI300X VM");
+        assert_eq(cloud_inst_total_mem_gb(inst), 1536, "8 x 192 GB");
+    }
+    # 200B BF16 (447 GiB): the 8x A100 40 GB VM (320 GB) must not appear
+    var r2 = recommend_instances(200000000000, QUANT_BF16, 0 - 1);
+    assert_eq(_has_instance(r2, "Standard_ND96asr_v4"), 0, "200B BF16: no 320 GB VM");
+    assert_eq(_recs_sound(r2), 1, "200B BF16 sound");
+    return 0;
+}
+
+fn test_recommend_provider_filter() {
+    var r = recommend_instances(7000000000, QUANT_BF16, CLOUD_AZURE);
+    assert_gt(vec_len(r), 0, "azure has a 7B instance");
+    var i = 0;
+    var other = 0;
+    while (i < vec_len(r)) {
+        if (streq(cloud_inst_provider(rec_instance(vec_get(r, i))), "azure") != 1) { other = other + 1; }
+        i = i + 1;
+    }
+    assert_eq(other, 0, "azure filter keeps only azure");
+    # A hand-built row with no provider is skipped, not dereferenced
+    var hb = alloc(CLOUD_INST_SIZE);
+    memset(hb, 0, CLOUD_INST_SIZE);
+    cloud_inst_set_name(hb, "hand-built");
+    cloud_inst_set_total_mem_gb(hb, 640);
+    var v = vec_new();
+    vec_push(v, hb);
+    assert_eq(vec_len(recommend_instances_from(v, 7000000000, QUANT_BF16, CLOUD_AWS)), 0, "NULL provider filtered out");
+    assert_eq(vec_len(recommend_instances_from(v, 7000000000, QUANT_BF16, 0 - 1)), 1, "NULL provider kept unfiltered");
+    return 0;
+}
+
+fn test_recommend_no_model() {
+    assert_eq(vec_len(recommend_instances(0, QUANT_BF16, 0 - 1)), 0, "0 params: nothing");
+    assert_eq(vec_len(recommend_instances(0 - 7, QUANT_BF16, 0 - 1)), 0, "negative params: nothing");
+    return 0;
+}
+
+fn test_cost_to_json() {
+    # 1.5B BF16 = 1.5e9 x 2 B x 1.2; 2.5.4 read "1.5B" as 15B (36e9)
+    var j = cost_to_json("1.5B", QUANT_BF16);
+    assert_eq(str_contains_cstr(j, "\"memory_required_bytes\":3600000000,"), 1, "1.5B is 1.5e9 params");
+    var j2 = cost_to_json("350M", QUANT_BF16);
+    assert_eq(str_contains_cstr(j2, "\"memory_required_bytes\":840000000,"), 1, "350M is 3.5e8 params");
+    # Invalid or oversized sizes: 0 bytes and no instances, never negative
+    var j3 = cost_to_json("8x7B", QUANT_BF16);
+    assert_eq(str_contains_cstr(j3, "\"memory_required_bytes\":0,"), 1, "8x7B: 0 bytes");
+    assert_eq(str_contains_cstr(j3, "\"recommendations\":[]"), 1, "8x7B: no instances");
+    var j4 = cost_to_json("99999999999B", QUANT_BF16);
+    assert_eq(str_contains_cstr(j4, "\"memory_required_bytes\":-"), 0, "never negative");
+    assert_eq(str_contains_cstr(j4, "\"recommendations\":[]"), 1, "oversized: no instances");
+    var j5 = cost_to_json("7B", QUANT_BF16);
+    assert_eq(str_contains_cstr(j5, "\"instance\":\"g4dn.xlarge\""), 1, "7B lists g4dn.xlarge first");
+    return 0;
+}
+
+# --- Crafted rows ---
+
+fn test_parse_missing_and_null_fields() {
+    var j = "[{\"name\":\"x1\",\"gpu_count\":1,\"total_gpu_memory_gb\":640,\"price_per_hour\":1.0},{\"name\":\"x2\",\"provider\":\"aws\",\"gpu\":null,\"gpu_count\":null,\"gpu_memory_gb\":80,\"total_gpu_memory_gb\":640,\"price_per_hour\":2.0}]"; #skip-lint
+    var v = _parse(j);
+    assert_eq(vec_len(v), 2, "top-level array: both rows");
+    if (vec_len(v) == 2) {
+        var a = vec_get(v, 0);
+        var b = vec_get(v, 1);
+        assert(cloud_inst_provider(a) != 0, "missing provider is not NULL");
+        assert(cloud_inst_gpu(a) != 0, "missing gpu is not NULL");
+        assert(cloud_inst_interconnect(a) != 0, "missing interconnect is not NULL");
+        assert_eq(strlen(cloud_inst_gpu(a)), 0, "missing gpu is empty");
+        assert_eq(streq(cloud_inst_gpu(b), "gpu_count"), 0, "null gpu does not take the next key");
+        assert_eq(cloud_inst_gpu_count(b), 0, "null gpu_count does not take a later number");
+        assert_eq(cloud_inst_gpu_mem_gb(b), 80, "gpu_memory_gb still parses");
+        assert_eq(cloud_inst_price_x100(b), 200, "price 2.0");
+    }
+    return 0;
+}
+
+fn test_parse_keys_only_as_keys() {
+    # A value equal to a key name, a longer key sharing the prefix, and braces
+    # inside strings: none of them may be read as the field.
+    var j = "{\"_comment\":\"a } and a { here, \\\"name\\\": \\\"fake\\\"\",\"instances\":[{\"interconnect\":\"gpu\",\"gpu\":\"L4\",\"name\":\"y1\",\"provider\":\"gcp\",\"price_per_hour_spot\":0.10,\"price_per_hour\":0.84,\"gpu_count\":1,\"gpu_memory_gb\":24,\"total_gpu_memory_gb\":24}],\"meta\":{\"name\":\"not-a-row\",\"price_per_hour\":1,\"total_gpu_memory_gb\":1}}"; #skip-lint
+    var v = _parse(j);
+    assert_eq(vec_len(v), 1, "wrapper with a brace-laden _comment: one row, nothing after the array");
+    if (vec_len(v) == 1) {
+        var a = vec_get(v, 0);
+        assert_eq(streq(cloud_inst_name(a), "y1"), 1, "name");
+        assert_eq(streq(cloud_inst_gpu(a), "L4"), 1, "\"interconnect\":\"gpu\" is not the gpu key");
+        assert_eq(streq(cloud_inst_interconnect(a), "gpu"), 1, "interconnect value");
+        assert_eq(cloud_inst_price_x100(a), 84, "price_per_hour, not price_per_hour_spot");
+    }
+    # An unbalanced brace inside a value must not swallow the next row
+    var j2 = "[{\"name\":\"b1\",\"gpu\":\"{\",\"price_per_hour\":1,\"total_gpu_memory_gb\":8},{\"name\":\"b2\",\"price_per_hour\":2,\"total_gpu_memory_gb\":8}]"; #skip-lint
+    assert_eq(vec_len(_parse(j2)), 2, "brace in a string value: both rows");
+    return 0;
+}
+
+fn test_parse_skips_unusable_rows() {
+    var j = "{\"instances\":[{\"name\":\"no-price\",\"total_gpu_memory_gb\":80},{\"provider\":\"aws\",\"price_per_hour\":1,\"total_gpu_memory_gb\":80},{\"name\":\"no-mem\",\"price_per_hour\":1},{\"name\":\"huge\",\"price_per_hour\":1,\"total_gpu_memory_gb\":99999999999},{\"name\":\"ok\",\"price_per_hour\":0.5,\"total_gpu_memory_gb\":16}]}"; #skip-lint
+    var v = _parse(j);
+    assert_eq(vec_len(v), 1, "rows without name, price or a sane memory are skipped");
+    if (vec_len(v) == 1) {
+        assert_eq(streq(cloud_inst_name(vec_get(v, 0)), "ok"), 1, "the usable row");
+    }
+    return 0;
+}
+
+fn test_parse_string_escapes() {
+    var j = "[{\"name\":\"q\\\"uote\\\\d\",\"gpu\":\"A\\tB\",\"price_per_hour\":1,\"total_gpu_memory_gb\":8}]";
+    var v = _parse(j);
+    assert_eq(vec_len(v), 1, "escaped row parses");
+    if (vec_len(v) == 1) {
+        assert_eq(streq(cloud_inst_name(vec_get(v, 0)), "q\"uote\\d"), 1, "\\\" and \\\\ decoded");
+        assert_eq(streq(cloud_inst_gpu(vec_get(v, 0)), "A\tB"), 1, "\\t decoded");
+    }
+    return 0;
+}
+
+fn _fixed(json, places) {
+    return _js_fixed(json, strlen(json), "v", places);
+}
+
+fn test_fixed_point_values() {
+    assert_eq(_fixed("{\"v\":1.5}", 2), 150, "1.5 -> 150");
+    assert_eq(_fixed("{\"v\":98.32}", 2), 9832, "98.32 -> 9832");
+    assert_eq(_fixed("{\"v\":0.8}", 2), 80, "0.8 -> 80");
+    assert_eq(_fixed("{\"v\": 7 }", 2), 700, "7 -> 700");
+    assert_eq(_fixed("{\"v\":1.999}", 2), 199, "extra digits dropped");
+    assert_eq(_fixed("{\"v\":46.7}", 3), 46700, "46.7 -> 46700");
+    assert_eq(_fixed("{\"v\":-1}", 2), 0 - 1, "negative is not a value");
+    assert_eq(_fixed("{\"v\":null}", 2), 0 - 1, "null is not a value");
+    assert_eq(_fixed("{\"v\":\"3\"}", 2), 0 - 1, "a string is not a number");
+    assert_eq(_fixed("{\"w\":3}", 2), 0 - 1, "missing key");
+    assert_eq(_fixed("{\"v\":99999999999999999999}", 0), 0 - 1, "past 1e15");
+    return 0;
+}
+
+fn test_headroom() {
+    var ci = alloc(CLOUD_INST_SIZE);
+    memset(ci, 0, CLOUD_INST_SIZE);
+    cloud_inst_set_total_mem_gb(ci, 80);
+    assert_eq(rec_headroom_x100(inst_rec_new(ci, 40 * BYTES_PER_GIB)), 10000, "80 GB for 40 GiB = 100.00%");
+    assert_eq(rec_headroom_x100(inst_rec_new(ci, 80 * BYTES_PER_GIB)), 0, "exact fit = 0");
+    return 0;
+}
+
+# --- From a file ---
+
+fn test_load_from_file() {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "/tmp/ai-hwaccel-cost-test-");
+    str_builder_add_int(sb, sys_getpid());
+    var path = str_data(str_builder_build(sb));
+    var j = "{\"instances\":[{\"name\":\"x1\",\"provider\":\"aws\",\"gpu\":\"H100\",\"gpu_count\":8,\"gpu_memory_gb\":80,\"total_gpu_memory_gb\":640,\"price_per_hour\":9.00},{\"name\":\"x2\",\"provider\":\"aws\",\"gpu\":\"H100\",\"gpu_count\":8,\"gpu_memory_gb\":80,\"total_gpu_memory_gb\":640,\"price_per_hour\":1.00}]}"; #skip-lint
+    assert(file_write_all(path, j, strlen(j)) == strlen(j), "temp pricing file written");
+    var v = load_cloud_instances_from(path);
+    assert_eq(vec_len(v), 2, "two-row wrapper file: both rows");
+    var r = recommend_instances_from(v, 7000000000, QUANT_BF16, 0 - 1);
+    assert_eq(vec_len(r), 2, "both fit 7B");
+    if (vec_len(r) == 2) {
+        assert_eq(streq(cloud_inst_name(rec_instance(vec_get(r, 0))), "x2"), 1, "cheaper row first");
+    }
+    sys_unlink(path);
+    assert_eq(vec_len(load_cloud_instances_from(path)), 0, "missing file: no rows");
+    return 0;
+}
+
+# --- The model catalogue shares the scanners ---
+
+fn test_models_parse_shared_scanner() {
+    var j = "{\"models\":[{\"name\":\"Phi {mini}\",\"family\":null,\"params_billions\":3.8,\"default_dtype\":\"bf16\",\"formats\":[\"gguf\"]},{\"family\":\"x\",\"params_billions\":1}]}"; #skip-lint
+    var v = models_parse(j, strlen(j));
+    assert_eq(vec_len(v), 1, "nameless model skipped");
+    if (vec_len(v) == 1) {
+        var m = vec_get(v, 0);
+        assert_eq(streq(model_name(m), "Phi {mini}"), 1, "brace in a name");
+        assert_eq(model_family(m), 0, "null family stays unset");
+        assert_eq(model_params_b_x1000(m), 3800, "3.8B");
+        assert_eq(streq(model_dtype(m), "bf16"), 1, "dtype");
+    }
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    args_init();
+    hwlog_init();
+    sakshi_set_level(0 - 1);
+    test_pricing_loads_every_instance();
+    test_recommend_cheapest_7b();
+    test_recommend_gib_boundary();
+    test_recommend_large_models();
+    test_recommend_provider_filter();
+    test_recommend_no_model();
+    test_cost_to_json();
+    test_parse_missing_and_null_fields();
+    test_parse_keys_only_as_keys();
+    test_parse_skips_unusable_rows();
+    test_parse_string_escapes();
+    test_fixed_point_values();
+    test_headroom();
+    test_load_from_file();
+    test_models_parse_shared_scanner();
+    return assert_summary();
+}

@@ -1,10 +1,13 @@
 """End-to-end tests that drive the real ai-hwaccel binary.
 
-Skipped automatically when no binary is locatable (set AI_HWACCEL_BIN,
-or put ai-hwaccel on PATH). CI builds the binary and exports
-AI_HWACCEL_BIN before running these.
+Skipped when no binary is locatable (set AI_HWACCEL_BIN, or put ai-hwaccel
+on PATH). When AI_HWACCEL_BIN is set and is not an executable file, the
+module fails to import instead of skipping. CI's "Python bindings" step in
+.github/workflows/ci.yml builds the binary, exports AI_HWACCEL_BIN and runs
+these with ``-W error::UserWarning``, so a schema mismatch fails it.
 """
 
+import os
 import pathlib
 import sys
 import unittest
@@ -14,10 +17,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 import ai_hwaccel  # noqa: E402
 from ai_hwaccel import Registry, ShardingPlan, TrainingMemory, CostReport  # noqa: E402
 
-try:
+if os.environ.get("AI_HWACCEL_BIN"):
+    # A binary was named: one that is not there is an error, not a skip.
     _BINARY = ai_hwaccel.find_binary()
-except ai_hwaccel.BinaryNotFoundError:
-    _BINARY = None
+else:
+    try:
+        _BINARY = ai_hwaccel.find_binary()
+    except ai_hwaccel.BinaryNotFoundError:
+        _BINARY = None
 
 requires_binary = unittest.skipIf(_BINARY is None, "ai-hwaccel binary not found")
 
@@ -28,6 +35,8 @@ class TestEndToEnd(unittest.TestCase):
         reg = ai_hwaccel.detect()
         self.assertIsInstance(reg, Registry)
         self.assertGreaterEqual(len(reg.profiles), 1)
+        # The binary and these bindings must agree on the format.
+        self.assertEqual(reg.schema_version, ai_hwaccel.SCHEMA_VERSION)
 
     def test_summary(self):
         s = ai_hwaccel.summary()

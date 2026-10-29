@@ -2,19 +2,33 @@
 
 # nvidia-smi query args. pci.device_id (field 11, 2.4.0) is the PCI device and
 # vendor ID, "0x268410DE"; profiles_dedup matches Vulkan's view of the same GPU
-# on it. Fields are read by position, so output without it still parses.
-var _NVSMI_QUERY = "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name,temperature.gpu,power.draw,utilization.gpu,clocks.max.memory,pci.device_id"; #skip-lint
+# on it. pci.bus_id (field 12, 2.5.5) is the PCI address, "00000000:3B:00.0",
+# where enrich_pcie and enrich_numa read sysfs. Fields are read by position,
+# so output without the trailing ones still parses.
+var _NVSMI_QUERY = "--query-gpu=index,memory.total,memory.used,memory.free,compute_cap,driver_version,name,temperature.gpu,power.draw,utilization.gpu,clocks.max.memory,pci.device_id,pci.bus_id"; #skip-lint
+# The same without compute_cap, which drivers before R510 (R470, the last
+# with Kepler) reject, failing the whole query (2.5.5).
+var _NVSMI_QUERY_NOCC = "--query-gpu=index,memory.total,memory.used,memory.free,driver_version,name,temperature.gpu,power.draw,utilization.gpu,clocks.max.memory,pci.device_id,pci.bus_id"; #skip-lint
 var _NVSMI_FMT = "--format=csv,noheader,nounits";
 
-# Bus width lookup by compute capability (bits)
+# Memory bus width (bits) by compute capability: the width of the
+# generation's flagship part, or 0 for a generation not listed, which leaves
+# the bandwidth unknown. Through 2.5.4 an unlisted one got 256 bits, so a
+# B200 (10.0) reported 256 GB/s of its 8 TB/s. Parts whose width differs from
+# their generation's are in nvidia_bus_width_by_dev. Pure.
 fn nvidia_bus_width(cc) {
     var cclen = str_len(cc);
     var ccd = str_data(cc);
-    # 9.0 = H100/H200 (5120-bit HBM3)
+    # 12.0 = RTX 5090 / RTX PRO 6000 Blackwell (512-bit GDDR7)
+    if (cclen >= 4 && memeq(ccd, "12.0", 4) == 1) { return 512; }
+    # 10.0 = B200/GB200, 10.3 = B300/GB300 (8192-bit HBM3e)
+    if (cclen >= 4 && memeq(ccd, "10.0", 4) == 1) { return 8192; }
+    if (cclen >= 4 && memeq(ccd, "10.3", 4) == 1) { return 8192; }
+    # 9.0 = H100 (5120-bit HBM3)
     if (cclen >= 3 && memeq(ccd, "9.0", 3) == 1) { return 5120; }
-    # 8.9 = RTX 4090 (384-bit)
+    # 8.9 = RTX 4090 / L40S (384-bit)
     if (cclen >= 3 && memeq(ccd, "8.9", 3) == 1) { return 384; }
-    # 8.6 = RTX 3090/3080 (384-bit)
+    # 8.6 = RTX 3090 / A40 (384-bit)
     if (cclen >= 3 && memeq(ccd, "8.6", 3) == 1) { return 384; }
     # 8.0 = A100 (5120-bit HBM2e)
     if (cclen >= 3 && memeq(ccd, "8.0", 3) == 1) { return 5120; }
@@ -22,14 +36,78 @@ fn nvidia_bus_width(cc) {
     if (cclen >= 3 && memeq(ccd, "7.5", 3) == 1) { return 256; }
     # 7.0 = V100 (4096-bit HBM2)
     if (cclen >= 3 && memeq(ccd, "7.0", 3) == 1) { return 4096; }
-    # Default
-    return 256;
+    # 6.0 = P100 (4096-bit HBM2)
+    if (cclen >= 3 && memeq(ccd, "6.0", 3) == 1) { return 4096; }
+    return 0;
+}
+
+# Memory bus width (bits) of the parts whose width is not their compute
+# capability's (nvidia_bus_width), by PCI device ID, from NVIDIA's spec
+# sheets; 0 for any other. One compute capability spans a 128-bit RTX 4060
+# and a 384-bit RTX 4090. Pure.
+fn nvidia_bus_width_by_dev(dev) {
+    # 12.0 Blackwell
+    if (dev == 0x2BB3) { return 384; }  # RTX PRO 5000 Blackwell
+    if (dev == 0x2C02 || dev == 0x2C05) { return 256; }  # RTX 5080, 5070 Ti
+    if (dev == 0x2C31 || dev == 0x2C3A) { return 256; }  # RTX PRO 4500 Blackwell
+    if (dev == 0x2C34) { return 192; }  # RTX PRO 4000 Blackwell
+    if (dev == 0x2F04) { return 192; }  # RTX 5070
+    if (dev == 0x2D04 || dev == 0x2D05) { return 128; }  # RTX 5060 Ti, 5060
+    if (dev == 0x2D30) { return 128; }  # RTX PRO 2000 Blackwell
+    if (dev == 0x2D83) { return 128; }  # RTX 5050
+    # 9.0 Hopper: six HBM stacks, not five
+    if (dev == 0x2321 || dev == 0x233A) { return 6144; }  # H100 NVL, H800L
+    if (dev == 0x2335 || dev == 0x233B) { return 6144; }  # H200 SXM, H200 NVL
+    if (dev == 0x2338 || dev == 0x2339 || dev == 0x233D) { return 6144; }  # H100 94/96GB
+    if (dev == 0x2342 || dev == 0x2348) { return 6144; }  # GH200, GH200 144G HBM3e
+    if (dev == 0x2337) { return 4096; }  # H100 SXM5 64GB
+    # 8.9 Ada
+    if (dev == 0x2689) { return 256; }  # RTX 4070 Ti SUPER (AD102)
+    if (dev == 0x26B2) { return 256; }  # RTX 5000 Ada
+    if (dev >= 0x2702 && dev <= 0x2705) { return 256; }  # RTX 4080 (SUPER), 4070 Ti SUPER
+    if (dev == 0x2709) { return 192; }  # RTX 4070 (AD103)
+    if (dev == 0x2782 || dev == 0x2783 || dev == 0x2786) { return 192; }  # RTX 4070 (Ti, SUPER)
+    if (dev == 0x27B1 || dev == 0x27B8) { return 192; }  # RTX 4500 Ada, L4
+    if (dev == 0x27B0 || dev == 0x27B2) { return 160; }  # RTX 4000 (SFF) Ada
+    if (dev == 0x2788 || dev == 0x2803 || dev == 0x2805) { return 128; }  # RTX 4060 Ti
+    if (dev == 0x2808 || dev == 0x2882) { return 128; }  # RTX 4060
+    if (dev == 0x28B0) { return 128; }  # RTX 2000 Ada
+    # 8.6 Ampere
+    if (dev == 0x2206 || dev == 0x2216) { return 320; }  # RTX 3080 10GB
+    if (dev == 0x2207 || dev == 0x2414) { return 256; }  # RTX 3070 Ti (GA102), 3060 Ti (GA103)
+    if (dev == 0x2482 || dev == 0x2484 || dev == 0x2486) { return 256; }  # RTX 3070 (Ti), 3060 Ti
+    if (dev == 0x2488 || dev == 0x2489) { return 256; }  # RTX 3070, 3060 Ti (LHR)
+    if (dev == 0x248C || dev == 0x248D || dev == 0x248E) { return 256; }  # RTX 3070 (Ti), 3060 Ti
+    if (dev == 0x24B0 || dev == 0x24C8 || dev == 0x24C9) { return 256; }  # RTX A4000, 3070, 3060 Ti
+    if (dev == 0x2487) { return 192; }  # RTX 3060 (GA104)
+    if (dev == 0x2501 || dev == 0x2503 || dev == 0x2504) { return 192; }  # RTX 3060
+    if (dev == 0x2509 || dev == 0x2544) { return 192; }  # RTX 3060
+    if (dev == 0x24C7) { return 128; }  # RTX 3060 8GB
+    if (dev == 0x2507 || dev == 0x2508 || dev == 0x2582) { return 128; }  # RTX 3050
+    if (dev == 0x25B6) { return 128; }  # A2 / A16
+    # 8.0 Ampere
+    if (dev == 0x20B7 || dev == 0x20B9) { return 3072; }  # A30, A30X
+    # 7.5 Turing
+    if (dev == 0x1E02 || dev == 0x1E03) { return 384; }  # TITAN RTX, RTX 2080 Ti 12GB
+    if (dev == 0x1E30 || dev == 0x1E36 || dev == 0x1E78) { return 384; }  # Quadro RTX 6000/8000
+    if (dev == 0x1E04 || dev == 0x1E07) { return 352; }  # RTX 2080 Ti
+    if (dev == 0x1E89 || dev == 0x1F03 || dev == 0x1F08) { return 192; }  # RTX 2060
+    if (dev == 0x2182 || dev == 0x2184 || dev == 0x21C4) { return 192; }  # GTX 1660 (Ti, SUPER)
+    if (dev == 0x1F0A || dev == 0x1F82 || dev == 0x2187 || dev == 0x2188) { return 128; }  # GTX 1650 (SUPER)
+    # 7.0 Volta
+    if (dev == 0x1D81) { return 3072; }  # TITAN V
+    # 6.0 Pascal
+    if (dev == 0x15F7) { return 3072; }  # P100 PCIe 12GB
+    return 0;
 }
 
 # Estimate bandwidth from compute capability (GB/s * 1000)
 fn nvidia_est_bw_x1000(cc) {
     var cclen = str_len(cc);
     var ccd = str_data(cc);
+    if (cclen >= 4 && memeq(ccd, "12.0", 4) == 1) { return 1792000; }
+    if (cclen >= 4 && memeq(ccd, "10.0", 4) == 1) { return 8000000; }
+    if (cclen >= 4 && memeq(ccd, "10.3", 4) == 1) { return 8000000; }
     if (cclen >= 3 && memeq(ccd, "9.0", 3) == 1) { return 3350000; }
     if (cclen >= 3 && memeq(ccd, "8.9", 3) == 1) { return 1008000; }
     if (cclen >= 3 && memeq(ccd, "8.6", 3) == 1) { return 936000; }
@@ -39,11 +117,88 @@ fn nvidia_est_bw_x1000(cc) {
     return 0;
 }
 
+# 1 if nvidia-smi's memory.total field (a Str) says the GPU has no memory of
+# its own: "[N/A]" or "[Not Supported]", as on the unified-memory GB10 (DGX
+# Spark) and Jetson Thor. Other text ("[Unknown Error]") is a GPU nvidia-smi
+# could not read. Pure.
+fn cuda_mem_unified(f) {
+    if (str_eq_cstr(f, "[N/A]") == 1) { return 1; }
+    if (str_eq_cstr(f, "[Not Supported]") == 1) { return 1; }
+    return 0;
+}
+
+# nvidia-smi's pci.bus_id (a Str, or 0), "00000000:3B:00.0", as the name
+# sysfs gives the device, "0000:3b:00.0" (a fresh cstr): lower case, the
+# domain cut to 4 digits but no fewer (a VMD domain is "10000"). 0 unless it
+# is domain:bus:device.function in hex, so nothing else reaches a sysfs
+# path. Pure.
+fn nvsmi_bus_id_to_bdf(s) {
+    if (s == 0) { return 0; }
+    var d = str_data(s);
+    var n = str_len(s);
+    var colon = str_index_of(s, 58);
+    if (colon < 4 || colon > 8) { return 0; }
+    if (n - colon != 8) { return 0; }
+    if (load8(d + colon + 3) != 58) { return 0; }
+    if (load8(d + colon + 6) != 46) { return 0; }
+    var skip = 0;
+    while (colon - skip > 4) {
+        if (load8(d + skip) != 48) { break; }
+        skip = skip + 1;
+    }
+    var len = n - skip;
+    var out = alloc(len + 1);
+    var i = 0;
+    while (i < len) {
+        var k = skip + i;
+        var c = load8(d + k);
+        if (k != colon && k != colon + 3 && k != colon + 6) {
+            if (c >= 65 && c <= 70) { c = c + 32; }
+            var hex = 0;
+            if (c >= 48 && c <= 57) { hex = 1; }
+            if (c >= 97 && c <= 102) { hex = 1; }
+            if (hex == 0) { return 0; }
+        }
+        store8(out + i, c);
+        i = i + 1;
+    }
+    store8(out + len, 0);
+    return out;
+}
+
+# `fields` with an empty Str at index 4, where the query without compute_cap
+# leaves it out, so every later field keeps its position.
+fn _cuda_insert_empty_cc(fields, empty) {
+    var out = vec_new();
+    var n = vec_len(fields);
+    var i = 0;
+    while (i < n) {
+        if (i == 4) { vec_push(out, empty); }
+        vec_push(out, vec_get(fields, i));
+        i = i + 1;
+    }
+    return out;
+}
+
 # Parse nvidia-smi CSV output into profiles
 fn parse_cuda_output(output, profiles, warnings) {
+    return parse_cuda_output_cc(output, profiles, warnings, 1);
+}
+
+# parse_cuda_output for the output of _NVSMI_QUERY (`has_cc` 1) or of
+# _NVSMI_QUERY_NOCC (0). `warnings` may be 0. A memory.total of "[N/A]"
+# (cuda_mem_unified) gives a GPU with memory 0, which detect_cuda sizes from
+# system RAM; any other memory.total that is not a MiB count above 0
+# ("[Unknown Error]", "0") skips the line with a warning, where through 2.5.4
+# it was a silent 0-byte GPU. Another numeric field that is not a number
+# ("[N/A]") is unknown, and a real 0 is 0: str_to_int read "[N/A]" as 0,
+# "64.67" W as 6467 W, and the parse took a 0 MiB used as unknown.
+fn parse_cuda_output_cc(output, profiles, warnings, has_cc) {
     var lines = str_split(output, 10);
     var li = 0;
     var nlines = vec_len(lines);
+    var empty = 0;
+    if (has_cc == 0) { empty = str_from(""); }
     while (li < nlines) {
         var line = vec_get(lines, li);
         li = li + 1;
@@ -51,54 +206,57 @@ fn parse_cuda_output(output, profiles, warnings) {
 
         var fields = parse_csv_line(line, 6);
         if (fields == 0) {
-            vec_push(warnings, warning_parse("cuda", "too few CSV fields"));
+            if (warnings != 0) { vec_push(warnings, warning_parse("cuda", "too few CSV fields")); }
             continue;
         }
+        if (has_cc == 0) { fields = _cuda_insert_empty_cc(fields, empty); }
 
         var f_id = vec_get(fields, 0);
         var dev_id = validate_device_id(f_id);
         if (dev_id < 0) {
-            vec_push(warnings, warning_parse("cuda", "bad device id"));
+            if (warnings != 0) { vec_push(warnings, warning_parse("cuda", "bad device id")); }
             continue;
         }
 
         var f_mem = vec_get(fields, 1);
         var mem_mb = validate_memory_mb(f_mem);
-        if (mem_mb < 0) {
-            vec_push(warnings, warning_parse("cuda", "bad memory"));
-            continue;
+        if (mem_mb <= 0) {
+            if (cuda_mem_unified(f_mem) == 0) {
+                if (warnings != 0) { vec_push(warnings, warning_parse("cuda", "bad memory")); }
+                continue;
+            }
+            mem_mb = 0;
         }
 
         var mem_bytes = mem_mb * 1024 * 1024;
-        var mem_used_mb = str_to_int(vec_get(fields, 2));
-        var mem_free_mb = str_to_int(vec_get(fields, 3));
+        var mem_used_mb = parse_field_int(vec_get(fields, 2));
+        var mem_free_mb = parse_field_int(vec_get(fields, 3));
 
         var p = profile_cuda(dev_id, mem_bytes);
 
-        # Compute capability (field 4)
-        if (vec_len(fields) > 4) {
-            var cc = vec_get(fields, 4);
-            if (str_len(cc) > 0) {
-                profile_set_compute_cap(p, str_cstr(cc));
+        # PCI device and vendor ID (field 11): "0x268410DE" is device 0x2684
+        # of vendor 0x10DE.
+        var dv_id = 0 - 1;
+        if (vec_len(fields) > 11) { dv_id = parse_hex_field(vec_get(fields, 11)); }
 
-                # Calculate memory bandwidth from clock + bus width
-                if (vec_len(fields) > 10) {
-                    var clock_str = vec_get(fields, 10);
-                    var clock_mhz = str_to_int(clock_str);
-                    if (clock_mhz > 0) {
-                        var bw_bits = nvidia_bus_width(cc);
-                        # BW = clock * bus_width * 2 (DDR) / 8 / 1000 (GB/s)
-                        # Store as x1000
-                        var bw_x1000 = clock_mhz * bw_bits * 2 / 8;
-                        profile_set_mem_bw_x1000(p, bw_x1000);
-                    }
-                }
-                # Fallback: estimate from CC
-                if (profile_mem_bw_x1000(p) == PROFILE_NONE) {
-                    var est = nvidia_est_bw_x1000(cc);
-                    if (est > 0) { profile_set_mem_bw_x1000(p, est); }
-                }
-            }
+        # Compute capability (field 4; empty from _NVSMI_QUERY_NOCC)
+        var cc = vec_get(fields, 4);
+        if (str_len(cc) > 0) { profile_set_compute_cap(p, str_cstr(cc)); }
+
+        # Memory bandwidth from clocks.max.memory (field 10) and the bus
+        # width, the device ID's where it is listed, else the compute
+        # capability's: MHz * bits * 2 (DDR) / 8 = MB/s, GB/s x1000.
+        var bw_bits = 0;
+        if (dv_id > 0) { bw_bits = nvidia_bus_width_by_dev((dv_id >> 16) & 0xFFFF); }
+        if (bw_bits == 0) { bw_bits = nvidia_bus_width(cc); }
+        if (bw_bits > 0 && vec_len(fields) > 10) {
+            var clock_mhz = parse_field_int(vec_get(fields, 10));
+            if (clock_mhz > 0) { profile_set_mem_bw_x1000(p, clock_mhz * bw_bits * 2 / 8); }
+        }
+        # Fallback: estimate from CC
+        if (profile_mem_bw_x1000(p) == PROFILE_NONE) {
+            var est = nvidia_est_bw_x1000(cc);
+            if (est > 0) { profile_set_mem_bw_x1000(p, est); }
         }
 
         # Driver version (field 5)
@@ -115,13 +273,16 @@ fn parse_cuda_output(output, profiles, warnings) {
             if (str_len(gn) > 0) {
                 profile_set_device_name(p, str_cstr(gn));
 
-                # Grace Hopper: add unified CPU+GPU memory
+                # Grace Hopper: add unified CPU+GPU memory. 80-160 GiB of HBM
+                # covers the 96 GB HBM3 and 144 GB HBM3e parts (through 2.5.4
+                # the bound was 100, which missed the second).
                 if (str_contains_cstr(gn, "GH200") == 1) {
                     if (mem_bytes > 80 * BYTES_PER_GIB) {
-                        if (mem_bytes < 100 * BYTES_PER_GIB) {
+                        if (mem_bytes < 160 * BYTES_PER_GIB) {
                             # Add 480 GB unified LPDDR5X. That part is the
                             # Grace CPU's memory, which the CPU profile also
-                            # counts, so it is marked shared (2.3.28).
+                            # counts, so it is marked shared (2.3.28);
+                            # detect_cuda caps it at system RAM.
                             profile_set_memory_bytes(p, mem_bytes + 480 * BYTES_PER_GIB);
                             profile_set_shared_mem(p, 480 * BYTES_PER_GIB);
                         }
@@ -131,39 +292,58 @@ fn parse_cuda_output(output, profiles, warnings) {
         }
 
         # Memory usage
-        if (mem_used_mb > 0) { profile_set_mem_used(p, mem_used_mb * 1024 * 1024); }
-        if (mem_free_mb > 0) { profile_set_mem_free(p, mem_free_mb * 1024 * 1024); }
+        if (mem_used_mb >= 0) { profile_set_mem_used(p, mem_used_mb * 1024 * 1024); }
+        if (mem_free_mb >= 0) { profile_set_mem_free(p, mem_free_mb * 1024 * 1024); }
 
         # Temperature (field 7)
         if (vec_len(fields) > 7) {
-            var tc = str_to_int(vec_get(fields, 7));
+            var tc = parse_field_int(vec_get(fields, 7));
             if (tc > 0) { profile_set_temp_c(p, tc); }
         }
 
-        # Power (field 8) — integer watts (losing decimal precision, acceptable)
+        # Power (field 8): watts with two decimals, "64.67" -> 64670.
         if (vec_len(fields) > 8) {
-            var pw = str_to_int(vec_get(fields, 8));
-            if (pw > 0) { profile_set_power_x1000(p, pw * 1000); }
+            var pw = parse_decimal_x1000(vec_get(fields, 8));
+            if (pw > 0) { profile_set_power_x1000(p, pw); }
         }
 
         # GPU utilization (field 9)
         if (vec_len(fields) > 9) {
-            var gu = str_to_int(vec_get(fields, 9));
+            var gu = parse_field_int(vec_get(fields, 9));
             if (gu >= 0) { profile_set_gpu_util(p, gu); }
         }
 
-        # PCI device and vendor ID (field 11): "0x268410DE" is device 0x2684
-        # of vendor 0x10DE.
-        if (vec_len(fields) > 11) {
-            var dv_id = parse_hex_field(vec_get(fields, 11));
-            if (dv_id > 0) {
-                profile_set_pci_id(p, pci_id_make(dv_id & 0xFFFF, (dv_id >> 16) & 0xFFFF));
-            }
+        if (dv_id > 0) {
+            profile_set_pci_id(p, pci_id_make(dv_id & 0xFFFF, (dv_id >> 16) & 0xFFFF));
+        }
+
+        # PCI address (field 12)
+        if (vec_len(fields) > 12) {
+            var bdf = nvsmi_bus_id_to_bdf(vec_get(fields, 12));
+            if (bdf != 0) { profile_set_pci_bdf(p, bdf); }
         }
 
         vec_push(profiles, p);
     }
     return 0;
+}
+
+# 1 if nvidia-smi rejected the query itself rather than failed to run it:
+# exit status 2, "a supplied argument or flag is invalid" (nvidia-smi(1)), or
+# its 'Field "compute_cap" is not a valid field to query.' in `result` (a
+# Str, or 0). Pure.
+fn cuda_query_rejected(result, code) {
+    if (code == 2) { return 1; }
+    if (result == 0) { return 0; }
+    return str_contains_cstr(result, "is not a valid field to query");
+}
+
+# Run nvidia-smi with `query`; its status goes to `st` (two i64 slots).
+fn _nvsmi_run(query, warnings, st) {
+    var args = vec_new();
+    vec_push(args, query);
+    vec_push(args, _NVSMI_FMT);
+    return run_tool_status("nvidia-smi", args, warnings, st);
 }
 
 # Detect CUDA GPUs
@@ -173,18 +353,34 @@ fn parse_cuda_output(output, profiles, warnings) {
 # communicate with the NVIDIA driver", exit 9, in a container without the
 # driver), and the tool-failure warning says what happened. Through 2.5.3 that
 # text became a "cuda: too few CSV fields" warning, logged on stderr at the
-# default level.
+# default level. A driver that rejects the query (cuda_query_rejected: one
+# before R510 knows no compute_cap) is asked again without compute_cap, and
+# only the second run's failure is reported (2.5.5).
 fn detect_cuda(profiles, warnings) {
-    var args = vec_new();
-    vec_push(args, _NVSMI_QUERY);
-    vec_push(args, _NVSMI_FMT);
+    var first = vec_len(profiles);
     var st[16];
-    var result = run_tool_status("nvidia-smi", args, warnings, &st);
+    var has_cc = 1;
+    var result = _nvsmi_run(_NVSMI_QUERY, warnings, &st);
     var w = tool_run_warning("nvidia-smi", result, &st);
+    if (w != 0 && cuda_query_rejected(result, load64(&st)) == 1) {
+        result = _nvsmi_run(_NVSMI_QUERY_NOCC, warnings, &st);
+        w = tool_run_warning("nvidia-smi", result, &st);
+        has_cc = 0;
+    }
     if (w != 0 && warnings != 0) { vec_push(warnings, w); }
     var failed = 0;
     if (w != 0) { failed = 1; }
-    cuda_take_output(result, failed, profiles, warnings);
+    cuda_take_output_cc(result, failed, has_cc, profiles, warnings);
+    # System RAM is read only for a GPU on it: unified memory, or a GH200.
+    var k = first;
+    while (k < vec_len(profiles)) {
+        var p = vec_get(profiles, k);
+        if (profile_memory_bytes(p) == 0 || profile_shared_mem(p) > 0) {
+            cuda_size_unified(profiles, first, detect_system_memory_opts(0));
+            break;
+        }
+        k = k + 1;
+    }
     return 0;
 }
 
@@ -192,10 +388,43 @@ fn detect_cuda(profiles, warnings) {
 # that failed (`failed` 1), without its parse warnings (see detect_cuda).
 # Returns the number of profiles pushed. Pure.
 fn cuda_take_output(result, failed, profiles, warnings) {
+    return cuda_take_output_cc(result, failed, 1, profiles, warnings);
+}
+
+# cuda_take_output for the query with compute_cap (`has_cc` 1) or without it
+# (0). Pure.
+fn cuda_take_output_cc(result, failed, has_cc, profiles, warnings) {
     if (result == 0) { return 0; }
     var first = vec_len(profiles);
     var pw = warnings;
     if (failed == 1) { pw = vec_new(); }
-    parse_cuda_output(result, profiles, pw);
+    parse_cuda_output_cc(result, profiles, pw, has_cc);
     return vec_len(profiles) - first;
+}
+
+# Size the CUDA profiles from index `first` on from system RAM `ram` (bytes;
+# nothing happens when it is not above 0): one with memory 0, whose
+# memory.total nvidia-smi gave as "[N/A]" (a unified-memory part), gets all
+# of it, all shared, as an integrated Vulkan GPU does; a GH200 whose Grace part
+# (its shared part) passes `ram` has that part cut to it, so the CPU memory
+# it shares is never more than the CPU profile holds. Through 2.5.4 a GB10
+# came out as a GPU with 0 bytes. Pure.
+fn cuda_size_unified(profiles, first, ram) {
+    if (ram <= 0) { return 0; }
+    var n = vec_len(profiles);
+    var k = first;
+    while (k < n) {
+        var p = vec_get(profiles, k);
+        k = k + 1;
+        if (profile_accel_type(p) != ACCEL_CUDA) { continue; }
+        var sh = profile_shared_mem(p);
+        if (profile_memory_bytes(p) == 0) {
+            profile_set_memory_bytes(p, ram);
+            profile_set_shared_mem(p, ram);
+        } elif (sh > ram) {
+            profile_set_memory_bytes(p, profile_memory_bytes(p) - sh + ram);
+            profile_set_shared_mem(p, ram);
+        }
+    }
+    return 0;
 }

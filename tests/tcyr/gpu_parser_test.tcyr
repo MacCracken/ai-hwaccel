@@ -69,9 +69,11 @@ fn test_cuda_single_gpu() {
     assert_eq(profile_temp_c(p), 45, "45C");
     assert_eq(profile_gpu_util(p), 30, "30% util");
 
-    # Memory BW should be calculated: 1325 MHz * 384 bits * 2 / 8 = 127200 MB/s
-    var bw = profile_mem_bw_x1000(p);
-    assert(bw > 0, "bandwidth calculated");
+    # Memory BW: 1325 MHz * 384 bits * 2 / 8 = 127200 MB/s
+    assert_eq(profile_mem_bw_x1000(p), 127200, "bandwidth 127.2 GB/s");
+    # 2.5.5: str_to_int read "120.5" as 1205 W.
+    assert_eq(profile_power_x1000(p), 120500, "120.5 W");
+    assert_eq(profile_mem_used(p), 1024 * 1024 * 1024, "1024 MiB used");
     return 0;
 }
 
@@ -87,7 +89,7 @@ fn test_cuda_gh200_unified() {
     var p = vec_get(profiles, 0);
     assert_eq(profile_memory_bytes(p), 97871 * 1024 * 1024 + 480 * BYTES_PER_GIB, "hbm + grace");
     assert_eq(profile_shared_bytes(p), 480 * BYTES_PER_GIB, "grace part shared");
-    var a100 = str_from("0, 81920, 512, 81408, 8.0, 470.82, A100-SXM4-80GB, 35, 60, 5, 1593");
+    var a100 = str_from("0, 81920, 512, 81408, 8.0, 535.104.05, A100-SXM4-80GB, 35, 60, 5, 1593");
     var p2 = vec_new();
     parse_cuda_output(a100, p2, warnings);
     assert_eq(profile_shared_bytes(vec_get(p2, 0)), 0, "a100 shares nothing");
@@ -95,7 +97,7 @@ fn test_cuda_gh200_unified() {
 }
 
 fn test_cuda_multi_gpu() {
-    var csv = str_from("0, 81920, 0, 81920, 8.0, 470.82, A100-SXM4-80GB, 35, 60, 0, 1593\n1, 81920, 512, 81408, 8.0, 470.82, A100-SXM4-80GB, 36, 62, 5, 1593");
+    var csv = str_from("0, 81920, 0, 81920, 8.0, 535.104.05, A100-SXM4-80GB, 35, 60, 0, 1593\n1, 81920, 512, 81408, 8.0, 535.104.05, A100-SXM4-80GB, 36, 62, 5, 1593");
     var profiles = vec_new();
     var warnings = vec_new();
     parse_cuda_output(csv, profiles, warnings);
@@ -108,6 +110,9 @@ fn test_cuda_multi_gpu() {
     assert_eq(profile_device_id(p0), 0, "dev 0");
     assert_eq(profile_device_id(p1), 1, "dev 1");
     assert_eq(profile_memory_bytes(p0) / (1024 * 1024), 81920, "80 GiB");
+    # An idle GPU's 0 MiB used is a known 0 (2.5.5; it was left unknown).
+    assert_eq(profile_mem_used(p0), 0, "0 MiB used is 0");
+    assert_eq(profile_gpu_util(p0), 0, "0% util is 0");
     return 0;
 }
 
@@ -159,20 +164,72 @@ fn test_nvidia_est_bw() {
     return 0;
 }
 
-# --- Gaudi parsing test (mock hl-smi output) ---
+# --- Gaudi: hl-smi parsing (2.5.5) ---
+# Through 2.5.4 this test copied the name check inline, so it could not catch
+# a change to gaudi.cyr; these call the parser itself.
 
 fn test_gaudi_gen_detection() {
-    # Gaudi3 name detection
-    var gen = GAUDI2;
-    var name = str_from("HL-325L");
-    if (str_contains_cstr(name, "HL-325") == 1) { gen = GAUDI3; }
-    assert_eq(gen, GAUDI3, "HL-325 = Gaudi3");
+    assert_eq(gaudi_gen_from_name(str_from("HL-225")), GAUDI2, "HL-225: Gaudi2");
+    assert_eq(gaudi_gen_from_name(str_from("HL-325L")), GAUDI3, "HL-325L: Gaudi3");
+    assert_eq(gaudi_gen_from_name(str_from("HL-338")), GAUDI3, "HL-338 PCIe: Gaudi3");
+    assert_eq(gaudi_gen_from_name(str_from("HL-328")), GAUDI3, "HL-328: Gaudi3");
+    assert_eq(gaudi_gen_from_name(str_from("HL-388")), GAUDI3, "HL-388: Gaudi3");
+    assert_eq(gaudi_gen_from_name(str_from("Intel Gaudi3")), GAUDI3, "Gaudi3 by name");
+    assert_eq(gaudi_gen_from_name(str_from("GAUDI3")), GAUDI3, "habanalabs device_type GAUDI3");
+    assert_eq(gaudi_gen_from_name(str_from("GAUDI2")), GAUDI2, "habanalabs device_type GAUDI2");
+    assert_eq(gaudi_gen_from_name(str_from("HL-205")), GAUDI2, "HL-205: no Gaudi1, Gaudi2");
+    assert_eq(gaudi_gen_from_name(str_from("")), GAUDI2, "empty: Gaudi2");
+    assert_eq(gaudi_gen_from_name(str_from("HL-")), GAUDI2, "HL-: Gaudi2");
+    return 0;
+}
 
-    var gen2 = GAUDI2;
-    var name2 = str_from("HL-225");
-    if (str_contains_cstr(name2, "gaudi3") == 1) { gen2 = GAUDI3; }
-    elif (str_contains_cstr(name2, "HL-325") == 1) { gen2 = GAUDI3; }
-    assert_eq(gen2, GAUDI2, "HL-225 = Gaudi2");
+fn test_gaudi_hl_smi_rows() {
+    var out = _vk_fixture("tests/fixtures/from-docs/hl-smi-query-aip.csv");
+    var p = vec_new();
+    var w = vec_new();
+    assert_eq(parse_hl_smi_output(out, p, w), 3, "hl-smi: three cards");
+    assert_eq(vec_len(w), 0, "hl-smi: no warning");
+    if (vec_len(p) != 3) { return 0; }
+    var g2 = vec_get(p, 0);
+    assert_eq(profile_accel_type(g2), ACCEL_GAUDI, "gaudi type");
+    assert_eq(profile_gaudi_gen(g2), GAUDI2, "HL-225: Gaudi2");
+    assert_eq(profile_memory_bytes(g2), 98304 * 1024 * 1024, "memory.total in MiB");
+    assert_streq(profile_device_name(g2), "HL-225", "name from hl-smi");
+    var pcie = vec_get(p, 2);
+    assert_eq(profile_device_id(pcie), 2, "index 2");
+    assert_eq(profile_gaudi_gen(pcie), GAUDI3, "HL-338: Gaudi3");
+    assert_eq(profile_rank(pcie), gaudi_rank(GAUDI3), "HL-338 ranks as a Gaudi3");
+    return 0;
+}
+
+# Fields are range-checked (2.5.5): a garbled memory.total wrapped to a
+# negative size through 2.5.4, and a non-numeric index became device 0.
+fn test_gaudi_hl_smi_bad_rows() {
+    var w = vec_new();
+    var p = vec_new();
+    assert_eq(parse_hl_smi_output(str_from("0, HL-225, 99999999999999, 0\n"), p, w), 1, "huge memory: listed");
+    assert_eq(vec_len(w), 1, "huge memory: a warning");
+    if (vec_len(p) == 1) {
+        assert_eq(profile_memory_bytes(vec_get(p, 0)), gaudi_hbm_bytes(GAUDI2), "huge memory: the generation's HBM");
+    }
+    var p2 = vec_new();
+    parse_hl_smi_output(str_from("1, HL-325L, N/A, N/A\n"), p2, w);
+    if (vec_len(p2) == 1) {
+        assert_eq(profile_memory_bytes(vec_get(p2, 0)), gaudi_hbm_bytes(GAUDI3), "N/A memory: the generation's HBM");
+    }
+    var w3 = vec_new();
+    var p3 = vec_new();
+    var bad = str_from("x, HL-225, 98304, 0\n2000, HL-225, 98304, 0\n-1, HL-225, 98304, 0\n");
+    assert_eq(parse_hl_smi_output(bad, p3, w3), 0, "bad index: no card");
+    assert_eq(vec_len(w3), 3, "bad index: a warning each");
+    var w4 = vec_new();
+    assert_eq(parse_hl_smi_output(str_from("hl-smi: no device\n\n"), vec_new(), w4), 0, "error text: no card");
+    assert_eq(vec_len(w4), 1, "error text: too few fields");
+    var p5 = vec_new();
+    parse_hl_smi_output(str_from("0, , 98304, 0\r\n"), p5, vec_new());
+    if (vec_len(p5) == 1) {
+        assert_streq(profile_device_name(vec_get(p5, 0)), "Intel Gaudi2", "no name: from the generation");
+    }
     return 0;
 }
 
@@ -240,6 +297,263 @@ fn test_cuda_pci_id() {
     parse_cuda_output(_cuda_line(", [N/A]"), p3, warnings);
     assert_eq(profile_pci_id(vec_get(p3, 0)), 0, "[N/A]: unknown");
     assert_eq(vec_len(warnings), 0, "no warnings");
+    return 0;
+}
+
+# 1 if cstr `p` (or 0) is `s`.
+fn _cstr_is(p, s) {
+    if (p == 0) { return 0; }
+    return streq(p, s);
+}
+
+# The first profile parse_cuda_output makes of `csv`, or 0.
+fn _cuda_one(csv) {
+    var ps = vec_new();
+    parse_cuda_output(str_from(csv), ps, vec_new());
+    if (vec_len(ps) == 0) { return 0; }
+    return vec_get(ps, 0);
+}
+
+# power.draw has two decimals (2.5.5): str_to_int read "64.67" as 6467 W.
+fn test_cuda_power_decimal() {
+    var p = _cuda_one("0, 24576, 1024, 23552, 8.9, 550.54, NVIDIA GeForce RTX 4090, 45, 64.67, 30, 10501, 0x268410DE");
+    assert_eq(profile_power_x1000(p), 64670, "64.67 W");
+    var g = _cuda_one("0, 15360, 0, 15360, 7.5, 535.104.05, Tesla T4, 40, 4.32, 0, 5001");
+    assert_eq(profile_power_x1000(g), 4320, "4.32 W");
+    var n = _cuda_one("0, 15360, 0, 15360, 7.5, 535.104.05, Tesla T4, 40, [N/A], 0, 5001");
+    assert_eq(profile_power_x1000(n), PROFILE_NONE, "[N/A] power unknown");
+    var z = _cuda_one("0, 15360, 0, 15360, 7.5, 535.104.05, Tesla T4, 40, 0.00, 0, 5001");
+    assert_eq(profile_power_x1000(z), PROFILE_NONE, "0.00 W unset");
+    return 0;
+}
+
+# "[N/A]" in a numeric field is unknown, a real 0 is 0 (2.5.5): MIG mode and
+# some vGPUs print utilization "[N/A]", which str_to_int read as 0 %.
+fn test_cuda_optional_fields() {
+    var p = _cuda_one("0, 81920, [N/A], [N/A], 8.0, 535.104.05, A100-SXM4-80GB, [N/A], 60, [N/A], [N/A]");
+    assert_eq(profile_gpu_util(p), PROFILE_NONE, "[N/A] util unknown");
+    assert_eq(profile_mem_used(p), PROFILE_NONE, "[N/A] used unknown");
+    assert_eq(profile_mem_free(p), PROFILE_NONE, "[N/A] free unknown");
+    assert_eq(profile_temp_c(p), PROFILE_NONE, "[N/A] temperature unknown");
+    # No memory clock: the compute capability's estimate.
+    assert_eq(profile_mem_bw_x1000(p), 2039000, "[N/A] clock: estimate");
+    var z = _cuda_one("0, 81920, 0, 81920, 8.0, 535.104.05, A100-SXM4-80GB, 35, 60, 0, 1593");
+    assert_eq(profile_mem_used(z), 0, "0 MiB used");
+    assert_eq(profile_mem_free(z), 81920 * 1024 * 1024, "all free");
+    return 0;
+}
+
+fn _cuda_bw(csv) {
+    var p = _cuda_one(csv);
+    if (p == 0) { return 0 - 2; }
+    return profile_mem_bw_x1000(p);
+}
+
+# Bus width by compute capability, or by device ID for a part whose width is
+# not its generation's (2.5.5): a B200 (10.0) was given 256 bits, an L4 384.
+fn test_cuda_bw_exact() {
+    assert_eq(_cuda_bw("0, 24564, 0, 24564, 8.9, 550.54, NVIDIA GeForce RTX 4090, 30, 20, 0, 10501, 0x268410DE"), 1008096, "RTX 4090 1008 GB/s");
+    assert_eq(_cuda_bw("0, 81559, 0, 81559, 9.0, 550.54, NVIDIA H100 80GB HBM3, 30, 20, 0, 2619, 0x233010DE"), 3352320, "H100 SXM 3352 GB/s");
+    assert_eq(_cuda_bw("0, 183359, 0, 183359, 10.0, 570.86, NVIDIA B200, 30, 120, 0, 3996, 0x290110DE"), 8183808, "B200 8192-bit");
+    assert_eq(_cuda_bw("0, 32607, 0, 32607, 12.0, 570.86, NVIDIA GeForce RTX 5090, 30, 20, 0, 14001, 0x2B8510DE"), 1792128, "RTX 5090 512-bit");
+    assert_eq(_cuda_bw("0, 23034, 0, 23034, 8.9, 550.54, NVIDIA L4, 30, 20, 0, 6251, 0x27B810DE"), 300048, "L4 192-bit");
+    assert_eq(_cuda_bw("0, 8188, 0, 8188, 8.9, 550.54, NVIDIA GeForce RTX 4060, 30, 20, 0, 8501, 0x288210DE"), 272032, "RTX 4060 128-bit");
+    assert_eq(_cuda_bw("0, 24576, 0, 24576, 8.0, 550.54, NVIDIA A30, 30, 20, 0, 1215, 0x20B710DE"), 933120, "A30 3072-bit");
+    assert_eq(_cuda_bw("0, 143771, 0, 143771, 9.0, 550.54, NVIDIA H200, 30, 20, 0, 3201, 0x233510DE"), 4916736, "H200 6144-bit");
+    assert_eq(_cuda_bw("0, 16384, 0, 16384, 6.0, 535.104.05, Tesla P100-PCIE-16GB, 30, 20, 0, 715, 0x15F810DE"), 732160, "P100 4096-bit");
+    assert_eq(_cuda_bw("0, 8192, 0, 8192, 6.1, 535.104.05, NVIDIA GeForce GTX 1080, 30, 20, 0, 5005, 0x1B8010DE"), PROFILE_NONE, "unlisted CC: unknown, not a 256-bit guess");
+    assert_eq(nvidia_bus_width(str_from("10.3")), 8192, "B300 8192-bit");
+    assert_eq(nvidia_bus_width(str_from("6.1")), 0, "6.1 not listed");
+    assert_eq(nvidia_bus_width_by_dev(0x2684), 0, "RTX 4090: its CC's width");
+    return 0;
+}
+
+# GB10 (DGX Spark) and Jetson Thor print memory.total "[N/A]": unified memory.
+# The GPU is kept and sized from system RAM, all shared (2.5.5); through
+# 2.5.4 it was a GPU with 0 bytes. Other unreadable memory skips the line.
+fn test_cuda_unified_memory() {
+    var w = vec_new();
+    var p = vec_new();
+    vec_push(p, profile_cpu(128 * BYTES_PER_GIB));
+    parse_cuda_output(str_from("0, [N/A], [N/A], [N/A], 12.1, 580.95.05, NVIDIA GB10, 41, 4.32, 0, [N/A], 0x2E1210DE"), p, w);
+    assert_eq(vec_len(p), 2, "GB10: the GPU kept");
+    assert_eq(vec_len(w), 0, "GB10: no warning");
+    if (vec_len(p) != 2) { return 0; }
+    var g = vec_get(p, 1);
+    assert_eq(profile_memory_bytes(g), 0, "GB10: no memory figure from nvidia-smi");
+    assert_eq(profile_mem_used(g), PROFILE_NONE, "GB10: used unknown");
+    cuda_size_unified(p, 1, 128 * BYTES_PER_GIB);
+    assert_eq(profile_memory_bytes(g), 128 * BYTES_PER_GIB, "GB10: sized from system RAM");
+    assert_eq(profile_shared_bytes(g), 128 * BYTES_PER_GIB, "GB10: all of it shared");
+    assert_eq(profile_memory_bytes(vec_get(p, 0)), 128 * BYTES_PER_GIB, "the CPU profile untouched");
+    var ns = vec_new();
+    parse_cuda_output(str_from("0, [Not Supported], 0, 0, 11.0, 580.00, NVIDIA Jetson Thor, 41, 4.32, 0, [N/A]"), ns, vec_new());
+    assert_eq(vec_len(ns), 1, "[Not Supported]: the GPU kept");
+    var bw = vec_new();
+    var bp = vec_new();
+    parse_cuda_output(str_from("0, [Unknown Error], [N/A], [N/A], 9.0, 550.54, NVIDIA H100, 41, 4.32, 0, [N/A], 0x233010DE"), bp, bw);
+    assert_eq(vec_len(bp), 0, "[Unknown Error]: no 0-byte GPU");
+    assert_eq(vec_len(bw), 1, "[Unknown Error]: a bad-memory warning");
+    var lw = vec_new();
+    var lp = vec_new();
+    parse_cuda_output(str_from("[GPU is lost], [GPU is lost], [GPU is lost], [GPU is lost], [GPU is lost], [GPU is lost], [GPU is lost]"), lp, lw);
+    assert_eq(vec_len(lp), 0, "lost GPU row skipped");
+    assert_eq(vec_len(lw), 1, "lost GPU row warns");
+    cuda_size_unified(p, 1, 0);
+    assert_eq(profile_memory_bytes(g), 128 * BYTES_PER_GIB, "RAM unknown: nothing changes");
+    return 0;
+}
+
+# GH200: 80-160 GiB of HBM takes the 144 GB HBM3e part too (2.5.5; the bound
+# was 100). The Grace part is cut to system RAM where that is less.
+fn test_cuda_gh200_144g() {
+    var p = vec_new();
+    parse_cuda_output(str_from("0, 146831, 0, 146831, 9.0, 560.35.03, NVIDIA GH200 144G HBM3e, 30, 100, 0, 3201, 0x234810DE"), p, vec_new());
+    assert_eq(vec_len(p), 1, "gh200 144g parsed");
+    if (vec_len(p) != 1) { return 0; }
+    var g = vec_get(p, 0);
+    var hbm = 146831 * 1024 * 1024;
+    assert_eq(profile_shared_bytes(g), 480 * BYTES_PER_GIB, "144G: grace part shared");
+    assert_eq(profile_mem_bw_x1000(g), 4916736, "GH200 6144-bit");
+    cuda_size_unified(p, 0, 470 * BYTES_PER_GIB);
+    assert_eq(profile_shared_bytes(g), 470 * BYTES_PER_GIB, "grace part cut to system RAM");
+    assert_eq(profile_memory_bytes(g), hbm + 470 * BYTES_PER_GIB, "hbm + what RAM holds");
+    cuda_size_unified(p, 0, 600 * BYTES_PER_GIB);
+    assert_eq(profile_shared_bytes(g), 470 * BYTES_PER_GIB, "more RAM: unchanged");
+    return 0;
+}
+
+# A library caller may pass no warnings vec (2.5.5: a bad line crashed).
+fn test_cuda_no_warnings_vec() {
+    var p = vec_new();
+    parse_cuda_output(str_from("garbage data\nx, 1, 2, 3, 4, 5\n0, [Unknown Error], 0, 0, 9.0, 550.54, H100"), p, 0);
+    assert_eq(vec_len(p), 0, "no warnings vec: bad lines skipped");
+    assert_eq(cuda_take_output(str_from("garbage"), 0, vec_new(), 0), 0, "take_output with no warnings vec");
+    return 0;
+}
+
+# A driver before R510 rejects compute_cap (2.5.5): detect_cuda asks again
+# without it, and the rows keep every other field in place.
+fn test_cuda_no_compute_cap() {
+    assert_eq(cuda_query_rejected(str_from("Field \"compute_cap\" is not a valid field to query.\n"), 2), 1, "invalid field");
+    assert_eq(cuda_query_rejected(0, 2), 1, "exit 2, nothing on stdout");
+    assert_eq(cuda_query_rejected(str_from("Field \"compute_cap\" is not a valid field to query.\n"), 1), 1, "the text alone");
+    assert_eq(cuda_query_rejected(str_from("NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver."), 9), 0, "no driver: no retry");
+    assert_eq(cuda_query_rejected(0, 0), 0, "success");
+    var p = vec_new();
+    var w = vec_new();
+    var out = str_from("0, 11441, 0, 11441, 470.82.01, Tesla K80, 34, 58.31, 0, 2505, 0x102D10DE, 00000000:04:00.0\n");
+    assert_eq(cuda_take_output_cc(out, 0, 0, p, w), 1, "no-cc row parsed");
+    assert_eq(vec_len(w), 0, "no-cc row: no warning");
+    if (vec_len(p) != 1) { return 0; }
+    var k = vec_get(p, 0);
+    assert_eq(profile_compute_cap(k), 0, "no-cc: compute capability unknown");
+    assert(_cstr_is(profile_driver_version(k), "470.82.01") == 1, "no-cc: driver in place");
+    assert(_cstr_is(profile_device_name(k), "Tesla K80") == 1, "no-cc: name in place");
+    assert_eq(profile_temp_c(k), 34, "no-cc: temperature in place");
+    assert_eq(profile_power_x1000(k), 58310, "no-cc: power in place");
+    assert_eq(profile_pci_id(k), pci_id_make(0x10DE, 0x102D), "no-cc: pci id in place");
+    assert(_cstr_is(profile_pci_bdf(k), "0000:04:00.0") == 1, "no-cc: pci address in place");
+    return 0;
+}
+
+# nvidia-smi's pci.bus_id (field 12, 2.5.5) gives the PCI address enrichment
+# reads sysfs at, in sysfs's spelling.
+fn test_cuda_pci_bdf() {
+    var profs = vec_new();
+    parse_cuda_output(str_from("0, 81559, 0, 81000, 9.0, 550.54, NVIDIA H100 80GB HBM3, 30, 70, 0, 2619, 0x233010DE, 00000000:3B:00.0\n1, 81559, 0, 81000, 9.0, 550.54, NVIDIA H100 80GB HBM3, 30, 70, 0, 2619, 0x233010DE, 00000000:C3:00.0\n"), profs, vec_new());
+    assert_eq(vec_len(profs), 2, "two rows");
+    if (vec_len(profs) != 2) { return 0; }
+    assert(_cstr_is(profile_pci_bdf(vec_get(profs, 0)), "0000:3b:00.0") == 1, "gpu 0 keeps its own address");
+    assert(_cstr_is(profile_pci_bdf(vec_get(profs, 1)), "0000:c3:00.0") == 1, "gpu 1 keeps its own address");
+    assert(_cstr_is(nvsmi_bus_id_to_bdf(str_from("00010000:E1:00.0")), "10000:e1:00.0") == 1, "VMD domain keeps 5 digits");
+    assert(_cstr_is(nvsmi_bus_id_to_bdf(str_from("0000:01:00.0")), "0000:01:00.0") == 1, "4-digit domain as is");
+    assert_eq(nvsmi_bus_id_to_bdf(str_from("[N/A]")), 0, "[N/A]");
+    assert_eq(nvsmi_bus_id_to_bdf(str_from("00000000:../00.0")), 0, "not hex");
+    assert_eq(nvsmi_bus_id_to_bdf(str_from("../../../../etc/x")), 0, "a path");
+    assert_eq(nvsmi_bus_id_to_bdf(str_from("000:01:00.0")), 0, "3-digit domain");
+    assert_eq(nvsmi_bus_id_to_bdf(0), 0, "nothing");
+    assert_eq(profile_pci_bdf(_cuda_one("0, 24576, 1024, 23552, 8.9, 550.54, NVIDIA GeForce RTX 4090, 45, 120.5, 30, 1325")), 0, "no field 12: unknown");
+    return 0;
+}
+
+# validate_device_id / validate_memory_mb take digits only (2.5.5): str_to_int
+# read "[N/A]" as 0 and "1.5" as 15.
+fn test_cuda_validators() {
+    assert_eq(validate_memory_mb(str_from("[N/A]")), 0 - 1, "[N/A] memory rejected");
+    assert_eq(validate_memory_mb(str_from("1.5")), 0 - 1, "1.5 rejected");
+    assert_eq(validate_memory_mb(str_from("18446744073709551617")), 0 - 1, "20 digits rejected");
+    assert_eq(validate_memory_mb(str_from("0")), 0, "0 MB valid");
+    assert_eq(validate_memory_mb(str_from("81920")), 81920, "81920 MB valid");
+    assert_eq(validate_device_id(str_from("[GPU is lost]")), 0 - 1, "lost id rejected");
+    assert_eq(validate_device_id(str_from("")), 0 - 1, "empty id rejected");
+    assert_eq(validate_device_id(str_from("7")), 7, "id 7");
+    return 0;
+}
+
+# --- ROCm parsers (2.5.5) ---
+
+fn test_rocm_parsers() {
+    # pp_dpm_mclk: the clock after ':', not the DPM level before it.
+    assert_eq(amd_dpm_max_mhz(str_from("2: 400Mhz \n3: 1600Mhz *")), 1600, "APU mclk, not level 3");
+    assert_eq(amd_dpm_max_mhz(str_from("0: 96Mhz\n1: 456Mhz\n2: 772Mhz\n3: 1249Mhz *\n")), 1249, "RDNA3 mclk");
+    assert_eq(amd_dpm_max_mhz(str_from("garbage\n")), 0, "no colon");
+    assert_eq(amd_dpm_max_mhz(0), 0, "no file");
+    # KFD properties.
+    var props = str_from("cpu_cores_count 0\nsimd_count 32\ngfx_target_version 90012\nvendor_id 4098\ndevice_id 5688\nlocation_id 1024\ndomain 0\n");
+    assert_eq(kfd_prop(props, "gfx_target_version"), 90012, "gfx target");
+    assert_eq(kfd_prop(props, "domain"), 0, "domain 0");
+    assert_eq(kfd_prop(props, "location_id"), 1024, "location");
+    assert_eq(kfd_prop(props, "count"), 0 - 1, "not a key: a suffix of one");
+    assert_eq(kfd_prop(props, "unique_id"), 0 - 1, "missing key");
+    assert_eq(kfd_prop(0, "domain"), 0 - 1, "no file");
+    # The gfx target name.
+    assert(_cstr_is(rocm_gfx_name(90012), "gfx90c") == 1, "gfx90c");
+    assert(_cstr_is(rocm_gfx_name(90010), "gfx90a") == 1, "gfx90a");
+    assert(_cstr_is(rocm_gfx_name(90402), "gfx942") == 1, "gfx942");
+    assert(_cstr_is(rocm_gfx_name(100300), "gfx1030") == 1, "gfx1030");
+    assert(_cstr_is(rocm_gfx_name(110000), "gfx1100") == 1, "gfx1100");
+    assert(_cstr_is(rocm_gfx_name(110501), "gfx1151") == 1, "gfx1151");
+    assert_eq(rocm_gfx_name(0), 0, "CPU node");
+    assert_eq(rocm_gfx_name(91600), 0, "minor past one hex digit");
+    # PCI address to KFD's domain and location_id.
+    var loc[16];
+    assert_eq(pci_bdf_split(str_from("0000:04:00.0"), &loc), 1, "bdf");
+    assert_eq(load64(&loc + 8), 1024, "bus 4 -> location 0x400");
+    assert_eq(pci_bdf_split(str_from("0001:c3:1f.7"), &loc), 1, "bdf with domain 1");
+    assert_eq(load64(&loc), 1, "domain 1");
+    assert_eq(load64(&loc + 8), (0xC3 << 8) | (0x1F << 3) | 7, "devfn");
+    assert_eq(pci_bdf_split(str_from("card1"), &loc), 0, "not an address");
+    assert_eq(pci_bdf_split(str_from("0000:04:00.9"), &loc), 0, "function past 7");
+    # Transfers per memory clock.
+    assert_eq(amd_mem_rate(90012), 2, "gfx90c: DDR4");
+    assert_eq(amd_mem_rate(90010), 2, "gfx90a: HBM2e");
+    assert_eq(amd_mem_rate(90402), 4, "gfx942: HBM3");
+    assert_eq(amd_mem_rate(110000), 16, "gfx1100: GDDR6");
+    assert_eq(amd_mem_rate(100101), 2, "gfx1011: HBM2");
+    assert_eq(amd_mem_rate(100305), 0, "gfx1035 APU: not known");
+    assert_eq(amd_mem_rate(110501), 0, "gfx1151 APU: not known");
+    assert_eq(amd_mem_rate(120001), 16, "gfx1201: GDDR6");
+    assert_eq(amd_mem_bw_x1000(1600, 128, 2), 51200, "dev host: 51.2 GB/s");
+    assert_eq(amd_mem_bw_x1000(1300, 8192, 4), 5324800, "MI300X: 5.3 TB/s");
+    assert_eq(amd_mem_bw_x1000(1249, 384, 16), 959232, "RX 7900 XTX: 959 GB/s");
+    assert_eq(amd_mem_bw_x1000(1600, 128, 0), 0, "rate unknown");
+    # A node by PCI address, else by device ID (a partition's location_id).
+    var nodes = vec_new();
+    vec_push(nodes, 0);
+    vec_push(nodes, 1024);
+    vec_push(nodes, 0x1638);
+    vec_push(nodes, 90012);
+    vec_push(nodes, 128);
+    vec_push(nodes, 0);
+    vec_push(nodes, 0xC300);
+    vec_push(nodes, 0x74A1);
+    vec_push(nodes, 90402);
+    vec_push(nodes, 8192);
+    assert_eq(kfd_node_for(nodes, 0, 0xC300, 0x74A1), 5, "by address");
+    assert_eq(kfd_node_for(nodes, 0, 0xC301, 0x74A1), 5, "by device id");
+    assert_eq(kfd_node_for(nodes, 0, 0xD000, 0x744C), 0 - 1, "no node");
+    assert_eq(kfd_node_for(nodes, 0 - 1, 0 - 1, 0x1638), 0, "no address: by device id");
     return 0;
 }
 
@@ -557,6 +871,46 @@ fn test_vulkan_size_shared() {
     return 0;
 }
 
+# A discrete GPU no vendor backend reports, such as an Intel Arc without
+# xpu-smi, is sized from its largest device-local heap, its own memory
+# (2.5.5; it kept the 4 GiB estimate). Hand-written in vulkaninfo 1.3's
+# layout: none of our hosts has an Arc.
+fn test_vulkan_size_discrete() {
+    var ln = vec_new();
+    vec_push(ln, "GPU0:");
+    vec_push(ln, "\tvendorID = 0x8086");
+    vec_push(ln, "\tdeviceID = 0x56a0");
+    vec_push(ln, "\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU");
+    vec_push(ln, "\tdeviceName = Intel(R) Arc(tm) A770 Graphics (DG2)");
+    vec_push(ln, "memoryHeaps: count = 2");
+    vec_push(ln, "\tmemoryHeaps[0]:");
+    vec_push(ln, "\t\tsize   = 16225243136 (0x3c71c0000) (15.11 GiB)");
+    vec_push(ln, "\t\tflags: count = 1");
+    vec_push(ln, "\t\t\tMEMORY_HEAP_DEVICE_LOCAL_BIT");
+    vec_push(ln, "\tmemoryHeaps[1]:");
+    vec_push(ln, "\t\tsize   = 50331648000 (0xbb8000000) (46.88 GiB)");
+    vec_push(ln, "\t\tflags:");
+    vec_push(ln, "\t\t\tNone");
+    vec_push(ln, "memoryTypes: count = 1");
+    var out = _vk_join(ln);
+    var p = vec_new();
+    var ids = vec_new();
+    _parse_vulkaninfo_ids(out, p, ids);
+    vulkan_size_shared(p, 0, ids, out);
+    assert_eq(vec_len(p), 1, "arc: one device");
+    if (vec_len(p) != 1) { return 0; }
+    assert_eq(profile_memory_bytes(vec_get(p, 0)), 16225243136, "arc: largest device-local heap");
+    assert_eq(profile_shared_bytes(vec_get(p, 0)), 0, "arc: its own memory, not shared");
+    assert_eq(vulkan_needs_heap_size(VK_DEV_DISCRETE, PCI_VENDOR_INTEL), 1, "intel discrete: heaps");
+    assert_eq(vulkan_needs_heap_size(VK_DEV_DISCRETE, PCI_VENDOR_NVIDIA), 1, "nvidia discrete: heaps, without its driver");
+    assert_eq(vulkan_needs_heap_size(VK_DEV_DISCRETE, PCI_VENDOR_AMD), 0, "amd discrete: ROCm");
+    assert_eq(vulkan_needs_heap_size(VK_DEV_DISCRETE, 0 - 1), 0, "no vendor id");
+    assert_eq(vulkan_needs_heap_size(VK_DEV_VIRTUAL, PCI_VENDOR_INTEL), 0, "virtual: estimate");
+    assert_eq(vulkan_needs_heap_size(VK_DEV_INTEGRATED, PCI_VENDOR_AMD), 0, "amd apu: sysfs");
+    assert_eq(vulkan_needs_heap_size(VK_DEV_INTEGRATED, PCI_VENDOR_INTEL), 1, "intel igpu: heaps");
+    return 0;
+}
+
 fn test_vulkan_sysfs_helpers() {
     assert_eq(pci_slot_is_intel_igpu(str_from("0000:00:02.0")), 1, "intel igpu slot");
     assert_eq(pci_slot_is_intel_igpu(str_from("0000:03:00.0")), 0, "arc slot");
@@ -593,9 +947,21 @@ test_cuda_multi_gpu();
 test_cuda_bad_csv();
 test_cuda_empty_lines();
 test_cuda_pci_id();
+test_cuda_power_decimal();
+test_cuda_optional_fields();
+test_cuda_bw_exact();
+test_cuda_unified_memory();
+test_cuda_gh200_144g();
+test_cuda_no_warnings_vec();
+test_cuda_no_compute_cap();
+test_cuda_pci_bdf();
+test_cuda_validators();
+test_rocm_parsers();
 test_nvidia_bus_width();
 test_nvidia_est_bw();
 test_gaudi_gen_detection();
+test_gaudi_hl_smi_rows();
+test_gaudi_hl_smi_bad_rows();
 test_neuron_json_parse();
 test_neuron_inferentia();
 test_detector_names();
@@ -611,6 +977,7 @@ test_vulkan_full_output_parses();
 test_vulkan_nested_fields();
 test_vulkan_local_heap_largest();
 test_vulkan_size_shared();
+test_vulkan_size_discrete();
 test_vulkan_sysfs_helpers();
 test_vulkan_take_summary();
 test_cuda_take_output();

@@ -1,0 +1,10 @@
+GPU 0: NVIDIA GeForce RTX 3090 (UUID: GPU-5d1a)
+	 Link 0: <inactive>
+	 Link 1: <inactive>
+	 Link 2: <inactive>
+	 Link 3: <inactive>
+GPU 1: NVIDIA GeForce RTX 3090 (UUID: GPU-c03b)
+	 Link 0: <inactive>
+	 Link 1: <inactive>
+	 Link 2: <inactive>
+	 Link 3: <inactive>

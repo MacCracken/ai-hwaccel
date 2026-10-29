@@ -12,6 +12,7 @@ include "lib/syscalls.cyr"
 include "lib/fs.cyr"
 include "lib/tagged.cyr"
 include "lib/process.cyr"
+include "lib/thread.cyr"
 
 include "src/units.cyr"
 include "src/error.cyr"
@@ -21,6 +22,43 @@ include "src/profile.cyr"
 include "src/system_io.cyr"
 include "src/detect/platform.cyr"
 include "src/detect/command.cyr"
+
+# --- Fixtures ---
+
+var _fx_seq = 0;
+
+# A fresh directory /tmp/ai-hwaccel-io-<pid>-<n>, as a cstr.
+fn _fx_dir() {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "/tmp/ai-hwaccel-io-");
+    str_builder_add_int(sb, sys_getpid());
+    str_builder_putc(sb, '-');
+    str_builder_add_int(sb, _fx_seq);
+    _fx_seq = _fx_seq + 1;
+    var d = str_data(str_builder_build(sb));
+    sys_mkdir(d, 0x1ED);
+    return d;
+}
+
+# Write cstr `text` to `dir`/`name` and give it mode `mode`. Returns the path.
+fn _fx_file(dir, name, text, mode) {
+    var p = sysfs_path(dir, name, 0);
+    file_write_all(p, text, strlen(text));
+    sys_chmod(p, mode);
+    return p;
+}
+
+fn _fx_rm(dir) {
+    run_tool2("rm", "-rf", dir, 0);
+    return 0;
+}
+
+# Monotonic milliseconds (Linux clock_gettime).
+fn _now_ms() {
+    var ts[16];
+    syscall(228, 1, &ts);
+    return load64(&ts) * 1000 + load64(&ts + 8) / 1000000;
+}
 
 # --- which() tests ---
 
@@ -35,6 +73,51 @@ fn test_which_echo() {
 fn test_which_missing() {
     var path = which("nonexistent_tool_xyz_12345");
     assert_eq(path, 0, "which(missing) returns 0");
+    return 0;
+}
+
+# which() takes the first regular file it may execute (2.5.5). Through 2.5.4
+# it took the first path that opened read-only: the 0644 file or the directory
+# below shadowed the real tool, which then failed with status 127, and the
+# exec-only (0111) tool was never found.
+fn test_which_in_executables_only() {
+    var t = _fx_dir();
+    var d1 = sysfs_path(t, "d1", 0);
+    var d2 = sysfs_path(t, "d2", 0);
+    var d3 = sysfs_path(t, "d3", 0);
+    var d4 = sysfs_path(t, "d4", 0);
+    sys_mkdir(d1, 0x1ED);
+    sys_mkdir(d2, 0x1ED);
+    sys_mkdir(d3, 0x1ED);
+    sys_mkdir(d4, 0x1ED);
+    _fx_file(d1, "tool", "#!/bin/sh\n", 0x1A4);
+    sys_mkdir(sysfs_path(d2, "tool", 0), 0x1ED);
+    var exec_only = _fx_file(d3, "tool", "#!/bin/sh\n", 0x49);
+    var runnable = _fx_file(d4, "tool", "#!/bin/sh\n", 0x1ED);
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, d1);
+    str_builder_putc(sb, ':');
+    str_builder_add_cstr(sb, d2);
+    str_builder_putc(sb, ':');
+    str_builder_add_cstr(sb, d4);
+    var path = str_data(str_builder_build(sb));
+    var got = which_in(path, "tool");
+    assert(got != 0, "which: a tool behind a 0644 file and a directory is found");
+    if (got != 0) { assert_streq(got, runnable, "which: the executable one"); }
+    var sb2 = str_builder_new();
+    str_builder_add_cstr(sb2, d3);
+    str_builder_putc(sb2, ':');
+    str_builder_add_cstr(sb2, d4);
+    var got2 = which_in(str_data(str_builder_build(sb2)), "tool");
+    assert(got2 != 0, "which: an exec-only (0111) tool is found");
+    if (got2 != 0) { assert_streq(got2, exec_only, "which: the exec-only one, first on PATH"); }
+    var sb3 = str_builder_new();
+    str_builder_add_cstr(sb3, d1);
+    str_builder_putc(sb3, ':');
+    str_builder_add_cstr(sb3, d2);
+    assert_eq(which_in(str_data(str_builder_build(sb3)), "tool"), 0, "which: no executable, no tool");
+    assert_eq(which_in(0, "tool"), 0, "which: no PATH");
+    _fx_rm(t);
     return 0;
 }
 
@@ -79,6 +162,7 @@ fn test_which_candidates_windows() {
     var e = which_candidates("C:\\WINDOWS\\System32\\wbem", "wmic.EXE", 1);
     assert_streq(vec_get(e, 0), "C:\\WINDOWS\\System32\\wbem\\wmic.EXE", "windows: .exe not added twice");
     assert_eq(vec_len(which_candidates("C:\\a\"b;\"C:\\x", "t", 1)), 0, "windows: an entry with a stray quote is skipped");
+    assert_streq(vec_get(which_candidates("c:/x", "t", 1), 0), "c:/x\\t.exe", "windows: a lower-case drive letter");
     var posix_on_win = which_candidates("/usr/bin:/bin", "sh", 1);
     assert_eq(vec_len(posix_on_win), 0, "windows: a POSIX PATH finds nothing");
     return 0;
@@ -107,6 +191,29 @@ fn test_run_echo() {
     # Output should contain "hello"
     var sdata = str_data(result);
     assert(memeq(sdata, "hello", 5) == 1, "echo output");
+    return 0;
+}
+
+# A run keeps what the tool printed, not its 1 MiB capture buffer (2.5.5):
+# through 2.5.4 each run kept 1 052 000 bytes of heap for good.
+fn test_run_tool_keeps_only_output() {
+    var w = vec_new();
+    run_tool1("echo", "warm", w);
+    var a0 = alloc_used();
+    var i = 0;
+    var ok = 1;
+    while (i < 4) {
+        var o = run_tool1("echo", "hi", w);
+        if (o == 0) { ok = 0; }
+        elif (str_len(o) != 3 || memeq(str_data(o), "hi\n", 3) != 1 || load8(str_data(o) + 3) != 0) { ok = 0; }
+        i = i + 1;
+    }
+    assert((alloc_used() - a0) / 4 < 65536, "run_tool: the 1 MiB capture buffer is not kept");
+    assert_eq(ok, 1, "run_tool: output intact and NUL-terminated");
+    var e = run_tool("true", vec_new(), w);
+    assert(e != 0 && str_len(e) == 0, "true: an empty Str");
+    if (e != 0) { assert_eq(load8(str_data(e)), 0, "true: NUL-terminated"); }
+    assert_eq(vec_len(w), 0, "run_tool keeps output: no warnings");
     return 0;
 }
 
@@ -189,9 +296,15 @@ fn test_run_tool_deadline() {
     var args = vec_new();
     vec_push(args, "-c");
     vec_push(args, "exec sleep 5");
+    var t0 = _now_ms();
     var result = run_tool("sh", args, warnings);
+    var elapsed = _now_ms() - t0;
     CMD_DEFAULT_TIMEOUT_MS = saved;
     assert_eq(result, 0, "silent tool past the deadline returns 0");
+    # What a hung tool costs on POSIX (command.cyr's header): the idle cut,
+    # a second deadline's wait, then TERM, which sleep honours at once.
+    assert(elapsed >= 2 * 300, "deadline: the read cut and the wait both ran");
+    assert(elapsed < 3 * 300 + 500, "deadline: about twice the bound for a tool that honours TERM");
     assert_eq(vec_len(warnings), 1, "deadline: 1 warning");
     if (vec_len(warnings) > 0) {
         var w = vec_get(warnings, 0);
@@ -218,6 +331,69 @@ fn test_run_tool_output_cap() {
     if (vec_len(warnings) > 0) {
         assert_eq(warning_code(vec_get(warnings, 0)), HWA_ERR_PARSE, "cut-short warning");
     }
+    return 0;
+}
+
+# --- Captures on several threads (2.5.5) ---
+# lib/process.cyr's capture state is shared between threads (cmd_capture), so
+# captures take turns. Through 2.5.4 these two failed on every run: the
+# healthy tool beside a hung one was reported as a timeout and its output
+# dropped, and a tool started during another thread's capture held that
+# capture's pipe.
+
+fn _t_hung_entry(warns) {
+    run_tool2("sh", "-c", "exec sleep 5", warns);
+    return 0;
+}
+
+fn test_run_tool_threaded_cut() {
+    var saved = CMD_DEFAULT_TIMEOUT_MS;
+    CMD_DEFAULT_TIMEOUT_MS = 300;
+    var bw = vec_new();
+    var t = thread_create(&_t_hung_entry, bw);
+    var w = vec_new();
+    var out = run_tool2("sh", "-c", "for i in 1 2 3 4 5 6 7 8; do echo x; sleep 0.1; done", w);
+    if (t != 0) { thread_join(t); }
+    CMD_DEFAULT_TIMEOUT_MS = saved;
+    assert(t != 0, "threaded cut: thread started");
+    assert(out != 0, "threaded cut: the healthy tool's output is kept");
+    if (out != 0) { assert_eq(str_len(out), 16, "threaded cut: all of it"); }
+    assert_eq(vec_len(w), 0, "threaded cut: the healthy tool has no warning");
+    assert_eq(vec_len(bw), 1, "threaded cut: the hung tool is reported");
+    if (vec_len(bw) > 0) {
+        assert_eq(warning_code(vec_get(bw, 0)), HWA_ERR_TIMEOUT, "threaded cut: as a timeout");
+    }
+    assert_eq(proc_timeout_ms(), 0, "threaded cut: the caller's deadline restored");
+    return 0;
+}
+
+fn _t_hold_capture(arg) {
+    run_tool1("sleep", "1", 0);
+    return 0;
+}
+
+# How many "pipe:" fd links an `ls -l /proc/self/fd` listing shows.
+fn _t_count_pipes(out) {
+    if (out == 0) { return 0 - 1; }
+    var d = str_data(out);
+    var n = str_len(out);
+    var c = 0;
+    var i = 0;
+    while (i + 5 <= n) {
+        if (memeq(d + i, "pipe:", 5) == 1) { c = c + 1; }
+        i = i + 1;
+    }
+    return c;
+}
+
+fn test_capture_pipe_not_inherited() {
+    var base = _t_count_pipes(run_tool2("ls", "-l", "/proc/self/fd", 0));
+    assert(base >= 1, "ls sees its own capture pipe");
+    var t = thread_create(&_t_hold_capture, 0);
+    syscall(7, 0, 0, 200);   # the other thread's capture (sleep 1) is in flight
+    var during = _t_count_pipes(run_tool2("ls", "-l", "/proc/self/fd", 0));
+    if (t != 0) { thread_join(t); }
+    assert_eq(during, base, "a tool does not hold another thread's capture pipe");
     return 0;
 }
 
@@ -270,6 +446,53 @@ fn test_validate_memory_mb() {
     return 0;
 }
 
+# 2.5.5: parse_field_int is strict, where str_to_int gathers every digit.
+fn test_parse_field_int() {
+    assert_eq(parse_field_int(str_from("0")), 0, "field 0");
+    assert_eq(parse_field_int(str_from("81920")), 81920, "field 81920");
+    assert_eq(parse_field_int(str_from("999999999999999999")), 999999999999999999, "18 digits");
+    assert_eq(parse_field_int(str_from("1000000000000000000")), 0 - 1, "19 digits");
+    assert_eq(parse_field_int(str_from("")), 0 - 1, "empty field");
+    assert_eq(parse_field_int(str_from("[N/A]")), 0 - 1, "[N/A], not 0");
+    assert_eq(parse_field_int(str_from("1.5")), 0 - 1, "1.5, not 15");
+    assert_eq(parse_field_int(str_from("-3")), 0 - 1, "negative");
+    assert_eq(parse_field_int(str_from("0x10")), 0 - 1, "hex");
+    assert_eq(parse_field_int(0), 0 - 1, "null field");
+    return 0;
+}
+
+fn test_parse_decimal_x1000() {
+    assert_eq(parse_decimal_x1000(str_from("64.67")), 64670, "64.67");
+    assert_eq(parse_decimal_x1000(str_from("4.32")), 4320, "4.32");
+    assert_eq(parse_decimal_x1000(str_from("120.5")), 120500, "120.5");
+    assert_eq(parse_decimal_x1000(str_from("450")), 450000, "450");
+    assert_eq(parse_decimal_x1000(str_from("1.23456")), 1234, "fraction past 3 digits dropped");
+    assert_eq(parse_decimal_x1000(str_from("70.")), 70000, "trailing point");
+    assert_eq(parse_decimal_x1000(str_from("0.00")), 0, "zero");
+    assert_eq(parse_decimal_x1000(str_from(" 2.5 GT/s PCIe")), 2500, "leading blank, unit after");
+    assert_eq(parse_decimal_x1000(str_from("\t26.562 GB/s")), 26562, "leading tab");
+    assert_eq(parse_decimal_x1000(str_from("[N/A]")), 0 - 1, "[N/A]");
+    assert_eq(parse_decimal_x1000(str_from("<inactive>")), 0 - 1, "<inactive>");
+    assert_eq(parse_decimal_x1000(str_from(".5")), 0 - 1, "no whole part");
+    assert_eq(parse_decimal_x1000(str_from("")), 0 - 1, "empty");
+    assert_eq(parse_decimal_x1000(str_from("   ")), 0 - 1, "blanks only");
+    assert_eq(parse_decimal_x1000(str_from("99999999999999")), 0 - 1, "past 1e12");
+    assert_eq(parse_decimal_x1000(0), 0 - 1, "null");
+    return 0;
+}
+
+fn test_str_leading_uint() {
+    assert_eq(str_leading_uint(str_from(" 42 W")), 42, "leading blank");
+    assert_eq(str_leading_uint(str_from("7")), 7, "single digit");
+    assert_eq(str_leading_uint(str_from("2.5")), 2, "stops at the point");
+    assert_eq(str_leading_uint(str_from("0x10")), 0, "stops at x");
+    assert_eq(str_leading_uint(str_from("[N/A]")), 0 - 1, "[N/A]");
+    assert_eq(str_leading_uint(str_from("")), 0 - 1, "empty");
+    assert_eq(str_leading_uint(str_from("1234567890123456789")), 0 - 1, "19 digits");
+    assert_eq(str_leading_uint(0), 0 - 1, "null");
+    return 0;
+}
+
 # --- sysfs tests ---
 
 fn test_sysfs_read_proc() {
@@ -317,6 +540,28 @@ fn test_sysfs_read_cap() {
     return 0;
 }
 
+# A read keeps only its bytes (2.5.5): through 2.5.4 each one kept a 4 KiB
+# buffer, a missing file's included.
+fn test_sysfs_read_right_sized() {
+    var t = _fx_dir();
+    var p = _fx_file(t, "ostype", "Linux\n", 0x1A4);
+    var miss = sysfs_path(t, "absent", 0);
+    var a0 = alloc_used();
+    var i = 0;
+    var ok = 1;
+    while (i < 8) {
+        var s = sysfs_read(p);
+        if (s == 0) { ok = 0; }
+        elif (str_len(s) != 5 || memeq(str_data(s), "Linux", 5) != 1 || load8(str_data(s) + 5) != 0) { ok = 0; }
+        if (sysfs_read(miss) != 0) { ok = 0; }
+        i = i + 1;
+    }
+    assert((alloc_used() - a0) / 8 < 256, "sysfs_read: a read keeps only its bytes");
+    assert_eq(ok, 1, "sysfs_read: newline trimmed, NUL-terminated, missing file 0");
+    _fx_rm(t);
+    return 0;
+}
+
 fn test_path_exists() {
     assert_eq(aihw_path_exists("/proc/self/status"), 1, "/proc/self/status exists");
     assert_eq(aihw_path_exists("/nonexistent_xyz"), 0, "nonexistent path");
@@ -330,6 +575,142 @@ fn test_detect_system_memory() {
     assert(mem > 0, "system memory > 0");
     # Should be at least 512 MB
     assert(mem > 512 * 1024 * 1024, "system memory > 512 MB");
+    return 0;
+}
+
+# MemTotal from a /proc/meminfo image, and the cgroup limit that caps it
+# inside a container (2.5.5). Through 2.5.4 a pod limited to 512 MiB on a
+# 64 GB host reported 64 GB.
+fn test_meminfo_total_bytes() {
+    var mi = "MemTotal:       62661168 kB\nMemFree:         1000 kB\n";
+    assert_eq(meminfo_total_bytes(mi, strlen(mi)), 62661168 * 1024, "meminfo: MemTotal");
+    var mi2 = "MemFree: 5 kB\nMemTotal: 2048 kB\n";
+    assert_eq(meminfo_total_bytes(mi2, strlen(mi2)), 2048 * 1024, "meminfo: MemTotal not first");
+    var mi3 = "MemFree: 5 kB\n";
+    assert_eq(meminfo_total_bytes(mi3, strlen(mi3)), 0, "meminfo: no MemTotal");
+    var mi4 = "MemTot";
+    assert_eq(meminfo_total_bytes(mi4, strlen(mi4)), 0, "meminfo: cut inside the key");
+    return 0;
+}
+
+fn test_cgroup_limit_parse() {
+    assert_eq(cgroup_limit_parse("max\n", 4), 0, "cgroup v2 max: no limit");
+    assert_eq(cgroup_limit_parse("536870912\n", 10), 536870912, "cgroup v2: 512 MiB");
+    assert_eq(cgroup_limit_parse("9223372036854771712\n", 20), 0, "cgroup v1 unlimited");
+    assert_eq(cgroup_limit_parse("99999999999999999999999\n", 24), 0, "overflow: no limit");
+    assert_eq(cgroup_limit_parse("", 0), 0, "empty: no limit");
+    assert_eq(cgroup_limit_parse("12x", 3), 12, "stops at a non-digit");
+    return 0;
+}
+
+fn test_cgroup_mem_limit_bytes() {
+    var v2 = _fx_dir();
+    _fx_file(v2, "memory.max", "536870912\n", 0x1A4);
+    assert_eq(cgroup_mem_limit_bytes(v2), 536870912, "cgroup v2 memory.max");
+    var v2max = _fx_dir();
+    _fx_file(v2max, "memory.max", "max\n", 0x1A4);
+    assert_eq(cgroup_mem_limit_bytes(v2max), 0, "cgroup v2 max: no limit");
+    var v1 = _fx_dir();
+    sys_mkdir(sysfs_path(v1, "memory", 0), 0x1ED);
+    _fx_file(v1, "memory/memory.limit_in_bytes", "1073741824\n", 0x1A4);
+    assert_eq(cgroup_mem_limit_bytes(v1), 1073741824, "cgroup v1 limit");
+    var v1u = _fx_dir();
+    sys_mkdir(sysfs_path(v1u, "memory", 0), 0x1ED);
+    _fx_file(v1u, "memory/memory.limit_in_bytes", "9223372036854771712\n", 0x1A4);
+    assert_eq(cgroup_mem_limit_bytes(v1u), 0, "cgroup v1 unlimited");
+    assert_eq(cgroup_mem_limit_bytes("/nonexistent-aihw-cgroup"), 0, "no cgroup fs: no limit");
+    _fx_rm(v2);
+    _fx_rm(v2max);
+    _fx_rm(v1);
+    _fx_rm(v1u);
+    return 0;
+}
+
+# --- /dev scans (2.5.5) ---
+
+fn _dev_id(name, prefix) {
+    return dev_entry_id(name, strlen(name), prefix);
+}
+
+fn test_dev_entry_id() {
+    assert_eq(_dev_id("ipu0", "ipu"), 0, "dev id: ipu0");
+    assert_eq(_dev_id("ipu12", "ipu"), 12, "dev id: ipu12");
+    assert_eq(_dev_id("neuron3", "neuron"), 3, "dev id: neuron3");
+    assert_eq(_dev_id("neuron1023", "neuron"), 1023, "dev id: 4 digits");
+    assert_eq(_dev_id("ipu-psys0", "ipu"), 0 - 1, "dev id: the Intel IPU6 camera node");
+    assert_eq(_dev_id("ipu7-psys0", "ipu"), 0 - 1, "dev id: the IPU7 camera node");
+    assert_eq(_dev_id("ipu0_ex", "ipu"), 0 - 1, "dev id: a Graphcore companion node");
+    assert_eq(_dev_id("neuron", "neuron"), 0 - 1, "dev id: bare prefix");
+    assert_eq(_dev_id("neuron_x", "neuron"), 0 - 1, "dev id: non-digit suffix");
+    assert_eq(_dev_id("neuron12345", "neuron"), 0 - 1, "dev id: 5 digits");
+    assert_eq(_dev_id("nvme0", "ipu"), 0 - 1, "dev id: other prefix");
+    return 0;
+}
+
+# 1 if vec `ids` holds `id`.
+fn _has_id(ids, id) {
+    var i = 0;
+    while (i < vec_len(ids)) {
+        if (vec_get(ids, i) == id) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn test_dev_dir_scan() {
+    var t = _fx_dir();
+    var names = vec_new();
+    vec_push(names, "ipu0");
+    vec_push(names, "ipu1");
+    vec_push(names, "ipu-psys0");
+    vec_push(names, "ipu7-psys0");
+    vec_push(names, "ipu");
+    vec_push(names, "video0");
+    vec_push(names, "qaic_aic100_0");
+    vec_push(names, "neuron_x");
+    vec_push(names, "neuron3");
+    var i = 0;
+    while (i < vec_len(names)) {
+        _fx_file(t, vec_get(names, i), "", 0x1A4);
+        i = i + 1;
+    }
+    var ids = vec_new();
+    assert_eq(dev_dir_scan(t, "ipu", ids), 2, "dev scan: an IPU6 camera node is no Graphcore IPU");
+    assert_eq(_has_id(ids, 0) + _has_id(ids, 1), 2, "dev scan: ipu0 and ipu1");
+    var nids = vec_new();
+    assert_eq(dev_dir_scan(t, "neuron", nids), 1, "dev scan: neuron3, not neuron_x");
+    assert_eq(dev_dir_scan(t, "qaic_", 0), 1, "dev presence: qaic_aic100_0 (any suffix)");
+    assert_eq(dev_dir_scan(t, "qaic_", vec_new()), 0, "dev scan: qaic_aic100_0 has no bare id");
+    assert_eq(dev_dir_scan(t, "groq", 0), 0, "dev presence: none");
+    assert_eq(dev_dir_scan("/nonexistent-aihw-dev", "ipu", 0), 0, "dev scan: no directory");
+    var a0 = alloc_used();
+    dev_dir_scan(t, "zzz", 0);
+    assert(alloc_used() - a0 < 64, "dev scan: the listing is not kept on the heap");
+    _fx_rm(t);
+    # A directory past the stack buffers' 2048 entries is still scanned whole.
+    var big = _fx_dir();
+    var j = 0;
+    while (j < 2100) {
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, "n");
+        str_builder_add_int(sb, j);
+        _fx_file(big, str_data(str_builder_build(sb)), "", 0x1A4);
+        j = j + 1;
+    }
+    assert_eq(dev_dir_scan(big, "n", vec_new()), 2100, "dev scan: 2100 entries, through dir_list");
+    _fx_rm(big);
+    return 0;
+}
+
+# --- Data directory (2.5.5) ---
+
+fn test_data_dir_set() {
+    data_dir_set("/opt/aihw");
+    assert_streq(data_file_path("VERSION"), "/opt/aihw/VERSION", "data_dir_set: the dir it was given");
+    data_dir_set(0);
+    if (cmd_getenv("AI_HWACCEL_DATA_DIR") == 0) {
+        assert_streq(data_file_path("VERSION"), "VERSION", "no dir set: cwd-relative");
+    }
     return 0;
 }
 
@@ -367,6 +748,7 @@ alloc_init();
 
 test_which_echo();
 test_which_missing();
+test_which_in_executables_only();
 test_which_candidates_posix();
 test_tool_exit_warning();
 test_run_tool_exit_status();
@@ -376,21 +758,34 @@ test_parse_csv_line();
 test_parse_csv_too_few();
 test_validate_device_id();
 test_validate_memory_mb();
+test_parse_field_int();
+test_parse_decimal_x1000();
+test_str_leading_uint();
 test_sysfs_read_proc();
 test_sysfs_read_int();
 test_sysfs_read_missing();
 test_sysfs_read_cap();
+test_sysfs_read_right_sized();
 test_path_exists();
 test_detect_system_memory();
+test_meminfo_total_bytes();
+test_cgroup_limit_parse();
+test_cgroup_mem_limit_bytes();
+test_dev_entry_id();
+test_dev_dir_scan();
+test_data_dir_set();
 test_sysfs_path();
 test_parse_value_suffix();
 # 2.5.1: the subprocess tests run again. They were skipped while
 # exec_capture hung inside a test binary, which no longer happens on cyrius
 # 6.7.18.
 test_run_echo();
+test_run_tool_keeps_only_output();
 test_run_missing_tool();
 test_run_tool_deadline();
 test_run_tool_output_cap();
+test_run_tool_threaded_cut();
+test_capture_pipe_not_inherited();
 
 var fails = assert_summary();
 syscall(60, fails);

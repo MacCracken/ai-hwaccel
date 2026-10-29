@@ -34,6 +34,13 @@ include "src/system_io.cyr"
 include "src/detect/platform.cyr"
 include "src/detect/command.cyr"
 include "src/registry.cyr"
+
+# cost.cyr's cost_to_json writes through json_out.cyr, which this unit does
+# not need (it reads the catalogues only).
+fn _json_str(sb, key, val, comma) { return 0; }
+fn _json_int(sb, key, val, comma) { return 0; }
+
+include "src/cost.cyr"
 include "src/model.cyr"
 
 # Stub detectors — registry.cyr references them but this unit never detects.
@@ -46,19 +53,19 @@ fn detect_vulkan_opts(p, w, a, l) { return 0; }
 fn detect_intel_npu(p, w) { return 0; }
 fn detect_amd_xdna(p, w) { return 0; }
 fn detect_tpu(p, w) { return 0; }
-fn detect_gaudi(p, w) { return 0; }
-fn detect_neuron(p, w) { return 0; }
+fn detect_gaudi_opts(p, w, a) { return 0; }
+fn detect_neuron_opts(p, w, a) { return 0; }
 fn detect_intel_oneapi(p, w) { return 0; }
 fn detect_qualcomm(p, w) { return 0; }
-fn detect_cerebras(p, w) { return 0; }
-fn detect_graphcore(p, w) { return 0; }
+fn detect_cerebras_opts(p, w, a) { return 0; }
+fn detect_graphcore_opts(p, w, a) { return 0; }
 fn detect_groq(p, w) { return 0; }
 fn detect_samsung_npu(p, w) { return 0; }
 fn detect_mediatek_apu(p, w) { return 0; }
 fn enrich_bandwidth(p) { return 0; }
 fn enrich_pcie(p) { return 0; }
 fn enrich_numa(p) { return 0; }
-fn detect_interconnects(s, p, w) { return 0; }
+fn detect_interconnects_opts(s, p, w, a) { return 0; }
 fn detect_storage(s) { return 0; }
 fn detect_environment(s) { return 0; }
 

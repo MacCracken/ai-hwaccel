@@ -1,15 +1,105 @@
 # plan.cyr — sharding and workload planning logic
 # Strategy selection: single device -> tensor parallel -> pipeline parallel
 
+# Largest TPU slice a plan tensor-parallelises over: a full Ironwood pod
+# (9216 chips; a v5p pod is 8960). Case 2 makes one shard per chip, and a
+# registry rebuilt from JSON can claim any tpu_chips.
+enum PlanLimits {
+    PLAN_MAX_TPU_CHIPS = 9216;
+}
+
 # Estimate tokens/sec for a single device
-# Returns x1000 fixed-point
+# Returns x1000 fixed-point. `accel_type` is unused; the signature is public.
 fn estimate_tps_x1000(accel_type, tput_x1000, model_params, quant) {
-    if (model_params == 0) { return 0; }
-    # base = 1B / model_params (tok/s at 1B params baseline)
-    # Scale by throughput multiplier and quant speedup
-    var base_x1000 = TOKENS_PER_SEC_BASE * 1000 / model_params;
+    if (model_params <= 0) { return 0; }
+    # tok/s = (1B / model_params) * throughput multiplier * quant speedup,
+    # multiplied out before the one division so a large model keeps its
+    # precision (through 2.5.4, 405B on Metal lost 19% and > 1T gave 0).
+    # 1e6 * tput * quant (<= 8000) stays in i64 for tput <= 1e9; only a
+    # hand-built profile claims more.
+    var t = tput_x1000;
+    if (t > 1000000000) { t = 1000000000; }
     var quant_x1000 = quant_reduction_x1000(quant);
-    return base_x1000 * tput_x1000 / 1000 * quant_x1000 / 1000;
+    return TOKENS_PER_SEC_BASE / 1000 * t * quant_x1000 / model_params;
+}
+
+# Layers of `per_layer` bytes that device `d` holds, at most `est_layers`.
+fn _pp_layer_cap(d, per_layer, est_layers) {
+    var c = profile_memory_bytes(d) / per_layer;
+    if (c < 0) { return 0; }
+    if (c > est_layers) { return est_layers; }
+    return c;
+}
+
+# Pipeline parallel over `devs`: layers in proportion to each device's
+# memory and never more than it holds, each shard reporting the memory of
+# its own layers. Through 2.5.4 every stage got needed/n bytes and the last
+# one the whole layer remainder, so a small card (an 8 GiB dGPU beside a
+# shared-memory iGPU) was handed more than it has. 0 when whole layers
+# cannot be placed.
+fn _plan_pipeline(devs, needed, model_params, quant, max_bw) {
+    var n = vec_len(devs);
+    var est_layers = model_params / PARAMS_PER_LAYER_ESTIMATE;
+    if (est_layers < 1) { est_layers = 1; }
+    # No more layers than the largest model the CLI takes, so the split's
+    # layers * capacity product stays in i64.
+    var max_layers = MODEL_PARAMS_MAX / PARAMS_PER_LAYER_ESTIMATE;
+    if (est_layers > max_layers) { est_layers = max_layers; }
+    var per_layer = needed / est_layers;
+    if (needed > per_layer * est_layers) { per_layer = per_layer + 1; }
+
+    var sum_cap = 0;
+    var i = 0;
+    while (i < n) {
+        sum_cap = sum_cap + _pp_layer_cap(vec_get(devs, i), per_layer, est_layers);
+        i = i + 1;
+    }
+    if (sum_cap < est_layers) { return 0; }
+
+    # Floor shares leave fewer than n layers over. Every device with room
+    # has a share below its capacity unless the pool is exactly full, so one
+    # extra layer each to the first devices with room places all of them.
+    var assigned = 0;
+    i = 0;
+    while (i < n) {
+        assigned = assigned + est_layers * _pp_layer_cap(vec_get(devs, i), per_layer, est_layers) / sum_cap;
+        i = i + 1;
+    }
+    var rem = est_layers - assigned;
+
+    var sp = sharding_plan_new(SHARD_PIPELINE, 0);
+    var stages = 0;
+    var lnext = 0;
+    var slowest = 999999000;
+    i = 0;
+    while (i < n) {
+        var d = vec_get(devs, i);
+        i = i + 1;
+        var cap = _pp_layer_cap(d, per_layer, est_layers);
+        var lc = est_layers * cap / sum_cap;
+        if (rem > 0 && lc < cap) {
+            lc = lc + 1;
+            rem = rem - 1;
+        }
+        if (lc == 0) { continue; }
+        var ms = model_shard_new(stages, lnext, lnext + lc - 1,
+          profile_accel_type(d), profile_device_id(d), lc * per_layer);
+        plan_add_shard(sp, ms);
+        lnext = lnext + lc;
+        stages = stages + 1;
+        var st = profile_throughput_x1000(d);
+        if (st < slowest) { slowest = st; }
+    }
+    plan_set_strategy_count(sp, stages);
+    plan_set_total_memory(sp, needed);
+
+    # Steady state: each stage runs at the slowest stage's per-device rate.
+    var ic_eff = PP_PCIE_ONLY_EFFICIENCY_X1000;
+    if (max_bw > 0) { ic_eff = PP_HIGH_BW_EFFICIENCY_X1000; }
+    var per_stage = estimate_tps_x1000(
+      profile_accel_type(vec_get(devs, 0)), slowest, model_params, quant);
+    plan_set_est_tps_x1000(sp, per_stage * ic_eff / 1000 * stages);
+    return sp;
 }
 
 # Generate a sharding plan for a model
@@ -23,7 +113,9 @@ fn reg_plan_sharding(r, model_params, quant) {
     var best = reg_best_available(r);
     if (best == 0) {
         hwlog_warn("plan: no available accelerator, defaulting to data-parallel");
-        return sharding_plan_new(SHARD_DATA, 0);
+        var sp0 = sharding_plan_new(SHARD_DATA, 0);
+        plan_set_fits(sp0, 0);
+        return sp0;
     }
 
     # Case 1: fits on single best device
@@ -44,6 +136,7 @@ fn reg_plan_sharding(r, model_params, quant) {
     var tpu_devs = vec_new();
     var tpu_mem = 0;
     var tpu_chips = 0;
+    var tpu_chip_mem = HW_I64_MAX;
     var tpu_min_tput = 999999000;
     var gpu_devs = vec_new();
     var gpu_mem = 0;
@@ -57,9 +150,15 @@ fn reg_plan_sharding(r, model_params, quant) {
         var at = profile_accel_type(p);
 
         if (at == ACCEL_TPU) {
+            # An unknown chip count is one chip; an absurd one is a pod.
+            var chips = profile_tpu_chips(p);
+            if (chips < 1) { chips = 1; }
+            if (chips > PLAN_MAX_TPU_CHIPS) { chips = PLAN_MAX_TPU_CHIPS; }
             vec_push(tpu_devs, p);
             tpu_mem = tpu_mem + profile_memory_bytes(p);
-            tpu_chips = tpu_chips + profile_tpu_chips(p);
+            tpu_chips = tpu_chips + chips;
+            var cm = profile_memory_bytes(p) / chips;
+            if (cm < tpu_chip_mem) { tpu_chip_mem = cm; }
             var tt = profile_throughput_x1000(p);
             if (tt < tpu_min_tput) { tpu_min_tput = tt; }
         }
@@ -68,26 +167,26 @@ fn reg_plan_sharding(r, model_params, quant) {
             gpu_mem = gpu_mem + profile_memory_bytes(p);
         }
     }
+    if (tpu_chips > PLAN_MAX_TPU_CHIPS) { tpu_chips = PLAN_MAX_TPU_CHIPS; }
 
-    # Case 2: TPU tensor parallel
+    # Case 2: TPU tensor parallel. Every chip holds an equal slice, so the
+    # slice has to fit the smallest chip, not only the pooled memory.
     if (vec_len(tpu_devs) > 0 && tpu_mem >= needed) {
-        if (tpu_chips < 1) { tpu_chips = 1; }
         var per_chip = needed / tpu_chips;
         if (needed > per_chip * tpu_chips) { per_chip = per_chip + 1; }
-
-        var sp = sharding_plan_new(SHARD_TENSOR, tpu_chips);
-        var ci = 0;
-        while (ci < tpu_chips) {
-            var tp = vec_get(tpu_devs, 0);
-            var ms = model_shard_new(ci, 0, 0, ACCEL_TPU, ci, per_chip);
-            plan_add_shard(sp, ms);
-            ci = ci + 1;
+        if (per_chip <= tpu_chip_mem) {
+            var sp = sharding_plan_new(SHARD_TENSOR, tpu_chips);
+            var ci = 0;
+            while (ci < tpu_chips) {
+                var ms = model_shard_new(ci, 0, 0, ACCEL_TPU, ci, per_chip);
+                plan_add_shard(sp, ms);
+                ci = ci + 1;
+            }
+            plan_set_total_memory(sp, needed);
+            var per_tpu = estimate_tps_x1000(ACCEL_TPU, tpu_min_tput, model_params, quant);
+            plan_set_est_tps_x1000(sp, per_tpu * TPU_TP_ICI_BONUS_X1000 / 1000 * tpu_chips);
+            return sp;
         }
-        plan_set_total_memory(sp, needed);
-        var quant_x1000 = quant_reduction_x1000(quant);
-        var tps = tpu_min_tput * tpu_chips * quant_x1000 / 1000 * TPU_TP_ICI_BONUS_X1000 / 1000;
-        plan_set_est_tps_x1000(sp, tps);
-        return sp;
     }
 
     # Case 3: GPU/ASIC multi-device
@@ -105,11 +204,22 @@ fn reg_plan_sharding(r, model_params, quant) {
             use_tp = 1;
         }
 
+        # Tensor parallel puts an equal slice on every device: it needs one
+        # kind of device, and the slice has to fit the smallest of them
+        # (2.5.4 put 56 GB of a 70B model on a 24 GiB iGPU beside two H100s).
+        var per_dev = needed / num_devs;
+        if (needed > per_dev * num_devs) { per_dev = per_dev + 1; }
+        var t0 = profile_accel_type(vec_get(gpu_devs, 0));
         if (use_tp == 1) {
-            # Tensor parallel
-            var per_dev = needed / num_devs;
-            if (needed > per_dev * num_devs) { per_dev = per_dev + 1; }
+            var ti = 0;
+            while (ti < num_devs) {
+                var tq = vec_get(gpu_devs, ti);
+                if (profile_accel_type(tq) != t0 || per_dev > profile_memory_bytes(tq)) { use_tp = 0; }
+                ti = ti + 1;
+            }
+        }
 
+        if (use_tp == 1) {
             var sp = sharding_plan_new(SHARD_TENSOR, num_devs);
             var di = 0;
             while (di < num_devs) {
@@ -122,7 +232,7 @@ fn reg_plan_sharding(r, model_params, quant) {
             }
             plan_set_total_memory(sp, needed);
 
-            # Throughput: slowest device * num_devices * quant * IC bonus
+            # Throughput: slowest device's rate * num_devices * IC bonus
             var slowest = 999999000;
             di = 0;
             while (di < num_devs) {
@@ -130,7 +240,6 @@ fn reg_plan_sharding(r, model_params, quant) {
                 if (gt < slowest) { slowest = gt; }
                 di = di + 1;
             }
-            var quant_x1000 = quant_reduction_x1000(quant);
             var ic_bonus = 1000;
             if (has_nvsw == 1) { ic_bonus = NVSWITCH_TP_BONUS_X1000; }
             else {
@@ -138,54 +247,32 @@ fn reg_plan_sharding(r, model_params, quant) {
                 var ic_max = 1000 + MAX_NON_NVSWITCH_TP_BONUS_X1000;
                 if (ic_bonus > ic_max) { ic_bonus = ic_max; }
             }
-            var tps = slowest * num_devs * quant_x1000 / 1000 * ic_bonus / 1000;
-            plan_set_est_tps_x1000(sp, tps);
+            var per_gpu = estimate_tps_x1000(t0, slowest, model_params, quant);
+            plan_set_est_tps_x1000(sp, per_gpu * ic_bonus / 1000 * num_devs);
             return sp;
         }
 
-        # Pipeline parallel
-        var num_stages = num_devs;
-        var per_shard = needed / num_stages;
-        if (needed > per_shard * num_stages) { per_shard = per_shard + 1; }
-        var est_layers = model_params / PARAMS_PER_LAYER_ESTIMATE;
-        if (est_layers < 1) { est_layers = 1; }
-        var layers_per = est_layers / num_stages;
-        if (layers_per < 1) { layers_per = 1; }
-
-        var sp = sharding_plan_new(SHARD_PIPELINE, num_stages);
-        var si = 0;
-        while (si < num_stages) {
-            var gp2 = vec_get(gpu_devs, si);
-            var lstart = si * layers_per;
-            if (lstart >= est_layers) { lstart = est_layers - 1; }
-            var lend = lstart + layers_per - 1;
-            if (si == num_stages - 1) { lend = est_layers - 1; }
-            if (lend >= est_layers) { lend = est_layers - 1; }
-            var pat = profile_accel_type(gp2);
-            var pdid = profile_device_id(gp2);
-            var ms = model_shard_new(si, lstart, lend, pat, pdid, per_shard);
-            plan_add_shard(sp, ms);
-            si = si + 1;
-        }
-        plan_set_total_memory(sp, needed);
-
-        var slowest2 = 999999000;
-        si = 0;
-        while (si < num_stages) {
-            var st = profile_throughput_x1000(vec_get(gpu_devs, si));
-            if (st < slowest2) { slowest2 = st; }
-            si = si + 1;
-        }
-        var quant_x2 = quant_reduction_x1000(quant);
-        var ic_eff = PP_PCIE_ONLY_EFFICIENCY_X1000;
-        if (max_bw > 0) { ic_eff = PP_HIGH_BW_EFFICIENCY_X1000; }
-        var tps2 = slowest2 * num_stages * quant_x2 / 1000 * ic_eff / 1000;
-        plan_set_est_tps_x1000(sp, tps2);
-        return sp;
+        var spp = _plan_pipeline(gpu_devs, needed, model_params, quant, max_bw);
+        if (spp != 0) { return spp; }
     }
 
-    # Case 4: CPU fallback
+    # Case 4: CPU fallback. It fits only when the largest available CPU
+    # profile holds the whole model; otherwise the plan says so (through
+    # 2.5.4 it looked exactly like a plan that fits).
+    var cpu_mem = 0;
+    i = 0;
+    while (i < n) {
+        var cp = vec_get(profs, i);
+        i = i + 1;
+        if (profile_available(cp) != 1) { continue; }
+        if (profile_accel_type(cp) != ACCEL_CPU) { continue; }
+        if (profile_memory_bytes(cp) > cpu_mem) { cpu_mem = profile_memory_bytes(cp); }
+    }
     var sp = sharding_plan_new(SHARD_NONE, 1);
+    if (needed > cpu_mem) {
+        hwlog_warn("plan: the model does not fit in accelerator or CPU memory");
+        plan_set_fits(sp, 0);
+    }
     var ms = model_shard_new(0, 0, 0, ACCEL_CPU, 0, needed);
     plan_add_shard(sp, ms);
     plan_set_total_memory(sp, needed);

@@ -13,12 +13,23 @@
 # convention; constructor stays `lazy_new`. The `probed` field is
 # an i64 bitmask (bit 0 = CPU probed, 1 = GPU, 2 = NPU, 3 = TPU,
 # 4 = AI_ASIC) — getter returns the raw mask, bit-manipulation
-# helpers below use `lazy_probed` + `lazy_set_probed` plus a small
-# inline mask compute. `backends` (2.3.26) is a builder mask of the
-# backends already run, so a backend whose profiles span two families
-# runs once however the families are queried. `warnings` (2.5.2) holds
-# the probes' diagnostics, which lazy_into_registry hands to its
-# registry; read it with lazy_warnings(lr) after lazy_by_family.
+# helpers below use `lazy_probed` + `lazy_set_probed` plus a shift.
+# `backends` (2.3.26) is a builder mask of the backends already run, so a
+# backend whose profiles span two families runs once however the families
+# are queried. `warns` (2.5.2; `warnings` through 2.5.4, renamed so that
+# lazy_warnings can be the locked copy) holds the probes' diagnostics, which
+# lazy_into_registry hands to its registry; read them with lazy_warnings(lr)
+# after lazy_by_family.
+#
+# A lazy registry may be shared between threads: every call below takes its
+# mutex, and what it hands out is a copy (2.5.5). The derived lazy_profiles
+# and lazy_warns getters are the live vecs, which a probe grows and then
+# compacts in place (profiles_dedup); they are for this file. Through 2.5.4
+# lazy_probed_profiles and lazy_warnings returned those vecs, so a reader on
+# another thread could index past a probe's vec_truncate, and vec_get's
+# abort exited its thread. The profiles themselves are shared: a later probe
+# may still rename one or set its memory (profiles_dedup), each an 8-byte
+# store.
 
 #derive(accessors)
 struct lazy {
@@ -26,11 +37,11 @@ struct lazy {
     probed;
     mutex;
     backends;
-    warnings;
+    warns;
 }
 
 fn lazy_new() {
-    var lr = alloc(40);
+    var lr = alloc(sizeof(lazy));
     var profs = vec_new();
     # Always include CPU
     var sys_mem = detect_system_memory();
@@ -40,26 +51,33 @@ fn lazy_new() {
     lazy_set_probed(lr, 1);  # bit 0 = CPU probed
     lazy_set_mutex(lr, mutex_new());
     lazy_set_backends(lr, 0);
-    lazy_set_warnings(lr, vec_new());
+    lazy_set_warns(lr, vec_new());
     return lr;
 }
 
-# Check if family has been probed
-fn _lazy_is_probed(lr, family) {
-    var mask = lazy_probed(lr);
-    var bit = 1;
+# Append every element of vec `src` to vec `dst`.
+fn _lazy_append(dst, src) {
+    var n = vec_len(src);
     var i = 0;
-    while (i < family) { bit = bit * 2; i = i + 1; }
-    return (mask & bit) != 0;
+    while (i < n) {
+        vec_push(dst, vec_get(src, i));
+        i = i + 1;
+    }
+    return 0;
 }
 
-# Mark family as probed
+# Check if family has been probed. A family outside the mask's 64 bits never
+# is: an unguarded `1 << 70` wraps the count on x86 and reads bit 6 (2.5.5;
+# through 2.5.4 a doubling loop ran `family` times, and overflowed to 0).
+fn _lazy_is_probed(lr, family) {
+    if (family < 0 || family > 63) { return 0; }
+    return (lazy_probed(lr) >> family) & 1;
+}
+
+# Mark family as probed (nothing for a family outside the mask).
 fn _lazy_mark_probed(lr, family) {
-    var mask = lazy_probed(lr);
-    var bit = 1;
-    var i = 0;
-    while (i < family) { bit = bit * 2; i = i + 1; }
-    lazy_set_probed(lr, mask | bit);
+    if (family < 0 || family > 63) { return 0; }
+    lazy_set_probed(lr, lazy_probed(lr) | (1 << family));
     return 0;
 }
 
@@ -130,18 +148,13 @@ fn _lazy_ensure(lr, family) {
     lazy_set_backends(lr, lazy_backends(lr) | mask);
     hwlog_span_enter("lazy");
     hwlog_debug_n("lazy: builder_mask=", mask);
-    var warns = lazy_warnings(lr);
+    var warns = lazy_warns(lr);
     var w0 = vec_len(warns);
     var found = vec_new();
     registry_run_detectors(found, warns, mask, 1);
     registry_profile_passes(found);
     var main_profs = lazy_profiles(lr);
-    var nf = vec_len(found);
-    var i = 0;
-    while (i < nf) {
-        vec_push(main_profs, vec_get(found, i));
-        i = i + 1;
-    }
+    _lazy_append(main_profs, found);
     # `found` is already deduplicated; this catches one device seen by two
     # families' probes, such as the Metal GPU from an NPU query (Apple) and
     # its MoltenVK view from a later GPU query (Vulkan).
@@ -152,35 +165,55 @@ fn _lazy_ensure(lr, family) {
     return 0;
 }
 
-# Query profiles by family (probes on first access)
-fn lazy_by_family(lr, family) {
+# The available profiles of `family` (probed on first access), into the
+# caller's vec `out` (emptied first), which is returned: reg_by_family_into's
+# filter, under the lock. A reused `out` keeps its buffer, so a long-lived
+# consumer that queries per request stops allocating (2.5.5).
+fn lazy_by_family_into(lr, family, out) {
     var mtx = lazy_mutex(lr);
     mutex_lock(mtx);
     _lazy_ensure(lr, family);
-    var profs = lazy_profiles(lr);
-    var result = vec_new();
-    var np = vec_len(profs);
-    var i = 0;
-    while (i < np) {
-        var p = vec_get(profs, i);
-        if (profile_available(p) == 1) {
-            if (accel_family(profile_accel_type(p)) == family) {
-                vec_push(result, p);
-            }
-        }
-        i = i + 1;
-    }
+    _profiles_by_family_into(lazy_profiles(lr), family, out);
     mutex_unlock(mtx);
-    return result;
+    return out;
 }
 
-# Get all profiles detected so far (no new detection)
+# Query profiles by family (probes on first access), in a new vec. Allocates
+# a vec per call; repeat queries use lazy_by_family_into.
+fn lazy_by_family(lr, family) {
+    return lazy_by_family_into(lr, family, vec_new());
+}
+
+# How many available profiles of `family` there are (probed on first
+# access), allocating nothing once probed.
+fn lazy_count_by_family(lr, family) {
+    var mtx = lazy_mutex(lr);
+    mutex_lock(mtx);
+    _lazy_ensure(lr, family);
+    var count = _profiles_count_by_family(lazy_profiles(lr), family);
+    mutex_unlock(mtx);
+    return count;
+}
+
+# All profiles detected so far (no new detection): a copy, taken under the
+# lock.
 fn lazy_probed_profiles(lr) {
     var mtx = lazy_mutex(lr);
     mutex_lock(mtx);
-    var profs = lazy_profiles(lr);
+    var out = vec_new();
+    _lazy_append(out, lazy_profiles(lr));
     mutex_unlock(mtx);
-    return profs;
+    return out;
+}
+
+# The probes' warnings so far: a copy, taken under the lock.
+fn lazy_warnings(lr) {
+    var mtx = lazy_mutex(lr);
+    mutex_lock(mtx);
+    var out = vec_new();
+    _lazy_append(out, lazy_warns(lr));
+    mutex_unlock(mtx);
+    return out;
 }
 
 # Probe all families and return a full registry: the probes' profiles and
@@ -194,22 +227,8 @@ fn lazy_into_registry(lr) {
     _lazy_ensure(lr, FAMILY_TPU);
     _lazy_ensure(lr, FAMILY_AI_ASIC);
     var r = hw_registry_new();
-    var rp = reg_profiles(r);
-    var profs = lazy_profiles(lr);
-    var np = vec_len(profs);
-    var i = 0;
-    while (i < np) {
-        vec_push(rp, vec_get(profs, i));
-        i = i + 1;
-    }
-    var rw = reg_warnings(r);
-    var warns = lazy_warnings(lr);
-    var nw = vec_len(warns);
-    i = 0;
-    while (i < nw) {
-        vec_push(rw, vec_get(warns, i));
-        i = i + 1;
-    }
+    _lazy_append(reg_profiles(r), lazy_profiles(lr));
+    _lazy_append(reg_warnings(r), lazy_warns(lr));
     mutex_unlock(mtx);
 
     registry_system_passes(r, 1);

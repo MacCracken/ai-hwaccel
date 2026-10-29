@@ -46,30 +46,100 @@ fn quant_from_bits(bits) {
     return 0 - 1;
 }
 
-# Parse from string name ("fp32", "fp16", "bf16", "int8", "int4")
-# Returns -1 on no match
+# Parse from string name ("fp32", "fp16", "bf16", "int8", "int4") in any
+# letter case ("Int8" and "BF16" too; through 2.5.4 only all-lower or
+# all-upper matched, and the CLI silently planned BF16 for the rest).
+# Returns -1 on no match.
 fn quant_from_str(s) {
-    if (streq(s, "fp32") == 1) { return QUANT_NONE; }
-    if (streq(s, "FP32") == 1) { return QUANT_NONE; }
-    if (streq(s, "fp16") == 1) { return QUANT_FP16; }
-    if (streq(s, "FP16") == 1) { return QUANT_FP16; }
-    if (streq(s, "bf16") == 1) { return QUANT_BF16; }
-    if (streq(s, "BF16") == 1) { return QUANT_BF16; }
-    if (streq(s, "int8") == 1) { return QUANT_INT8; }
-    if (streq(s, "INT8") == 1) { return QUANT_INT8; }
-    if (streq(s, "int4") == 1) { return QUANT_INT4; }
-    if (streq(s, "INT4") == 1) { return QUANT_INT4; }
+    if (hw_streq_ci(s, "fp32") == 1) { return QUANT_NONE; }
+    if (hw_streq_ci(s, "fp16") == 1) { return QUANT_FP16; }
+    if (hw_streq_ci(s, "bf16") == 1) { return QUANT_BF16; }
+    if (hw_streq_ci(s, "int8") == 1) { return QUANT_INT8; }
+    if (hw_streq_ci(s, "int4") == 1) { return QUANT_INT4; }
     return 0 - 1;
 }
 
-# Calculate model memory in bytes given param count and quant level
-fn quant_model_bytes(param_count, quant) {
-    var bits = quant_bits(quant);
-    return param_count * bits / BITS_PER_BYTE;
+# Largest i64. Byte counts saturate here rather than wrap negative.
+enum HwLimits {
+    HW_I64_MAX = 0x7FFFFFFFFFFFFFFF;
 }
 
-# Calculate model memory with activation overhead (20%)
+# Largest model size model_params_from_str accepts: 1e15 parameters (1000T),
+# which keeps params * 32 bits, and the 20% overhead on top, inside an i64.
+var MODEL_PARAMS_MAX = 1000000000000000;
+
+# Parameter count of a model-size string: digits, an optional fraction and an
+# optional unit, with nothing after it. "70B", "1.5B", "0.5b", "350M", "125m",
+# "1.2T", "800K"; no unit means billions ("70" is 70B). -1 for anything else:
+# "", "B", "8x7B", "1.5.0B", "70GB", "-3B", or past MODEL_PARAMS_MAX. Fraction
+# digits finer than one parameter are dropped. Pure; `s` is a C string.
+fn model_params_from_str(s) {
+    if (s == 0) { return 0 - 1; }
+    var i = 0;
+    var whole = 0;
+    var nd = 0;
+    var c = load8(s);
+    while (c >= 48 && c <= 57) {
+        if (whole > MODEL_PARAMS_MAX) { return 0 - 1; }
+        whole = whole * 10 + c - 48;
+        nd = nd + 1;
+        i = i + 1;
+        c = load8(s + i);
+    }
+    if (nd == 0) { return 0 - 1; }
+    var frac = 0;
+    var fd = 0;
+    if (c == 46) {
+        i = i + 1;
+        c = load8(s + i);
+        if (c < 48 || c > 57) { return 0 - 1; }
+        while (c >= 48 && c <= 57) {
+            # Keep 12 fraction digits, enough for one parameter at "T".
+            if (fd < 12) {
+                frac = frac * 10 + c - 48;
+                fd = fd + 1;
+            }
+            i = i + 1;
+            c = load8(s + i);
+        }
+    }
+    var unit = 1000000000;
+    if (c == 66 || c == 98) { unit = 1000000000; i = i + 1; }
+    elif (c == 77 || c == 109) { unit = 1000000; i = i + 1; }
+    elif (c == 75 || c == 107) { unit = 1000; i = i + 1; }
+    elif (c == 84 || c == 116) { unit = 1000000000000; i = i + 1; }
+    elif (c != 0) { return 0 - 1; }
+    if (load8(s + i) != 0) { return 0 - 1; }
+    if (whole > MODEL_PARAMS_MAX / unit) { return 0 - 1; }
+    var params = whole * unit;
+    # frac / 10^fd of one unit, without overflowing: unit and 10^fd are both
+    # powers of ten, so divide the larger by the smaller first.
+    var scale = 1;
+    var k = 0;
+    while (k < fd) { scale = scale * 10; k = k + 1; }
+    if (unit >= scale) { params = params + frac * (unit / scale); }
+    else { params = params + frac / (scale / unit); }
+    if (params > MODEL_PARAMS_MAX) { return 0 - 1; }
+    return params;
+}
+
+# Calculate model memory in bytes given param count and quant level.
+# Divides before it multiplies, so no count wraps the i64 (through 2.5.4,
+# 3e17 params at FP32 came out negative and "fitted" everywhere); a count
+# whose bytes pass the i64 saturates at HW_I64_MAX. 0 for a count <= 0.
+fn quant_model_bytes(param_count, quant) {
+    if (param_count <= 0) { return 0; }
+    var bits = quant_bits(quant);
+    var whole = param_count / BITS_PER_BYTE;
+    if (whole > (HW_I64_MAX - bits) / bits) { return HW_I64_MAX; }
+    return whole * bits + (param_count % BITS_PER_BYTE) * bits / BITS_PER_BYTE;
+}
+
+# Calculate model memory with activation overhead (20%), saturating like
+# quant_model_bytes.
 fn quant_model_bytes_with_overhead(param_count, quant) {
     var raw = quant_model_bytes(param_count, quant);
-    return raw + raw / ACTIVATION_OVERHEAD_DIVISOR;
+    var extra = raw / ACTIVATION_OVERHEAD_DIVISOR;
+    if (raw > HW_I64_MAX - extra) { return HW_I64_MAX; }
+    return raw + extra;
 }

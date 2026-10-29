@@ -1,5 +1,8 @@
 # Fuzz: Gaudi hl-smi parser
-# Exercises detect_gaudi path with mock hl-smi output patterns
+# Exercises parse_hl_smi_output with valid, empty, malformed and mutated
+# `hl-smi --query-aip=index,name,memory.total,memory.free` rows. Through 2.5.4
+# the parse was inline in detect_gaudi, so this harness could only run the
+# detector, which fuzzed nothing on a host without hl-smi.
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
@@ -22,16 +25,79 @@ include "src/profile.cyr"
 include "src/system_io.cyr"
 include "src/detect/platform.cyr"
 include "src/detect/command.cyr"
+include "src/detect/tpu.cyr"
 include "src/detect/gaudi.cyr"
+
+# Every profile has memory in (0, 16 TiB], an index in 0..CMD_MAX_DEVICE_ID,
+# a known generation and a name.
+fn fz_check(profs) {
+    var i = 0;
+    while (i < vec_len(profs)) {
+        var p = vec_get(profs, i);
+        var m = profile_memory_bytes(p);
+        if (m <= 0 || m > 16 * 1024 * BYTES_PER_GIB) { return 0; }
+        var id = profile_device_id(p);
+        if (id < 0 || id > CMD_MAX_DEVICE_ID) { return 0; }
+        var g = profile_gaudi_gen(p);
+        if (g != GAUDI2 && g != GAUDI3) { return 0; }
+        if (profile_device_name(p) == 0) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
 
 alloc_init();
 
-# The Gaudi detection calls hl-smi directly, so we can't easily
-# unit-test the parser without the tool. But we CAN verify that
-# detect_gaudi doesn't crash when hl-smi is not found.
+# Valid rows.
+var good = "0, HL-225, 98304, 97920\n1, HL-325L, 131072, 130560\n2, HL-338, 131072, 130560\n";
 var p1 = vec_new();
-var w1 = vec_new();
-detect_gaudi(p1, w1);
-# On a non-Gaudi machine, should produce 0 profiles and possibly a warning
+if (parse_hl_smi_output(str_from(good), p1, vec_new()) != 3) { syscall(60, 1); }
+if (fz_check(p1) == 0) { syscall(60, 2); }
+
+# Empty, garbage, an error message, blank lines.
+var p2 = vec_new();
+parse_hl_smi_output(str_from(""), p2, vec_new());
+parse_hl_smi_output(str_from("not csv at all"), p2, vec_new());
+parse_hl_smi_output(str_from("hl-smi: no device found\n\n\r\n"), p2, 0);
+if (vec_len(p2) != 0) { syscall(60, 3); }
+
+# Malformed fields: huge memory (wrapped negative through 2.5.4), a 20-digit
+# index, a negative one, N/A, missing fields.
+var bad = "0, HL-225, 99999999999999, 0\n99999999999999999999, HL-225, 98304, 0\n-1, HL-325, 1, 0\n3, , N/A, N/A\n4,\n5, HL-338\n";
+var p3 = vec_new();
+parse_hl_smi_output(str_from(bad), p3, vec_new());
+if (fz_check(p3) == 0) { syscall(60, 4); }
+if (vec_len(p3) != 2) { syscall(60, 5); }
+
+# Every byte replaced in turn by each of a few structural bytes, then cut
+# short there: nothing may crash, the card count never exceeds the rows, and
+# every profile keeps its invariants.
+var subs = ",\n\r -9xN";
+var nsub = strlen(subs);
+var glen = strlen(good);
+var pos = 0;
+while (pos < glen) {
+    var si = 0;
+    while (si < nsub) {
+        var buf = alloc(glen + 1);
+        memcpy(buf, good, glen);
+        store8(buf + glen, 0);
+        store8(buf + pos, load8(subs + si));
+        var pm = vec_new();
+        parse_hl_smi_output(str_new(buf, glen), pm, vec_new());
+        if (vec_len(pm) > 4) { syscall(60, 6); }
+        if (fz_check(pm) == 0) { syscall(60, 7); }
+        var pc = vec_new();
+        parse_hl_smi_output(str_new(buf, pos), pc, vec_new());
+        if (fz_check(pc) == 0) { syscall(60, 7); }
+        si = si + 1;
+    }
+    pos = pos + 1;
+}
+
+# detect_gaudi itself must not crash when hl-smi is missing: it falls back to
+# the habanalabs accel nodes, which a host without Gaudi does not have.
+var p4 = vec_new();
+detect_gaudi(p4, vec_new());
 
 syscall(60, 0);

@@ -41,6 +41,22 @@ fn test_req_gpu() {
     return 0;
 }
 
+# REQ_GPU over every type: exactly the accel_is_gpu ones, Metal, Vulkan,
+# oneAPI, Windows and AGNOS GPUs included (2.5.5).
+fn test_req_gpu_every_type() {
+    var t = 0;
+    var wrong = 0;
+    while (t < ACCEL_TYPE_COUNT) {
+        var want = 0;
+        if (t == ACCEL_CUDA || t == ACCEL_ROCM || t == ACCEL_METAL || t == ACCEL_VULKAN) { want = 1; }
+        if (t == ACCEL_INTEL_ONEAPI || t == ACCEL_WIN_GPU || t == ACCEL_AGNOS_GPU) { want = 1; }
+        if (requirement_satisfied(REQ_GPU, 0, profile_new(t, 0, BYTES_PER_GIB)) != want) { wrong = wrong + 1; }
+        t = t + 1;
+    }
+    assert_eq(wrong, 0, "REQ_GPU: exactly the GPU types");
+    return 0;
+}
+
 fn test_req_tpu() {
     var tpu = profile_new(ACCEL_TPU, 0, 32 * BYTES_PER_GIB);
     profile_set_tpu_version(tpu, TPU_V4);
@@ -117,6 +133,9 @@ fn test_req_names() {
       "gpu-or-tpu");
     assert(streq(requirement_name(REQ_ANY_ACCELERATOR),
         "any-accelerator") == 1, "any-accel");
+    assert(streq(requirement_name(99), "unknown") == 1, "out-of-range name");
+    var cuda = profile_new(ACCEL_CUDA, 0, 80 * BYTES_PER_GIB);
+    assert_eq(requirement_satisfied(99, 0, cuda), 0, "an unknown requirement is never met");
     return 0;
 }
 
@@ -138,11 +157,45 @@ fn test_find_satisfying() {
     return 0;
 }
 
+# The same profiles in another order give the same answer (2.5.5): the best
+# rank, then the most memory, then the first. registry_detect and
+# registry_detect_threaded push the backends in different orders, and
+# through 2.5.4 REQ_GPU gave whichever GPU came first.
+fn _profs3(a, b, c) {
+    var v = vec_new();
+    vec_push(v, a);
+    vec_push(v, b);
+    vec_push(v, c);
+    return v;
+}
+
+fn test_find_satisfying_order() {
+    var cpu = profile_new(ACCEL_CPU, 0, 16 * BYTES_PER_GIB);
+    var rocm = profile_new(ACCEL_ROCM, 0, 4 * BYTES_PER_GIB);
+    var cuda = profile_new(ACCEL_CUDA, 0, 24 * BYTES_PER_GIB);
+    assert_eq(find_satisfying_profile(REQ_GPU, 0, _profs3(cpu, rocm, cuda)), cuda, "ROCm first: CUDA");
+    assert_eq(find_satisfying_profile(REQ_GPU, 0, _profs3(cpu, cuda, rocm)), cuda, "CUDA first: CUDA");
+    var npu = profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB);
+    assert_eq(find_satisfying_profile(REQ_ANY_ACCELERATOR, 0, _profs3(npu, cpu, rocm)), rocm, "an NPU first: the GPU");
+    # Equal rank: the most memory, then the first.
+    var small = profile_new(ACCEL_CUDA, 0, 24 * BYTES_PER_GIB);
+    var big = profile_new(ACCEL_CUDA, 1, 80 * BYTES_PER_GIB);
+    assert_eq(find_satisfying_profile(REQ_GPU, 0, _profs3(small, big, cpu)), big, "equal rank: more memory");
+    assert_eq(find_satisfying_profile(REQ_GPU, 0, _profs3(big, small, cpu)), big,
+      "equal rank: more memory, either order");
+    var twin = profile_new(ACCEL_CUDA, 2, 24 * BYTES_PER_GIB);
+    assert_eq(find_satisfying_profile(REQ_GPU, 0, _profs3(cpu, small, twin)), small, "a full tie: the first");
+    profile_set_available(cuda, 0);
+    assert_eq(find_satisfying_profile(REQ_GPU, 0, _profs3(cpu, cuda, rocm)), rocm, "an unavailable best is skipped");
+    assert_eq(find_satisfying_profile(REQ_TPU, 1, _profs3(cpu, cuda, rocm)), 0, "none: 0");
+    return 0;
+}
 
 # --- Main ---
 
 test_req_none();
 test_req_gpu();
+test_req_gpu_every_type();
 test_req_tpu();
 test_req_gaudi();
 test_req_neuron();
@@ -151,5 +204,6 @@ test_req_any_accel();
 test_req_unavailable();
 test_req_names();
 test_find_satisfying();
+test_find_satisfying_order();
 var fails = assert_summary();
 syscall(60, fails);

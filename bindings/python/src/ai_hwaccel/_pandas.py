@@ -1,6 +1,6 @@
-"""Optional pandas export. Requires the ``pandas`` extra.
+"""Optional pandas export. Requires pandas (the ``pandas`` extra).
 
-    pip install ai-hwaccel[pandas]
+    pip install pandas
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ def profiles_to_dataframe(profiles: list):
     except ImportError as exc:  # pragma: no cover - exercised only without pandas
         raise ImportError(
             "pandas is required for DataFrame export; "
-            "install it with: pip install ai-hwaccel[pandas]"
+            "install it with: pip install pandas"
         ) from exc
 
     return pd.DataFrame([dataclasses.asdict(p) for p in profiles])

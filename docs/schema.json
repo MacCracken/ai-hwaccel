@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/MacCracken/ai-hwaccel/schema.json",
   "title": "AcceleratorRegistry",
-  "description": "The JSON that ai-hwaccel prints by default (and with --json): detected accelerators, detection warnings and system I/O. schema_version 6. Written by registry_to_json in src/json_out.cyr. The other JSON outputs are under $defs: Summary (--summary), ShardingPlan (--plan), TrainingMemory (--train) and CostReport (--cost --json). Every key in an object is listed; optional keys are omitted, never null, when a value is unknown or does not apply.",
+  "description": "The JSON that ai-hwaccel prints by default (and with --json): detected accelerators, detection warnings and system I/O. schema_version 6. Written by registry_to_json in src/json_out.cyr. The other JSON outputs are under $defs: Summary (--summary), ShardingPlan (--plan), TrainingMemory (--train) and CostReport (--cost --json). Every key in an object is listed; optional keys are omitted, never null, when a value is unknown or does not apply. String values are JSON-escaped (RFC 8259) since 2.5.5: a quote, backslash or control byte in a device name, a tool's output or the --cost argument no longer breaks the document.",
   "type": "object",
   "required": ["schema_version", "profiles", "system_io"],
   "additionalProperties": false,
@@ -30,27 +30,28 @@
   },
   "$defs": {
     "AcceleratorProfile": {
+      "description": "One device. profile_from_json (src/json_out.cyr) reads it back: since 2.5.5 a key holding another type than the one below (null, a string, a float) reads as absent, and a value outside the ranges below makes it refuse the profile, as malformed JSON does.",
       "type": "object",
       "required": ["accelerator", "accel_type_id", "device_id", "available", "memory_bytes", "family"],
       "additionalProperties": false,
       "properties": {
         "accelerator": {
-          "description": "Display name of the accelerator type.",
-          "enum": ["CPU", "CUDA GPU", "ROCm GPU", "Metal GPU", "Vulkan GPU", "Intel NPU", "AMD XDNA NPU", "Apple Neural Engine", "TPU", "Intel Gaudi", "AWS Neuron", "Qualcomm Cloud AI 100", "Intel oneAPI GPU", "Cerebras WSE", "Graphcore IPU", "Groq LPU", "Samsung NPU", "MediaTek APU", "Windows GPU", "AGNOS GPU"]
+          "description": "Display name of the accelerator type. \"Unknown\" only when a consumer re-serializes a profile read back with an accel_type_id this build does not know.",
+          "enum": ["CPU", "CUDA GPU", "ROCm GPU", "Metal GPU", "Vulkan GPU", "Intel NPU", "AMD XDNA NPU", "Apple Neural Engine", "TPU", "Intel Gaudi", "AWS Neuron", "Qualcomm Cloud AI 100", "Intel oneAPI GPU", "Cerebras WSE", "Graphcore IPU", "Groq LPU", "Samsung NPU", "MediaTek APU", "Windows GPU", "AGNOS GPU", "Unknown"]
         },
         "accel_type_id": {
-          "description": "The accelerator type as a number, the authoritative tag when a profile is read back (profile_from_json).",
+          "description": "The accelerator type as a number, the authoritative tag when a profile is read back (profile_from_json). This build writes 0..19; reading back, it keeps a higher id (a newer producer's type) and refuses a negative one.",
           "type": "integer", "minimum": 0, "maximum": 19
         },
-        "device_id": { "description": "Index within the backend.", "type": "integer", "minimum": 0 },
+        "device_id": { "description": "Index within the backend, at most 1024 (CMD_MAX_DEVICE_ID, the bound every tool parser applies).", "type": "integer", "minimum": 0, "maximum": 1024 },
         "available": { "type": "boolean" },
-        "memory_bytes": { "description": "Memory the device can use. For a device on system RAM this includes the shared part below.", "type": "integer", "minimum": 0 },
-        "family": { "enum": ["CPU", "GPU", "NPU", "TPU", "AI ASIC"] },
+        "memory_bytes": { "description": "Memory the device can use. For a device on system RAM this includes the shared part below. At most 16 TiB (17592186044416) for an accelerator, the tool parsers' bound, and 1 PiB (1125899906842624) for the CPU profile's system RAM.", "type": "integer", "minimum": 0, "maximum": 1125899906842624 },
+        "family": { "description": "\"Unknown\" only for a re-serialized profile whose accel_type_id this build does not know.", "enum": ["CPU", "GPU", "NPU", "TPU", "AI ASIC", "Unknown"] },
         "compute_capability": { "description": "CUDA compute capability (\"8.9\"), or the ROCm gfx target.", "type": "string" },
         "driver_version": { "type": "string" },
         "device_name": { "type": "string" },
-        "memory_used_bytes": { "type": "integer", "minimum": 0 },
-        "memory_free_bytes": { "type": "integer", "minimum": 0 },
+        "memory_used_bytes": { "description": "At most memory_bytes' bound for the type.", "type": "integer", "minimum": 0, "maximum": 1125899906842624 },
+        "memory_free_bytes": { "description": "At most memory_bytes' bound for the type.", "type": "integer", "minimum": 0, "maximum": 1125899906842624 },
         "numa_node": { "type": "integer", "minimum": 0 },
         "temperature_c": { "type": "integer" },
         "gpu_utilization_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
@@ -58,12 +59,12 @@
         "pcie_bandwidth_x1000": { "description": "PCIe link bandwidth, GB/s x 1000.", "type": "integer", "minimum": 0 },
         "power_x1000": { "description": "Power draw, watts x 1000.", "type": "integer", "minimum": 0 },
         "tpu_version": { "type": "integer", "minimum": 0 },
-        "tpu_chips": { "type": "integer", "minimum": 1 },
+        "tpu_chips": { "type": "integer", "minimum": 1, "maximum": 1024 },
         "gaudi_gen": { "type": "integer", "minimum": 0 },
         "neuron_chip": { "type": "integer", "minimum": 0 },
-        "neuron_cores": { "type": "integer", "minimum": 1 },
+        "neuron_cores": { "type": "integer", "minimum": 1, "maximum": 1024 },
         "shared_memory_bytes": {
-          "description": "The part of memory_bytes that is system RAM, which the CPU profile already counts: all of it for Apple Silicon, the client NPUs and integrated GPUs on system RAM; 480 GiB on a GH200. Never on the CPU profile. Since schema v6.",
+          "description": "The part of memory_bytes that is system RAM, which the CPU profile already counts: all of it for Apple Silicon, the client NPUs and integrated GPUs on system RAM; 480 GiB on a GH200. At most memory_bytes. Never on the CPU profile: profile_from_json ignores it there and reads 0 as absent. Absent, the reader derives it from the type (all of memory_bytes on a system-memory type, else none). Since schema v6.",
           "type": "integer", "minimum": 1
         }
       }
@@ -86,7 +87,7 @@
         "kind": { "enum": ["InfiniBand", "RoCE", "RoCE v2", "NVLink", "NVSwitch", "XGMI", "ICI", "PCIe", "Unknown"] },
         "name": { "type": "string" },
         "bandwidth_bytes_per_sec": { "type": "integer", "minimum": 0 },
-        "state": { "type": "integer" }
+        "state": { "description": "For InfiniBand and RoCE, the port state number sysfs reports (4 is ACTIVE); 4 for an NVSwitch; 0 when unknown, as for the other kinds.", "type": "integer", "minimum": 0, "maximum": 99 }
       }
     },
     "Storage": {
@@ -133,12 +134,13 @@
     "ShardingPlan": {
       "description": "ai-hwaccel --plan <model> [--quant <q>] (plan_to_json).",
       "type": "object",
-      "required": ["strategy", "strategy_count", "total_memory_bytes", "shards"],
+      "required": ["strategy", "strategy_count", "total_memory_bytes", "fits", "shards"],
       "additionalProperties": false,
       "properties": {
         "strategy": { "enum": ["None", "Pipeline Parallel", "Tensor Parallel", "Data Parallel", "Unknown"] },
         "strategy_count": { "type": "integer", "minimum": 0 },
         "total_memory_bytes": { "type": "integer", "minimum": 0 },
+        "fits": { "description": "Whether every shard fits the memory of the device it names. false when nothing holds the model: the CPU fallback ('None' on the CPU) asks for more than the CPU's memory, or no device is available ('Data Parallel', no shards). Added in 2.5.5.", "type": "boolean" },
         "est_tokens_per_sec_x1000": { "description": "Estimated throughput, tokens/s x 1000. Omitted when unknown.", "type": "integer", "minimum": 0 },
         "shards": { "type": "array", "items": { "$ref": "#/$defs/Shard" } }
       }
@@ -178,7 +180,7 @@
       "required": ["model", "quantization", "memory_required_bytes", "recommendations"],
       "additionalProperties": false,
       "properties": {
-        "model": { "type": "string" },
+        "model": { "description": "The --cost argument as given, JSON-escaped.", "type": "string" },
         "quantization": { "enum": ["FP32", "FP16", "BF16", "INT8", "INT4", "Unknown"] },
         "memory_required_bytes": { "type": "integer", "minimum": 0 },
         "recommendations": { "type": "array", "items": { "$ref": "#/$defs/CostRecommendation" } }

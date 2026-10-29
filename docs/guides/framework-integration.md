@@ -3,8 +3,9 @@
 `ai-hwaccel` detects hardware and plans model deployment. It does **not** run
 inference or training — that's the job of your ML framework. This guide shows
 how to bridge the gap. Most ML frameworks are driven from Python, so the
-examples use the Python package (`pip install ai-hwaccel`). Any other language
-can run the binary and parse its JSON ([docs/schema.json](../schema.json)).
+examples use the Python package, installed from a CI wheel (it is not on
+PyPI; see [bindings/python](../../bindings/python/README.md#install)). Any other
+language can run the binary and parse its JSON ([docs/schema.json](../schema.json)).
 
 ## General pattern
 

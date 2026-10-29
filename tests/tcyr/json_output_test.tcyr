@@ -1,5 +1,8 @@
-# test_phase9.cyr — tests for Phase 9 CLI & JSON output
-# Tests JSON serialization, arg parsing stubs, output formatting
+# json_output_test.tcyr — JSON serialization (json_out.cyr, cost_to_json).
+#
+# Every emitted document is parsed back with bayan (2.5.5): through 2.5.4
+# these tests matched substrings only, so an unescaped name, a trailing
+# comma or a duplicate key passed. bayan refuses all three.
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
@@ -31,12 +34,12 @@ fn detect_vulkan_opts(p, w, a, l) { return 0; }
 fn detect_intel_npu(p, w) { return 0; }
 fn detect_amd_xdna(p, w) { return 0; }
 fn detect_tpu(p, w) { return 0; }
-fn detect_gaudi(p, w) { return 0; }
-fn detect_neuron(p, w) { return 0; }
+fn detect_gaudi_opts(p, w, a) { return 0; }
+fn detect_neuron_opts(p, w, a) { return 0; }
 fn detect_intel_oneapi(p, w) { return 0; }
 fn detect_qualcomm(p, w) { return 0; }
-fn detect_cerebras(p, w) { return 0; }
-fn detect_graphcore(p, w) { return 0; }
+fn detect_cerebras_opts(p, w, a) { return 0; }
+fn detect_graphcore_opts(p, w, a) { return 0; }
 fn detect_groq(p, w) { return 0; }
 fn detect_samsung_npu(p, w) { return 0; }
 fn detect_mediatek_apu(p, w) { return 0; }
@@ -48,21 +51,50 @@ fn enrich_numa(p) { return 0; }
 var _stub_ic_arg = 0;
 var _stub_storage_arg = 0;
 var _stub_env_arg = 0;
-fn detect_interconnects(s, p, w) { _stub_ic_arg = s; return 0; }
+var _stub_ic_exec = 0 - 1;
+fn detect_interconnects_opts(s, p, w, x) {
+    _stub_ic_arg = s;
+    _stub_ic_exec = x;
+    return 0;
+}
 fn detect_storage(s) { _stub_storage_arg = s; return 0; }
 fn detect_environment(s) { _stub_env_arg = s; return 0; }
 fn detect_system_memory() { return 16 * 1073741824; }
 fn detect_system_memory_opts(a) { return 16 * 1073741824; }
 fn cmd_getenv(n) { return 0; }
+# cost.cyr reads data/cloud_pricing.json through it: cwd-relative, the repo
+# root, as for model_catalog_test and cost_test.
+fn data_file_path(rel) { return rel; }
 
 include "src/registry.cyr"
+include "src/cost.cyr"
 include "src/json_out.cyr"
+
+# 1 if Str `js` is one well-formed JSON document.
+fn _valid(js) {
+    if (bayan_json_v_parse_buf(str_data(js), str_len(js)) != 0) { return 1; }
+    return 0;
+}
+
+# The string value under `key` in the JSON object Str `js`, as a Str, or 0.
+fn _jget(js, key) {
+    var v = bayan_json_v_parse_buf(str_data(js), str_len(js));
+    if (v == 0) { return 0; }
+    return bayan_json_v_str(bayan_json_v_obj_get_by_cstr(v, key));
+}
+
+# 1 if `s` (a Str or 0) holds exactly cstr `want`.
+fn _is(s, want) {
+    if (s == 0) { return 0; }
+    return str_eq_cstr(s, want);
+}
 
 # --- Post-pass wiring ---
 
 # registry_post_passes must hand the system-I/O passes the registry's
 # system_io, never the registry itself (the threaded and lazy entry points
-# passed `r` through 2.3.24), and must skip interconnects without exec.
+# passed `r` through 2.3.24). Without exec the interconnect pass still runs,
+# told not to start its one tool (2.5.5; through 2.5.4 it was skipped).
 fn test_post_passes_get_system_io() {
     var r = hw_registry_new();
     var sio = reg_system_io(r);
@@ -73,9 +105,11 @@ fn test_post_passes_get_system_io() {
     assert_eq(_stub_storage_arg, sio, "storage pass gets system_io");
     assert_eq(_stub_env_arg, sio, "environment pass gets system_io");
     assert_eq(_stub_ic_arg, sio, "interconnect pass gets system_io");
+    assert_eq(_stub_ic_exec, 1, "interconnect pass may run its tool");
     _stub_ic_arg = 0;
     registry_post_passes(r, 0);
-    assert_eq(_stub_ic_arg, 0, "no interconnect pass without exec");
+    assert_eq(_stub_ic_arg, sio, "interconnect pass runs without exec");
+    assert_eq(_stub_ic_exec, 0, "but without its tool");
     return 0;
 }
 
@@ -98,6 +132,7 @@ fn test_profile_json() {
     assert(str_contains_cstr(json, "memory_bytes") == 1, "has memory");
     assert(str_contains_cstr(json, "RTX 4090") == 1, "has device name");
     assert(str_contains_cstr(json, "8.9") == 1, "has CC");
+    assert_eq(_valid(json), 1, "profile JSON parses");
     return 0;
 }
 
@@ -113,6 +148,7 @@ fn test_registry_json() {
     assert(str_contains_cstr(json, "profiles") == 1, "has profiles");
     assert(str_contains_cstr(json, "CPU") == 1, "has CPU");
     assert(str_contains_cstr(json, "CUDA GPU") == 1, "has CUDA");
+    assert_eq(_valid(json), 1, "registry JSON parses");
     return 0;
 }
 
@@ -129,6 +165,7 @@ fn test_summary_json() {
     assert(str_contains_cstr(json, "has_accelerator") == 1, "has has_accel");
     assert(str_contains_cstr(json, "true") == 1, "accel true");
     assert(str_contains_cstr(json, "gpu_count") == 1, "has gpu_count");
+    assert_eq(_valid(json), 1, "summary JSON parses");
     return 0;
 }
 
@@ -163,6 +200,7 @@ fn test_shared_memory_json() {
     var js = registry_to_summary_json(registry_from_profiles(profiles));
     assert(str_contains_cstr(js, "\"total_memory_bytes\":51539607552") == 1, "summary total = 48 GiB");
     assert(str_contains_cstr(js, "\"accelerator_memory_bytes\":51539607552") == 1, "summary accel = 48 GiB");
+    assert_eq(_valid(mj), 1, "metal profile JSON parses");
     return 0;
 }
 
@@ -193,13 +231,7 @@ fn test_json_with_warnings() {
 
     assert(str_contains_cstr(json, "warnings") == 1, "has warnings");
     assert(str_contains_cstr(json, "nvidia-smi") == 1, "warning content");
-    return 0;
-}
-
-fn test_binary_size() {
-    # Verify the compiled binary exists and is reasonable size
-    # (this test is about the compilation itself succeeding)
-    assert(1 == 1, "compilation succeeded");
+    assert_eq(_valid(json), 1, "registry JSON with warnings parses");
     return 0;
 }
 
@@ -223,6 +255,7 @@ fn test_system_io_json() {
     assert(str_contains_cstr(json, "bandwidth_bytes_per_sec") == 1, "has bw");
     assert(str_contains_cstr(json, "NVMe") == 1, "has NVMe storage");
     assert(str_contains_cstr(json, "is_docker") == 1, "has env is_docker");
+    assert_eq(_valid(json), 1, "system_io JSON parses");
     return 0;
 }
 
@@ -233,6 +266,7 @@ fn test_system_io_null_env() {
     var r = registry_from_profiles(profiles);
     var json = registry_to_json(r);
     assert(str_contains_cstr(json, "\"environment\":null") == 1, "null env serialized");
+    assert_eq(_valid(json), 1, "null-env JSON parses");
     return 0;
 }
 
@@ -250,6 +284,7 @@ fn test_plan_json() {
     assert(str_contains_cstr(json, "shards") == 1, "has shards");
     assert(str_contains_cstr(json, "CUDA GPU") == 1, "shard device name");
     assert(str_contains_cstr(json, "layer_end") == 1, "has layer_end");
+    assert_eq(_valid(json), 1, "plan JSON parses");
     return 0;
 }
 
@@ -261,6 +296,135 @@ fn test_training_json() {
     assert(str_contains_cstr(json, "model_bytes") == 1, "has model_bytes");
     assert(str_contains_cstr(json, "total_bytes") == 1, "has total_bytes");
     assert(str_contains_cstr(json, "total_gib_x1000") == 1, "has fixed-point");
+    assert_eq(_valid(json), 1, "training JSON parses");
+    return 0;
+}
+
+# --- String escaping (2.5.5) ---
+
+# A cstr holding the bytes of every class _json_clean_len must flag.
+var NASTY = "GPU \"Max\" C:\\x\ttab\r\x01end";
+
+# Every string a profile carries is escaped, so the document parses and the
+# name reads back as written. Through 2.5.4 the quote ended the string and
+# the rest became JSON syntax.
+fn test_profile_strings_escaped() {
+    var p = profile_cuda(0, 24 * BYTES_PER_GIB);
+    profile_set_device_name(p, NASTY);
+    profile_set_driver_version(p, "550\\54");
+    profile_set_compute_cap(p, "8.9\"");
+    var sb = str_builder_new();
+    profile_to_json(sb, p);
+    var js = str_builder_build(sb);
+    assert_eq(_valid(js), 1, "profile with quote/backslash/control bytes parses");
+    var want = "\"device_name\":\"GPU \\\"Max\\\" C:\\\\x\\ttab\\r\\u0001end\"";
+    assert(str_contains_cstr(js, want) == 1, "device_name escaped byte for byte");
+    assert_eq(_is(_jget(js, "device_name"), NASTY), 1, "device_name reads back");
+    assert_eq(_is(_jget(js, "driver_version"), "550\\54"), 1, "driver_version reads back");
+    assert_eq(_is(_jget(js, "compute_capability"), "8.9\""), 1, "compute_capability reads back");
+    # A clean name is copied as before.
+    var c = profile_cuda(0, 24 * BYTES_PER_GIB);
+    profile_set_device_name(c, "NVIDIA GeForce RTX 4090");
+    var sb2 = str_builder_new();
+    profile_to_json(sb2, c);
+    var clean = str_builder_build(sb2);
+    assert(str_contains_cstr(clean, "\"device_name\":\"NVIDIA GeForce RTX 4090\"}") == 1, "clean name byte-identical");
+    return 0;
+}
+
+# A name shaped to close the string and add keys. Python keeps the last of a
+# duplicate key, so through 2.5.4 it read memory_bytes 1 TiB and
+# available false for this 24 GiB GPU.
+fn test_profile_key_injection() {
+    var p = profile_cuda(0, 24 * BYTES_PER_GIB);
+    profile_set_device_name(p, "RTX\",\"memory_bytes\":1099511627776,\"available\":false,\"x\":\"");
+    var sb = str_builder_new();
+    profile_to_json(sb, p);
+    var js = str_builder_build(sb);
+    assert_eq(_valid(js), 1, "injection-shaped name parses as one string");
+    var v = bayan_json_v_parse_buf(str_data(js), str_len(js));
+    var mem = bayan_json_v_int(bayan_json_v_obj_get_by_cstr(v, "memory_bytes"));
+    assert_eq(mem, 24 * BYTES_PER_GIB, "memory_bytes not overridden");
+    assert_eq(bayan_json_v_obj_get_by_cstr(v, "x"), 0, "no injected key");
+    return 0;
+}
+
+# The registry's other string fields: a warning's tool, interconnect and
+# storage names (sysfs), the environment (DMI, the k8s namespace file).
+fn test_registry_strings_escaped() {
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(16 * BYTES_PER_GIB));
+    var r = registry_from_profiles(profiles);
+    vec_push(reg_warnings(r), warning_tool_not_found("odd\"tool"));
+    var sio = reg_system_io(r);
+    sio_add_interconnect(sio, interconnect_new(ICK_INFINIBAND, "mlx5\\0", 25000));
+    sio_add_storage(sio, storage_new("nvme\t0", STK_NVME, 3500));
+    var env = runtime_env_new();
+    env_set_instance_type(env, "Standard \"PC\"");
+    env_set_k8s_namespace(env, "ns\n");
+    sio_set_environment(sio, env);
+    var js = registry_to_json(r);
+    assert_eq(_valid(js), 1, "registry with odd tool/ic/storage/env strings parses");
+    assert(str_contains_cstr(js, "\"warnings\":[\"odd\\\"tool\"]") == 1, "warning tool escaped");
+    assert(str_contains_cstr(js, "\"name\":\"mlx5\\\\0\"") == 1, "interconnect name escaped");
+    assert(str_contains_cstr(js, "\"name\":\"nvme\\t0\"") == 1, "storage name escaped");
+    assert(str_contains_cstr(js, "\"instance_type\":\"Standard \\\"PC\\\"\"") == 1, "instance_type escaped");
+    return 0;
+}
+
+# The --cost argument is echoed as "model": the Python cost(model) passes the
+# caller's string through. Through 2.5.4 '7B"x' or '7B\' broke json.loads.
+fn test_cost_model_escaped() {
+    var js = cost_to_json("7B\"x\\", QUANT_BF16);
+    assert_eq(_valid(js), 1, "cost JSON with an odd model parses");
+    assert_eq(_is(_jget(js, "model"), "7B\"x\\"), 1, "model reads back");
+    var ok = cost_to_json("7B", QUANT_BF16);
+    assert_eq(_valid(ok), 1, "cost JSON parses");
+    assert(str_contains_cstr(ok, "{\"model\":\"7B\",\"quantization\":\"BF16\"") == 1, "clean model byte-identical");
+    return 0;
+}
+
+# _json_clean_len at every alignment: the word-at-a-time scan must flag each
+# escape class wherever it falls in a word, find the NUL at every offset,
+# and pass the bytes next to '"' and '\' and the high half.
+fn test_clean_len_alignment() {
+    var buf = alloc(64);
+    var bad = 0;
+    var off = 0;
+    while (off < 8) {
+        var len = 0;
+        while (len < 24) {
+            memset(buf, 97, 64);
+            store8(buf + off + len, 0);
+            if (_json_clean_len(buf + off) != len) { bad = bad + 1; }
+            var at = 0;
+            while (at < len) {
+                store8(buf + off + at, 34);
+                if (_json_clean_len(buf + off) != 0 - 1) { bad = bad + 1; }
+                store8(buf + off + at, 92);
+                if (_json_clean_len(buf + off) != 0 - 1) { bad = bad + 1; }
+                store8(buf + off + at, 1);
+                if (_json_clean_len(buf + off) != 0 - 1) { bad = bad + 1; }
+                store8(buf + off + at, 31);
+                if (_json_clean_len(buf + off) != 0 - 1) { bad = bad + 1; }
+                store8(buf + off + at, 97);
+                at = at + 1;
+            }
+            len = len + 1;
+        }
+        off = off + 1;
+    }
+    assert_eq(bad, 0, "clean_len flags every escape byte at every offset");
+    # Neighbours of the flagged values, DEL and UTF-8 bytes need no escape.
+    memset(buf, 0, 64);
+    var ok = "\x20!#[]\x7f\xc3\xa9\xff\x80 tail past one word";
+    memcpy(buf + 3, ok, strlen(ok));
+    assert_eq(_json_clean_len(buf + 3), strlen(ok), "neighbour and high bytes are clean");
+    # A special byte after the NUL is past the string.
+    memset(buf, 97, 64);
+    store8(buf + 5, 0);
+    store8(buf + 6, 34);
+    assert_eq(_json_clean_len(buf), 5, "byte after NUL ignored");
     return 0;
 }
 
@@ -276,11 +440,15 @@ test_shared_memory_json();
 test_pci_id_not_serialized();
 test_json_optional_fields();
 test_json_with_warnings();
-test_binary_size();
 test_system_io_json();
 test_system_io_null_env();
 test_plan_json();
 test_training_json();
+test_profile_strings_escaped();
+test_profile_key_injection();
+test_registry_strings_escaped();
+test_cost_model_escaped();
+test_clean_len_alignment();
 
 var fails = assert_summary();
 syscall(60, fails);

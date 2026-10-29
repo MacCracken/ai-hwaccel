@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=64"]
+# 77: the SPDX `license` string and `license-files` (PEP 639). The table form
+# and the License classifier this used through 2.5.4 are deprecated, and
+# setuptools stops accepting them after 2027-02-18.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -15,11 +18,15 @@ version = "2.5.4"
 description = "Universal AI hardware accelerator detection — Python bindings"
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "GPL-3.0-only" }
+license = "GPL-3.0-only"
+# The wheel ships a GPL-3.0 binary, so its .dist-info/licenses/ carries the
+# license text. setuptools reads no file outside the project root, so
+# bindings/python/LICENSE is a copy of the repo-root LICENSE; CI checks that the
+# two match.
+license-files = ["LICENSE"]
 authors = [{ name = "Robert MacCracken" }]
 keywords = ["gpu", "cuda", "rocm", "tpu", "accelerator", "hardware", "detection"]
 classifiers = [
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python :: 3",
     "Topic :: System :: Hardware",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",

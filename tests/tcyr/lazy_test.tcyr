@@ -3,8 +3,9 @@
 # its calls; detect_apple emits two (Metal GPU + Neural Engine), because it is
 # the one backend whose profiles span two families. A lazy query for a family
 # must return what full detection returns for that family, and no backend may
-# run twice however the families are queried. The CUDA and Gaudi stubs also
-# push a warning, and the post-pass stubs count their calls (2.5.2).
+# run twice however the families are queried. The CUDA stub also pushes a
+# warning, and the Gaudi stub one when it may exec, and the post-pass stubs
+# count their calls (2.5.2).
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
@@ -59,15 +60,24 @@ fn detect_vulkan_opts(p, w, a, l) {
 fn detect_intel_npu(p, w) { return _stub(p, BACKEND_INTEL_NPU, ACCEL_INTEL_NPU); }
 fn detect_amd_xdna(p, w) { return _stub(p, BACKEND_AMD_XDNA, ACCEL_AMD_XDNA); }
 fn detect_tpu(p, w) { return _stub(p, BACKEND_TPU, ACCEL_TPU); }
-fn detect_gaudi(p, w) {
-    vec_push(w, warning_tool_not_found("hl-smi"));
+# The Gaudi and Neuron stubs keep the last allow_exec they were given, as the
+# Apple stub does; the Gaudi one looks for hl-smi only with exec.
+var _gaudi_exec = 0 - 1;
+var _neuron_exec = 0 - 1;
+
+fn detect_gaudi_opts(p, w, a) {
+    _gaudi_exec = a;
+    if (a == 1) { vec_push(w, warning_tool_not_found("hl-smi")); }
     return _stub(p, BACKEND_GAUDI, ACCEL_GAUDI);
 }
-fn detect_neuron(p, w) { return _stub(p, BACKEND_NEURON, ACCEL_NEURON); }
+fn detect_neuron_opts(p, w, a) {
+    _neuron_exec = a;
+    return _stub(p, BACKEND_NEURON, ACCEL_NEURON);
+}
 fn detect_intel_oneapi(p, w) { return _stub(p, BACKEND_INTEL_ONEAPI, ACCEL_INTEL_ONEAPI); }
 fn detect_qualcomm(p, w) { return _stub(p, BACKEND_QUALCOMM, ACCEL_QUALCOMM); }
-fn detect_cerebras(p, w) { return _stub(p, BACKEND_CEREBRAS, ACCEL_CEREBRAS); }
-fn detect_graphcore(p, w) { return _stub(p, BACKEND_GRAPHCORE, ACCEL_GRAPHCORE); }
+fn detect_cerebras_opts(p, w, a) { return _stub(p, BACKEND_CEREBRAS, ACCEL_CEREBRAS); }
+fn detect_graphcore_opts(p, w, a) { return _stub(p, BACKEND_GRAPHCORE, ACCEL_GRAPHCORE); }
 fn detect_groq(p, w) { return _stub(p, BACKEND_GROQ, ACCEL_GROQ); }
 fn detect_samsung_npu(p, w) { return _stub(p, BACKEND_SAMSUNG_NPU, ACCEL_SAMSUNG_NPU); }
 fn detect_mediatek_apu(p, w) { return _stub(p, BACKEND_MEDIATEK_APU, ACCEL_MEDIATEK_APU); }
@@ -107,7 +117,7 @@ var _storage_calls = 0;
 var _env_calls = 0;
 var _mem_calls = 0;
 
-fn detect_interconnects(s, p, w) { _ic_calls = _ic_calls + 1; return 0; }
+fn detect_interconnects_opts(s, p, w, x) { _ic_calls = _ic_calls + 1; return 0; }
 fn detect_storage(s) { _storage_calls = _storage_calls + 1; return 0; }
 fn detect_environment(s) { _env_calls = _env_calls + 1; return 0; }
 fn detect_system_memory() { _mem_calls = _mem_calls + 1; return 16 * BYTES_PER_GIB; }
@@ -227,7 +237,7 @@ fn test_family_query_matches_full_detection() {
         var got = lazy_by_family(lazy_new(), fam);
         var mismatches = 0;
         var t = 0;
-        while (t <= ACCEL_AGNOS_GPU) {
+        while (t < ACCEL_TYPE_COUNT) {
             if (t != ACCEL_CPU) {
                 if (accel_family(t) == fam) {
                     if (_count_type(got, t) != _count_type(full, t)) { mismatches = mismatches + 1; }
@@ -292,7 +302,7 @@ fn test_into_registry_runs_each_backend_once() {
     assert_eq(vec_len(lazy_all), vec_len(full), "same profile count as full detection");
     var mismatches = 0;
     var t = 0;
-    while (t <= ACCEL_AGNOS_GPU) {
+    while (t < ACCEL_TYPE_COUNT) {
         if (_count_type(lazy_all, t) != _count_type(full, t)) { mismatches = mismatches + 1; }
         t = t + 1;
     }
@@ -387,6 +397,154 @@ fn test_warnings_kept() {
     return 0;
 }
 
+# --- No-exec detection finds Gaudi and Neuron (2.5.5) ---
+
+# Through 2.5.4 a no-exec mask dropped both backends, so registry_detect_no_exec
+# found neither the habanalabs nodes nor /dev/neuron<N>. They run now, told
+# not to exec; registry_detect still lets them.
+fn test_no_exec_finds_gaudi_neuron() {
+    _reset_calls();
+    _gaudi_exec = 0 - 1;
+    _neuron_exec = 0 - 1;
+    var r = registry_detect_no_exec();
+    var p = reg_profiles(r);
+    assert_eq(_count_type(p, ACCEL_GAUDI), 1, "no_exec: Gaudi found");
+    assert_eq(_count_type(p, ACCEL_NEURON), 1, "no_exec: Neuron found");
+    assert_eq(_gaudi_exec, 0, "no_exec: Gaudi told not to exec");
+    assert_eq(_neuron_exec, 0, "no_exec: Neuron told not to exec");
+    assert_eq(_count_warning(reg_warnings(r), HWA_ERR_TOOL_NOT_FOUND, "hl-smi"), 0, "no_exec: hl-smi not looked for");
+    assert_eq(_calls_of(BACKEND_CUDA), 0, "no_exec: CUDA still masked out");
+    registry_detect();
+    assert_eq(_gaudi_exec, 1, "registry_detect: Gaudi may exec");
+    assert_eq(_neuron_exec, 1, "registry_detect: Neuron may exec");
+    var mask = builder_with(builder_none(), BACKEND_NEURON);
+    _neuron_exec = 0 - 1;
+    var only = reg_profiles(registry_detect_with(mask));
+    assert_eq(_count_type(only, ACCEL_NEURON), 1, "a Neuron-only mask: Neuron found");
+    assert_eq(_neuron_exec, 0, "a Neuron-only mask spawns nothing");
+    _neuron_exec = 0 - 1;
+    registry_detect_with_opts(mask, 1);
+    assert_eq(_neuron_exec, 1, "with_opts(mask, 1): Neuron may exec");
+    return 0;
+}
+
+# --- What a lazy registry hands out is a copy (2.5.5) ---
+
+# Through 2.5.4 lazy_probed_profiles and lazy_warnings returned the live vecs,
+# which a later probe grows and compacts in place (profiles_dedup), so a
+# reader on another thread could index past a vec_truncate.
+fn test_probed_profiles_is_snapshot() {
+    _vk_moltenvk = 1;
+    var lr = lazy_new();
+    lazy_by_family(lr, FAMILY_NPU);
+    var snap = lazy_probed_profiles(lr);
+    var n0 = vec_len(snap);
+    lazy_by_family(lr, FAMILY_GPU);
+    assert_eq(vec_len(snap), n0, "probed_profiles: a snapshot, not the live list");
+    assert(vec_len(lazy_probed_profiles(lr)) > n0, "probed_profiles: a new call sees the GPU probe");
+    var mine = lazy_probed_profiles(lr);
+    var n1 = vec_len(mine);
+    vec_push(mine, profile_cpu(BYTES_PER_GIB));
+    assert_eq(vec_len(lazy_probed_profiles(lr)), n1, "probed_profiles: the caller's pushes stay its own");
+    _vk_moltenvk = 0;
+    return 0;
+}
+
+fn test_warnings_is_snapshot() {
+    var lr = lazy_new();
+    lazy_by_family(lr, FAMILY_GPU);
+    var ws = lazy_warnings(lr);
+    var w0 = vec_len(ws);
+    lazy_by_family(lr, FAMILY_AI_ASIC);
+    assert_eq(vec_len(ws), w0, "warnings: a snapshot, unchanged by a later query");
+    assert_eq(vec_len(lazy_warnings(lr)), w0 + 1, "warnings: a new call has the ASIC probe's");
+    return 0;
+}
+
+# A reader walking snapshots while another thread probes: every snapshot is
+# whole and stays as it was taken (no Vulkan view the dedup drops, no length
+# that moves under the reader). The reader walks each snapshot many times,
+# so a probe can land mid-walk.
+var _cc_lr = 0;
+var _cc_done = 0;
+
+fn _gpu_prober(arg) {
+    lazy_by_family(_cc_lr, FAMILY_GPU);
+    atomic_store(&_cc_done, 1);
+    return 0;
+}
+
+fn test_lazy_concurrent_readers() {
+    _vk_moltenvk = 1;
+    var bad = 0;
+    var runs = 0;
+    while (runs < 100) {
+        _cc_lr = lazy_new();
+        lazy_by_family(_cc_lr, FAMILY_NPU);
+        atomic_store(&_cc_done, 0);
+        var t = thread_create(&_gpu_prober, 0);
+        if (t == 0) { _gpu_prober(0); }
+        var cap = 0;
+        while (atomic_load(&_cc_done) == 0 && cap < 100000) {
+            var snap = lazy_probed_profiles(_cc_lr);
+            var n = vec_len(snap);
+            var k = 0;
+            while (k < 50) {
+                if (_count_type(snap, ACCEL_VULKAN) != 0) { bad = bad + 1; }
+                k = k + 1;
+            }
+            if (vec_len(snap) != n) { bad = bad + 1; }
+            cap = cap + 1;
+        }
+        if (t != 0) { thread_join(t); }
+        runs = runs + 1;
+    }
+    assert_eq(bad, 0, "concurrent probe: every snapshot whole");
+    _vk_moltenvk = 0;
+    return 0;
+}
+
+# --- Family bits and repeat queries (2.5.5) ---
+
+# The probed bit is a shift, guarded: a family past bit 63 is never probed
+# and marks nothing (an unguarded 1 << 70 wraps to bit 6).
+fn test_family_bits() {
+    var lr = lazy_new();
+    assert_eq(_lazy_is_probed(lr, FAMILY_CPU), 1, "bits: CPU probed at start");
+    assert_eq(_lazy_is_probed(lr, FAMILY_GPU), 0, "bits: GPU not yet");
+    lazy_by_family(lr, FAMILY_GPU);
+    assert_eq(_lazy_is_probed(lr, FAMILY_GPU), 1, "bits: GPU after its query");
+    assert_eq(lazy_probed(lr), 3, "bits: CPU and GPU only");
+    _lazy_mark_probed(lr, 70);
+    assert_eq(lazy_probed(lr), 3, "bits: family 70 marks nothing");
+    assert_eq(_lazy_is_probed(lr, 70), 0, "bits: family 70 never probed");
+    _lazy_mark_probed(lr, 0 - 1);
+    assert_eq(lazy_probed(lr), 3, "bits: a negative family marks nothing");
+    assert_eq(vec_len(lazy_by_family(lr, 70)), 0, "bits: family 70 finds nothing");
+    return 0;
+}
+
+# lazy_by_family_into refills the caller's vec under the lock: repeat
+# queries allocate nothing; lazy_count_by_family counts what it returns.
+fn test_by_family_into_bounded() {
+    var lr = lazy_new();
+    var out = vec_new();
+    lazy_by_family_into(lr, FAMILY_GPU, out);
+    var n = vec_len(out);
+    assert(n > 0, "into: GPUs found");
+    assert_eq(lazy_count_by_family(lr, FAMILY_GPU), n, "count: as many as into returns");
+    var u0 = alloc_used();
+    var i = 0;
+    while (i < 1000) {
+        lazy_by_family_into(lr, FAMILY_GPU, out);
+        lazy_count_by_family(lr, FAMILY_GPU);
+        i = i + 1;
+    }
+    assert_eq(alloc_used() - u0, 0, "into: 1000 repeat queries allocate nothing");
+    assert_eq(vec_len(out), n, "into: the same GPUs");
+    return 0;
+}
+
 # --- Run all tests ---
 
 alloc_init();
@@ -404,6 +562,12 @@ test_into_registry_system_passes_once();
 test_enriched_once();
 test_npu_first_apple_allows_exec();
 test_warnings_kept();
+test_no_exec_finds_gaudi_neuron();
+test_probed_profiles_is_snapshot();
+test_warnings_is_snapshot();
+test_lazy_concurrent_readers();
+test_family_bits();
+test_by_family_into_bounded();
 
 var fails = assert_summary();
 syscall(60, fails);

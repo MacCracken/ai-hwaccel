@@ -1,8 +1,8 @@
 """ai-hwaccel — universal AI hardware accelerator detection (Python bindings).
 
 Thin, dependency-free wrapper over the compiled ``ai-hwaccel`` binary.
-Each call shells out to the binary and parses its JSON (schema v4) into
-typed dataclasses.
+Each call shells out to the binary and parses its JSON (schema v6, see
+``SCHEMA_VERSION``) into typed dataclasses.
 
     >>> import ai_hwaccel
     >>> reg = ai_hwaccel.detect()
@@ -18,7 +18,13 @@ import warnings
 from typing import Optional
 
 from . import _runner
-from ._runner import BinaryNotFoundError, CommandError, find_binary
+from ._runner import (
+    BinaryNotFoundError,
+    CommandError,
+    CommandTimeoutError,
+    InvalidOutputError,
+    find_binary,
+)
 from .models import (
     SCHEMA_VERSION,
     AcceleratorProfile,
@@ -72,6 +78,8 @@ __all__ = [
     "find_binary",
     "BinaryNotFoundError",
     "CommandError",
+    "CommandTimeoutError",
+    "InvalidOutputError",
     "SCHEMA_VERSION",
     "AcceleratorProfile",
     "Interconnect",
@@ -87,7 +95,7 @@ __all__ = [
 ]
 
 
-def detect(*, binary: Optional[str] = None, timeout: float = 30.0) -> Registry:
+def detect(*, binary: Optional[str] = None, timeout: float = 60.0) -> Registry:
     """Detect all accelerators + system I/O topology."""
     data = _runner.run_json([], binary=binary, timeout=timeout)
     reg = Registry.from_dict(data)
@@ -101,7 +109,7 @@ def detect(*, binary: Optional[str] = None, timeout: float = 30.0) -> Registry:
     return reg
 
 
-def summary(*, binary: Optional[str] = None, timeout: float = 30.0) -> dict:
+def summary(*, binary: Optional[str] = None, timeout: float = 60.0) -> dict:
     """Compact registry summary (counts + totals) as a plain dict."""
     return _runner.run_json(["--summary"], binary=binary, timeout=timeout)
 
@@ -111,7 +119,7 @@ def plan(
     *,
     quant: str = "bf16",
     binary: Optional[str] = None,
-    timeout: float = 30.0,
+    timeout: float = 60.0,
 ) -> ShardingPlan:
     """Recommend a sharding plan for ``model`` (e.g. ``"70B"``)."""
     data = _runner.run_json(
@@ -124,17 +132,30 @@ def training_memory(
     model: str,
     *,
     method: str = "full",
-    quant: str = "bf16",
+    quant: Optional[str] = None,
     binary: Optional[str] = None,
-    timeout: float = 30.0,
+    timeout: float = 60.0,
 ) -> TrainingMemory:
-    """Estimate training memory for ``model`` under ``method``.
+    """Estimate training memory for ``model`` under ``method``, on a GPU.
 
     ``method`` is one of: full, lora, qlora-4bit, qlora-8bit, prefix,
-    dpo, rlhf, distillation.
+    dpo, rlhf, distillation. The weights are bf16 unless the method is a
+    QLoRA one, which picks 4- or 8-bit weights itself.
+
+    ``quant`` is deprecated and ignored: ``--train`` never read ``--quant``,
+    so every value gave the bf16 figures. Passing it warns; it is removed in
+    2.6.0.
     """
+    if quant is not None:
+        warnings.warn(
+            "training_memory(quant=...) has no effect: the estimate assumes "
+            "bf16 weights (method='qlora-4bit' / 'qlora-8bit' for quantized "
+            "ones). The parameter is removed in 2.6.0.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     data = _runner.run_json(
-        ["--train", model, "--method", method, "--quant", quant],
+        ["--train", model, "--method", method],
         binary=binary,
         timeout=timeout,
     )
@@ -146,7 +167,7 @@ def cost(
     *,
     quant: str = "bf16",
     binary: Optional[str] = None,
-    timeout: float = 30.0,
+    timeout: float = 60.0,
 ) -> CostReport:
     """Cloud instance cost recommendations for ``model``."""
     data = _runner.run_json(
@@ -155,6 +176,6 @@ def cost(
     return CostReport.from_dict(data)
 
 
-def version(*, binary: Optional[str] = None, timeout: float = 30.0) -> str:
+def version(*, binary: Optional[str] = None, timeout: float = 60.0) -> str:
     """Return the version reported by the binary."""
     return _runner.run_text(["--version"], binary=binary, timeout=timeout).strip()

@@ -1,0 +1,537 @@
+# accel_test.tcyr — the DRM accel class walk, the Graphcore /dev fallback and
+# the interconnect pass (2.5.5), on fake sysfs and /dev trees this unit builds
+# under /tmp and removes, and the parsers behind them.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/assert.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "lib/sakshi.cyr"
+include "src/log.cyr"
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/cuda.cyr"
+include "src/detect/rocm.cyr"
+include "src/detect/tpu.cyr"
+include "src/detect/gaudi.cyr"
+include "src/detect/neuron.cyr"
+include "src/detect/vulkan.cyr"
+include "src/detect/apple.cyr"
+include "src/detect/intel.cyr"
+include "src/detect/amd_xdna.cyr"
+include "src/detect/edge.cyr"
+include "src/detect/cloud_asic.cyr"
+include "src/detect/bandwidth.cyr"
+include "src/detect/pcie.cyr"
+include "src/detect/numa.cyr"
+include "src/detect/interconnect.cyr"
+include "src/detect/disk.cyr"
+include "src/detect/environment.cyr"
+include "src/registry.cyr"
+include "src/plan.cyr"
+include "src/training.cyr"
+include "src/json_out.cyr"
+
+# --- A fake sysfs tree under /tmp ---
+
+var _t_root = 0;
+
+# `rel` (a cstr) under this run's temp root, as a fresh cstr.
+fn _t_path(rel) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, _t_root);
+    str_builder_add_cstr(sb, "/");
+    str_builder_add_cstr(sb, rel);
+    return str_data(str_builder_build(sb));
+}
+
+# The directory part of cstr `path`, created.
+fn _t_parent(path) {
+    var n = strlen(path);
+    var i = n - 1;
+    while (i > 0 && load8(path + i) != 47) { i = i - 1; }
+    var dir = alloc(i + 1);
+    memcpy(dir, path, i);
+    store8(dir + i, 0);
+    xmkdir_p(dir, 493);
+    return 0;
+}
+
+fn _t_dir(rel) {
+    xmkdir_p(_t_path(rel), 493);
+    return 0;
+}
+
+fn _t_put(rel, text) {
+    var path = _t_path(rel);
+    _t_parent(path);
+    file_write_all(path, text, strlen(text));
+    return 0;
+}
+
+fn _t_link(rel, target) {
+    var path = _t_path(rel);
+    _t_parent(path);
+    sys_symlink(target, path);
+    return 0;
+}
+
+# Remove cstr `path`: a file or link, else a directory and all it holds.
+fn _t_rm(path) {
+    if (sys_unlink(path) == 0) { return 0; }
+    var entries = dir_list(str_from(path));
+    var i = 0;
+    while (i < vec_len(entries)) {
+        var sb = str_builder_new();
+        str_builder_add_cstr(sb, path);
+        str_builder_add_cstr(sb, "/");
+        str_builder_add(sb, vec_get(entries, i));
+        _t_rm(str_data(str_builder_build(sb)));
+        i = i + 1;
+    }
+    sys_rmdir(path);
+    return 0;
+}
+
+# An accel class node `cls`/accelN: a device/driver link to driver `drv` (a
+# cstr, or 0 for none) and a device/vendor file `vendor` (or 0 for none).
+fn _t_accel(cls, n, drv, vendor) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, cls);
+    str_builder_add_cstr(sb, "/accel");
+    str_builder_add_int(sb, n);
+    var node = str_data(str_builder_build(sb));
+    var dev = str_data(str_builder_build(_t_sb2(node, "/device")));
+    _t_dir(dev);
+    if (drv != 0) {
+        var tsb = str_builder_new();
+        str_builder_add_cstr(tsb, "../../../../bus/pci/drivers/");
+        str_builder_add_cstr(tsb, drv);
+        _t_link(str_data(str_builder_build(_t_sb2(dev, "/driver"))), str_data(str_builder_build(tsb)));
+    }
+    if (vendor != 0) { _t_put(str_data(str_builder_build(_t_sb2(dev, "/vendor"))), vendor); }
+    return dev;
+}
+
+fn _t_sb2(a, b) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, a);
+    str_builder_add_cstr(sb, b);
+    return sb;
+}
+
+fn _t_file(dev, leaf, text) {
+    _t_put(str_data(str_builder_build(_t_sb2(dev, leaf))), text);
+    return 0;
+}
+
+# Profiles in `v` of type `atype`.
+fn _count_type(v, atype) {
+    var c = 0;
+    var i = 0;
+    while (i < vec_len(v)) {
+        if (profile_accel_type(vec_get(v, i)) == atype) { c = c + 1; }
+        i = i + 1;
+    }
+    return c;
+}
+
+# The profile in `v` with device id `id`, or 0.
+fn _by_id(v, id) {
+    var i = 0;
+    while (i < vec_len(v)) {
+        if (profile_device_id(vec_get(v, i)) == id) { return vec_get(v, i); }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# The fake accel class every accel test reads: one node per in-tree driver,
+# a Google TPU, a node with no driver link, and names that are not nodes.
+fn _build_accel_tree() {
+    _t_accel("accel", 0, "intel_vpu", "0x8086\n");
+    var g = _t_accel("accel", 1, "habanalabs", "0x1da3\n");
+    _t_file(g, "/device_type", "GAUDI2\n");
+    _t_accel("accel", 2, "qaic", "0x17cb\n");
+    _t_accel("accel", 3, "amdxdna", "0x1022\n");
+    var tpu = _t_accel("accel", 4, "google_tpu", "0x1ae0\n");
+    _t_file(tpu, "/device", "0x0063\n");
+    _t_file(tpu, "/chip_count", "4\n");
+    _t_accel("accel", 5, "ethosu", 0);
+    var bare = _t_accel("accel", 6, 0, 0);
+    _t_file(bare, "/tpu_version", "v5p\n");
+    _t_file(bare, "/chip_count", "99999\n");
+    _t_accel("accel", 7, "nvidia_accel", "0x10de\n");
+    _t_accel("accel", 8, "rocket", 0);
+    var g3 = _t_accel("accel", 9, "habanalabs", "0x1da3\n");
+    _t_file(g3, "/device_type", "GAUDI3\n");
+    _t_dir("accel/card0/device");
+    _t_dir("accel/accelX/device");
+    return 0;
+}
+
+# --- The accel class ---
+
+fn test_accel_driver_backend() {
+    assert_eq(accel_driver_backend(str_from("intel_vpu"), 0 - 1), BACKEND_INTEL_NPU, "intel_vpu: Intel NPU");
+    assert_eq(accel_driver_backend(str_from("amdxdna"), 0 - 1), BACKEND_AMD_XDNA, "amdxdna: XDNA");
+    assert_eq(accel_driver_backend(str_from("habanalabs"), 0 - 1), BACKEND_GAUDI, "habanalabs: Gaudi");
+    assert_eq(accel_driver_backend(str_from("qaic"), 0 - 1), BACKEND_QUALCOMM, "qaic: Qualcomm");
+    assert_eq(accel_driver_backend(str_from("ethosu"), 0 - 1), 0 - 1, "ethosu: no backend");
+    assert_eq(accel_driver_backend(str_from("rocket"), 0 - 1), 0 - 1, "rocket: no backend");
+    assert_eq(accel_driver_backend(str_from("intel_vp"), 0 - 1), BACKEND_TPU, "a prefix is not the driver");
+    assert_eq(accel_driver_backend(str_from("amdxdna2"), 0x1022), 0 - 1, "a longer name is not amdxdna");
+    assert_eq(accel_driver_backend(0, 0 - 1), BACKEND_TPU, "no driver link, no vendor: a TPU candidate");
+    assert_eq(accel_driver_backend(str_from("google_tpu"), 0x1ae0), BACKEND_TPU, "Google vendor: a TPU");
+    assert_eq(accel_driver_backend(str_from("other"), 0x10DE), 0 - 1, "another vendor: not a TPU");
+    assert_eq(accel_driver_backend(str_from("intel_vpu"), 0x1ae0), BACKEND_INTEL_NPU, "the driver decides first");
+    assert_eq(accel_node_index(str_from("accel12")), 12, "accel12");
+    assert_eq(accel_node_index(str_from("accel")), 0 - 1, "accel: no index");
+    assert_eq(accel_node_index(str_from("accelX")), 0 - 1, "accelX: not a node");
+    assert_eq(accel_node_index(str_from("card0")), 0 - 1, "card0: not a node");
+    assert_eq(accel_node_index(str_from("accel99999")), 0 - 1, "past CMD_MAX_DEVICE_ID");
+    assert_eq(tpu_version_from_pci_device(0x005e), TPU_V4, "0x005e: v4");
+    assert_eq(tpu_version_from_pci_device(0x0063), TPU_V5E, "0x0063: v5e");
+    assert_eq(tpu_version_from_pci_device(0x0062), TPU_V5P, "0x0062: v5p");
+    assert_eq(tpu_version_from_pci_device(0x006f), 0 - 1, "0x006f: no enum value");
+    return 0;
+}
+
+# Every accel node goes to its own backend: through 2.5.4 each node but the
+# amdxdna one was a 32 GiB "Google TPU v4" (and the Intel NPU was not found).
+fn test_accel_class_tree() {
+    var root = _t_path("accel");
+    var tpus = vec_new();
+    detect_tpu_at(root, tpus, vec_new());
+    assert_eq(vec_len(tpus), 2, "TPUs: the Google node and the bare one");
+    var v5e = _by_id(tpus, 4);
+    assert(v5e != 0, "accel4 is a TPU");
+    if (v5e != 0) {
+        assert_eq(profile_tpu_version(v5e), TPU_V5E, "accel4: v5e from its PCI device ID");
+        assert_eq(profile_tpu_chips(v5e), 4, "accel4: 4 chips");
+        assert_streq(profile_device_name(v5e), "Google TPU v5e", "accel4: name");
+    }
+    var bare = _by_id(tpus, 6);
+    assert(bare != 0, "accel6 (no driver link) is a TPU candidate");
+    if (bare != 0) {
+        assert_eq(profile_tpu_version(bare), TPU_V5P, "accel6: v5p from tpu_version");
+        assert_eq(profile_tpu_chips(bare), 1, "accel6: a chip_count past the bound is 1");
+    }
+
+    var npus = vec_new();
+    assert_eq(detect_intel_npu_at(root, _t_path("misc/intel_npu"), npus), 1, "one Intel NPU");
+    if (vec_len(npus) == 1) {
+        assert_eq(profile_accel_type(vec_get(npus, 0)), ACCEL_INTEL_NPU, "intel_vpu: Intel NPU");
+        assert_eq(profile_device_id(vec_get(npus, 0)), 0, "intel_vpu: accel0");
+    }
+    var xdna = vec_new();
+    assert_eq(detect_amd_xdna_at(root, xdna), 1, "one XDNA NPU");
+    if (vec_len(xdna) == 1) { assert_eq(profile_device_id(vec_get(xdna, 0)), 3, "amdxdna: accel3"); }
+    var qc = vec_new();
+    assert_eq(detect_qualcomm_at(root, qc), 1, "one Cloud AI 100");
+    if (vec_len(qc) == 1) { assert_eq(profile_device_id(vec_get(qc, 0)), 2, "qaic: accel2"); }
+    var hl = vec_new();
+    assert_eq(detect_gaudi_accel_at(root, hl), 2, "two Gaudi from habanalabs nodes");
+    var g2 = _by_id(hl, 1);
+    var g3 = _by_id(hl, 9);
+    if (g2 != 0) {
+        assert_eq(profile_gaudi_gen(g2), GAUDI2, "accel1: GAUDI2");
+        assert_eq(profile_memory_bytes(g2), gaudi_hbm_bytes(GAUDI2), "accel1: Gaudi2 HBM");
+        assert_streq(profile_device_name(g2), "Intel Gaudi2", "accel1: name");
+    }
+    if (g3 != 0) { assert_eq(profile_gaudi_gen(g3), GAUDI3, "accel9: GAUDI3"); }
+    assert_eq(vec_len(accel_class_nodes(root, 0 - 1)), 3, "ethosu, rocket and the NVIDIA node: no backend");
+    return 0;
+}
+
+# The misc node is the Intel NPU's fallback, used only when the accel class
+# has none; an empty or missing class gives no device of any kind.
+fn test_accel_class_fallbacks() {
+    _t_dir("empty");
+    _t_put("misc/intel_npu", "");
+    var npus = vec_new();
+    assert_eq(detect_intel_npu_at(_t_path("empty"), _t_path("misc/intel_npu"), npus), 1, "misc node: one NPU");
+    assert_eq(detect_intel_npu_at(_t_path("empty"), _t_path("misc/none"), vec_new()), 0, "neither: none");
+    var both = vec_new();
+    detect_intel_npu_at(_t_path("accel"), _t_path("misc/intel_npu"), both);
+    assert_eq(vec_len(both), 1, "accel node and misc node: one NPU");
+    var t = vec_new();
+    detect_tpu_at(_t_path("missing"), t, vec_new());
+    detect_amd_xdna_at(_t_path("missing"), t);
+    detect_gaudi_accel_at(_t_path("missing"), t);
+    assert_eq(vec_len(t), 0, "a missing class: nothing");
+    return 0;
+}
+
+# --- /dev fallbacks (2.5.5) ---
+
+# Graphcore's fallback takes an ipu<N> node only. Through 2.5.4 any /dev/ipu*
+# entry counted, so an Intel IPU6 or IPU7 camera (/dev/ipu-psys0,
+# /dev/ipu7-psys0) was a Graphcore IPU.
+# 2.5.5: with exec off, the Cerebras and Graphcore detectors look up no tool
+# (only their /dev fallbacks run), so registry_detect_no_exec can use them.
+fn test_cloud_asic_no_exec() {
+    var p = vec_new();
+    var w = vec_new();
+    detect_cerebras_opts(p, w, 0);
+    detect_graphcore_opts(p, w, 0);
+    assert_eq(vec_len(w), 0, "no-exec cerebras/graphcore: no tool looked up");
+    # With exec, gc-info is looked up (this host and CI have none).
+    var w2 = vec_new();
+    detect_graphcore_opts(vec_new(), w2, 1);
+    assert_gt(vec_len(w2), 0, "exec graphcore: gc-info looked up");
+    var w3 = vec_new();
+    detect_cerebras_opts(vec_new(), w3, 1);
+    assert_gt(vec_len(w3), 0, "exec cerebras: cerebras_cli looked up");
+    return 0;
+}
+
+fn test_graphcore_dev_nodes() {
+    _t_put("dev-cam/ipu-psys0", "");
+    _t_put("dev-cam/ipu7-psys0", "");
+    _t_put("dev-cam/ipu0_ex", "");
+    assert_eq(graphcore_dev_present_at(_t_path("dev-cam")), 0, "camera nodes: no Graphcore IPU");
+    _t_put("dev-ipu/ipu0", "");
+    _t_put("dev-ipu/ipu0_ex", "");
+    assert_eq(graphcore_dev_present_at(_t_path("dev-ipu")), 1, "ipu0: a Graphcore IPU");
+    assert_eq(graphcore_dev_present_at(_t_path("missing")), 0, "no directory: none");
+    return 0;
+}
+
+# --- InfiniBand / RoCE ---
+
+fn test_ib_port_state() {
+    assert_eq(ib_port_state_code(str_from("4: ACTIVE")), 4, "4: ACTIVE");
+    assert_eq(ib_port_state_code(str_from("1: DOWN")), 1, "1: DOWN");
+    assert_eq(ib_port_state_code(str_from("5: ACTIVE_DEFER")), 5, "5: ACTIVE_DEFER");
+    assert_eq(ib_port_state_code(str_from("ACTIVE")), IB_PORT_STATE_UNKNOWN, "no number: unknown");
+    assert_eq(ib_port_state_code(str_from("123: X")), IB_PORT_STATE_UNKNOWN, "three digits: unknown");
+    assert_eq(ib_port_state_code(0), IB_PORT_STATE_UNKNOWN, "no file: unknown");
+    assert_eq(ib_rate_gbps_x1000(str_from("200 Gb/sec (4X HDR)")), 25000, "HDR: 25 GB/s");
+    assert_eq(ib_rate_gbps_x1000(str_from("2.5 Gb/sec (1X SDR)")), 312, "1X SDR: 0.312 GB/s");
+    assert_eq(ib_rate_gbps_x1000(str_from("bogus")), 0, "no number: 0");
+    assert_eq(ib_rate_gbps_x1000(0), 0, "no file: 0");
+    return 0;
+}
+
+# The state is the port-state number, in the JSON too: through 2.5.4 it held
+# a string's address.
+fn test_infiniband_tree() {
+    _t_put("ib/mlx5_0/ports/1/state", "4: ACTIVE\n");
+    _t_put("ib/mlx5_0/ports/1/rate", "200 Gb/sec (4X HDR)\n");
+    _t_put("ib/mlx5_0/ports/1/link_layer", "InfiniBand\n");
+    _t_put("ib/mlx5_1/ports/1/state", "1: DOWN\n");
+    _t_put("ib/mlx5_1/ports/1/rate", "2.5 Gb/sec (1X SDR)\n");
+    _t_put("ib/mlx5_1/ports/1/link_layer", "Ethernet\n");
+    var sio = system_io_new();
+    _detect_infiniband_at(sio, _t_path("ib"));
+    var ics = sio_interconnects(sio);
+    assert_eq(vec_len(ics), 2, "two ports");
+    var i = 0;
+    while (i < vec_len(ics)) {
+        var ic = vec_get(ics, i);
+        i = i + 1;
+        if (streq(ic_name(ic), "mlx5_0") == 1) {
+            assert_eq(ic_kind(ic), ICK_INFINIBAND, "mlx5_0: InfiniBand");
+            assert_eq(ic_state(ic), 4, "mlx5_0: ACTIVE");
+            assert_eq(ic_bw_x1000(ic), 25000, "mlx5_0: 25 GB/s");
+        } else {
+            assert_eq(ic_kind(ic), ICK_ROCEV2, "mlx5_1: RoCE v2");
+            assert_eq(ic_state(ic), 1, "mlx5_1: DOWN");
+            assert_eq(ic_bw_x1000(ic), 312, "mlx5_1: 1X SDR keeps its .5");
+        }
+    }
+    var sb = str_builder_new();
+    system_io_to_json(sb, sio);
+    var js = str_builder_build(sb);
+    var want = "\"name\":\"mlx5_0\",\"bandwidth_bytes_per_sec\":25000000000,\"state\":4}";
+    assert_eq(str_contains_cstr(js, want), 1, "json: mlx5_0 state 4");
+    assert_eq(str_contains_cstr(js, "\"state\":1}"), 1, "json: mlx5_1 state 1");
+    return 0;
+}
+
+# --- NVLink ---
+
+fn _nvl_fixture(path) {
+    var buf = alloc(65536);
+    var n = file_read_all(path, buf, 65535);
+    assert_gt(n, 0, path);
+    if (n <= 0) { return str_from(""); }
+    return str_new(buf, n);
+}
+
+# Per GPU, active links only, each link's own rate. Through 2.5.4 every line
+# with "Link" in it was 25 GB/s and all GPUs were summed into one entry, so
+# two unbridged RTX 3090s were a 200 GB/s NVLink.
+fn test_nvlink_status() {
+    var sio = system_io_new();
+    var unbridged = _nvl_fixture("tests/fixtures/from-docs/nvidia-smi-nvlink-s-3090-unbridged.txt");
+    assert_eq(parse_nvlink_status(unbridged, sio), 0, "unbridged 3090s: no NVLink");
+    assert_eq(vec_len(sio_interconnects(sio)), 0, "unbridged 3090s: nothing added");
+    var nsb = str_builder_new();
+    str_builder_add_cstr(nsb, "GPU 0: NVIDIA L40S (UUID: GPU-0)\n");
+    str_builder_add_cstr(nsb, "NVML: Unable to retrieve NVLink information as all links are inActive\n");
+    var nvml = str_builder_build(nsb);
+    assert_eq(parse_nvlink_status(nvml, sio), 0, "an NVML message is not a link");
+
+    var h = system_io_new();
+    var h100 = _nvl_fixture("tests/fixtures/from-docs/nvidia-smi-nvlink-s-h100.txt");
+    assert_eq(parse_nvlink_status(h100, h), 2, "H100 x2: one NVLink per GPU");
+    var ics = sio_interconnects(h);
+    if (vec_len(ics) == 2) {
+        assert_streq(ic_name(vec_get(ics, 0)), "nvlink0", "GPU 0: nvlink0");
+        assert_streq(ic_name(vec_get(ics, 1)), "nvlink1", "GPU 1: nvlink1");
+        assert_eq(ic_bw_x1000(vec_get(ics, 1)), 18 * 26562, "18 links x 26.562 GB/s");
+        assert_eq(ic_kind(vec_get(ics, 0)), ICK_NVLINK, "NVLink kind");
+    }
+    assert_eq(sio_max_ic_bw_x1000(h), 478116, "max is one GPU's, not the sum");
+
+    var m = system_io_new();
+    var msb = str_builder_new();
+    str_builder_add_cstr(msb, "GPU 0: X (UUID: a)\n\t Link 0: 14.062 GB/s\n\t Link 1: <inactive>\n");
+    str_builder_add_cstr(msb, "\t Link 2: 14.062 GB/s\nGPU 3: X (UUID: b)\n\t Link 0: <inactive>\n");
+    var mixed = str_builder_build(msb);
+    assert_eq(parse_nvlink_status(mixed, m), 1, "one GPU with an active link");
+    if (vec_len(sio_interconnects(m)) == 1) {
+        var ic = vec_get(sio_interconnects(m), 0);
+        assert_eq(ic_bw_x1000(ic), 28124, "active links summed, inactive skipped");
+        assert_streq(ic_name(ic), "nvlink0", "named after its GPU");
+    }
+    var junk = system_io_new();
+    var absurd = "GPU 0: X\n\t Link 0: 99999999999999999999 GB/s\n\t Link 1: 5000 GB/s\n\t Link 2:\n";
+    parse_nvlink_status(str_from(absurd), junk);
+    assert_eq(vec_len(sio_interconnects(junk)), 0, "absurd rates: no NVLink");
+    assert_eq(nvlink_link_gbps_x1000(str_from(" 25 GB/s")), 25000, "25 GB/s");
+    assert_eq(nvlink_link_gbps_x1000(str_from(" <inactive>")), 0, "<inactive>");
+    return 0;
+}
+
+# Where nvidia-smi is missing and there are no NVSwitch nodes (the dev host,
+# CI), the probe reports the tool missing when it runs, so these show whether
+# it ran. A CUDA run of nvidia-smi that hit the deadline is not followed by
+# `nvlink -s`, and no-exec never runs it.
+fn _nvsmi_missing(warns) {
+    var c = 0;
+    var i = 0;
+    while (i < vec_len(warns)) {
+        var w = vec_get(warns, i);
+        if (warning_code(w) == HWA_ERR_TOOL_NOT_FOUND && streq(warning_tool(w), "nvidia-smi") == 1) { c = c + 1; }
+        i = i + 1;
+    }
+    return c;
+}
+
+fn test_nvlink_probe_gates() {
+    if (which("nvidia-smi") != 0) { return 0; }
+    if (dir_exists("/sys/devices/virtual/nvidia-nvswitch") == 1) { return 0; }
+    if (aihw_path_exists("/sys/bus/nvidia_nvswitch/devices") == 1) { return 0; }
+    var vk = vec_new();
+    var g = profile_new(ACCEL_VULKAN, 0, 24 * BYTES_PER_GIB);
+    profile_set_pci_id(g, pci_id_make(0x10DE, 0x2684));
+    vec_push(vk, g);
+    var w = vec_new();
+    vec_push(w, warning_timeout("nvidia-smi", CMD_DEFAULT_TIMEOUT_MS));
+    detect_interconnects(system_io_new(), vk, w);
+    assert_eq(_nvsmi_missing(w), 0, "nvidia-smi timed out: nvlink probe skipped");
+    assert_eq(vec_len(w), 1, "nvidia-smi timed out: only that warning");
+    var w2 = vec_new();
+    detect_interconnects_opts(system_io_new(), vk, w2, 0);
+    assert_eq(_nvsmi_missing(w2), 0, "no exec: nvidia-smi not looked for");
+    var w3 = vec_new();
+    detect_interconnects_opts(system_io_new(), vk, w3, 1);
+    assert_eq(_nvsmi_missing(w3), 1, "exec: nvidia-smi looked for");
+    return 0;
+}
+
+# --- XGMI ---
+
+fn test_xgmi_tree() {
+    _t_dir("drm/card0/device/xgmi_hive_info");
+    _t_dir("drm/card0-DP-1");
+    _t_dir("drm/renderD128");
+    var sio = system_io_new();
+    _detect_xgmi_at(sio, _t_path("drm"));
+    assert_eq(vec_len(sio_interconnects(sio)), 1, "XGMI hive found");
+    assert_eq(sio_max_ic_bw_x1000(sio), 400000, "XGMI 400 GB/s");
+    _t_dir("drm2/card0/device");
+    var none = system_io_new();
+    _detect_xgmi_at(none, _t_path("drm2"));
+    assert_eq(vec_len(sio_interconnects(none)), 0, "no hive: no XGMI");
+    return 0;
+}
+
+# --- ICI ---
+
+# Every TPU profile counts: through 2.5.4 only the first did.
+fn test_ici_all_profiles() {
+    var p = vec_new();
+    var i = 0;
+    while (i < 4) {
+        vec_push(p, profile_tpu(i, 1, TPU_V5E));
+        i = i + 1;
+    }
+    var sio = system_io_new();
+    _detect_ici(sio, p);
+    assert_eq(vec_len(sio_interconnects(sio)), 1, "one ICI entry");
+    assert_eq(sio_max_ic_bw_x1000(sio), 4 * 204800, "4 v5e chips");
+    var none = system_io_new();
+    _detect_ici(none, vec_new());
+    assert_eq(vec_len(sio_interconnects(none)), 0, "no TPU: no ICI");
+    return 0;
+}
+
+# --- No-exec detection still reads the sysfs interconnects ---
+
+# Through 2.5.4 registry_system_passes skipped the whole interconnect pass
+# without exec, so registry_detect_no_exec() lost ICI, InfiniBand, NVSwitch
+# and XGMI though none of them spawns anything.
+fn test_no_exec_interconnects() {
+    var r = hw_registry_new();
+    reg_add_profile(r, profile_tpu(0, 4, TPU_V5P));
+    registry_system_passes(r, 0);
+    assert_eq(sio_has_ici(reg_system_io(r)), 1, "no exec: ICI found");
+    assert_eq(_nvsmi_missing(reg_warnings(r)), 0, "no exec: no nvidia-smi");
+    return 0;
+}
+
+alloc_init();
+
+var _rsb = str_builder_new();
+str_builder_add_cstr(_rsb, "/tmp/ai-hwaccel-accel-test-");
+str_builder_add_int(_rsb, sys_getpid());
+_t_root = str_data(str_builder_build(_rsb));
+_t_rm(_t_root);
+_build_accel_tree();
+
+test_accel_driver_backend();
+test_accel_class_tree();
+test_accel_class_fallbacks();
+test_graphcore_dev_nodes();
+test_cloud_asic_no_exec();
+test_ib_port_state();
+test_infiniband_tree();
+test_nvlink_status();
+test_nvlink_probe_gates();
+test_xgmi_tree();
+test_ici_all_profiles();
+test_no_exec_interconnects();
+
+_t_rm(_t_root);
+assert_eq(aihw_path_exists(_t_root), 0, "temp tree removed");
+
+var fails = assert_summary();
+syscall(60, fails);

@@ -1,9 +1,11 @@
 # command.cyr — safe subprocess execution for hardware detection
 # Wraps lib/process.cyr with:
-#   - PATH resolution (absolute path)
-#   - Environment sanitization (strip LD_PRELOAD etc.)
+#   - PATH resolution (absolute path to a regular executable file)
+#   - An empty environment on POSIX (lib/process.cyr), so LD_PRELOAD and the
+#     like never reach the tool; a Windows tool inherits the caller's
 #   - Output size limits (1 MiB stdout)
-#   - A deadline: a tool silent for CMD_DEFAULT_TIMEOUT_MS is killed (2.5.1)
+#   - A deadline on a silent tool (2.5.1; see below for what it costs)
+#   - One capture at a time (2.5.5; see cmd_capture)
 #   - CSV parsing helpers
 #   - Device ID validation
 
@@ -13,16 +15,21 @@ var CMD_MAX_DEVICE_ID = 1024;
 
 # --- Tool deadline (2.5.1) ---
 # Through 2.5.0 every tool ran without a time limit, so a hung `nvidia-smi`
-# blocked detection for ever. lib/process.cyr's deadline is IDLE-based: a tool
-# still printing is never cut, one silent for the deadline is killed and its
-# capture reports -2. The bound is a process-wide value (proc_set_timeout_ms),
-# and registry_detect_threaded runs tools on several threads at once, so a
-# plain set-and-restore around each call would race: one thread's restore
-# could unbound another's capture mid-run. The first capture in flight sets
-# the deadline and the last one out restores the caller's own value, under a
+# blocked detection for ever. What a hung tool costs now, per tool:
+#   - POSIX: the read is cut after CMD_DEFAULT_TIMEOUT_MS of silence (a tool
+#     still printing is never cut), then lib/process.cyr waits a second
+#     CMD_DEFAULT_TIMEOUT_MS for it to exit before it sends TERM, gives it up
+#     to 5 s of grace and sends KILL: about 2x the deadline, plus up to 5 s
+#     for a tool that ignores TERM. The reap after KILL does not time out, so
+#     a tool stuck in the kernel (D state, a wedged driver) is not bounded.
+#   - Windows: the bound is wall-clock over the whole run, so a tool still
+#     printing when it passes is killed too.
+#   - AGNOS: none (process_agnos.cyr has no proc_set_timeout_ms).
+# The capture then reports -2 and run_tool_status drops what it read. The
+# bound is a process-wide value (proc_set_timeout_ms). The first capture in
+# flight sets it and the last one out restores the caller's own value, under a
 # mutex, so an embedding program's subprocesses keep their deadline outside
-# detection. AGNOS has no deadline (process_agnos.cyr does not define
-# proc_set_timeout_ms), so there the helpers do nothing.
+# detection. AGNOS has no deadline, so there the helpers do nothing.
 var _cmd_dl_mtx = 0;
 var _cmd_dl_inflight = 0;
 var _cmd_dl_saved = 0;
@@ -59,13 +66,45 @@ fn _cmd_dl_exit() {
     return 0;
 }
 
+# --- One capture at a time (2.5.5) ---
+# lib/process.cyr (cyrius 6.7.18) keeps a capture's state where another
+# thread's capture can reach it, and registry_detect_threaded runs detectors
+# on several threads:
+#   - the idle cut is a global (_proc_read_cut): a capture still reading when
+#     another thread's tool was cut read the cut as its own, and a healthy
+#     tool was reported as a timeout, its output dropped;
+#   - the capture pipe is not close-on-exec (Windows: an inheritable pipe and
+#     bInheritHandles), so a tool another thread started mid-capture held the
+#     pipe open, and the capture saw EOF only when that tool exited: one hung
+#     tool made every capture beside it a deadline kill;
+#   - a deadline kill snapshots the tool's descendants into one shared buffer
+#     (_proc_tree), and Windows keeps its job table unlocked.
+# So captures take turns, under their own mutex (the deadline helpers take
+# _cmd_dl_mtx inside it, never the other way round). Detector threads still
+# overlap their parsing, sysfs reads and DXGI calls; their tools run one
+# after another. Issue 2026-10-29-cyrius-process-capture-state-not-thread-safe.
+var _cmd_cap_mtx = 0;
+
+# The capture mutex, created on first use (the same CAS as _cmd_dl_mutex).
+fn _cmd_cap_mutex() {
+    var m = atomic_load(&_cmd_cap_mtx);
+    if (m != 0) { return m; }
+    var fresh = mutex_new();
+    if (atomic_cas(&_cmd_cap_mtx, 0, fresh) == 1) { return fresh; }
+    return atomic_load(&_cmd_cap_mtx);
+}
+
 # exec_capture_status under the tool deadline: bytes read (-1 if nothing
 # ran), with the end in `st` (two i64 slots; slot 0 is -2 when the deadline
-# killed the tool). Every subprocess detection starts goes through here.
+# killed the tool). Every subprocess detection starts goes through here, one
+# at a time.
 fn cmd_capture(args, buf, buflen, st) {
+    var m = _cmd_cap_mutex();
+    mutex_lock(m);
     _cmd_dl_enter();
     var n = exec_capture_status(args, buf, buflen, st);
     _cmd_dl_exit();
+    mutex_unlock(m);
     return n;
 }
 
@@ -86,20 +125,81 @@ fn cmd_capture(args, buf, buflen, st) {
 #
 # Kept as a named wrapper rather than replacing the four call sites: the name
 # documents intent at the call site, and a single seam is the right place to
-# put any future per-target quirk.
+# put any future per-target quirk. Windows has one (2.5.5, below).
 fn cmd_getenv(name) {
+    #ifdef CYRIUS_TARGET_WIN
+    return _cmd_getenv_win(name);
+    #endif
+    #ifndef CYRIUS_TARGET_WIN
     return getenv(name);
+    #endif
+}
+
+#ifdef CYRIUS_TARGET_WIN
+# A variable's value as a heap cstr of its own size, or 0 when it is unset or
+# empty. The stdlib getenv reads into a fixed 4096-byte buffer and answers 0
+# for a longer value (lib/io.cyr, cyrius 6.7.18), so a Windows PATH of 4096
+# or more characters, which the CUDA toolkit, Visual Studio, conda and oneAPI
+# reach between them, made which() find no tool at all. GetEnvironmentVariableA
+# (the 0xF015 reroute) returns the length it wrote, NUL excluded, or, when the
+# buffer is short, the size it needs, NUL included. A value under 512 bytes
+# is read on the stack and copied; a longer one is read again into a buffer of
+# the size asked for, a third time if the variable grew in between. Issue
+# 2026-10-29-cyrius-pe-getenv-4096-cap.
+fn _cmd_getenv_win(name) {
+    alloc_init();
+    var small[512];
+    var n = syscall(0xF015, name, &small, 512);
+    if (n <= 0) { return 0; }
+    if (n < 512) {
+        var v = alloc(n + 1);
+        if (v == 0) { return 0; }
+        memcpy(v, &small, n);
+        store8(v + n, 0);
+        return v;
+    }
+    var cap = n;
+    var tries = 0;
+    while (tries < 2) {
+        var buf = alloc(cap);
+        if (buf == 0) { return 0; }
+        var got = syscall(0xF015, name, buf, cap);
+        if (got <= 0) { return 0; }
+        if (got < cap) {
+            store8(buf + got, 0);
+            return buf;
+        }
+        cap = got;
+        tries = tries + 1;
+    }
+    return 0;
+}
+#endif
+
+# --- Data directory (2.5.5) ---
+# The directory data_file_path reads VERSION and data/*.json from, as the
+# embedding program set it (data_dir_set), or 0.
+var _cmd_data_dir = 0;
+
+# Point data_file_path at directory `dir` (a cstr; 0 clears it). The CLI
+# passes its --data-dir value here at startup. A library build never reads
+# the process argv: through 2.5.4 data_file_path scanned it for --data-dir,
+# and in a consumer binary that argv is the host's, whose own --data-dir flag
+# (meaning something else there) silently moved load_cloud_instances and
+# load_models to <its dir>/data/.
+fn data_dir_set(dir) {
+    _cmd_data_dir = dir;
+    return 0;
 }
 
 # Scan argv for `--data-dir <path>`, returning the path cstr or 0.
 #
 # Self-contained (argv/argc/streq, no dependency on main.cyr's parser) so
 # it works on PE: argv is populated from GetCommandLineW/CommandLineToArgvW
-# (cyrius PE reroutes 0xF006/0xF010). Environment variables are readable on PE
-# too as of 2.3.21 (cmd_getenv now delegates to the stdlib getenv, which calls
-# the 0xF015 GetEnvironmentVariableA reroute), so the flag is no longer the
-# ONLY channel there — it remains the preferred one because it is explicit and
-# needs no environment plumbing through the Python runner.
+# (cyrius PE reroutes 0xF006/0xF010). Nothing calls it since 2.5.5: in a
+# library build the argv it reads belongs to the host program. Removed in
+# 2.6.0.
+#deprecated("reads the host program's argv in a library build; the CLI hands --data-dir to data_dir_set")
 fn cmd_data_dir_arg() {
     var n = argc();
     var i = 1;
@@ -120,9 +220,10 @@ fn cmd_data_dir_arg() {
 # data/cloud_pricing.json (--cost) at runtime; invoked from outside the
 # project root (e.g. a pip-installed wheel) those are not cwd-relative.
 # Resolution precedence:
-#   1. `--data-dir <path>` CLI flag — works on EVERY platform including
-#      Windows PE, because argv is readable there. This is the portable
-#      channel a consumer (Python _runner now, agnos later) should use.
+#   1. data_dir_set(<path>): the CLI's `--data-dir <path>` flag, on EVERY
+#      platform including Windows PE, because argv is readable there. This
+#      is the portable channel a consumer of the CLI (the Python _runner now,
+#      agnos later) should use. A library consumer calls data_dir_set itself.
 #   2. AI_HWACCEL_DATA_DIR env var — honoured on **every target** as of
 #      2.3.21. It was a silent no-op on macOS and Windows through 2.3.21
 #      because `cmd_getenv` read /proc/self/environ, which neither has; it
@@ -131,7 +232,7 @@ fn cmd_data_dir_arg() {
 #   3. cwd-relative <rel> — the original fallback.
 # See roadmap 2.3.3 (env var) and 2.3.12 (the --data-dir flag for PE).
 fn data_file_path(rel) {
-    var dir = cmd_data_dir_arg();
+    var dir = _cmd_data_dir;
     if (dir == 0) { dir = cmd_getenv("AI_HWACCEL_DATA_DIR"); }
     if (dir == 0) { return rel; }
     var sb = str_builder_new();
@@ -230,10 +331,35 @@ fn which_candidates(path_val, name, win) {
     return out;
 }
 
-# Resolve tool name to an absolute path through $PATH: the first of
-# which_candidates that exists. Returns a heap cstr, or 0 if not found.
-fn which(name) {
-    var path_val = cmd_getenv("PATH");
+# 1 if candidate `path` (a cstr) is a tool which() may return. POSIX: a
+# regular file this process may execute, asked of stat(2) and access(X_OK)
+# (2.5.5). Through 2.5.4 it was any path that opened read-only, so a
+# directory or a file without the x bit earlier on PATH shadowed the real
+# tool (it then failed with status 127), a tool this process may run but not
+# read (another user's 0711) was never found, and a FIFO blocked the open,
+# outside any deadline. stat opens nothing. Windows and AGNOS keep the open test: CreateFileW does not open a
+# directory, and AGNOS has no access(2).
+fn _which_runnable(path) {
+    #ifdef CYRIUS_TARGET_WIN
+    return file_exists(path);
+    #endif
+    #ifdef CYRIUS_TARGET_AGNOS
+    return file_exists(path);
+    #endif
+    #ifndef CYRIUS_TARGET_WIN
+    #ifndef CYRIUS_TARGET_AGNOS
+    var st[256];
+    if (sys_stat(path, &st) != 0) { return 0; }
+    if ((load32(&st + STAT_MODE) & 0xF000) != 0x8000) { return 0; }   # S_IFREG
+    if (sys_access(path, 1) != 0) { return 0; }                        # X_OK
+    return 1;
+    #endif
+    #endif
+}
+
+# The first of which_candidates(`path_val`, `name`) that _which_runnable
+# accepts, as a heap cstr, or 0. `path_val` is a PATH value (a cstr, or 0).
+fn which_in(path_val, name) {
     if (path_val == 0) { return 0; }
     var win = 0;
     #ifdef CYRIUS_TARGET_WIN
@@ -244,10 +370,16 @@ fn which(name) {
     var i = 0;
     while (i < n) {
         var c = vec_get(cands, i);
-        if (file_exists(c) == 1) { return c; }
+        if (_which_runnable(c) == 1) { return c; }
         i = i + 1;
     }
     return 0;
+}
+
+# Resolve tool name to an absolute path through $PATH (which_in). Returns a
+# heap cstr, or 0 if not found.
+fn which(name) {
+    return which_in(cmd_getenv("PATH"), name);
 }
 
 # `path` as the first token of a Windows command line (2.5.3): wrapped in
@@ -350,9 +482,17 @@ fn run_tool_status(tool, args, warnings, st_out) {
         ai = ai + 1;
     }
 
-    # Capture stdout (1 MiB buffer). One byte short of the buffer, so the NUL
-    # below always fits: through 2.5.0 a full read wrote it one byte past.
-    var buf = alloc(CMD_MAX_STDOUT);
+    # Capture stdout into a 1 MiB scratch buffer: fl_alloc maps a block this
+    # size on its own, and fl_free unmaps it. One byte short of the buffer, so
+    # the result's NUL always fits: through 2.5.0 a full read wrote it one byte
+    # past. Through 2.5.4 the result pointed into a fresh alloc(CMD_MAX_STDOUT),
+    # so every tool run kept 1 MiB for good, and each cached_get re-detection
+    # grew a long-lived consumer by about that much per tool (2.5.5).
+    var buf = fl_alloc(CMD_MAX_STDOUT);
+    if (buf == 0) {
+        if (warnings != 0) { vec_push(warnings, warning_tool_failed(tool, 0 - 1, "exec failed")); }
+        return 0;
+    }
     var st[16];
     var n = cmd_capture(exec_args, buf, CMD_MAX_STDOUT - 1, &st);
     if (st_out != 0) {
@@ -361,15 +501,14 @@ fn run_tool_status(tool, args, warnings, st_out) {
     }
 
     if (load64(&st) == 0 - 2) {
+        fl_free(buf);
         if (warnings != 0) { vec_push(warnings, warning_timeout(tool, CMD_DEFAULT_TIMEOUT_MS)); }
         return 0;
     }
     if (n < 0) {
+        fl_free(buf);
         if (warnings != 0) { vec_push(warnings, warning_tool_failed(tool, 0 - 1, "exec failed")); }
         return 0;
-    }
-    if (n == 0) {
-        return str_new(buf, 0);
     }
     if (n >= CMD_MAX_STDOUT - 1) {
         if (warnings != 0) {
@@ -377,12 +516,15 @@ fn run_tool_status(tool, args, warnings, st_out) {
         }
     }
 
-    # Null-terminate
-    store8(buf + n, 0);
-    return str_new(buf, n);
+    # Keep what the tool printed, NUL-terminated, in a buffer of its size.
+    # Copied before the scratch goes back: parsers keep str_sub views of it.
+    var out = str_from_buf(buf, n);
+    fl_free(buf);
+    return out;
 }
 
-# Run a tool with up to 5 args. Returns Str with stdout, or 0 on error.
+# Run a tool with the args in vec `args` (cstrs). Returns Str with stdout, or
+# 0 on error.
 # Pushes a warning to the warnings vec on failure: not found, failed to run,
 # killed at the deadline (warning_timeout), output that filled the buffer and
 # was cut short (a parse warning; the truncated output is still returned), or
@@ -398,7 +540,7 @@ fn run_tool(tool, args, warnings) {
     return out;
 }
 
-# Convenience: run tool with string args (up to 5)
+# Convenience: run_tool with 1 to 3 cstr args
 fn run_tool1(tool, arg1, warnings) {
     var args = vec_new();
     vec_push(args, arg1);
@@ -476,22 +618,39 @@ fn parse_hex_field(s) {
     return v;
 }
 
-# Parse an integer from a Str field. Returns value, or -1 on error.
+# A field (a Str, already trimmed) that is all decimal digits, 1 to 18 of
+# them, as an int; -1 otherwise: 0, "", "[N/A]", "1.5", "-3", 19+ digits.
+# str_to_int skips non-digits, so it reads "[N/A]" as 0 and "1.5" as 15. Pure.
 fn parse_field_int(field) {
-    return str_to_int(field);
+    if (field == 0) { return 0 - 1; }
+    var d = str_data(field);
+    var n = str_len(field);
+    if (n == 0 || n > 18) { return 0 - 1; }
+    var v = 0;
+    var i = 0;
+    while (i < n) {
+        var c = load8(d + i);
+        if (c < 48 || c > 57) { return 0 - 1; }
+        v = v * 10 + c - 48;
+        i = i + 1;
+    }
+    return v;
 }
 
-# Validate device ID is in sane range (0-1024)
+# Validate device ID is in sane range (0-1024). The field must be all digits
+# (parse_field_int, 2.5.5): through 2.5.4 str_to_int read nvidia-smi's
+# "[GPU is lost]" as device 0.
 fn validate_device_id(raw_str) {
-    var id = str_to_int(raw_str);
+    var id = parse_field_int(raw_str);
     if (id < 0) { return 0 - 1; }
     if (id > CMD_MAX_DEVICE_ID) { return 0 - 1; }
     return id;
 }
 
-# Validate memory in MB (0 to 16 TiB)
+# Validate memory in MB (0 to 16 TiB). The field must be all digits, as for
+# validate_device_id: "[N/A]" was 0 MB, "1.5" 15 MB, and 20 digits wrapped.
 fn validate_memory_mb(raw_str) {
-    var mb = str_to_int(raw_str);
+    var mb = parse_field_int(raw_str);
     if (mb < 0) { return 0 - 1; }
     if (mb > 16 * 1024 * 1024) { return 0 - 1; }
     return mb;

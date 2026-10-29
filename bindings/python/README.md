@@ -12,17 +12,34 @@ into typed dataclasses.
 
 ## Install
 
+The package is **not published on PyPI**. Install a wheel file, never the name
+`ai-hwaccel` from an index: the project does not own that name there, so
+whoever registers it would run code on your machine. The Wheels workflow
+(`.github/workflows/wheels.yml`) builds the wheels on every tag and keeps them as
+that run's artifacts (`wheels-linux`, `wheels-macos`, `wheels-windows`; GitHub
+keeps artifacts for 90 days by default):
+
 ```bash
-pip install ai-hwaccel              # platform wheel (Linux / macOS / Windows)
-pip install ai-hwaccel[pandas]      # + DataFrame export
+pip install ./ai_hwaccel-<version>-py3-none-<platform>.whl
+pip install './ai_hwaccel-<version>-py3-none-<platform>.whl[pandas]'   # + DataFrame export
 ```
 
-Prebuilt wheels ship for Linux (manylinux x86_64 / aarch64), macOS
-(arm64), and Windows (x86_64) — each bundles a self-contained binary, so
-there is nothing else to install. If no wheel matches your platform, the
-package falls back to a binary you supply: it locates one via, in order,
-an explicit `binary=` argument, the `AI_HWACCEL_BIN` environment
-variable, a wheel-bundled binary, or `ai-hwaccel` on `PATH`.
+Or build one from a checkout with the pinned cyrius:
+
+```bash
+bindings/python/scripts/stage_binary.sh
+bindings/python/scripts/build_wheel.sh manylinux2014_x86_64   # the platform tag
+```
+
+The Wheels workflow builds wheels for Linux (manylinux x86_64 / aarch64), macOS
+(arm64), and Windows (x86_64). Each bundles a self-contained binary, so there
+is nothing else to install. Where no wheel matches your platform,
+`pip install ./bindings/python` installs the package without a binary, and it
+runs one you supply. It locates the binary via, in order, an explicit
+`binary=` argument, the `AI_HWACCEL_BIN` environment variable, a wheel-bundled
+binary, or `ai-hwaccel` on `PATH`. A `binary=` or `AI_HWACCEL_BIN` you give is
+the only one tried: when it is not an executable file the call raises
+`BinaryNotFoundError` instead of running another binary (2.5.5).
 
 ## Usage
 
@@ -49,7 +66,7 @@ for r in rep.recommendations:
     print(r.instance, r.provider, r.price_per_hour_usd)
 
 # Optional pandas export
-df = reg.to_dataframe()          # requires ai-hwaccel[pandas]
+df = reg.to_dataframe()          # requires pandas
 ```
 
 ## API
@@ -59,21 +76,39 @@ df = reg.to_dataframe()          # requires ai-hwaccel[pandas]
 | `detect()` | `Registry` | accelerators + `system_io` topology |
 | `summary()` | `dict` | counts + totals |
 | `plan(model, quant=)` | `ShardingPlan` | sharding recommendation |
-| `training_memory(model, method=, quant=)` | `TrainingMemory` | bytes + `*_gib_x1000` |
+| `training_memory(model, method=)` | `TrainingMemory` | bytes + `*_gib_x1000`, for a GPU |
 | `cost(model, quant=)` | `CostReport` | cloud instance recommendations |
 | `version()` | `str` | binary's self-reported version |
 
-All accept `binary=<path>` and `timeout=<seconds>` (30 by default). The
+All accept `binary=<path>` and `timeout=<seconds>` (60 by default; 30 through 2.5.4). The
 binary kills a vendor tool that prints nothing for 10 s; `timeout` bounds the
 whole run. `TrainingMemory`, `ShardingPlan` and
 `CostRecommendation` also expose the fixed-point fields as floats (`total_gib`,
 `est_tokens_per_sec`, `price_per_hour_usd`).
+
+`training_memory()` assumes bf16 weights unless `method` is `qlora-4bit` or
+`qlora-8bit`. Its `quant=` keyword never had an effect (`--train` does not read
+`--quant`); since 2.5.5 passing it issues a `DeprecationWarning`, and 2.6.0
+removes it.
 
 `summary()`'s `total_memory_bytes` and `accelerator_memory_bytes` count system
 RAM once. On Apple Silicon the Metal GPU and Neural Engine use the CPU's RAM,
 so a 48 GB Mac totals 48 GiB. Each profile's `shared_memory_bytes` (schema v6)
 says how much of its `memory_bytes` is system RAM, and
 `AcceleratorProfile.dedicated_memory_bytes` is the rest.
+
+## Errors
+
+- `BinaryNotFoundError`: no binary was found, or the one `binary=` or
+  `AI_HWACCEL_BIN` names is not an executable file.
+- `CommandError`: the binary exited non-zero, ran past `timeout`, or printed
+  output that is not valid JSON. The last two raise the subclasses
+  `CommandTimeoutError` (also a `subprocess.TimeoutExpired`) and
+  `InvalidOutputError` (also a `json.JSONDecodeError`, with the output in
+  `.doc`), so code that caught those before 2.5.5 still catches them.
+
+The binary's output is decoded as UTF-8 whatever the locale's code page (a
+Windows host's is cp1252, cp936, ...); a byte that is not UTF-8 becomes U+FFFD.
 
 ## Data files & working directory
 

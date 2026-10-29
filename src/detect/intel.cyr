@@ -1,13 +1,39 @@
 # intel.cyr — Intel NPU + Intel oneAPI GPU detection
 
-# Intel NPU (Meteor Lake+): simple sysfs check
+# --- Intel NPU (Meteor Lake and later) ---
+#
+# The in-tree driver, intel_vpu (drivers/accel/ivpu, Linux 6.3+), registers
+# the NPU in the DRM accel class: /sys/class/accel/accelN, device/driver ->
+# intel_vpu (see tpu.cyr). Through 2.5.4 only /sys/class/misc/intel_npu was
+# checked, a node nothing creates, so no NPU was found and detect_tpu listed
+# it as a TPU instead. The misc node stays as a fallback for when the accel
+# class has none.
+
 fn detect_intel_npu(profiles, warnings) {
-    if (aihw_path_exists("/sys/class/misc/intel_npu") == 1) {
-        var p = profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB);
+    detect_intel_npu_at("/sys/class/accel", "/sys/class/misc/intel_npu", profiles);
+    return 0;
+}
+
+# detect_intel_npu over the accel class at `root` and the legacy node at
+# `misc` (both cstrs): one 2 GiB profile per intel_vpu node, else one for the
+# misc node. Returns the number pushed.
+fn detect_intel_npu_at(root, misc, profiles) {
+    var nodes = accel_class_nodes(root, BACKEND_INTEL_NPU);
+    var n = vec_len(nodes);
+    var i = 0;
+    while (i < n) {
+        var p = profile_new(ACCEL_INTEL_NPU, accel_node_index(vec_get(nodes, i)), 2 * BYTES_PER_GIB);
         profile_set_device_name(p, "Intel NPU");
         vec_push(profiles, p);
+        i = i + 1;
     }
-    return 0;
+    if (n == 0 && aihw_path_exists(misc) == 1) {
+        var p0 = profile_new(ACCEL_INTEL_NPU, 0, 2 * BYTES_PER_GIB);
+        profile_set_device_name(p0, "Intel NPU");
+        vec_push(profiles, p0);
+        n = 1;
+    }
+    return n;
 }
 
 # --- Intel oneAPI GPUs (Arc, Flex, Data Center GPU Max): xpu-smi ---
@@ -93,16 +119,20 @@ fn _xpu_leading_int(v) {
     return x;
 }
 
-# The bytes in a Memory Physical Size value: "32768.00 MiB", whole MiB only
-# (the fraction is dropped), or "... GiB". 0 when there is no leading number,
-# or past validate_memory_mb's 16 TiB bound, which also keeps the multiply from
+# The bytes in a Memory Physical Size value: "32768.00 MiB", or "0.50 GiB",
+# to three decimals (through 2.5.4 the fraction was dropped, so "0.50 GiB"
+# fell back to 16 GiB). 0 when there is no leading number, or past
+# validate_memory_mb's 16 TiB bound, which also keeps the multiply from
 # wrapping. Pure.
 fn _xpu_memory_bytes(v) {
-    var x = _xpu_leading_int(v);
-    if (x <= 0) { return 0; }
-    if (str_contains_cstr(v, "GiB") == 1) { x = x * 1024; }
-    if (x > 16 * 1024 * 1024) { return 0; }
-    return x * 1024 * 1024;
+    var mib_x1000 = parse_decimal_x1000(v);
+    if (mib_x1000 <= 0) { return 0; }
+    if (str_contains_cstr(v, "GiB") == 1) {
+        if (mib_x1000 > 16 * 1024 * 1000) { return 0; }
+        mib_x1000 = mib_x1000 * 1024;
+    }
+    if (mib_x1000 > 16 * 1024 * 1024 * 1000) { return 0; }
+    return mib_x1000 * 1024 * 1024 / 1000;
 }
 
 # Parse `xpu-smi discovery --dump 1,2,16,24` output (see above) into
@@ -110,11 +140,15 @@ fn _xpu_memory_bytes(v) {
 # from the PCI Device ID (Intel's vendor ID, which every xpu-smi device has).
 # Output with no "Device ID" header, such as xpu-smi's "Error: XPUM Service
 # Status Error." (printed with exit status 0), pushes a parse warning and no
-# profile. Returns the number of profiles pushed. Pure.
+# profile. A later line with fewer fields than the header, or with neither a
+# name nor a PCI Device ID when the header has either column, is not a device:
+# it pushes a parse warning (2.5.5; through 2.5.4 a trailing message line
+# became a nameless 16 GiB GPU). Returns the number of profiles pushed. Pure.
 fn parse_xpu_smi_dump(out, profiles, warnings) {
     var lines = str_split(out, 10);
     var nl = vec_len(lines);
     var hdr = 0 - 1;
+    var hdr_n = 0;
     var c_id = 0 - 1;
     var c_name = 0 - 1;
     var c_mem = 0 - 1;
@@ -130,9 +164,20 @@ fn parse_xpu_smi_dump(out, profiles, warnings) {
             c_id = _xpu_column(fields, "Device ID");
             if (c_id < 0) { continue; }
             hdr = li;
+            hdr_n = vec_len(fields);
             c_name = _xpu_column(fields, "Device Name");
             c_mem = _xpu_column(fields, "Memory Physical Size");
             c_pci = _xpu_column(fields, "PCI Device ID");
+            continue;
+        }
+        var nm = _xpu_value(fields, c_name);
+        var pv = _xpu_value(fields, c_pci);
+        var unnamed = 0;
+        if (nm == 0 && pv == 0 && (c_name >= 0 || c_pci >= 0)) { unnamed = 1; }
+        if (vec_len(fields) < hdr_n || unnamed == 1) {
+            if (warnings != 0) {
+                vec_push(warnings, warning_parse("xpu-smi", "a `discovery --dump` line that is not a device row"));
+            }
             continue;
         }
         var dev_id = _xpu_leading_int(_xpu_value(fields, c_id));
@@ -140,9 +185,7 @@ fn parse_xpu_smi_dump(out, profiles, warnings) {
         var mem = _xpu_memory_bytes(_xpu_value(fields, c_mem));
         if (mem <= 0) { mem = 16 * BYTES_PER_GIB; }
         var p = profile_new(ACCEL_INTEL_ONEAPI, dev_id, mem);
-        var nm = _xpu_value(fields, c_name);
         if (nm != 0) { profile_set_device_name(p, str_cstr(nm)); }
-        var pv = _xpu_value(fields, c_pci);
         if (pv != 0) { profile_set_pci_id(p, pci_id_make(PCI_VENDOR_INTEL, parse_hex_field(pv))); }
         vec_push(profiles, p);
         count = count + 1;
@@ -156,13 +199,30 @@ fn parse_xpu_smi_dump(out, profiles, warnings) {
 }
 
 # Intel oneAPI GPUs through xpu-smi. The property list is its own argument.
+# A run that exits non-zero is reported once, by its exit-status warning: its
+# output is still parsed, without the parse warnings its error text would add
+# (2.5.5, as detect_cuda does).
 fn detect_intel_oneapi(profiles, warnings) {
     var args = vec_new();
     vec_push(args, "discovery");
     vec_push(args, "--dump");
     vec_push(args, "1,2,16,24");
-    var result = run_tool("xpu-smi", args, warnings);
-    if (result == 0) { return 0; }
-    parse_xpu_smi_dump(result, profiles, warnings);
+    var st[16];
+    var result = run_tool_status("xpu-smi", args, warnings, &st);
+    var w = tool_run_warning("xpu-smi", result, &st);
+    if (w != 0 && warnings != 0) { vec_push(warnings, w); }
+    var failed = 0;
+    if (w != 0) { failed = 1; }
+    xpu_take_output(result, failed, profiles, warnings);
     return 0;
+}
+
+# Parse xpu-smi's output `result` (a Str, or 0) into profiles; after a run
+# that failed (`failed` 1), without its parse warnings (see
+# detect_intel_oneapi). Returns the number of profiles pushed. Pure.
+fn xpu_take_output(result, failed, profiles, warnings) {
+    if (result == 0) { return 0; }
+    var pw = warnings;
+    if (failed == 1) { pw = vec_new(); }
+    return parse_xpu_smi_dump(result, profiles, pw);
 }

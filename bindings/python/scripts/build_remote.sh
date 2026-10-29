@@ -22,13 +22,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 BIN_DIR="$SCRIPT_DIR/../src/ai_hwaccel/_bin"
 REMOTE_DIR="aih-build-$PLAT"
+# The ssh commands below run through the remote shell: quote these once here.
+# (scp takes the paths as they are: since OpenSSH 9.0 it speaks SFTP, which
+# does not pass them through a shell.)
+RDIR_Q="$(printf '%q' "$REMOTE_DIR")"
+EXE_Q="$(printf '%q' "$EXE")"
 
 echo ">> packing sources"
 TARBALL="$(mktemp -t aih-src-XXXXXX).tar.gz"
 tar -C "$REPO_ROOT" -czf "$TARBALL" src cyrius.cyml VERSION data
 
 echo ">> shipping to $HOST:$REMOTE_DIR"
-ssh "$HOST" "rm -rf $REMOTE_DIR && mkdir -p $REMOTE_DIR"
+ssh "$HOST" "rm -rf $RDIR_Q && mkdir -p $RDIR_Q"
 scp -q "$TARBALL" "$HOST:$REMOTE_DIR/src.tar.gz"
 rm -f "$TARBALL"
 
@@ -46,22 +51,25 @@ echo ">> building on $HOST"
 # On a Mac, ad-hoc sign the binary before it leaves: cycc writes it unsigned,
 # and Apple Silicon kills an unsigned arm64 executable when it starts (2.5.4;
 # see stage_binary.sh).
-ssh "$HOST" "cd $REMOTE_DIR && tar xzf src.tar.gz && \
+ssh "$HOST" "cd $RDIR_Q && tar xzf src.tar.gz && \
     export PATH=\"\$HOME/.cyrius/bin:\$PATH\" && \
     { cyrius lib sync || echo '>> lib sync unsupported here; [deps] resolution will populate ./lib'; } && \
-    CYRIUS_DCE=1 cyrius build src/main.cyr $EXE && \
-    { [ \"\$(uname -s)\" != Darwin ] || codesign -s - -f $EXE; } && \
-    file $EXE"
+    CYRIUS_DCE=1 cyrius build src/main.cyr $EXE_Q && \
+    { [ \"\$(uname -s)\" != Darwin ] || codesign -s - -f $EXE_Q; } && \
+    file $EXE_Q"
 
 echo ">> retrieving binary"
 mkdir -p "$BIN_DIR/data"
+# Drop any stray Windows EXE so this wheel bundles only the binary built here,
+# as stage_binary.sh does.
+rm -f "$BIN_DIR/ai-hwaccel.exe"
 scp -q "$HOST:$REMOTE_DIR/$EXE" "$BIN_DIR/ai-hwaccel"
 chmod +x "$BIN_DIR/ai-hwaccel"
 cp "$REPO_ROOT/VERSION" "$BIN_DIR/VERSION"
 cp "$REPO_ROOT/data/cloud_pricing.json" "$BIN_DIR/data/cloud_pricing.json"
 
 echo ">> cleaning remote"
-ssh "$HOST" "rm -rf $REMOTE_DIR"
+ssh "$HOST" "rm -rf $RDIR_Q"
 
 echo "Staged $PLAT binary into $BIN_DIR:"
 file "$BIN_DIR/ai-hwaccel"

@@ -1,27 +1,127 @@
 # cloud_asic.cyr — cloud/datacenter AI ASIC detectors
 # Cerebras WSE, Graphcore IPU, Groq LPU
 
-fn detect_cerebras(profiles, warnings) {
-    # Try CLI first
-    var result = run_tool1("cerebras_cli", "system-info", warnings);
-    if (result != 0) {
-        if (str_len(result) > 0) {
-            var mem_gb = 44;
-            # Parse memory from output if available
-            var lines = str_split(result, 10);
-            var li = 0;
-            while (li < vec_len(lines)) {
-                var line = vec_get(lines, li);
-                li = li + 1;
-                if (str_contains_cstr(line, "memory") == 1) {
-                    var val = parse_value_with_suffix(line);
-                    if (val > 0) { mem_gb = val; }
-                }
+# --- Memory sizes in tool output ---
+#
+# Through 2.5.4 the Cerebras and Graphcore detectors handed the whole
+# "Memory: 40 GB" line to parse_value_with_suffix, which reads only digits at
+# the start of a line, so the 44 GiB and 900 MiB defaults always applied; the
+# unit was ignored too, and only lowercase "memory" / "sram" matched.
+
+# 1 if Str `s` contains `word` (a lowercase cstr) in any ASCII case. Pure.
+fn _asic_contains_ci(s, word) {
+    var d = str_data(s);
+    var n = str_len(s);
+    var wl = strlen(word);
+    var i = 0;
+    while (i + wl <= n) {
+        var j = 0;
+        while (j < wl) {
+            var c = load8(d + i + j);
+            if (c >= 65 && c <= 90) { c = c + 32; }
+            if (c != load8(word + j)) { break; }
+            j = j + 1;
+        }
+        if (j == wl) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# The bytes in the size after the first ':' of `line` (a Str), or at its
+# start when it has none: "Memory: 40 GB", "sram: 900 MiB", "1.5 TB". K, M,
+# G and T, in any case and with or without "B" / "iB", are binary units; a
+# number with no unit is `dflt_unit` bytes. 0 when no number follows, when
+# the unit is something else ("GB/s", "PB", "%"), or past 16 TiB. Pure.
+fn asic_size_bytes(line, dflt_unit) {
+    var rest = line;
+    var colon = str_index_of(line, 58);
+    if (colon >= 0) { rest = str_sub(line, colon + 1, str_len(line) - colon - 1); }
+    var x = parse_decimal_x1000(rest);
+    if (x <= 0) { return 0; }
+    var d = str_data(rest);
+    var n = str_len(rest);
+    var i = 0;
+    while (i < n) {
+        var c = load8(d + i);
+        if (c != 32 && c != 9 && c != 46 && (c < 48 || c > 57)) { break; }
+        i = i + 1;
+    }
+    var unit = dflt_unit;
+    if (i < n) {
+        var u = load8(d + i);
+        if (u >= 65 && u <= 90) { u = u + 32; }
+        if (u == 107) { unit = 1024; }
+        elif (u == 109) { unit = 1024 * 1024; }
+        elif (u == 103) { unit = 1024 * 1024 * 1024; }
+        elif (u == 116) { unit = 1024 * 1024 * 1024 * 1024; }
+        else { return 0; }
+        i = i + 1;
+        if (i < n && (load8(d + i) == 105 || load8(d + i) == 73)) { i = i + 1; }
+        if (i < n && (load8(d + i) == 98 || load8(d + i) == 66)) { i = i + 1; }
+        if (i < n) {
+            var t = load8(d + i);
+            if (t == 47) { return 0; }
+            if (t >= 65 && t <= 90) { return 0; }
+            if (t >= 97 && t <= 122) { return 0; }
+        }
+    }
+    var cap = 16 * 1024 * BYTES_PER_GIB;
+    if (x > cap / unit * 1000) { return 0; }
+    return x * unit / 1000;
+}
+
+# Cerebras WSE memory from `cerebras_cli system-info` output (a Str): the
+# last line naming "memory" that holds a size (GB when it has no unit), else
+# 44 GiB. Pure.
+fn parse_cerebras_memory(out) {
+    var mem = 44 * BYTES_PER_GIB;
+    var lines = str_split(out, 10);
+    var n = vec_len(lines);
+    var li = 0;
+    while (li < n) {
+        var line = vec_get(lines, li);
+        li = li + 1;
+        if (_asic_contains_ci(line, "memory") != 1) { continue; }
+        var b = asic_size_bytes(line, BYTES_PER_GIB);
+        if (b > 0) { mem = b; }
+    }
+    return mem;
+}
+
+# Graphcore IPU memory from `gc-info -d 0 -i` output (a Str): the last line
+# naming "memory" or "sram" that holds a size (MB when it has no unit), else
+# 900 MiB. Pure.
+fn parse_gcinfo_memory(out) {
+    var mem = 900 * 1024 * 1024;
+    var lines = str_split(out, 10);
+    var n = vec_len(lines);
+    var li = 0;
+    while (li < n) {
+        var line = vec_get(lines, li);
+        li = li + 1;
+        if (_asic_contains_ci(line, "memory") != 1 && _asic_contains_ci(line, "sram") != 1) { continue; }
+        var b = asic_size_bytes(line, 1024 * 1024);
+        if (b > 0) { mem = b; }
+    }
+    return mem;
+}
+
+# --- Detectors ---
+
+# Detect a Cerebras system through cerebras_cli, with `allow_exec` 1, else
+# (or when it prints nothing) a /dev/cerebras* node. Through 2.5.4 no-exec
+# mode skipped the backend, node and all.
+fn detect_cerebras_opts(profiles, warnings, allow_exec) {
+    if (allow_exec == 1) {
+        var result = run_tool1("cerebras_cli", "system-info", warnings);
+        if (result != 0) {
+            if (str_len(result) > 0) {
+                var p = profile_new(ACCEL_CEREBRAS, 0, parse_cerebras_memory(result));
+                profile_set_device_name(p, "Cerebras WSE");
+                vec_push(profiles, p);
+                return 0;
             }
-            var p = profile_new(ACCEL_CEREBRAS, 0, mem_gb * BYTES_PER_GIB);
-            profile_set_device_name(p, "Cerebras WSE");
-            vec_push(profiles, p);
-            return 0;
         }
     }
 
@@ -34,42 +134,55 @@ fn detect_cerebras(profiles, warnings) {
     return 0;
 }
 
-fn detect_graphcore(profiles, warnings) {
-    # Try gc-info CLI
-    var result = run_tool3("gc-info", "-d", "0", "-i", warnings);
-    if (result != 0) {
-        if (str_len(result) > 0) {
-            var mem_mb = 900;
-            var lines = str_split(result, 10);
-            var li = 0;
-            while (li < vec_len(lines)) {
-                var line = vec_get(lines, li);
-                li = li + 1;
-                if (str_contains_cstr(line, "memory") == 1) {
-                    var val = parse_value_with_suffix(line);
-                    if (val > 0) { mem_mb = val; }
-                }
-                elif (str_contains_cstr(line, "sram") == 1) {
-                    var val2 = parse_value_with_suffix(line);
-                    if (val2 > 0) { mem_mb = val2; }
-                }
+# detect_cerebras_opts with exec allowed.
+fn detect_cerebras(profiles, warnings) {
+    return detect_cerebras_opts(profiles, warnings, 1);
+}
+
+# 1 when directory `dev` (a cstr; "/dev" but in a test) holds a Graphcore
+# IPU node, ipu<N> (dev_entry_id's rule), else 0, and 0 on Windows (see
+# platform.cyr's header). Through 2.5.4 the fallback took any /dev/ipu*
+# entry (has_dev_device), so an Intel IPU6 camera's /dev/ipu-psys0 was a
+# Graphcore IPU.
+fn graphcore_dev_present_at(dev) {
+    #ifdef CYRIUS_TARGET_WIN
+    return 0;
+    #endif
+    var ids = vec_new();
+    if (dev_dir_scan(dev, "ipu", ids) > 0) { return 1; }
+    return 0;
+}
+
+# Detect a Graphcore IPU through gc-info, with `allow_exec` 1, else (or when
+# it prints nothing) a /dev/ipu<N> node. Through 2.5.4 no-exec mode skipped
+# the backend, node and all.
+fn detect_graphcore_opts(profiles, warnings, allow_exec) {
+    if (allow_exec == 1) {
+        var result = run_tool3("gc-info", "-d", "0", "-i", warnings);
+        if (result != 0) {
+            if (str_len(result) > 0) {
+                var p = profile_new(ACCEL_GRAPHCORE, 0, parse_gcinfo_memory(result));
+                profile_set_device_name(p, "Graphcore IPU");
+                profile_set_compute_cap(p, "IPU");
+                vec_push(profiles, p);
+                return 0;
             }
-            var p = profile_new(ACCEL_GRAPHCORE, 0, mem_mb * 1024 * 1024);
-            profile_set_device_name(p, "Graphcore IPU");
-            profile_set_compute_cap(p, "IPU");
-            vec_push(profiles, p);
-            return 0;
         }
     }
 
-    # Fallback: /dev/ipu* check
-    if (has_dev_device("ipu") == 1) {
+    # Fallback: a /dev/ipu<N> node
+    if (graphcore_dev_present_at("/dev") == 1) {
         var p = profile_new(ACCEL_GRAPHCORE, 0, 900 * 1024 * 1024);
         profile_set_device_name(p, "Graphcore IPU");
         profile_set_compute_cap(p, "IPU");
         vec_push(profiles, p);
     }
     return 0;
+}
+
+# detect_graphcore_opts with exec allowed.
+fn detect_graphcore(profiles, warnings) {
+    return detect_graphcore_opts(profiles, warnings, 1);
 }
 
 fn detect_groq(profiles, warnings) {

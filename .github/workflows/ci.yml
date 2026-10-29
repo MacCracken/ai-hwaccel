@@ -7,6 +7,18 @@ on:
     branches: [main]
   workflow_call:
 
+# Nothing here writes to the repository. release.yml and wheels.yml call this
+# workflow, and a called workflow can only lower the token it is given.
+permissions:
+  contents: read
+
+# `bash -eo pipefail`. With no shell set, GitHub runs `bash -e`, where a
+# pipeline's status is its last command's alone (through 2.5.4 that let the
+# test gate below pass a failing unit).
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -16,7 +28,12 @@ jobs:
     name: Build & Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned to full commit SHAs, which a moved tag cannot
+      # change (the trailing comment names the release). No step needs git
+      # credentials, so none are left in .git/config for later steps to read.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install Cyrius toolchain
         run: |
@@ -28,10 +45,18 @@ jobs:
           # copies the stdlib snapshot at ~/.cyrius/versions/$VER/lib/
           # into ./lib/. `cyrius deps` resolves only non-stdlib
           # [deps.*] git entries from 6.0.0 onward.
+          #
+          # The installer holds the release signing key and the tarball
+          # checks, so it comes from the pinned version's tag (through 2.5.4
+          # it came from cyrius's main branch), and it runs from a file: a
+          # failed or cut-off download fails here instead of feeding sh
+          # partial input.
           CYRIUS_VERSION="${CYRIUS_VERSION:-$(grep -E '^cyrius[[:space:]]*=' cyrius.cyml | sed -E 's/^cyrius[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')}"
+          case "$CYRIUS_VERSION" in ''|*[!0-9.]*) echo "FAIL: cyrius pin '$CYRIUS_VERSION' is not a version"; exit 1;; esac
           echo "Installing Cyrius $CYRIUS_VERSION"
-          curl -sSf "https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh" \
-            | CYRIUS_VERSION="$CYRIUS_VERSION" sh
+          inst="$RUNNER_TEMP/cyrius-install.sh"
+          curl -sSfL -o "$inst" "https://raw.githubusercontent.com/MacCracken/cyrius/${CYRIUS_VERSION}/scripts/install.sh"
+          CYRIUS_VERSION="$CYRIUS_VERSION" sh "$inst"
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
@@ -164,6 +189,8 @@ jobs:
           check_struct cloud_inst  src/cost.cyr       ci
           check_struct rec         src/cost.cyr       rec
           check_struct lazy        src/lazy.cyr       lr
+          check_struct warning     src/error.cyr      w
+          check_struct targ        src/async_detect.cyr ta
           # Field-count bound checks (ambiguous params shared across
           # structs within a file or across files).
           # file                  | param | struct       | fields
@@ -251,23 +278,80 @@ jobs:
       - name: Verify ELF
         run: xxd -l 4 build/ai-hwaccel | grep -q "7f45 4c46"
 
+      - name: Python bindings (unittest against the built binary)
+        # Nothing ran bindings/python/tests before 2.5.5, which is how the
+        # bindings' SCHEMA_VERSION stayed at 4 while the binary emitted v5
+        # (2.3.15-2.3.27). detect() only warns on a schema mismatch, so
+        # `-W error::UserWarning` makes one fail. The binary is also staged
+        # into _bin/ the way stage_binary.sh lays it out, so the bundled-binary
+        # tests run too; a skipped test fails the step.
+        run: |
+          bin_dir=bindings/python/src/ai_hwaccel/_bin
+          mkdir -p "$bin_dir/data"
+          cp build/ai-hwaccel VERSION "$bin_dir/"
+          cp data/cloud_pricing.json "$bin_dir/data/"
+          cd bindings/python
+          AI_HWACCEL_BIN="$GITHUB_WORKSPACE/build/ai-hwaccel" \
+            python3 -W error::UserWarning -m unittest discover -s tests -v 2>&1 | tee "$RUNNER_TEMP/py-tests.log"
+          if grep -qE ' \.\.\. skipped |^OK \(skipped=' "$RUNNER_TEMP/py-tests.log"; then
+            echo "FAIL: a Python test was skipped"; exit 1
+          fi
+
       - name: Test suite
         # `tests/tcyr/*.tcyr` — descriptive-named test units. Each
         # `.tcyr` is a standalone compilation unit (see 2.1.0 arc).
+        #
+        # A unit passes when it exits 0 AND its last line is an anchored
+        # "N passed, 0 failed (" summary. Through 2.5.4 the gate was
+        # `tail -1 | grep -q "0 failed"` without pipefail: "10 failed"
+        # contains "0 failed", and the unit's exit status (its failure count)
+        # was thrown away. Each check covers a hole in the other: an exit
+        # status wraps mod 256 (1280 failures exit 0), and a unit can fail
+        # after printing a clean summary. Probe units try the gate first, so
+        # a gate that lets a failure through fails this step.
         run: |
+          unit_passed() {  # <output file> <exit status>
+            [ "$2" -eq 0 ] && tail -1 "$1" | grep -qE '^[0-9]+ passed, 0 failed \('
+          }
+          pr="$RUNNER_TEMP/ci_probe"
+          probe() {  # <failing assertions> <exit expression>; sets probe_rc
+            { printf 'include "lib/%s.cyr"\n' string alloc vec str fmt assert
+              printf 'alloc_init();\nvar i = 0;\nwhile (i < %s) { assert_eq(1, 2, "deliberate"); i = i + 1; }\n' "$1"
+              printf 'assert_eq(1, 1, "ok");\nvar fails = assert_summary();\nsyscall(60, %s);\n' "$2"
+            } > "$pr.tcyr"
+            CYRIUS_DCE=1 cyrius build "$pr.tcyr" "$pr" > /dev/null
+            probe_rc=0
+            "$pr" > "$pr.out" 2>&1 || probe_rc=$?
+          }
+          for p in "10 fails" "1280 fails" "0 3"; do
+            probe $p
+            if unit_passed "$pr.out" "$probe_rc"; then
+              echo "FAIL: the gate passes a probe unit ($p, exit $probe_rc): $(tail -1 "$pr.out")"; exit 1
+            fi
+          done
+          probe 0 fails
+          unit_passed "$pr.out" "$probe_rc" || {
+            echo "FAIL: the gate fails a passing probe unit: $(tail -1 "$pr.out")"; exit 1; }
+          rm -f "$pr" "$pr.tcyr" "$pr.out"
+          echo "gate: rejects 10 failures, 1280 failures (exit 0) and a clean summary with exit 3"
+
           pass=0; fail=0
           for t in tests/tcyr/*.tcyr; do
             [ -f "$t" ] || continue
             name=$(basename "$t" .tcyr)
             echo "=== $name ==="
-            CYRIUS_DCE=1 cyrius build "$t" "/tmp/ci_$name"
-            if "/tmp/ci_$name" 2>&1 | tee "/tmp/${name}_out" | tail -1 | grep -q "0 failed"; then
+            CYRIUS_DCE=1 cyrius build "$t" "$RUNNER_TEMP/ci_$name"
+            rc=0
+            "$RUNNER_TEMP/ci_$name" > "$RUNNER_TEMP/${name}_out" 2>&1 || rc=$?
+            if unit_passed "$RUNNER_TEMP/${name}_out" "$rc"; then
               pass=$((pass + 1))
+              tail -1 "$RUNNER_TEMP/${name}_out"
             else
               fail=$((fail + 1))
-              echo "FAIL: $t"
+              echo "FAIL: $t (exit $rc)"
+              tail -40 "$RUNNER_TEMP/${name}_out"
             fi
-            rm -f "/tmp/ci_$name"
+            rm -f "$RUNNER_TEMP/ci_$name"
           done
           echo "$pass passed, $fail failed"
           test $fail -eq 0
@@ -283,9 +367,11 @@ jobs:
           done
 
       - name: Benchmarks
-        env:
-          AI_HWACCEL_BENCH_HISTORY: ${{ github.workspace }}/bench-history.csv
-          AI_HWACCEL_BENCH_TAG: ${{ github.sha }}
+        # Builds and runs the suites so they cannot rot; the timings here are
+        # a shared runner's and go nowhere. bench-history.csv rows come from
+        # scripts/bench-history.sh on the dev host. (Through 2.5.4 this step
+        # set two env vars nothing reads, and the next step uploaded the
+        # committed CSV unchanged.)
         run: |
           for f in benches/*.bcyr; do
             [ -f "$f" ] || continue
@@ -294,20 +380,13 @@ jobs:
             "build/$name"
           done
 
-      - name: Upload bench history
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bench-history-${{ github.sha }}
-          path: bench-history.csv
-          if-no-files-found: ignore
-          retention-days: 90
-
   docs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Check required docs
         run: |
           MISSING=0
@@ -349,3 +428,48 @@ jobs:
             bindings/python/src/ai_hwaccel/__init__.py || {
             echo "FAIL: __init__.py must derive __version__ (no hardcoded literal)."; exit 1; }
           echo "Python bindings version consistent: $PY_VERSION (pyproject == VERSION; __version__ derived)"
+
+      - name: Workflow supply-chain guard
+        # 2.5.5. The release job's token can write to this repository, and
+        # the toolchain the workflows install builds every shipped binary, so
+        # what they run is pinned: the cyrius installer comes from the pinned
+        # version's tag, every action from a full commit SHA, no checkout
+        # leaves its token in .git/config, and release.yml's workflow-wide
+        # token is read-only (only its release job gets contents: write).
+        run: |
+          if grep -nE 'cyrius/(main|master)/scripts/install\.sh' .github/workflows/*.yml; then
+            echo "FAIL: fetch the cyrius installer from the pinned version's tag, not a branch"; exit 1
+          fi
+          if grep -nE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]*[^.[:space:]][^@[:space:]]*@' .github/workflows/*.yml \
+              | grep -vE '@[0-9a-f]{40}([[:space:]]|$)'; then
+            echo "FAIL: pin every action to a full commit SHA"; exit 1
+          fi
+          for f in .github/workflows/*.yml; do
+            co=$(grep -cE 'uses:[[:space:]]*actions/checkout@' "$f" || true)
+            pc=$(grep -cE '^[[:space:]]*persist-credentials:[[:space:]]*false' "$f" || true)
+            [ "$co" -eq "$pc" ] || { echo "FAIL: $f has $co checkouts but $pc 'persist-credentials: false'"; exit 1; }
+          done
+          awk '/^permissions:/ { p = 1; next } p && /^[^ #]/ { exit } p' .github/workflows/release.yml \
+            | grep -qE '^[[:space:]]+contents:[[:space:]]*read' || {
+            echo "FAIL: release.yml's top-level permissions must be contents: read"; exit 1; }
+          echo "Workflows: installer and actions pinned, no persisted credentials, release token read-only."
+
+      - name: No index install of an unpublished package
+        # ai-hwaccel is not published on PyPI and the project does not own the
+        # name there, so a documented `pip install ai-hwaccel` would install
+        # whatever someone else uploads under it. Until wheels.yml publishes
+        # the package, the docs install a wheel file.
+        run: |
+          if ! grep -q 'pypa/gh-action-pypi-publish' .github/workflows/wheels.yml; then
+            if grep -rnE 'pip install ai-hwaccel' --include='*.md' --include='*.py' --include='*.toml' \
+                README.md CONTRIBUTING.md SECURITY.md docs bindings/python; then
+              echo "FAIL: the docs install ai-hwaccel by name from an index, where nothing publishes it"; exit 1
+            fi
+          fi
+          echo "No index install line."
+
+      - name: Wheel license text
+        # setuptools reads no file outside bindings/python, so the wheel's
+        # license text is a copy of the repo-root LICENSE (pyproject.toml's
+        # license-files). Keep the two identical.
+        run: cmp LICENSE bindings/python/LICENSE

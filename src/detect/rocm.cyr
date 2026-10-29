@@ -1,10 +1,216 @@
 # rocm.cyr — AMD ROCm GPU detection via sysfs
+#
+# Each amdgpu DRM card is one profile, read from the card's own device
+# directory (2.5.5): its PCI address (the device link), memory, sensors, and
+# from the KFD topology node of the same PCI address its gfx target and
+# memory bus width, which with pp_dpm_mclk give the memory bandwidth. Through
+# 2.5.4 the bandwidth pass rebuilt "/sys/class/drm/card<device_id>" from the
+# profile's ordinal, which names another card or none (simpledrm or a BMC
+# holds card0 on many hosts), and the gfx target was the PCI revision byte.
 
 fn detect_rocm(profiles, warnings) {
-    var drm_dir = str_from("/sys/class/drm");
-    var entries = dir_list(drm_dir);
+    return detect_rocm_at(profiles, "/sys/class/drm", "/sys/class/kfd/kfd/topology/nodes");
+}
+
+# --- Parsers ---
+
+# The value of `key` (a cstr) in a KFD properties text `props` (a Str, or 0),
+# one "key value" line each: "location_id 1024". -1 when the key is missing or
+# its value is not a number. Pure.
+fn kfd_prop(props, key) {
+    if (props == 0) { return 0 - 1; }
+    var d = str_data(props);
+    var n = str_len(props);
+    var kl = strlen(key);
+    var i = 0;
+    while (i < n) {
+        if (i + kl < n) {
+            if (memeq(d + i, key, kl) == 1) {
+                if (load8(d + i + kl) == 32) {
+                    return str_leading_uint(str_sub(props, i + kl + 1, n - i - kl - 1));
+                }
+            }
+        }
+        while (i < n) {
+            if (load8(d + i) == 10) { break; }
+            i = i + 1;
+        }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+# The `len` hex digits at `p` as an int, or -1 if one is not a hex digit.
+fn _hex_digits(p, len) {
+    var v = 0;
+    var i = 0;
+    while (i < len) {
+        var h = load8(p + i);
+        var dv = 0 - 1;
+        if (h >= 48 && h <= 57) { dv = h - 48; }
+        elif (h >= 97 && h <= 102) { dv = h - 87; }
+        elif (h >= 65 && h <= 70) { dv = h - 55; }
+        if (dv < 0) { return 0 - 1; }
+        v = v * 16 + dv;
+        i = i + 1;
+    }
+    return v;
+}
+
+# Split a sysfs PCI address (a Str), "0000:04:00.0", into KFD's domain and
+# location_id ((bus << 8) | (device << 3) | function) in `out` (two i64
+# slots). Returns 1, or 0 when it is not domain:bus:device.function. Pure.
+fn pci_bdf_split(s, out) {
+    if (s == 0) { return 0; }
+    var d = str_data(s);
+    var n = str_len(s);
+    var c1 = str_index_of(s, 58);
+    if (c1 < 1 || c1 > 8) { return 0; }
+    if (n - c1 != 8) { return 0; }
+    if (load8(d + c1 + 3) != 58) { return 0; }
+    if (load8(d + c1 + 6) != 46) { return 0; }
+    var dom = _hex_digits(d, c1);
+    var bus = _hex_digits(d + c1 + 1, 2);
+    var dev = _hex_digits(d + c1 + 4, 2);
+    var func = _hex_digits(d + c1 + 7, 1);
+    if (dom < 0 || bus < 0 || dev < 0 || func < 0) { return 0; }
+    if (dev > 31 || func > 7) { return 0; }
+    store64(out, dom);
+    store64(out + 8, (bus << 8) | (dev << 3) | func);
+    return 1;
+}
+
+# KFD's gfx_target_version (major * 10000 + minor * 100 + stepping) as the
+# LLVM target name, a fresh cstr: 90012 -> "gfx90c", 110000 -> "gfx1100",
+# 90402 -> "gfx942". 0 when it is not above 0 (a CPU node) or the minor or
+# stepping passes one hex digit. Pure.
+fn rocm_gfx_name(v) {
+    if (v <= 0) { return 0; }
+    var minor = (v / 100) % 100;
+    var step = v % 100;
+    if (minor > 15 || step > 15) { return 0; }
+    var hex = "0123456789abcdef";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "gfx");
+    str_builder_add_int(sb, v / 10000);
+    str_builder_putc(sb, load8(hex + minor));
+    str_builder_putc(sb, load8(hex + step));
+    return str_data(str_builder_build(sb));
+}
+
+# Highest clock (MHz) in amdgpu's pp_dpm_mclk text (a Str, or 0), one
+# "<level>: <MHz>Mhz[ *]" line per DPM level: "2: 400Mhz \n3: 1600Mhz *" gives
+# 1600. The number before ':' is the level index, which through 2.5.4 was read
+# as the clock. 0 when no line has a clock. Pure.
+fn amd_dpm_max_mhz(data) {
+    if (data == 0) { return 0; }
+    var lines = str_split(data, 10);
+    var best = 0;
+    var i = 0;
+    while (i < vec_len(lines)) {
+        var ln = vec_get(lines, i);
+        i = i + 1;
+        var colon = str_index_of(ln, 58);
+        if (colon < 0) { continue; }
+        var mhz = parse_value_with_suffix(str_sub(ln, colon + 1, str_len(ln) - colon - 1));
+        if (mhz > best) { best = mhz; }
+    }
+    return best;
+}
+
+# Memory transfers per pp_dpm_mclk cycle for a gfx target (KFD's
+# gfx_target_version), by the memory it ships with, or 0 when that is not
+# known: 2 for HBM2/HBM2e (gfx900-gfx90a, gfx1011) and the DDR4 APUs (gfx902,
+# gfx909, gfx90c; DDR4-3200 runs mclk 1600); 4 for HBM3 (gfx94x: MI300X
+# 1300 MHz, 5.2 Gbps); 16 for GDDR6 (the RDNA dGPUs: RX 7900 XTX 1249 MHz,
+# 20 Gbps). Not known: the later APUs (gfx1013, gfx1033, gfx1035, gfx1036,
+# gfx1103, gfx115x), whose LPDDR5 clock this was not checked against, and
+# gfx950. dGPU or APU per target is LLVM's AMDGPUUsage processor table. Pure.
+fn amd_mem_rate(gfx) {
+    var major = gfx / 10000;
+    var minor = (gfx / 100) % 100;
+    var step = gfx % 100;
+    if (major == 9) {
+        if (minor == 0) { return 2; }
+        if (minor == 4) { return 4; }
+        return 0;
+    }
+    if (major == 10 && minor == 1) {
+        if (step == 1) { return 2; }
+        if (step == 0 || step == 2) { return 16; }
+        return 0;
+    }
+    if (major == 10 && minor == 3) {
+        if (step <= 2 || step == 4) { return 16; }
+        return 0;
+    }
+    if (major == 11 && minor == 0) {
+        if (step <= 2) { return 16; }
+        return 0;
+    }
+    if (major == 12 && minor == 0) { return 16; }
+    return 0;
+}
+
+# Memory bandwidth (GB/s x1000, i.e. MB/s) from the top memory clock (MHz),
+# the bus width (bits) and the transfers per clock (amd_mem_rate); 0 when one
+# is unknown. Pure.
+fn amd_mem_bw_x1000(mclk, width, rate) {
+    if (mclk <= 0 || width <= 0 || rate <= 0) { return 0; }
+    return mclk * width * rate / 8;
+}
+
+# --- KFD topology ---
+
+# The GPU nodes under KFD topology root `root` (a cstr), five entries each:
+# domain, location_id, device_id, gfx_target_version, and the bus width of
+# its first memory bank. CPU nodes (gfx_target_version 0) are left out.
+fn _kfd_gpu_nodes(root) {
+    var out = vec_new();
+    var entries = sysfs_list_dir(root);
+    var i = 0;
+    while (i < vec_len(entries)) {
+        var e = vec_get(entries, i);
+        i = i + 1;
+        var props = sysfs_read(sysfs_path_str(root, e, "properties"));
+        var gfx = kfd_prop(props, "gfx_target_version");
+        if (gfx <= 0) { continue; }
+        vec_push(out, kfd_prop(props, "domain"));
+        vec_push(out, kfd_prop(props, "location_id"));
+        vec_push(out, kfd_prop(props, "device_id"));
+        vec_push(out, gfx);
+        var bank = sysfs_read(sysfs_path_str(root, e, "mem_banks/0/properties"));
+        vec_push(out, kfd_prop(bank, "width"));
+    }
+    return out;
+}
+
+# The index (a multiple of 5) in `nodes` (_kfd_gpu_nodes) of the node at PCI
+# `domain` and `location`, or else of the first with PCI device ID `device`
+# (a partition of a GPU can carry another location_id; the gfx target and bus
+# width are the ASIC's), or -1. Pure.
+fn kfd_node_for(nodes, domain, location, device) {
+    var by_dev = 0 - 1;
+    var n = vec_len(nodes);
+    var k = 0;
+    while (k + 4 < n) {
+        if (domain >= 0 && vec_get(nodes, k) == domain && vec_get(nodes, k + 1) == location) { return k; }
+        if (by_dev < 0 && device >= 0 && vec_get(nodes, k + 2) == device) { by_dev = k; }
+        k = k + 5;
+    }
+    return by_dev;
+}
+
+# --- Detection ---
+
+# detect_rocm over DRM root `drm` and KFD topology root `kfd` (cstrs), which a
+# test points at a fake tree.
+fn detect_rocm_at(profiles, drm, kfd) {
+    var entries = sysfs_list_dir(drm);
     var nent = vec_len(entries);
     var dev_id = 0;
+    var nodes = 0;
+    var loc[16];
 
     var ei = 0;
     while (ei < nent) {
@@ -15,28 +221,33 @@ fn detect_rocm(profiles, warnings) {
         if (str_starts_with(name, "card") != 1) { continue; }
         if (str_index_of(name, 45) >= 0) { continue; }
 
-        # Check driver is amdgpu
-        var dev_path = sysfs_path_str("/sys/class/drm", name, "device/driver");
-        var driver_link = read_symlink(dev_path);
+        # The card's device directory; its driver must be amdgpu exactly.
+        var dev = sysfs_path_str(drm, name, "device");
+        var driver_link = read_symlink(sysfs_path(dev, 0, "driver"));
         if (driver_link == 0) { continue; }
-        # Driver link target basename should be "amdgpu"
-        var drv_base = path_basename(driver_link);
-        var drv_data = str_data(drv_base);
-        if (memeq(drv_data, "amdgpu", 6) != 1) { continue; }
+        if (str_eq_cstr(path_basename(driver_link), "amdgpu") != 1) { continue; }
 
         # Read VRAM total
-        var vram_path = sysfs_path_str("/sys/class/drm", name, "device/mem_info_vram_total");
-        var mem_total = sysfs_read_int(vram_path);
+        var mem_total = sysfs_read_int(sysfs_path(dev, 0, "mem_info_vram_total"));
         if (mem_total <= 0) { mem_total = 8 * BYTES_PER_GIB; }
 
         # Read VRAM used
-        var used_path = sysfs_path_str("/sys/class/drm", name, "device/mem_info_vram_used");
-        var mem_used = sysfs_read_int(used_path);
+        var mem_used = sysfs_read_int(sysfs_path(dev, 0, "mem_info_vram_used"));
 
         var p = profile_rocm(dev_id, mem_total);
-        var vendor_s = sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/vendor"));
-        var device_s = sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/device"));
-        profile_set_pci_id(p, pci_id_make(parse_hex_field(vendor_s), parse_hex_field(device_s)));
+        var vendor_s = sysfs_read(sysfs_path(dev, 0, "vendor"));
+        var device_s = sysfs_read(sysfs_path(dev, 0, "device"));
+        var device = parse_hex_field(device_s);
+        profile_set_pci_id(p, pci_id_make(parse_hex_field(vendor_s), device));
+
+        # PCI address: the device link's target, "../../../0000:04:00.0".
+        store64(&loc, 0 - 1);
+        store64(&loc + 8, 0 - 1);
+        var dlink = read_symlink(dev);
+        if (dlink != 0) {
+            var slot = path_basename(dlink);
+            if (pci_bdf_split(slot, &loc) == 1) { profile_set_pci_bdf(p, str_cstr(slot)); }
+        }
 
         # Device name: prefer the kernel-exposed product_name (newer
         # amdgpu drivers populate it for discrete cards); otherwise
@@ -45,8 +256,7 @@ fn detect_rocm(profiles, warnings) {
         # Worst case (both missing) we fall through to "AMD Radeon".
         # This closes the 2.2.5 gap where ROCm GPUs reported a null
         # device name (mihi 0.4.0 smoke showed "(unnamed)").
-        var prod_path = sysfs_path_str("/sys/class/drm", name, "device/product_name");
-        var prod = sysfs_read(prod_path);
+        var prod = sysfs_read(sysfs_path(dev, 0, "product_name"));
         if (prod != 0 && str_len(prod) > 0) {
             profile_set_device_name(p, str_cstr(prod));
         } else {
@@ -67,58 +277,51 @@ fn detect_rocm(profiles, warnings) {
         }
 
         if (mem_used > 0) {
+            if (mem_used > mem_total) { mem_used = mem_total; }
             profile_set_mem_used(p, mem_used);
             profile_set_mem_free(p, mem_total - mem_used);
         }
 
         # Temperature from hwmon (millidegrees C)
-        var hwmon_base = sysfs_path_str("/sys/class/drm", name, "device/hwmon");
-        var hwmon_entries = dir_list(str_from(hwmon_base));
+        var hwmon_base = sysfs_path(dev, 0, "hwmon");
+        var hwmon_entries = sysfs_list_dir(hwmon_base);
         if (vec_len(hwmon_entries) > 0) {
             var hw_name = vec_get(hwmon_entries, 0);
-            var temp_path = sysfs_path_str(hwmon_base, hw_name, "temp1_input");
-            var millideg = sysfs_read_int(temp_path);
+            var millideg = sysfs_read_int(sysfs_path_str(hwmon_base, hw_name, "temp1_input"));
             if (millideg > 0) { profile_set_temp_c(p, millideg / 1000); }
 
             # Power (microwatts)
-            var pow_path = sysfs_path_str(hwmon_base, hw_name, "power1_average");
-            var microwatts = sysfs_read_int(pow_path);
+            var microwatts = sysfs_read_int(sysfs_path_str(hwmon_base, hw_name, "power1_average"));
             if (microwatts <= 0) {
-                var pow_path2 = sysfs_path_str(hwmon_base, hw_name, "power1_input");
-                microwatts = sysfs_read_int(pow_path2);
+                microwatts = sysfs_read_int(sysfs_path_str(hwmon_base, hw_name, "power1_input"));
             }
             if (microwatts > 0) { profile_set_power_x1000(p, microwatts / 1000); }
         }
 
         # GPU busy percent
-        var busy_path = sysfs_path_str("/sys/class/drm", name, "device/gpu_busy_percent");
-        var gpu_busy = sysfs_read_int(busy_path);
+        var gpu_busy = sysfs_read_int(sysfs_path(dev, 0, "gpu_busy_percent"));
         if (gpu_busy >= 0) { profile_set_gpu_util(p, gpu_busy); }
 
         # VBIOS version as driver_version
-        var vbios_path = sysfs_path_str("/sys/class/drm", name, "device/vbios_version");
-        var vbios = sysfs_read(vbios_path);
+        var vbios = sysfs_read(sysfs_path(dev, 0, "vbios_version"));
         if (vbios != 0) {
             if (str_len(vbios) > 0) {
                 profile_set_driver_version(p, str_cstr(vbios));
             }
         }
 
-        # Compute capability from revision
-        var rev_path = sysfs_path_str("/sys/class/drm", name, "device/revision");
-        var rev = sysfs_read(rev_path);
-        if (rev != 0) {
-            if (str_len(rev) > 0) {
-                profile_set_compute_cap(p, str_cstr(rev));
-            }
-        }
-
-        # CXL memory detection (MI300X/MI350)
-        var vis_path = sysfs_path_str("/sys/class/drm", name, "device/mem_info_vis_vram_total");
-        var vis_total = sysfs_read_int(vis_path);
-        if (vis_total > mem_total) {
-            # CXL memory detected — add to total
-            profile_set_memory_bytes(p, vis_total);
+        # The KFD node of this card (read once, at the first card): its gfx
+        # target is the compute capability, and with its bus width and the
+        # top memory clock it gives the memory bandwidth.
+        if (nodes == 0) { nodes = _kfd_gpu_nodes(kfd); }
+        var k = kfd_node_for(nodes, load64(&loc), load64(&loc + 8), device);
+        if (k >= 0) {
+            var gfx = vec_get(nodes, k + 3);
+            var cc = rocm_gfx_name(gfx);
+            if (cc != 0) { profile_set_compute_cap(p, cc); }
+            var mclk = amd_dpm_max_mhz(sysfs_read(sysfs_path(dev, 0, "pp_dpm_mclk")));
+            var bw = amd_mem_bw_x1000(mclk, vec_get(nodes, k + 4), amd_mem_rate(gfx));
+            if (bw > 0) { profile_set_mem_bw_x1000(p, bw); }
         }
 
         vec_push(profiles, p);

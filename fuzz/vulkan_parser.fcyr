@@ -168,4 +168,52 @@ var p11 = vec_new();
 _parse_vulkaninfo(str_builder_build(sb11), p11);
 if (vec_len(p11) != 100) { syscall(60, 11); }
 
+# A discrete Intel GPU is sized from its device-local heap, as its own
+# memory (2.5.5). Every byte of a summary plus heaps replaced in turn: no
+# crash, memory never below 0, a discrete card never shared.
+var dl = vec_new();
+vec_push(dl, "GPU0:");
+vec_push(dl, "\tvendorID = 0x8086");
+vec_push(dl, "\tdeviceID = 0x56a0");
+vec_push(dl, "\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU");
+vec_push(dl, "\tdeviceName = Arc");
+vec_push(dl, "memoryHeaps: count = 1");
+vec_push(dl, "\tmemoryHeaps[0]:");
+vec_push(dl, "\t\tsize   = 16225243136 (0x3c71c0000) (15.11 GiB)");
+vec_push(dl, "\t\tflags: count = 1");
+vec_push(dl, "\t\t\tMEMORY_HEAP_DEVICE_LOCAL_BIT");
+vec_push(dl, "memoryTypes: count = 1");
+var arc = fz_join(dl, "\n");
+var p12 = vec_new();
+var ids12 = vec_new();
+_parse_vulkaninfo_ids(str_from(arc), p12, ids12);
+vulkan_size_shared(p12, 0, ids12, str_from(arc));
+if (vec_len(p12) != 1) { syscall(60, 12); }
+if (profile_memory_bytes(vec_get(p12, 0)) != 16225243136) { syscall(60, 12); }
+if (profile_shared_bytes(vec_get(p12, 0)) != 0) { syscall(60, 12); }
+var alen = strlen(arc);
+var apos = 0;
+while (apos < alen) {
+    var asi = 0;
+    while (asi < nsub) {
+        var abuf = alloc(alen + 1);
+        memcpy(abuf, arc, alen);
+        store8(abuf + alen, 0);
+        store8(abuf + apos, load8(subs + asi));
+        var pa = vec_new();
+        var ida = vec_new();
+        _parse_vulkaninfo_ids(str_new(abuf, alen), pa, ida);
+        vulkan_size_shared(pa, 0, ida, str_new(abuf, alen));
+        var ai = 0;
+        while (ai < vec_len(pa)) {
+            var q = vec_get(pa, ai);
+            if (profile_memory_bytes(q) < 0) { syscall(60, 13); }
+            if (vec_get(ida, ai * 3 + 2) == VK_DEV_DISCRETE && profile_shared_bytes(q) != 0) { syscall(60, 13); }
+            ai = ai + 1;
+        }
+        asi = asi + 1;
+    }
+    apos = apos + 1;
+}
+
 syscall(60, 0);

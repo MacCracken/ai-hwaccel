@@ -49,6 +49,10 @@ within 14 days of confirmation.
   call (30 s by default).
 - **sysfs/procfs reads**: the library reads system files but never writes to
   them.
+- **Python package**: not published on PyPI, where the project does not own the
+  name `ai-hwaccel`. Install a wheel file from the Wheels workflow (or one you
+  build), never the name from an index: whoever registers it there would run
+  code on your machine.
 - **File writes**: none. Through 2.5.0 the opt-in disk cache
   (`disk_cached_get`) wrote `~/.cache/ai-hwaccel/registry.json`, or
   `/tmp/ai-hwaccel-cache.json` when `HOME` was unset, following symlinks.

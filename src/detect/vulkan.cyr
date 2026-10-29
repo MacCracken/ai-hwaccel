@@ -16,9 +16,13 @@
 #     do not give it.
 #   - A software implementation (deviceType CPU: lavapipe, SwiftShader) is not
 #     a GPU and is not reported, as DXGI's Basic Render Driver is not.
-#   - Discrete and virtual GPUs keep the 4 GiB estimate. CUDA and ROCm report
-#     the same cards; profiles_dedup (src/registry.cyr, 2.4.0) drops this
-#     view and keeps theirs, with their memory figure.
+#   - A virtual GPU, and a discrete one a vendor backend reports (CUDA on
+#     NVIDIA's own driver, ROCm on amdgpu), keep the 4 GiB estimate:
+#     profiles_dedup (src/registry.cyr, 2.4.0) drops this view of the
+#     discrete card and keeps the backend's, with its memory figure. Any other
+#     discrete GPU, such as an Intel Arc without xpu-smi or an NVIDIA card
+#     under nouveau (NVK), is sized from its largest device-local heap, as
+#     memory of its own (2.5.5; it kept the estimate before).
 # Without vulkaninfo, and in no-exec mode, a sysfs scan of the DRM cards finds
 # the GPUs by PCI vendor instead. Through 2.3.28 every Vulkan GPU carried the
 # 4 GiB estimate and counted as memory of its own.
@@ -195,6 +199,18 @@ fn vulkan_device_type(v) {
 fn vulkan_uses_system_memory(dev_type, vendor) {
     if (dev_type != VK_DEV_INTEGRATED) { return 0; }
     if (vendor == PCI_VENDOR_AMD) { return 0; }
+    return 1;
+}
+
+# 1 if a Vulkan device of this type and PCI vendor gets its memory from its
+# heaps in the full vulkaninfo output: one on system RAM
+# (vulkan_uses_system_memory), or a discrete GPU of a known vendor but AMD,
+# whose cards ROCm reads from sysfs. An NVIDIA one needs it only without
+# NVIDIA's driver (see _vulkan_size_integrated). Pure.
+fn vulkan_needs_heap_size(dev_type, vendor) {
+    if (vulkan_uses_system_memory(dev_type, vendor) == 1) { return 1; }
+    if (dev_type != VK_DEV_DISCRETE) { return 0; }
+    if (vendor < 0 || vendor == PCI_VENDOR_AMD) { return 0; }
     return 1;
 }
 
@@ -383,23 +399,25 @@ fn vulkan_local_heap_bytes(full, vendor, device, name) {
     return 0;
 }
 
-# Size the integrated GPUs whose memory is system RAM (vulkan_uses_system_memory)
-# among the profiles from index `first` on, with a vendor/device/type triple
-# each in `ids`, from `full` vulkaninfo output: memory and shared part both
-# become the device's largest device-local heap. A device the output does not
-# size keeps its estimate, still all shared. Pure.
+# Size the devices vulkan_needs_heap_size marks among the profiles from index
+# `first` on, with a vendor/device/type triple each in `ids`, from `full`
+# vulkaninfo output: memory becomes the device's largest device-local heap,
+# and for one on system RAM (vulkan_uses_system_memory) so does the shared
+# part; a discrete GPU's heap is its own memory. A device the output does not
+# size keeps its estimate. Pure.
 fn vulkan_size_shared(profiles, first, ids, full) {
     var n = vec_len(profiles) - first;
     var k = 0;
     while (k < n) {
         var vendor = vec_get(ids, k * 3);
         var device = vec_get(ids, k * 3 + 1);
-        if (vulkan_uses_system_memory(vec_get(ids, k * 3 + 2), vendor) == 1) {
+        var dev_type = vec_get(ids, k * 3 + 2);
+        if (vulkan_needs_heap_size(dev_type, vendor) == 1) {
             var p = vec_get(profiles, first + k);
             var heap = vulkan_local_heap_bytes(full, vendor, device, profile_device_name(p));
             if (heap > 0) {
                 profile_set_memory_bytes(p, heap);
-                profile_set_shared_mem(p, heap);
+                if (vulkan_uses_system_memory(dev_type, vendor) == 1) { profile_set_shared_mem(p, heap); }
             }
         }
         k = k + 1;
@@ -437,13 +455,18 @@ fn _vulkan_size_from_dxgi(profiles, first, ids) {
 }
 
 # Size the integrated GPUs that _parse_vulkaninfo_ids just pushed (profiles
-# from index `first` on, a vendor/device/type triple each in `ids`). An AMD
-# APU gets its sysfs carve-out. The others are sized by vulkan_size_shared from
-# one run of the full vulkaninfo, made only when such a GPU is present, or on
-# Windows from DXGI (_vulkan_size_from_dxgi), with the full run as the fallback.
+# from index `first` on, a vendor/device/type triple each in `ids`), and the
+# discrete ones no vendor backend reports. An AMD APU gets its sysfs
+# carve-out. The others are sized by vulkan_size_shared from one run of the
+# full vulkaninfo, made only when such a GPU is present, or on Windows from
+# DXGI (_vulkan_size_from_dxgi), with the full run as the fallback; DXGI
+# reports the discrete ones there. A discrete NVIDIA GPU asks for the run
+# only when NVIDIA's driver is not loaded (/sys/module/nvidia): with it, CUDA
+# reports the card.
 fn _vulkan_size_integrated(profiles, first, ids) {
     var n = vec_len(profiles) - first;
     var need_full = 0;
+    var nv_driver = 0 - 1;
     var k = 0;
     while (k < n) {
         var dev_type = vec_get(ids, k * 3 + 2);
@@ -452,7 +475,14 @@ fn _vulkan_size_integrated(profiles, first, ids) {
             var vram = _vulkan_sysfs_vram(vendor, vec_get(ids, k * 3 + 1));
             if (vram > 0) { profile_set_memory_bytes(vec_get(profiles, first + k), vram); }
         }
-        if (vulkan_uses_system_memory(dev_type, vendor) == 1) { need_full = 1; }
+        if (vulkan_needs_heap_size(dev_type, vendor) == 1) {
+            if (dev_type == VK_DEV_DISCRETE && vendor == PCI_VENDOR_NVIDIA) {
+                if (nv_driver < 0) { nv_driver = aihw_path_exists("/sys/module/nvidia"); }
+                if (nv_driver != 1) { need_full = 1; }
+            } else {
+                need_full = 1;
+            }
+        }
         k = k + 1;
     }
     if (need_full == 1) {
@@ -469,7 +499,7 @@ fn _vulkan_size_integrated(profiles, first, ids) {
 # mem_info_vram_total of the DRM card with these PCI vendor and device IDs, or
 # 0 (no such card, or not amdgpu).
 fn _vulkan_sysfs_vram(vendor, device) {
-    var entries = dir_list(str_from("/sys/class/drm"));
+    var entries = sysfs_list_dir("/sys/class/drm");
     var nent = vec_len(entries);
     var ei = 0;
     while (ei < nent) {
@@ -487,17 +517,18 @@ fn _vulkan_sysfs_vram(vendor, device) {
     return 0;
 }
 
-# The PCI address of DRM card `card` (a Str such as "card0"), such as
-# "0000:00:02.0", as a Str, or 0.
-fn _drm_pci_slot(card) {
-    var link = read_symlink(sysfs_path_str("/sys/class/drm", card, "device"));
+# The PCI address of DRM card `card` (a Str such as "card0") under DRM root
+# `drm` (a cstr), such as "0000:00:02.0", as a Str, or 0.
+fn _drm_pci_slot(drm, card) {
+    var link = read_symlink(sysfs_path_str(drm, card, "device"));
     if (link == 0) { return 0; }
     return path_basename(link);
 }
 
-# 1 if DRM card `card` (a Str) is bound to the kernel driver `drv` (a cstr).
-fn _drm_driver_is(card, drv) {
-    var link = read_symlink(sysfs_path_str("/sys/class/drm", card, "device/driver"));
+# 1 if DRM card `card` (a Str) under DRM root `drm` (a cstr) is bound to the
+# kernel driver `drv` (a cstr).
+fn _drm_driver_is(drm, card, drv) {
+    var link = read_symlink(sysfs_path_str(drm, card, "device/driver"));
     if (link == 0) { return 0; }
     return str_eq_cstr(path_basename(link), drv);
 }
@@ -515,8 +546,13 @@ fn pci_slot_is_intel_igpu(slot) {
 # integrated GPU is all shared; `leave_amdgpu` 1 skips amdgpu devices, which
 # ROCm reports.
 fn _detect_vulkan_sysfs(profiles, leave_amdgpu) {
-    var drm_dir = str_from("/sys/class/drm");
-    var entries = dir_list(drm_dir);
+    return _detect_vulkan_sysfs_at(profiles, leave_amdgpu, "/sys/class/drm");
+}
+
+# _detect_vulkan_sysfs over DRM root `drm` (a cstr), which a test points at a
+# fake tree.
+fn _detect_vulkan_sysfs_at(profiles, leave_amdgpu, drm) {
+    var entries = sysfs_list_dir(drm);
     var nent = vec_len(entries);
     var dev_id = 0;
 
@@ -527,9 +563,10 @@ fn _detect_vulkan_sysfs(profiles, leave_amdgpu) {
         if (str_starts_with(name, "card") != 1) { continue; }
         if (str_index_of(name, 45) >= 0) { continue; }
 
-        var vendor_path = sysfs_path_str("/sys/class/drm", name, "device/vendor");
+        var vendor_path = sysfs_path_str(drm, name, "device/vendor");
         var vendor_str = sysfs_read(vendor_path);
         if (vendor_str == 0) { continue; }
+        var vendor = parse_hex_field(vendor_str);
 
         # Check for known GPU vendors
         var is_gpu = 0;
@@ -537,36 +574,33 @@ fn _detect_vulkan_sysfs(profiles, leave_amdgpu) {
         var gpu_name = "Unknown GPU";
         var est_vram = 4 * BYTES_PER_GIB;
 
-        # NVIDIA: 0x10de
-        if (str_contains_cstr(vendor_str, "0x10de") == 1) {
+        if (vendor == PCI_VENDOR_NVIDIA) {
             is_gpu = 1;
             gpu_name = "NVIDIA GPU (Vulkan)";
         }
-        # AMD: 0x1002
-        elif (str_contains_cstr(vendor_str, "0x1002") == 1) {
+        elif (vendor == PCI_VENDOR_AMD) {
             if (leave_amdgpu == 1) {
-                if (_drm_driver_is(name, "amdgpu") == 1) { continue; }
+                if (_drm_driver_is(drm, name, "amdgpu") == 1) { continue; }
             }
             is_gpu = 1;
             gpu_name = "AMD GPU (Vulkan)";
             # Try reading actual VRAM
-            var vram_path = sysfs_path_str("/sys/class/drm", name, "device/mem_info_vram_total");
+            var vram_path = sysfs_path_str(drm, name, "device/mem_info_vram_total");
             var vram = sysfs_read_int(vram_path);
             if (vram > 0) { est_vram = vram; }
         }
-        # Intel: 0x8086
-        elif (str_contains_cstr(vendor_str, "0x8086") == 1) {
+        elif (vendor == PCI_VENDOR_INTEL) {
             is_gpu = 1;
             gpu_name = "Intel GPU (Vulkan)";
             est_vram = 2 * BYTES_PER_GIB;
-            igpu = pci_slot_is_intel_igpu(_drm_pci_slot(name));
+            igpu = pci_slot_is_intel_igpu(_drm_pci_slot(drm, name));
         }
 
         if (is_gpu == 1) {
             var p = profile_new(ACCEL_VULKAN, dev_id, est_vram);
             profile_set_device_name(p, gpu_name);
-            var dev_str = sysfs_read(sysfs_path_str("/sys/class/drm", name, "device/device"));
-            profile_set_pci_id(p, pci_id_make(parse_hex_field(vendor_str), parse_hex_field(dev_str)));
+            var dev_str = sysfs_read(sysfs_path_str(drm, name, "device/device"));
+            profile_set_pci_id(p, pci_id_make(vendor, parse_hex_field(dev_str)));
             if (igpu == 1) { profile_set_shared_mem(p, est_vram); }
             vec_push(profiles, p);
             dev_id = dev_id + 1;

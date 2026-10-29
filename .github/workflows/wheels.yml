@@ -14,23 +14,41 @@ on:
   push:
     tags: ["*"]
 
+# Read-only token: the wheels are uploaded as this run's artifacts, which
+# needs no repository permission.
+permissions:
+  contents: read
+
 defaults:
   run:
     shell: bash
 
 jobs:
+  ci:
+    # 2.5.5: wheels are built only from a tree CI passes (through 2.5.4 a
+    # tag whose CI failed still got wheels).
+    name: CI Gate
+    uses: ./.github/workflows/ci.yml
+
   linux:
     name: linux wheels (x86_64 + aarch64)
+    needs: ci
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Install cyrius (pinned)
+        # The installer comes from the pinned version's tag and runs from a
+        # file (see ci.yml's "Install Cyrius toolchain").
         run: |
           CYRIUS_VERSION="$(grep -E '^cyrius[[:space:]]*=' cyrius.cyml | sed -E 's/.*"([^"]+)".*/\1/')"
-          curl -sSf "https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh" \
-            | CYRIUS_VERSION="$CYRIUS_VERSION" sh
+          case "$CYRIUS_VERSION" in ''|*[!0-9.]*) echo "FAIL: cyrius pin '$CYRIUS_VERSION' is not a version"; exit 1;; esac
+          inst="$RUNNER_TEMP/cyrius-install.sh"
+          curl -sSfL -o "$inst" "https://raw.githubusercontent.com/MacCracken/cyrius/${CYRIUS_VERSION}/scripts/install.sh"
+          CYRIUS_VERSION="$CYRIUS_VERSION" sh "$inst"
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: { python-version: "3.x" }
       - run: python -m pip install build
       - name: x86_64
@@ -41,11 +59,12 @@ jobs:
         run: |
           bindings/python/scripts/stage_binary.sh --aarch64
           bindings/python/scripts/build_wheel.sh manylinux2014_aarch64 python
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with: { name: wheels-linux, path: bindings/python/dist/*.whl }
 
   macos:
     name: macOS wheel (arm64)
+    needs: ci
     runs-on: macos-14
     # ENABLED (2.3.6): cyrius 6.0.43 fixes the Darwin `[deps] stdlib`
     # install-check + getcwd/stat ABI bugs that blocked 6.0.38 (cyrius
@@ -56,20 +75,26 @@ jobs:
     # Darwin but isn't needed for the build).
     if: ${{ true }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Install cyrius (pinned)
+        # The installer comes from the pinned version's tag and runs from a
+        # file (see ci.yml's "Install Cyrius toolchain").
         run: |
           CYRIUS_VERSION="$(grep -E '^cyrius[[:space:]]*=' cyrius.cyml | sed -E 's/.*"([^"]+)".*/\1/')"
-          curl -sSf "https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh" \
-            | CYRIUS_VERSION="$CYRIUS_VERSION" sh
+          case "$CYRIUS_VERSION" in ''|*[!0-9.]*) echo "FAIL: cyrius pin '$CYRIUS_VERSION' is not a version"; exit 1;; esac
+          inst="$RUNNER_TEMP/cyrius-install.sh"
+          curl -sSfL -o "$inst" "https://raw.githubusercontent.com/MacCracken/cyrius/${CYRIUS_VERSION}/scripts/install.sh"
+          CYRIUS_VERSION="$CYRIUS_VERSION" sh "$inst"
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: { python-version: "3.x" }
       - run: python -m pip install build
       - run: |
           bindings/python/scripts/stage_binary.sh
           bindings/python/scripts/build_wheel.sh macosx_11_0_arm64 python
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with: { name: wheels-macos, path: bindings/python/dist/*.whl }
 
   windows:
@@ -83,22 +108,29 @@ jobs:
     # the old `cycc_win` pipe needed Wine and broke here with "Exec format
     # error" — fixed in 2.3.9 by switching stage_win_cross.sh to --win.
     # Verified on cass: real CPU RAM + GPU detection + structured logging.
+    needs: ci
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Install cyrius (pinned)
+        # The installer comes from the pinned version's tag and runs from a
+        # file (see ci.yml's "Install Cyrius toolchain").
         run: |
           CYRIUS_VERSION="$(grep -E '^cyrius[[:space:]]*=' cyrius.cyml | sed -E 's/.*"([^"]+)".*/\1/')"
-          curl -sSf "https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh" \
-            | CYRIUS_VERSION="$CYRIUS_VERSION" sh
+          case "$CYRIUS_VERSION" in ''|*[!0-9.]*) echo "FAIL: cyrius pin '$CYRIUS_VERSION' is not a version"; exit 1;; esac
+          inst="$RUNNER_TEMP/cyrius-install.sh"
+          curl -sSfL -o "$inst" "https://raw.githubusercontent.com/MacCracken/cyrius/${CYRIUS_VERSION}/scripts/install.sh"
+          CYRIUS_VERSION="$CYRIUS_VERSION" sh "$inst"
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: { python-version: "3.x" }
       - run: python -m pip install build
       - run: |
           bindings/python/scripts/stage_win_cross.sh
           bindings/python/scripts/build_wheel.sh win_amd64 python
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with: { name: wheels-windows, path: bindings/python/dist/*.whl }
 
   windows-smoke:
@@ -118,10 +150,12 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: { python-version: "3.x" }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with: { name: wheels-windows, path: dist }
       - name: Extract the bundled EXE from the wheel
         run: |
@@ -228,6 +262,8 @@ jobs:
           if ($hw.Count -gt 0 -and $gpu.Count -eq 0) { "FAIL: Windows lists $($hw.Count) GPU adapter(s) but no GPU profile was reported"; exit 1 }
           "OK native detection: RAM matches Windows, $($gpu.Count) GPU profile(s) for $($hw.Count) adapter(s)"
       - name: (e) --threaded (registry_detect_threaded) reports what registry_detect reports
+        # `warnings` is left out of the JSON when no tool is missing, hence
+        # d.get() (2.5.5; d['warnings'] raised KeyError on such a host).
         run: |
           set -euo pipefail
           "$BIN_DIR/ai-hwaccel.exe" > sync.json
@@ -237,7 +273,7 @@ jobs:
           def key(path):
               d = json.load(open(path))
               return (sorted((p['accelerator'], p.get('device_name') or '', p['memory_bytes']) for p in d['profiles']),
-                      sorted(d['warnings']))
+                      sorted(d.get('warnings', [])))
           s, t = key('sync.json'), key('threaded.json')
           print('registry_detect:', s)
           print('registry_detect_threaded:', t)
@@ -258,10 +294,12 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: { python-version: "3.x" }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with: { name: wheels-macos, path: dist }
       - name: Install the wheel; the bundled binary must be signed
         run: |
@@ -337,7 +375,7 @@ jobs:
           def key(path):
               d = json.load(open(path))
               return (sorted((p['accelerator'], p.get('device_name') or '', p['memory_bytes']) for p in d['profiles']),
-                      sorted(d['warnings']))
+                      sorted(d.get('warnings', [])))
           s, t = key('sync.json'), key('threaded.json')
           print('registry_detect:', s)
           print('registry_detect_threaded:', t)
@@ -345,14 +383,91 @@ jobs:
           print('OK threaded')
           "
       - name: (f) the Python package runs the bundled binary
+        # -W error::UserWarning: detect() only warns when the binary's schema
+        # is not the one the bindings target.
         run: |
           set -euo pipefail
           cd /tmp
-          python -c "
+          python -W error::UserWarning -c "
           import ai_hwaccel
           r = ai_hwaccel.detect()
           print('profiles:', [p.accelerator for p in r.profiles])
           assert r.profiles, 'detect() returned no profile'
+          assert r.schema_version == ai_hwaccel.SCHEMA_VERSION, r.schema_version
           print('version:', ai_hwaccel.version())
+          print('OK python')
+          "
+
+  linux-smoke:
+    name: linux ${{ matrix.arch }} runtime smoke
+    # 2.5.5 — the `linux` job built both Linux wheels and uploaded them without
+    # running either (its aarch64 step overwrites the x86_64 binary in _bin/
+    # between the two builds), so a wheel with a broken or wrong-arch binary
+    # could ship green. Each leg installs one wheel with pip on a runner of
+    # that architecture, the aarch64 one natively rather than under qemu, and
+    # checks: the bundled binary's ELF machine, (a) JSON shape, (c) --version,
+    # and (f) the Python API.
+    needs: linux
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # e_machine, the little-endian u16 at ELF offset 18.
+          - { arch: x86_64, runner: ubuntu-latest, machine: "3e00" }
+          - { arch: aarch64, runner: ubuntu-24.04-arm, machine: "b700" }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with: { python-version: "3.x" }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with: { name: wheels-linux, path: dist }
+      - name: Install the ${{ matrix.arch }} wheel; its binary is for this machine
+        run: |
+          set -euo pipefail
+          python -m pip install dist/*-py3-none-manylinux2014_${{ matrix.arch }}.whl
+          bin="$(cd /tmp && python -c 'import ai_hwaccel, os; print(os.path.join(os.path.dirname(ai_hwaccel.__file__), "_bin"))')"
+          ls -la "$bin"
+          test -x "$bin/ai-hwaccel" || { echo 'FAIL: the installed binary is not executable'; exit 1; }
+          machine="$(python -c 'import sys; f = open(sys.argv[1], "rb"); f.seek(18); print(f.read(2).hex())' "$bin/ai-hwaccel")"
+          test "$machine" = "${{ matrix.machine }}" \
+            || { echo "FAIL: the ${{ matrix.arch }} wheel's binary has e_machine $machine, not ${{ matrix.machine }}"; exit 1; }
+          echo "BIN_DIR=$bin" >> "$GITHUB_ENV"
+      - name: (a) detection emits well-formed JSON (schema_version + non-empty profiles[])
+        run: |
+          set -euo pipefail
+          out="$("$BIN_DIR/ai-hwaccel")"
+          echo "${out:0:300}"
+          printf '%s' "$out" | python -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert 'schema_version' in d, 'missing schema_version'
+          p = d.get('profiles')
+          assert isinstance(p, list) and p, 'empty profiles[]'
+          print('OK schema_version=%s profiles=%d' % (d['schema_version'], len(p)))
+          "
+      - name: (c) --version resolves the bundled VERSION
+        run: |
+          set -euo pipefail
+          expected="$(tr -d ' \t\r\n' < VERSION)"
+          got="$(cd "$BIN_DIR" && ./ai-hwaccel --version | tr -d ' \t\r\n')"
+          echo "expected=$expected got=$got"
+          test "$got" = "$expected" || { echo 'FAIL: --version did not resolve the bundled VERSION'; exit 1; }
+          echo 'OK version'
+      - name: (f) the Python package runs the bundled binary
+        run: |
+          set -euo pipefail
+          cd /tmp
+          python -W error::UserWarning -c "
+          import ai_hwaccel
+          r = ai_hwaccel.detect()
+          print('profiles:', [p.accelerator for p in r.profiles])
+          assert r.profiles, 'detect() returned no profile'
+          assert r.schema_version == ai_hwaccel.SCHEMA_VERSION, r.schema_version
+          print('version:', ai_hwaccel.version())
+          print('summary:', ai_hwaccel.summary())
           print('OK python')
           "

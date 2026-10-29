@@ -1,0 +1,48 @@
+[
+    {
+        "neuron_device": 0,
+        "bdf": "10:1c.0",
+        "cpu_affinity": "0-31,64-95",
+        "numa_node": "0",
+        "connected_to": [
+            12,
+            3,
+            4,
+            1
+        ],
+        "nc_count": 2,
+        "logical_neuroncore_config": 1,
+        "memory_size": 34359738368,
+        "neuroncore_ids": [
+            0,
+            1
+        ],
+        "neuron_processes": [
+            {
+                "pid": 113985,
+                "command": "python3 train.py --tag \"memory_size\": 1, \"nc_count\": 64}",
+                "neuron_runtime_version": "2.20.0"
+            }
+        ]
+    },
+    {
+        "neuron_device": 1,
+        "bdf": "10:1d.0",
+        "cpu_affinity": "0-31,64-95",
+        "numa_node": "0",
+        "connected_to": [
+            13,
+            0,
+            5,
+            2
+        ],
+        "nc_count": 2,
+        "logical_neuroncore_config": 1,
+        "memory_size": 34359738368,
+        "neuroncore_ids": [
+            2,
+            3
+        ],
+        "neuron_processes": []
+    }
+]

@@ -31,12 +31,18 @@ echo "║  cyrius: $(cyrius --version 2>/dev/null || echo unknown)"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
+# Bench binaries go to a private temp dir, not fixed /tmp/bench_<name> paths
+# another user could create first. The build stays without CYRIUS_DCE: every
+# row in bench-history.csv was measured that way.
+BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aih-bench.XXXXXX")"
+trap 'rm -rf "$BUILD_DIR"' EXIT
+
 for f in benches/*.bcyr; do
     name=$(basename "$f" .bcyr)
     echo "--- Building $name ---"
-    cyrius build "$f" "/tmp/bench_${name}" 2>&1
+    cyrius build "$f" "$BUILD_DIR/bench_${name}" 2>&1
     echo "--- Running $name ---"
-    result=$("/tmp/bench_${name}" 2>&1)
+    result=$("$BUILD_DIR/bench_${name}" 2>&1)
     echo "$result"
 
     # Parse output and append to CSV. bench_report (cyrius 6.4.x) prints

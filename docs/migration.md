@@ -58,7 +58,7 @@ than assuming a shape.
 
 - **Rust crate** — no longer published to crates.io
 - **C FFI** (`ffi.rs`) — there is no C API; other languages run the CLI and
-  parse its JSON, as the Python package (`pip install ai-hwaccel`) does
+  parse its JSON, as the Python package ([bindings/python](../bindings/python/README.md)) does
 - **serde/tokio/tracing** — replaced by manual JSON, thread.cyr, stderr
 
 Windows detection, removed in 2.0.0, came back in the 2.3 series (DXGI).

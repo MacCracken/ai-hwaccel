@@ -9,6 +9,11 @@ parse its JSON stdout. Binary discovery order:
 3. a binary bundled in the wheel at ``ai_hwaccel/_bin/`` (shipped from
    2.3.3 onward; absent in the pure-source install)
 4. ``ai-hwaccel`` on ``PATH``
+
+An explicit path or ``AI_HWACCEL_BIN`` names the build the caller chose, so
+when it is not an executable file :class:`BinaryNotFoundError` is raised
+rather than another binary being run (2.5.5; it fell through to 3 and 4
+before).
 """
 
 from __future__ import annotations
@@ -26,7 +31,29 @@ class BinaryNotFoundError(RuntimeError):
 
 
 class CommandError(RuntimeError):
-    """Raised when the binary exits non-zero."""
+    """Raised when the binary exits non-zero, runs past ``timeout``, or
+    prints output that is not valid JSON."""
+
+
+class CommandTimeoutError(CommandError, subprocess.TimeoutExpired):
+    """The binary ran past ``timeout``. It is also the
+    ``subprocess.TimeoutExpired`` these calls raised before 2.5.5."""
+
+    def __init__(self, message: str, cmd: list, timeout: float):
+        subprocess.TimeoutExpired.__init__(self, cmd, timeout)
+        self.args = (message,)
+
+    def __str__(self) -> str:
+        return self.args[0]
+
+    def __reduce__(self):  # picklable, e.g. out of a process pool
+        return (type(self), (self.args[0], self.cmd, self.timeout))
+
+
+class InvalidOutputError(CommandError, json.JSONDecodeError):
+    """The binary printed output that is not valid JSON. It is also the
+    ``json.JSONDecodeError`` these calls raised before 2.5.5; ``doc`` holds
+    the output."""
 
 
 def _bundled_path() -> Path:
@@ -34,27 +61,38 @@ def _bundled_path() -> Path:
     return Path(__file__).resolve().parent / "_bin" / name
 
 
+def _runnable(path: str) -> bool:
+    return Path(path).is_file() and os.access(path, os.X_OK)
+
+
 def find_binary(explicit: Optional[str] = None) -> str:
-    """Return the path to a runnable ai-hwaccel binary, or raise."""
-    candidates = []
+    """Return the path to a runnable ai-hwaccel binary, or raise.
+
+    An explicit path, else ``AI_HWACCEL_BIN`` when it is set, is the only
+    candidate: if it is not an executable file this raises instead of
+    falling back to the bundled binary or ``PATH``.
+    """
     if explicit:
-        candidates.append(explicit)
+        if _runnable(explicit):
+            return explicit
+        raise BinaryNotFoundError(f"binary={explicit!r} is not an executable file")
     env = os.environ.get("AI_HWACCEL_BIN")
     if env:
-        candidates.append(env)
-    candidates.append(str(_bundled_path()))
+        if _runnable(env):
+            return env
+        raise BinaryNotFoundError(f"AI_HWACCEL_BIN={env!r} is not an executable file")
+
+    candidates = [str(_bundled_path())]
     on_path = shutil.which("ai-hwaccel")
     if on_path:
         candidates.append(on_path)
-
     for c in candidates:
-        p = Path(c)
-        if p.is_file() and os.access(c, os.X_OK):
+        if _runnable(c):
             return c
 
     raise BinaryNotFoundError(
         "could not locate the 'ai-hwaccel' binary. Tried: "
-        + ", ".join(candidates or ["<none>"])
+        + ", ".join(candidates)
         + ". Set AI_HWACCEL_BIN, put it on PATH, or pass binary=..."
     )
 
@@ -89,13 +127,23 @@ def _run(args: list, binary: Optional[str], timeout: float) -> str:
             cmd += ["--data-dir", data_dir]
             env["AI_HWACCEL_DATA_DIR"] = data_dir
     cmd += args
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-    )
+    try:
+        # The binary writes UTF-8 on every platform (Windows argv and DXGI
+        # adapter names are converted to it). Text mode alone decodes with
+        # the locale's code page, which on Windows is cp1252 / cp936 / ...:
+        # mojibake, or a UnicodeDecodeError on a CJK locale.
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise CommandTimeoutError(
+            f"ai-hwaccel {' '.join(args)} timed out after {timeout} s", cmd, timeout
+        ) from e
     if proc.returncode != 0:
         raise CommandError(
             f"ai-hwaccel {' '.join(args)} exited {proc.returncode}: "
@@ -104,11 +152,17 @@ def _run(args: list, binary: Optional[str], timeout: float) -> str:
     return proc.stdout
 
 
-def run_json(args: list, *, binary: Optional[str] = None, timeout: float = 30.0):
+def run_json(args: list, *, binary: Optional[str] = None, timeout: float = 60.0):
     """Run the binary with ``args`` and parse stdout as JSON."""
-    return json.loads(_run(args, binary, timeout))
+    out = _run(args, binary, timeout)
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError as e:
+        raise InvalidOutputError(
+            f"ai-hwaccel {' '.join(args)} printed invalid JSON ({e.msg})", e.doc, e.pos
+        ) from e
 
 
-def run_text(args: list, *, binary: Optional[str] = None, timeout: float = 30.0) -> str:
+def run_text(args: list, *, binary: Optional[str] = None, timeout: float = 60.0) -> str:
     """Run the binary with ``args`` and return raw stdout text."""
     return _run(args, binary, timeout)

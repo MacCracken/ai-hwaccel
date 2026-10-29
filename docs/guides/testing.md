@@ -7,7 +7,7 @@ How to run the tests, check detection on real hardware, and read the results.
 Run everything from the repository root (some tests read `tests/fixtures/`):
 
 ```sh
-cyrius test tests/tcyr                           # 1157 assertions in 15 units
+cyrius test tests/tcyr                           # 1226 assertions in 15 units
 cyrius fuzz                                      # the 7 fuzz harnesses
 for f in src/*.cyr src/detect/*.cyr; do cyrius lint --strict "$f"; done   # fails on a warning
 for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do
@@ -16,12 +16,17 @@ done
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same checks, plus `cyrius vet`, the
-raw-offset guard, the `dist/` drift check and the `cyrius.lock` hash check. Its
-lint step runs without `--strict`, so a lint warning does not fail CI yet.
+raw-offset guard, the `dist/` drift check, the `cyrius.lock` hash check and the
+Python bindings' tests. Its lint step runs `--strict`, so a lint warning fails
+CI.
+
+A unit passes CI when it exits 0 and its last line reads
+`N passed, 0 failed (T total)`. Each unit exits with its failure count, as
+`syscall(60, assert_summary())` does; keep that in a new unit.
 
 ## Test categories
 
-Tests are 15 `.tcyr` units under `tests/tcyr/`, with 1157 assertions in total.
+Tests are 15 `.tcyr` units under `tests/tcyr/`, with 1226 assertions in total.
 The README's *Test units* table lists what each unit covers. Real tool output
 used as fixtures lives in `tests/fixtures/`.
 
@@ -30,11 +35,19 @@ used as fixtures lives in `tests/fixtures/`.
 | Unit tests | `tests/tcyr/*.tcyr` | Types, profiles, registry queries and totals, the duplicate-device pass, every detection entry point, parsers, planning, JSON output and round-trip, Windows, lazy detection |
 | Fuzz harnesses | `fuzz/*.fcyr` | The CUDA, Vulkan, Neuron, Gaudi, Apple, `xpu-smi` and model-format parsers |
 | Benchmarks | `benches/*.bcyr` | 21 rows in three suites, `parsing`, `registry` and `lazy` |
+| Python bindings | `bindings/python/tests/` | The runner and the dataclasses against fixtures; with a binary (`AI_HWACCEL_BIN`), every API call end to end |
+
+Run the Python tests the way CI does, against a binary you built:
+
+```sh
+cd bindings/python
+AI_HWACCEL_BIN="$PWD/../../build/ai-hwaccel" python3 -W error::UserWarning -m unittest discover -s tests
+```
 
 ## Running benchmarks
 
 ```sh
-./scripts/bench-history.sh             # both suites; appends to bench-history.csv
+./scripts/bench-history.sh             # all three suites; appends to bench-history.csv
 cyrius bench benches/parsing.bcyr      # one suite
 cyrius bench benches/registry.bcyr
 ```
@@ -140,8 +153,13 @@ These need no tool:
 
 ## CI matrix
 
-- `ubuntu-latest` (x86_64 Linux): the whole test suite, fuzzing, benchmarks
-  and the static checks (`ci.yml`).
+- `ubuntu-latest` (x86_64 Linux): the whole test suite, fuzzing, benchmarks,
+  the static checks and the Python tests against the built binary (`ci.yml`).
+- `ubuntu-latest` and `ubuntu-24.04-arm`: `linux-smoke` (2.5.5) installs the
+  x86_64 and aarch64 Linux wheels with pip, each on its own architecture, and
+  checks the bundled binary's ELF machine, the JSON shape, `--version` and the
+  Python API. The release workflow also runs its aarch64 binary on an arm64
+  runner before it publishes.
 - `macos-14` (arm64): `macos-smoke` (2.5.4) installs the macOS wheel with
   pip and runs its binary: the signature, JSON shape, logging, `--version`,
   memory against `sysctl hw.memsize`, a Metal GPU whenever `system_profiler`

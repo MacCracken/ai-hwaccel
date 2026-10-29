@@ -32,5 +32,13 @@ export AIH_WHEEL_PLAT="$PLAT"
 # back-to-back cross-platform builds.
 rm -rf "$PKG_DIR/build"
 ( cd "$PKG_DIR" && "$PY" -m build --wheel --outdir dist )
+# The wheel ships a GPL-3.0 binary, so refuse one without the license text
+# (none had it through 2.5.4; pyproject.toml's license-files adds it).
+"$PY" - "$PKG_DIR/dist" "$PLAT" <<'EOF_PY'
+import glob, os, sys, zipfile
+whl = max(glob.glob(os.path.join(sys.argv[1], "*-py3-none-%s.whl" % sys.argv[2])), key=os.path.getmtime)
+if not any(n.endswith(".dist-info/licenses/LICENSE") for n in zipfile.ZipFile(whl).namelist()):
+    sys.exit("%s has no .dist-info/licenses/LICENSE" % whl)
+EOF_PY
 echo "Built:"
 ls -1 "$PKG_DIR/dist/"

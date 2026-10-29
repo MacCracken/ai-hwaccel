@@ -76,3 +76,24 @@ var GBITS_PER_GBYTE = 8;
 # that is system RAM, and the summary totals count that RAM once.
 
 var SCHEMA_VERSION = 6;
+
+# --- Text helpers ---
+
+# 1 when C strings `a` and `b` are equal ignoring ASCII case ("Int8" and
+# "INT8"), 0 otherwise or when either is 0. No allocation. It lives here,
+# the first module every unit includes, so the name parsers (quant, training
+# method, log level) can use it whatever else a unit includes.
+fn hw_streq_ci(a, b) {
+    if (a == 0 || b == 0) { return 0; }
+    var i = 0;
+    while (1 == 1) {
+        var ca = load8(a + i);
+        var cb = load8(b + i);
+        if (ca >= 65 && ca <= 90) { ca = ca + 32; }
+        if (cb >= 65 && cb <= 90) { cb = cb + 32; }
+        if (ca != cb) { return 0; }
+        if (ca == 0) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}

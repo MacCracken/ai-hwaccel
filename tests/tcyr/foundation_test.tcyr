@@ -37,7 +37,6 @@ fn test_warning_struct() {
     assert_eq(warning_exit_code(w2), 1, "exit code");
     assert(streq(warning_message(w2), "device not found") == 1, "stderr msg");
 
-
     var w3 = warning_timeout("vulkaninfo", 5000);
     assert_eq(warning_code(w3), HWA_ERR_TIMEOUT, "timeout code");
     assert_eq(warning_timeout_ms(w3), 5000, "timeout ms");
@@ -49,6 +48,48 @@ fn test_warning_struct() {
     var w5 = warning_sysfs("/sys/class/drm/card0", "permission denied");
     assert_eq(warning_code(w5), HWA_ERR_SYSFS_READ, "sysfs code");
     assert(streq(warning_message(w5), "permission denied") == 1, "sysfs msg");
+    assert_eq(warning_exit_code(w5), 0 - 1, "no exit status but for a failed tool");
+    return 0;
+}
+
+# The warning struct is derived (2.5.5): warning_new allocates sizeof(warning)
+# and nothing else, and every field reads back what its setter stored.
+fn test_warning_derived() {
+    var u0 = alloc_used();
+    var w = warning_new(HWA_ERR_TIMEOUT, "t");
+    assert_eq(alloc_used() - u0, sizeof(warning), "warning_new allocates sizeof(warning)");
+    assert_eq(WARNING_SIZE, sizeof(warning), "WARNING_SIZE is sizeof(warning)");
+    warning_set_timeout_ms(w, 7);
+    warning_set_exit_code(w, 9);
+    warning_set_message(w, "m");
+    assert_eq(warning_timeout_ms(w), 7, "timeout_ms round-trips");
+    assert_eq(warning_exit_code(w), 9, "exit_code round-trips");
+    assert_streq(warning_message(w), "m", "message round-trips");
+    assert_eq(warning_code(w), HWA_ERR_TIMEOUT, "code kept");
+    return 0;
+}
+
+# warning_describe, the text warning_print writes and the CLI logs (2.5.5).
+# Through 2.5.4 -1 read as a signal and a status was shown twice.
+fn test_warning_describe() {
+    assert_streq(str_data(warning_describe(warning_tool_failed("dxgi", 0 - 1, "EnumAdapters1 failed"))),
+      "dxgi: EnumAdapters1 failed", "describe: -1 is not a signal");
+    assert_streq(str_data(warning_describe(warning_tool_failed("sh", 137, "killed by signal 9"))),
+      "sh: killed by signal 9", "describe: a signal once");
+    assert_streq(str_data(warning_describe(warning_tool_failed("nvidia-smi", 9, "exited with status 9"))),
+      "nvidia-smi: exited with status 9", "describe: a status once");
+    assert_streq(str_data(warning_describe(warning_tool_failed("x", 3, 0))),
+      "x: exited with status 3", "describe: a status without a message");
+    assert_streq(str_data(warning_describe(warning_tool_failed("x", 0 - 1, 0))),
+      "x: failed", "describe: no status, no message");
+    assert_streq(str_data(warning_describe(warning_timeout("hl-smi", 10000))),
+      "hl-smi: timed out after 10s", "describe: timeout");
+    assert_streq(str_data(warning_describe(warning_tool_not_found("gc-info"))),
+      "gc-info: tool not found on $PATH", "describe: not found");
+    assert_streq(str_data(warning_describe(warning_parse("cuda", "bad line"))),
+      "cuda: parse error - bad line", "describe: parse");
+    assert_streq(str_data(warning_describe(warning_sysfs("/sys/x", "unreadable"))),
+      "sysfs /sys/x: unreadable", "describe: sysfs");
     return 0;
 }
 
@@ -56,6 +97,14 @@ fn test_warning_struct() {
 
 fn test_accel_family() {
     assert_eq(accel_family(ACCEL_CPU), FAMILY_CPU, "CPU family");
+    assert_eq(accel_family(ACCEL_WIN_GPU), FAMILY_GPU, "Windows GPU family");
+    assert_eq(accel_family(ACCEL_AGNOS_GPU), FAMILY_GPU, "AGNOS GPU family");
+    assert_eq(accel_family(ACCEL_QUALCOMM), FAMILY_AI_ASIC, "Qualcomm family");
+    assert_eq(accel_family(ACCEL_GRAPHCORE), FAMILY_AI_ASIC, "Graphcore family");
+    # A type this build does not know is not the CPU (2.5.5).
+    assert_eq(accel_family(ACCEL_TYPE_COUNT), FAMILY_UNKNOWN, "past the last type: Unknown family");
+    assert_eq(accel_family(0 - 1), FAMILY_UNKNOWN, "negative type: Unknown family");
+    assert_eq(accel_family(1000), FAMILY_UNKNOWN, "far past the last type: Unknown family");
     assert_eq(accel_family(ACCEL_CUDA), FAMILY_GPU, "CUDA family");
     assert_eq(accel_family(ACCEL_ROCM), FAMILY_GPU, "ROCm family");
     assert_eq(accel_family(ACCEL_METAL), FAMILY_GPU, "Metal family");
@@ -80,9 +129,58 @@ fn test_accel_is_gpu() {
     assert_eq(accel_is_gpu(ACCEL_METAL), 1, "Metal is GPU");
     assert_eq(accel_is_gpu(ACCEL_VULKAN), 1, "Vulkan is GPU");
     assert_eq(accel_is_gpu(ACCEL_INTEL_ONEAPI), 1, "oneAPI is GPU");
+    assert_eq(accel_is_gpu(ACCEL_WIN_GPU), 1, "Windows GPU is GPU");
+    assert_eq(accel_is_gpu(ACCEL_AGNOS_GPU), 1, "AGNOS GPU is GPU");
     assert_eq(accel_is_gpu(ACCEL_CPU), 0, "CPU not GPU");
     assert_eq(accel_is_gpu(ACCEL_TPU), 0, "TPU not GPU");
     assert_eq(accel_is_gpu(ACCEL_INTEL_NPU), 0, "NPU not GPU");
+    return 0;
+}
+
+# Every type, 0 to ACCEL_TYPE_COUNT - 1, against one table of families: each
+# has a name and a known family, and the family's predicate agrees with it.
+# Nothing past the count has a name, so a type appended without moving
+# ACCEL_TYPE_COUNT fails here (2.5.5).
+fn _want_family(t) {
+    if (t == ACCEL_CPU) { return FAMILY_CPU; }
+    if (t == ACCEL_CUDA || t == ACCEL_ROCM || t == ACCEL_METAL || t == ACCEL_VULKAN) { return FAMILY_GPU; }
+    if (t == ACCEL_INTEL_ONEAPI || t == ACCEL_WIN_GPU || t == ACCEL_AGNOS_GPU) { return FAMILY_GPU; }
+    if (t == ACCEL_INTEL_NPU || t == ACCEL_AMD_XDNA || t == ACCEL_APPLE_NPU) { return FAMILY_NPU; }
+    if (t == ACCEL_SAMSUNG_NPU || t == ACCEL_MEDIATEK_APU) { return FAMILY_NPU; }
+    if (t == ACCEL_TPU) { return FAMILY_TPU; }
+    if (t == ACCEL_GAUDI || t == ACCEL_NEURON || t == ACCEL_QUALCOMM) { return FAMILY_AI_ASIC; }
+    if (t == ACCEL_CEREBRAS || t == ACCEL_GRAPHCORE || t == ACCEL_GROQ) { return FAMILY_AI_ASIC; }
+    return FAMILY_UNKNOWN;
+}
+
+fn test_accel_type_table() {
+    assert_eq(ACCEL_TYPE_COUNT, ACCEL_AGNOS_GPU + 1, "the count is one past the last type");
+    var t = 0;
+    var bad_family = 0;
+    var unnamed = 0;
+    var bad_pred = 0;
+    while (t < ACCEL_TYPE_COUNT) {
+        var f = _want_family(t);
+        if (f == FAMILY_UNKNOWN || accel_family(t) != f) { bad_family = bad_family + 1; }
+        if (streq(accel_name(t), "Unknown") == 1) { unnamed = unnamed + 1; }
+        var gpu = 0;
+        if (f == FAMILY_GPU) { gpu = 1; }
+        var npu = 0;
+        if (f == FAMILY_NPU) { npu = 1; }
+        var asic = 0;
+        if (f == FAMILY_AI_ASIC) { asic = 1; }
+        var tpu = 0;
+        if (f == FAMILY_TPU) { tpu = 1; }
+        if (accel_is_gpu(t) != gpu || accel_is_npu(t) != npu) { bad_pred = bad_pred + 1; }
+        if (accel_is_ai_asic(t) != asic || accel_is_tpu(t) != tpu) { bad_pred = bad_pred + 1; }
+        t = t + 1;
+    }
+    assert_eq(bad_family, 0, "every type: its family");
+    assert_eq(unnamed, 0, "every type: a name");
+    assert_eq(bad_pred, 0, "every type: the family predicates agree");
+    assert_streq(accel_name(ACCEL_TYPE_COUNT), "Unknown", "past the last type: no name");
+    assert_streq(accel_name(0 - 1), "Unknown", "negative type: no name");
+    assert_eq(accel_is_gpu(ACCEL_TYPE_COUNT), 0, "past the last type: not a GPU");
     return 0;
 }
 
@@ -135,12 +233,20 @@ fn test_neuron_chips() {
     assert(streq(neuron_chip_name(NEURON_INFERENTIA), "Inferentia") == 1, "Inferentia name");
     assert(streq(neuron_chip_name(NEURON_TRAINIUM), "Trainium") == 1, "Trainium name");
 
+    # inf2 and trn1 are both 32 GiB over 2 NeuronCores (2.5.5: Trainium was
+    # 32 GiB a core, so a trn1 device read 64 GiB).
     assert_eq(neuron_hbm_per_core(NEURON_INFERENTIA) / BYTES_PER_GIB, 16, "Inf 16 GiB/core");
-    assert_eq(neuron_hbm_per_core(NEURON_TRAINIUM) / BYTES_PER_GIB, 32, "Trn 32 GiB/core");
+    assert_eq(neuron_hbm_per_core(NEURON_TRAINIUM) / BYTES_PER_GIB, 16, "Trn 16 GiB/core");
 
-    # Trainium trains, Inferentia does not
+    # Trainium trains, Inferentia does not, and neither does an unknown chip
+    # (2.5.5: it trained at Trainium's rate while its throughput was
+    # Inferentia's).
     assert(neuron_training_x1000(NEURON_TRAINIUM, 2) > 0, "Trainium trains");
     assert_eq(neuron_training_x1000(NEURON_INFERENTIA, 2), 0, "Inferentia no train");
+    var unknown = 0 - 1;
+    assert_eq(neuron_training_x1000(unknown, 2), 0, "unknown chip no train");
+    var inf = neuron_throughput_x1000(NEURON_INFERENTIA, 2);
+    assert_eq(neuron_throughput_x1000(unknown, 2), inf, "unknown chip: Inferentia throughput");
 
     # Rank
     assert(neuron_rank(NEURON_TRAINIUM) > neuron_rank(NEURON_INFERENTIA), "Trn rank > Inf");
@@ -168,7 +274,7 @@ fn test_units() {
 fn test_uses_system_memory() {
     var t = 0;
     var wrong = 0;
-    while (t <= ACCEL_AGNOS_GPU) {
+    while (t < ACCEL_TYPE_COUNT) {
         var want = 0;
         if (t == ACCEL_CPU) { want = 1; }
         if (t == ACCEL_METAL) { want = 1; }
@@ -183,7 +289,7 @@ fn test_uses_system_memory() {
     assert_eq(wrong, 0, "system-memory types");
     var t2 = 0;
     var disagree = 0;
-    while (t2 <= ACCEL_AGNOS_GPU) {
+    while (t2 < ACCEL_TYPE_COUNT) {
         if (((ACCEL_SYSMEM_MASK >> t2) & 1) != accel_uses_system_memory(t2)) { disagree = disagree + 1; }
         t2 = t2 + 1;
     }
@@ -267,6 +373,8 @@ fn test_backends() {
     assert(streq(backend_name(BACKEND_GAUDI), "gaudi") == 1, "gaudi name");
     assert(streq(backend_name(BACKEND_NEURON), "neuron") == 1, "neuron name");
     assert(streq(backend_name(BACKEND_AGNOS_GPU), "agnos-gpu") == 1, "agnos-gpu name");
+    assert_streq(backend_name(AIHW_BACKEND_COUNT), "unknown", "past the last backend: unknown");
+    assert_streq(backend_name(0 - 1), "unknown", "negative backend: unknown");
     return 0;
 }
 
@@ -278,6 +386,56 @@ fn test_family_names() {
     assert(streq(family_name(FAMILY_NPU), "NPU") == 1, "NPU name");
     assert(streq(family_name(FAMILY_TPU), "TPU") == 1, "TPU name");
     assert(streq(family_name(FAMILY_AI_ASIC), "AI ASIC") == 1, "AI ASIC name");
+    assert_streq(family_name(FAMILY_UNKNOWN), "Unknown", "Unknown family name");
+    assert_streq(family_name(99), "Unknown", "out-of-range family name");
+    assert_streq(quant_name(99), "Unknown", "out-of-range quant name");
+    assert_eq(quant_bits(99), 32, "out-of-range quant: 32 bits");
+    return 0;
+}
+
+# --- 2.5.5: shared parsers ---
+
+fn test_hw_streq_ci() {
+    assert_eq(hw_streq_ci("Int8", "INT8"), 1, "ci: Int8 == INT8");
+    assert_eq(hw_streq_ci("lora", "LoRA"), 1, "ci: lora == LoRA");
+    assert_eq(hw_streq_ci("bf16", "bf16"), 1, "ci: equal");
+    assert_eq(hw_streq_ci("bf16", "bf1"), 0, "ci: prefix differs");
+    assert_eq(hw_streq_ci("bf1", "bf16"), 0, "ci: longer differs");
+    assert_eq(hw_streq_ci("", ""), 1, "ci: both empty");
+    assert_eq(hw_streq_ci(0, "x"), 0, "ci: null a");
+    assert_eq(hw_streq_ci("x", 0), 0, "ci: null b");
+    # '@' (64) and '[' (91) sit next to the letters: not folded.
+    assert_eq(hw_streq_ci("@", "`"), 0, "ci: @ is not a letter");
+    assert_eq(hw_streq_ci("[", "{"), 0, "ci: [ is not a letter");
+    return 0;
+}
+
+fn test_model_params_from_str() {
+    assert_eq(model_params_from_str("70B"), 70000000000, "70B");
+    assert_eq(model_params_from_str("70b"), 70000000000, "70b");
+    assert_eq(model_params_from_str("70"), 70000000000, "70 means billions");
+    assert_eq(model_params_from_str("1.5B"), 1500000000, "1.5B, not 15B");
+    assert_eq(model_params_from_str("0.5B"), 500000000, "0.5B, not 5B");
+    assert_eq(model_params_from_str("350M"), 350000000, "350M, not 350B");
+    assert_eq(model_params_from_str("125m"), 125000000, "125m");
+    assert_eq(model_params_from_str("1.2T"), 1200000000000, "1.2T");
+    assert_eq(model_params_from_str("800K"), 800000, "800K");
+    assert_eq(model_params_from_str("405B"), 405000000000, "405B");
+    assert_eq(model_params_from_str("1.234567891B"), 1234567891, "9 fraction digits at B");
+    assert_eq(model_params_from_str("1.2345M"), 1234500, "4 fraction digits at M");
+    assert_eq(model_params_from_str("1.2345K"), 1234, "sub-parameter fraction dropped");
+    assert_eq(model_params_from_str("1000T"), 1000000000000000, "the 1e15 ceiling itself");
+    assert_eq(model_params_from_str("1001T"), 0 - 1, "past the ceiling");
+    assert_eq(model_params_from_str("99999999999999999999B"), 0 - 1, "20 digits: no wrap");
+    assert_eq(model_params_from_str(""), 0 - 1, "empty");
+    assert_eq(model_params_from_str("B"), 0 - 1, "unit alone");
+    assert_eq(model_params_from_str("8x7B"), 0 - 1, "8x7B rejected, not 87B");
+    assert_eq(model_params_from_str("1.5.0B"), 0 - 1, "two points");
+    assert_eq(model_params_from_str("70GB"), 0 - 1, "trailing text");
+    assert_eq(model_params_from_str("-3B"), 0 - 1, "negative");
+    assert_eq(model_params_from_str("7.B"), 0 - 1, "point with no fraction");
+    assert_eq(model_params_from_str(".5B"), 0 - 1, "no whole part");
+    assert_eq(model_params_from_str(0), 0 - 1, "null");
     return 0;
 }
 
@@ -286,8 +444,11 @@ fn test_family_names() {
 alloc_init();
 test_error_codes();
 test_warning_struct();
+test_warning_derived();
+test_warning_describe();
 test_accel_family();
 test_accel_is_gpu();
+test_accel_type_table();
 test_accel_training();
 test_tpu_versions();
 test_gaudi_generations();
@@ -302,6 +463,8 @@ test_quant_from_str();
 test_quant_model_bytes();
 test_backends();
 test_family_names();
+test_hw_streq_ci();
+test_model_params_from_str();
 
 var fails = assert_summary();
 syscall(60, fails);

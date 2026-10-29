@@ -1,0 +1,1 @@
+[{"neuron_device":0,"bdf":"cc:00.0","connected_to":[12,3,4,1],"nc_count":8,"logical_neuroncore_config":2,"memory_size":103079215104,"neuroncore_ids":[0,1,2,3],"neuron_processes":[]},{"neuron_device":1,"bdf":"b5:00.0","connected_to":[13,0,5,2],"nc_count":8,"logical_neuroncore_config":2,"memory_size":103079215104,"neuroncore_ids":[4,5,6,7],"neuron_processes":[]}]

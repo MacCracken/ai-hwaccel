@@ -3,65 +3,132 @@
 var _HLSMI_QUERY = "--query-aip=index,name,memory.total,memory.free";
 var _HLSMI_FMT = "--format=csv,noheader,nounits";
 
-fn detect_gaudi(profiles, warnings) {
-    var result = run_tool2("hl-smi", _HLSMI_QUERY, _HLSMI_FMT, warnings);
-    if (result == 0) { return 0; }
+# Gaudi generation from a board name: hl-smi's `name` field (HL-225 is the
+# Gaudi2 OAM; HL-325L, HL-338, HL-328 and HL-388 are Gaudi3 OAM and PCIe
+# boards) or the habanalabs device_type ("GAUDI2"). Every HL-3xx board is a
+# Gaudi3; through 2.5.4 only HL-325 was, so the HL-338 PCIe card ranked and
+# estimated as a Gaudi2. Anything else is a Gaudi2, the default (the enum has
+# no Gaudi1, so the HL-205 is one too). Pure.
+fn gaudi_gen_from_name(name) {
+    if (str_contains_cstr(name, "HL-3") == 1) { return GAUDI3; }
+    if (str_contains_cstr(name, "hl-3") == 1) { return GAUDI3; }
+    if (str_contains_cstr(name, "Gaudi3") == 1) { return GAUDI3; }
+    if (str_contains_cstr(name, "gaudi3") == 1) { return GAUDI3; }
+    if (str_contains_cstr(name, "GAUDI3") == 1) { return GAUDI3; }
+    return GAUDI2;
+}
 
-    var lines = str_split(result, 10);
-    var li = 0;
+fn _gaudi_name_profile(p, gen) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Intel ");
+    str_builder_add_cstr(sb, gaudi_gen_name(gen));
+    profile_set_device_name(p, str_data(str_builder_build(sb)));
+    return 0;
+}
+
+# Parse `hl-smi --query-aip=index,name,memory.total,memory.free
+# --format=csv,noheader,nounits` output into ACCEL_GAUDI profiles. The index
+# must be all digits, at most CMD_MAX_DEVICE_ID, or the row is skipped with a
+# parse warning; memory.total is MiB, and a value that is not a number or is
+# past 16 TiB takes the generation's HBM size (the second with a warning).
+# Through 2.5.4 both went through str_to_int unchecked, and a garbled memory
+# field wrapped to a negative size. Returns the number of profiles pushed.
+# Pure.
+fn parse_hl_smi_output(out, profiles, warnings) {
+    var lines = str_split(out, 10);
     var nlines = vec_len(lines);
+    var count = 0;
+    var li = 0;
     while (li < nlines) {
-        var line = vec_get(lines, li);
+        var line = str_trim(vec_get(lines, li));
         li = li + 1;
         if (str_len(line) == 0) { continue; }
 
         var fields = parse_csv_line(line, 3);
         if (fields == 0) {
-            vec_push(warnings, warning_parse("gaudi", "too few CSV fields"));
+            if (warnings != 0) { vec_push(warnings, warning_parse("gaudi", "too few CSV fields")); }
             continue;
         }
 
-        var dev_id = str_to_int(vec_get(fields, 0));
-        if (dev_id < 0) { dev_id = 0; }
-
-        # Determine generation from device name
-        var gen = GAUDI2;
-        var name_field = vec_get(fields, 1);
-        var name_lower = str_data(name_field);
-        var name_len = str_len(name_field);
-        # Check for "gaudi3" or "hl-325" in name
-        if (name_len >= 6) {
-            if (str_contains_cstr(name_field, "gaudi3") == 1) { gen = GAUDI3; }
-            elif (str_contains_cstr(name_field, "Gaudi3") == 1) { gen = GAUDI3; }
-            elif (str_contains_cstr(name_field, "HL-325") == 1) { gen = GAUDI3; }
-            elif (str_contains_cstr(name_field, "hl-325") == 1) { gen = GAUDI3; }
+        var dev_id = parse_field_int(vec_get(fields, 0));
+        if (dev_id < 0 || dev_id > CMD_MAX_DEVICE_ID) {
+            if (warnings != 0) { vec_push(warnings, warning_parse("gaudi", "bad device index")); }
+            continue;
         }
 
-        # Memory in MB
-        var mem_mb = str_to_int(vec_get(fields, 2));
-        if (mem_mb <= 0) { mem_mb = gaudi_hbm_bytes(gen) / (1024 * 1024); }
-
+        var name_field = vec_get(fields, 1);
+        var gen = gaudi_gen_from_name(name_field);
         var p = profile_gaudi(dev_id, gen);
-        # Override memory from hl-smi if available
-        profile_set_memory_bytes(p, mem_mb * 1024 * 1024);
 
-        # Device name: prefer the hl-smi CSV "name" field (e.g.
-        # "HL-225" / "HL-325") when present; otherwise synthesize
-        # "Intel Gaudi2" / "Intel Gaudi3" from the generation enum.
-        # name_field is a str_split slice (not guaranteed null-
-        # terminated), so str_cstr copies out an owned NUL-terminated
-        # buffer.
+        var mem_mb = parse_field_int(vec_get(fields, 2));
+        if (mem_mb > 16 * 1024 * 1024) {
+            if (warnings != 0) { vec_push(warnings, warning_parse("gaudi", "memory.total past 16 TiB")); }
+            mem_mb = 0;
+        }
+        if (mem_mb > 0) { profile_set_memory_bytes(p, mem_mb * 1024 * 1024); }
+
+        # Device name: the hl-smi `name` field ("HL-225") when present, else
+        # "Intel Gaudi2" / "Intel Gaudi3". str_cstr copies the str_split slice
+        # out as an owned, NUL-terminated buffer.
         if (str_len(name_field) > 0) {
             profile_set_device_name(p, str_cstr(name_field));
         } else {
-            var sb = str_builder_new();
-            str_builder_add_cstr(sb, "Intel ");
-            str_builder_add_cstr(sb, gaudi_gen_name(gen));
-            var gnm = str_builder_build(sb);
-            profile_set_device_name(p, str_data(gnm));
+            _gaudi_name_profile(p, gen);
         }
 
         vec_push(profiles, p);
+        count = count + 1;
     }
+    return count;
+}
+
+# Gaudi cards from the habanalabs nodes of the accel class at `root` (a cstr;
+# see tpu.cyr), for when hl-smi lists none: the generation from the driver's
+# device_type attribute, the memory from the generation. Returns the number
+# pushed.
+fn detect_gaudi_accel_at(root, profiles) {
+    var nodes = accel_class_nodes(root, BACKEND_GAUDI);
+    var n = vec_len(nodes);
+    var i = 0;
+    while (i < n) {
+        var name = vec_get(nodes, i);
+        i = i + 1;
+        var gen = GAUDI2;
+        var dt = sysfs_read(sysfs_path_str(root, name, "device/device_type"));
+        if (dt != 0) { gen = gaudi_gen_from_name(dt); }
+        var p = profile_gaudi(accel_node_index(name), gen);
+        _gaudi_name_profile(p, gen);
+        vec_push(profiles, p);
+    }
+    return n;
+}
+
+# Detect Gaudi cards through hl-smi, with `allow_exec` 1. A run that exits
+# non-zero is reported once, by its exit-status warning, and its output is
+# parsed without the parse warnings its error text would add (as detect_cuda
+# does). When hl-smi lists no card (missing, failed, or a container without
+# it), or with `allow_exec` 0, the habanalabs accel nodes are read instead
+# (2.5.5; through 2.5.4 they became TPUs, and no-exec mode skipped Gaudi).
+fn detect_gaudi_opts(profiles, warnings, allow_exec) {
+    if (allow_exec == 1) {
+        var args = vec_new();
+        vec_push(args, _HLSMI_QUERY);
+        vec_push(args, _HLSMI_FMT);
+        var st[16];
+        var result = run_tool_status("hl-smi", args, warnings, &st);
+        var w = tool_run_warning("hl-smi", result, &st);
+        if (w != 0 && warnings != 0) { vec_push(warnings, w); }
+        if (result != 0) {
+            var pw = warnings;
+            if (w != 0) { pw = vec_new(); }
+            if (parse_hl_smi_output(result, profiles, pw) > 0) { return 0; }
+        }
+    }
+    detect_gaudi_accel_at("/sys/class/accel", profiles);
     return 0;
+}
+
+# detect_gaudi_opts with exec allowed.
+fn detect_gaudi(profiles, warnings) {
+    return detect_gaudi_opts(profiles, warnings, 1);
 }

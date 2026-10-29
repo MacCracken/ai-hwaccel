@@ -48,4 +48,18 @@ if (vec_len(p4) != 0) { syscall(60, 4); }
 var p5 = vec_new();
 _parse_apple_macos(str_from("Chip: Apple M3\n"), p5);
 
+# The Neural Engine table matches a generation as a word (2.5.5): every name,
+# however odd, gets one of the three figures, and an M10 is not an M1.
+var names = "M1\0M10\0 M2\0M2M1\0Apple M1\0Apple M5 Max\0\0M\0";
+var ni = 0;
+while (ni < 33) {
+    var ane = _apple_ane_bytes(str_from(names + ni));
+    if (ane != 4 * BYTES_PER_GIB && ane != 6 * BYTES_PER_GIB && ane != 8 * BYTES_PER_GIB) { syscall(60, 6); }
+    ni = ni + 1;
+}
+if (_apple_ane_bytes(str_from("Apple M10")) != 8 * BYTES_PER_GIB) { syscall(60, 7); }
+var asahi = _asahi_ane_bytes(str_new("apple,j293\0apple,t8103\0", 23));
+if (asahi != 4 * BYTES_PER_GIB) { syscall(60, 8); }
+if (_asahi_ane_bytes(str_from("")) != 8 * BYTES_PER_GIB) { syscall(60, 8); }
+
 syscall(60, 0);

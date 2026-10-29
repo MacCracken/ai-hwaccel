@@ -4,7 +4,9 @@
 # Requirement type enum
 enum AccelRequirement {
     REQ_NONE = 0;            # CPU is sufficient
-    REQ_GPU = 1;             # CUDA, ROCm, Metal, Vulkan
+    # REQ_GPU: any accel_is_gpu type (CUDA, ROCm, Metal, Vulkan, oneAPI,
+    # Windows GPU, AGNOS GPU)
+    REQ_GPU = 1;
     REQ_TPU = 2;             # TPU (check min_chips separately)
     REQ_GAUDI = 3;           # Intel Gaudi HPU
     REQ_AWS_NEURON = 4;      # Inferentia or Trainium
@@ -61,18 +63,33 @@ fn requirement_satisfied(req, min_chips, profile) {
     return 0;
 }
 
-# Find first profile in registry that satisfies requirement
+# The best profile in `profiles` that satisfies the requirement, or 0: the
+# highest profile_rank, then the most memory, then the lowest index, as
+# reg_best_available ranks. Through 2.5.4 it was the first match in vector
+# order, and registry_detect and registry_detect_threaded push the backends
+# in different orders, so with a ROCm iGPU and a CUDA card REQ_GPU gave CUDA
+# from one and ROCm from the other.
 fn find_satisfying_profile(req, min_chips, profiles) {
+    var best = 0;
+    var best_rank = 0;
+    var best_mem = 0;
     var np = vec_len(profiles);
     var i = 0;
     while (i < np) {
         var p = vec_get(profiles, i);
-        if (requirement_satisfied(req, min_chips, p) == 1) {
-            return p;
-        }
         i = i + 1;
+        if (requirement_satisfied(req, min_chips, p) != 1) { continue; }
+        var rank = profile_rank(p);
+        var mem = profile_memory_bytes(p);
+        if (best != 0) {
+            if (rank < best_rank) { continue; }
+            if (rank == best_rank && mem <= best_mem) { continue; }
+        }
+        best = p;
+        best_rank = rank;
+        best_mem = mem;
     }
-    return 0;
+    return best;
 }
 
 # Count profiles that satisfy requirement

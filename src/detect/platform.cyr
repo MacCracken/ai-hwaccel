@@ -1,23 +1,32 @@
 # platform.cyr — sysfs/procfs/devfs helpers for hardware detection
 # Wrappers around io.cyr and fs.cyr for common detection patterns.
+#
+# Windows has no sysfs, procfs or devfs, and a rooted "/sys/..." path there
+# names a folder at the root of the current drive, which any local user may
+# create (C:\sys\class\dmi\id\sys_vendor, C:\sys\block\nvme9n1). So on PE
+# builds every helper below answers "absent" without touching the
+# filesystem (2.5.5): through 2.5.4 a planted folder fed the report (a fake
+# NVMe, a fake cloud provider) or, through the XGMI probe, crashed it.
 
 var SYSFS_MAX_READ = 4096;
 
 # Read a sysfs/procfs file into a Str. Returns Str or 0 on error. Reads at
-# most SYSFS_MAX_READ - 1 bytes, so the NUL always fits (through 2.5.0 a
-# 4 KiB file put it one byte past the buffer). A longer file is cut short
-# without a warning: this runs on detector threads, which must not log, and
-# every file read here is a short sysfs value or device-tree string.
+# most SYSFS_MAX_READ - 1 bytes (through 2.5.0 a 4 KiB file put the NUL one
+# byte past the buffer). A longer file is cut short without a warning: this
+# runs on detector threads, which must not log, and every file read here is a
+# short sysfs value or device-tree string. One trailing newline is dropped.
+# The read goes to the stack and the Str is a copy of its own size: through
+# 2.5.4 each read kept a 4 KiB buffer for a value of a few bytes, missing
+# files included, and a long-lived consumer re-detects (2.5.5).
 fn sysfs_read(path) {
-    var buf = alloc(SYSFS_MAX_READ);
-    var n = file_read_all(path, buf, SYSFS_MAX_READ - 1);
+    #ifdef CYRIUS_TARGET_WIN
+    return 0;
+    #endif
+    var tmp[4096];   # SYSFS_MAX_READ
+    var n = file_read_all(path, &tmp, SYSFS_MAX_READ - 1);
     if (n <= 0) { return 0; }
-    store8(buf + n, 0);
-    # Trim trailing newline
-    if (n > 0) {
-        if (load8(buf + n - 1) == 10) { n = n - 1; }
-    }
-    return str_new(buf, n);
+    if (load8(&tmp + n - 1) == 10) { n = n - 1; }
+    return str_from_buf(&tmp, n);
 }
 
 # Read a sysfs file as an integer. Returns value, or -1 on error.
@@ -27,13 +36,19 @@ fn sysfs_read_int(path) {
     return str_to_int(s);
 }
 
-# Check if a path exists (file or directory)
+# Check if a path exists (file or directory). 0 on Windows (see the header).
 fn aihw_path_exists(path) {
+    #ifdef CYRIUS_TARGET_WIN
+    return 0;
+    #endif
     return file_exists(path);
 }
 
-# Check if a directory exists
+# Check if a directory exists. 0 on Windows (see the header).
 fn dir_exists(path) {
+    #ifdef CYRIUS_TARGET_WIN
+    return 0;
+    #endif
     var s = str_from(path);
     return is_dir(s);
 }
@@ -71,38 +86,107 @@ fn read_symlink(path) {
     return str_new(buf, n);
 }
 
-# Scan /dev/ for devices matching a prefix (e.g., "neuron", "accel").
-# Returns vec of device IDs parsed from the suffix.
+# --- /dev scans ---
+
+# The device id of directory entry `name` (`len` bytes at `name`) when it is
+# `prefix` (a cstr) followed by 1 to 4 decimal digits, else -1. For "neuron"
+# and "ipu": "neuron0" -> 0, "ipu12" -> 12; "ipu-psys0" (the Intel IPU6
+# camera's processing-system node), "ipu7-psys0" (IPU7), "ipu0_ex" (a
+# Graphcore IPU's companion node), "neuron" and "neuron_x" -> -1. Through
+# 2.5.4 the suffix went through str_to_int, which skips non-digits, so every
+# one of those was a device. Pure.
+fn dev_entry_id(name, len, prefix) {
+    var plen = strlen(prefix);
+    var nd = len - plen;
+    if (nd < 1 || nd > 4) { return 0 - 1; }
+    if (memeq(name, prefix, plen) != 1) { return 0 - 1; }
+    var id = 0;
+    var i = plen;
+    while (i < len) {
+        var c = load8(name + i);
+        if (c < 48 || c > 57) { return 0 - 1; }
+        id = id * 10 + c - 48;
+        i = i + 1;
+    }
+    return id;
+}
+
+# One entry for dev_dir_scan: with `ids` a vec, push the entry's dev_entry_id
+# and answer 1 when it has one; with `ids` 0, answer 1 when the entry is
+# `prefix` followed by anything at all.
+fn _dev_scan_entry(name, len, prefix, plen, ids) {
+    if (ids == 0) {
+        if (len > plen) {
+            if (memeq(name, prefix, plen) == 1) { return 1; }
+        }
+        return 0;
+    }
+    var id = dev_entry_id(name, len, prefix);
+    if (id < 0) { return 0; }
+    vec_push(ids, id);
+    return 1;
+}
+
+# Scan directory `dir` (a cstr) for entries named after `prefix` (a cstr).
+# With `ids` a vec, push the id of every <prefix><digits> entry
+# (dev_entry_id) and return how many; with `ids` 0, return 1 if some entry is
+# `prefix` followed by anything, else 0. The names are listed into stack
+# buffers (dir_list_into), so a scan keeps nothing but its ids: detection
+# scans /dev up to 8 times and a long-lived consumer re-detects, and
+# dir_list's Str per entry (about 12 KB for /dev here) was never freed. A
+# directory past 2048 entries or 16 KiB of names is listed by dir_list.
+fn dev_dir_scan(dir, prefix, ids) {
+    var plen = strlen(prefix);
+    var scratch[4096];
+    var names[16384];
+    var offs[16384];
+    var dp = str_from(dir);
+    var count = 0;
+    var n = dir_list_into(dp, &scratch, 4096, &names, 16384, &offs, 2048);
+    if (n >= 0) {
+        var i = 0;
+        while (i < n) {
+            var nm = &names + load64(&offs + i * 8);
+            i = i + 1;
+            count = count + _dev_scan_entry(nm, strlen(nm), prefix, plen, ids);
+            if (ids == 0 && count > 0) { return 1; }
+        }
+        return count;
+    }
+    if (n == 0 - 1) { return 0; }
+    var entries = dir_list(dp);
+    var nent = vec_len(entries);
+    var ei = 0;
+    while (ei < nent) {
+        var e = vec_get(entries, ei);
+        ei = ei + 1;
+        count = count + _dev_scan_entry(str_data(e), str_len(e), prefix, plen, ids);
+        if (ids == 0 && count > 0) { return 1; }
+    }
+    return count;
+}
+
+# Ids of the /dev/<prefix><digits> devices (dev_entry_id), e.g. "neuron" ->
+# /dev/neuron0.. . Digits only, as the Rust releases' iter_dev_devices had
+# it. Empty on Windows (see the header).
 fn scan_dev_devices(prefix) {
     var ids = vec_new();
-    var dev_dir = str_from("/dev");
-    var entries = dir_list(dev_dir);
-    var plen = strlen(prefix);
-    var ei = 0;
-    var nent = vec_len(entries);
-    while (ei < nent) {
-        var entry = vec_get(entries, ei);
-        var elen = str_len(entry);
-        var edata = str_data(entry);
-        if (elen > plen) {
-            if (memeq(edata, prefix, plen) == 1) {
-                # Parse suffix as integer
-                var suffix = str_sub(entry, plen, elen - plen);
-                var id = str_to_int(suffix);
-                if (id >= 0) {
-                    vec_push(ids, id);
-                }
-            }
-        }
-        ei = ei + 1;
-    }
+    #ifdef CYRIUS_TARGET_WIN
+    return ids;
+    #endif
+    dev_dir_scan("/dev", prefix, ids);
     return ids;
 }
 
-# Check if any /dev/<prefix>* device exists
+# 1 when some /dev entry is <prefix> followed by anything at all, else 0
+# (0 on Windows). Presence only, for the families whose node names need not
+# end in a bare number, such as Qualcomm's /dev/qaic_aic100_0; a family whose
+# nodes are /dev/<prefix><N> uses scan_dev_devices.
 fn has_dev_device(prefix) {
-    var ids = scan_dev_devices(prefix);
-    return vec_len(ids) > 0;
+    #ifdef CYRIUS_TARGET_WIN
+    return 0;
+    #endif
+    return dev_dir_scan("/dev", prefix, 0);
 }
 
 # Parse `wmic computersystem get TotalPhysicalMemory` output (a
@@ -176,80 +260,131 @@ fn mac_total_phys_bytes() {
 }
 #endif
 
+# MemTotal from a /proc/meminfo image (`n` bytes at `buf`), in bytes, or 0
+# when it has no MemTotal line. Pure.
+fn meminfo_total_bytes(buf, n) {
+    var pos = 0;
+    while (pos < n) {
+        if (n - pos >= 9 && memeq(buf + pos, "MemTotal:", 9) == 1) {
+            pos = pos + 9;
+            while (pos < n) {
+                if (load8(buf + pos) != 32) { break; }
+                pos = pos + 1;
+            }
+            var kb = 0;
+            var nd = 0;
+            while (pos < n) {
+                var c = load8(buf + pos);
+                if (c < 48 || c > 57) { break; }
+                if (nd >= 15) { return 0; }
+                kb = kb * 10 + c - 48;
+                nd = nd + 1;
+                pos = pos + 1;
+            }
+            return kb * 1024;
+        }
+        # Skip to the next line
+        while (pos < n) {
+            if (load8(buf + pos) == 10) {
+                pos = pos + 1;
+                break;
+            }
+            pos = pos + 1;
+        }
+    }
+    return 0;
+}
+
+# A cgroup memory limit file's contents (`n` bytes at `buf`) as bytes, or 0
+# for no limit: v2's "max", a value that does not start with a digit, more
+# digits than an i64 holds, or 2^62 and up (v1's "unlimited" is
+# 9223372036854771712, 2^63 less a page). Stops at the first non-digit. Pure.
+fn cgroup_limit_parse(buf, n) {
+    var v = 0;
+    var i = 0;
+    while (i < n) {
+        var c = load8(buf + i);
+        if (c < 48 || c > 57) { break; }
+        if (v > 461168601842738790) { return 0; }
+        v = v * 10 + c - 48;
+        i = i + 1;
+    }
+    if (i == 0) { return 0; }
+    if (v >= 4611686018427387904) { return 0; }
+    return v;
+}
+
+# cgroup_limit_parse of the file `rel` (a cstr) under directory `root`, or -1
+# when it cannot be read.
+fn _cgroup_read_limit(root, rel) {
+    var path[512];
+    var rl = strlen(root);
+    var sl = strlen(rel);
+    if (rl + sl + 2 > 512) { return 0 - 1; }
+    memcpy(&path, root, rl);
+    store8(&path + rl, 47);
+    memcpy(&path + rl + 1, rel, sl);
+    store8(&path + rl + 1 + sl, 0);
+    var buf[64];
+    var n = file_read_all(&path, &buf, 63);
+    if (n <= 0) { return 0 - 1; }
+    return cgroup_limit_parse(&buf, n);
+}
+
+# The memory limit of the cgroup mounted at `root` (a cstr; the system's is
+# "/sys/fs/cgroup"), in bytes, or 0 for none: cgroup v2's memory.max, else
+# v1's memory/memory.limit_in_bytes. In a container with its own cgroup
+# namespace (Docker's and containerd's default on cgroup v2) and under v1,
+# the mount shows the container's cgroup, so this is the container's limit.
+# On a host the v2 root has no memory.max and the v1 root is unlimited, so
+# both read as 0. A container that shares the host's cgroup namespace
+# (--cgroupns=host) is not seen.
+fn cgroup_mem_limit_bytes(root) {
+    var v2 = _cgroup_read_limit(root, "memory.max");
+    if (v2 >= 0) { return v2; }
+    var v1 = _cgroup_read_limit(root, "memory/memory.limit_in_bytes");
+    if (v1 > 0) { return v1; }
+    return 0;
+}
+
 # Get total system memory (in bytes). Windows: GlobalMemoryStatusEx, with a
 # `wmic computersystem` spawn only if that fails AND `allow_exec` is 1 (wmic
-# is absent on Windows 11 24H2+), started by the absolute path which() finds
-# (2.5.3; it was its bare name, which Windows looks up in the current
-# directory first). macOS: sysctl hw.memsize. Else:
-# /proc/meminfo. `allow_exec` matters only on Windows. Returns 0 on failure
-# (caller substitutes a default).
+# is absent on Windows 11 24H2+), through run_tool_status (2.5.5; by the
+# absolute path which() finds since 2.5.3). macOS: sysctl hw.memsize. Else:
+# /proc/meminfo's MemTotal, or the cgroup memory limit when that is lower
+# (2.5.5): inside a container MemTotal is the host's RAM, so a pod limited to
+# 32 GiB on a 1 TiB node reported 1 TiB. `allow_exec` matters only on
+# Windows. Returns 0 on failure (caller substitutes a default).
 fn detect_system_memory_opts(allow_exec) {
     #ifdef CYRIUS_TARGET_WIN
     var native = win_total_phys_bytes();
     if (native > 0) { return native; }
     if (allow_exec == 0) { return 0; }
-    var wmic = which("wmic");
-    if (wmic == 0) { return 0; }
     var wargs = vec_new();
-    vec_push(wargs, cmd_win_program_token(wmic));
     vec_push(wargs, "computersystem");
     vec_push(wargs, "get");
     vec_push(wargs, "TotalPhysicalMemory");
     vec_push(wargs, "/value");
-    var wbuf = alloc(4096);
+    # No warnings vec: a failure reads as 0, and the caller's default.
     var wst[16];
-    # One byte short of the buffer, so the NUL below always fits. Under the
-    # tool deadline (cmd_capture, src/detect/command.cyr).
-    var wn = cmd_capture(wargs, wbuf, 4095, &wst);
-    if (load64(&wst) == 0 - 2) { return 0; }
-    if (wn > 0) {
-        store8(wbuf + wn, 0);
-        return win_parse_total_memory(str_new(wbuf, wn));
-    }
-    return 0;
+    var wout = run_tool_status("wmic", wargs, 0, &wst);
+    if (wout == 0) { return 0; }
+    return win_parse_total_memory(wout);
     #endif
     #ifdef CYRIUS_TARGET_MACOS
     return mac_total_phys_bytes();
     #endif
-    # One byte short of the buffer, so the NUL below always fits. MemTotal is
-    # the file's first line, so a cut-short read still holds it.
-    var buf = alloc(4096);
-    var n = file_read_all("/proc/meminfo", buf, 4095);
-    if (n <= 0) { return 0; }
-    store8(buf + n, 0);
-    # Find "MemTotal:" line, parse kB value
-    var pos = 0;
-    while (pos < n) {
-        if (memeq(buf + pos, "MemTotal:", 9) == 1) {
-            # Skip "MemTotal:" and whitespace
-            pos = pos + 9;
-            while (pos < n) {
-                var c = load8(buf + pos);
-                if (c != 32) { break; }
-                pos = pos + 1;
-            }
-            # Parse number
-            var kb = 0;
-            while (pos < n) {
-                var c2 = load8(buf + pos);
-                if (c2 >= 48) {
-                    if (c2 <= 57) {
-                        kb = kb * 10 + c2 - 48;
-                        pos = pos + 1;
-                        continue;
-                    }
-                }
-                break;
-            }
-            return kb * 1024;
-        }
-        # Skip to next line
-        while (pos < n) {
-            if (load8(buf + pos) == 10) { pos = pos + 1; break; }
-            pos = pos + 1;
-        }
+    # MemTotal is the file's first line, so a cut-short read still holds it.
+    # On the stack: only the number leaves.
+    var buf[4096];
+    var total = 0;
+    var n = file_read_all("/proc/meminfo", &buf, 4096);
+    if (n > 0) { total = meminfo_total_bytes(&buf, n); }
+    var lim = cgroup_mem_limit_bytes("/sys/fs/cgroup");
+    if (lim > 0) {
+        if (total == 0 || lim < total) { total = lim; }
     }
-    return 0;
+    return total;
 }
 
 # detect_system_memory_opts with exec allowed.
@@ -257,37 +392,27 @@ fn detect_system_memory() {
     return detect_system_memory_opts(1);
 }
 
-# List entries in a sysfs directory. Returns vec of Str names.
+# List entries in a sysfs directory. Returns vec of Str names (empty on
+# Windows; see the header).
 fn sysfs_list_dir(path) {
+    #ifdef CYRIUS_TARGET_WIN
+    return vec_new();
+    #endif
     var s = str_from(path);
     return dir_list(s);
 }
 
-# Build a sysfs path: base/entry/suffix
-# Returns null-terminated C string (heap-allocated)
+# Build a sysfs path: base/entry/suffix, from cstrs (`entry` and `suffix`
+# may be 0). Returns a heap cstr.
 fn sysfs_path(base, entry, suffix) {
-    var sb = str_builder_new();
-    str_builder_add_cstr(sb, base);
-    str_builder_add_cstr(sb, "/");
-    if (entry != 0) {
-        str_builder_add_cstr(sb, entry);
-        if (suffix != 0) {
-            str_builder_add_cstr(sb, "/");
-        }
-    }
-    if (suffix != 0) {
-        str_builder_add_cstr(sb, suffix);
-    }
-    var result = str_builder_build(sb);
-    # Return null-terminated C string for syscall compatibility
-    var clen = str_len(result);
-    var cstr = alloc(clen + 1);
-    memcpy(cstr, str_data(result), clen);
-    store8(cstr + clen, 0);
-    return cstr;
+    var es = 0;
+    if (entry != 0) { es = str_from(entry); }
+    return sysfs_path_str(base, es, suffix);
 }
 
-# Build sysfs path from Str components
+# sysfs_path with `entry_str` a Str (or 0). str_builder_build already
+# returns a fresh NUL-terminated buffer, so its data is the cstr (through
+# 2.5.4 both builders copied it a second time).
 fn sysfs_path_str(base, entry_str, suffix) {
     var sb = str_builder_new();
     str_builder_add_cstr(sb, base);
@@ -301,16 +426,88 @@ fn sysfs_path_str(base, entry_str, suffix) {
     if (suffix != 0) {
         str_builder_add_cstr(sb, suffix);
     }
-    var result = str_builder_build(sb);
-    var clen = str_len(result);
-    var cstr = alloc(clen + 1);
-    memcpy(cstr, str_data(result), clen);
-    store8(cstr + clen, 0);
-    return cstr;
+    return str_data(str_builder_build(sb));
 }
 
-# Parse a line containing a number with a suffix like "123 MB" or "456GB"
-# Returns value in the base unit (MB stays MB, GB stays GB)
+# The decimal number a Str starts with, after blanks (space or tab), in
+# thousandths: "64.67" -> 64670, " 2.5 GT/s" -> 2500, "16.0" -> 16000,
+# "450" -> 450000, "70." -> 70000. Fraction digits past the third are
+# dropped. -1 when `s` is 0 or does not start with a digit ("[N/A]", "",
+# "<inactive>", ".5"), or when the whole part passes 1e12. Pure.
+fn parse_decimal_x1000(s) {
+    if (s == 0) { return 0 - 1; }
+    var n = str_len(s);
+    var d = str_data(s);
+    var i = 0;
+    while (i < n) {
+        var b = load8(d + i);
+        if (b != 32 && b != 9) { break; }
+        i = i + 1;
+    }
+    if (i >= n) { return 0 - 1; }
+    var c = load8(d + i);
+    if (c < 48 || c > 57) { return 0 - 1; }
+    var whole = 0;
+    while (i < n) {
+        c = load8(d + i);
+        if (c < 48 || c > 57) { break; }
+        if (whole > 1000000000000) { return 0 - 1; }
+        whole = whole * 10 + c - 48;
+        i = i + 1;
+    }
+    var frac = 0;
+    var fd = 0;
+    if (i < n && load8(d + i) == 46) {
+        i = i + 1;
+        while (i < n) {
+            c = load8(d + i);
+            if (c < 48 || c > 57) { break; }
+            if (fd < 3) {
+                frac = frac * 10 + c - 48;
+                fd = fd + 1;
+            }
+            i = i + 1;
+        }
+    }
+    while (fd < 3) {
+        frac = frac * 10;
+        fd = fd + 1;
+    }
+    return whole * 1000 + frac;
+}
+
+# The unsigned integer a Str starts with, after blanks (space or tab):
+# " 42 W" -> 42, "7" -> 7. -1 when `s` is 0, does not start with a digit
+# ("[N/A]", ""), or holds more than 18 digits. Unlike str_to_int it stops at
+# the first non-digit, so "2.5" is 2 and "0x10" is 0. Pure.
+fn str_leading_uint(s) {
+    if (s == 0) { return 0 - 1; }
+    var n = str_len(s);
+    var d = str_data(s);
+    var i = 0;
+    while (i < n) {
+        var b = load8(d + i);
+        if (b != 32 && b != 9) { break; }
+        i = i + 1;
+    }
+    var v = 0;
+    var nd = 0;
+    while (i < n) {
+        var c = load8(d + i);
+        if (c < 48 || c > 57) { break; }
+        if (nd >= 18) { return 0 - 1; }
+        v = v * 10 + c - 48;
+        nd = nd + 1;
+        i = i + 1;
+    }
+    if (nd == 0) { return 0 - 1; }
+    return v;
+}
+
+# The unsigned integer a Str starts with, after spaces, in whatever unit
+# follows it ("44 GB" -> 44, "900MB" -> 900; MB stays MB, GB stays GB). It
+# stops at the first non-digit, so "2.5 GT/s" -> 2 and "0: 96Mhz" -> 0; the
+# suffix is neither read nor converted (parse_decimal_x1000 keeps fractions).
 fn parse_value_with_suffix(s) {
     var slen = str_len(s);
     var sd = str_data(s);
