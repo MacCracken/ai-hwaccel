@@ -4,6 +4,7 @@
 #   ai-hwaccel                  # Full registry JSON
 #   ai-hwaccel --summary        # Compact summary JSON
 #   ai-hwaccel --table          # Human-readable table
+#   ai-hwaccel --threaded       # Any detecting mode, tools run in parallel
 #   ai-hwaccel --cost 70B       # Cloud instance recommendation
 #   ai-hwaccel --version        # Print version
 
@@ -333,9 +334,11 @@ if (_has_flag("--help") == 1) {
     _println_cstr("  ai-hwaccel --version    Print version");
     _println_cstr("");
     _println_cstr("Options: --quant <fp16|bf16|int8|int4>  --method <full|lora|qlora-4bit|...>");
+    _println_cstr("         --threaded          Run the vendor tools in parallel threads; the same");
+    _println_cstr("                             registry, sooner when several tools are installed");
     _println_cstr("         --data-dir <path>   Dir holding VERSION + data/ (for --version/--cost");
-    _println_cstr("                             outside the project root; required on Windows, where");
-    _println_cstr("                             AI_HWACCEL_DATA_DIR is unreadable)");
+    _println_cstr("                             outside the project root); AI_HWACCEL_DATA_DIR");
+    _println_cstr("                             does the same, and the flag wins");
     syscall(60, 0);
 }
 
@@ -356,8 +359,15 @@ if (train_val != 0) {
     syscall(60, 0);
 }
 
-# Detect hardware
-var registry = registry_detect();
+# Detect hardware. --threaded (2.5.4) runs the vendor tools in parallel
+# threads, registry_detect_threaded; the registry holds the same profiles and
+# warnings, in another order. CI's smoke jobs run both on macOS and Windows.
+var registry = 0;
+if (_has_flag("--threaded") == 1) {
+    registry = registry_detect_threaded();
+} else {
+    registry = registry_detect();
+}
 
 var plan_val = _get_val("--plan");
 if (plan_val != 0) {

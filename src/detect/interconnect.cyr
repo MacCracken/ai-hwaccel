@@ -95,7 +95,15 @@ fn _detect_nvlink_nvswitch(sio, profiles, warnings) {
     # nvidia-smi but no GPU it can reach (a container without the driver)
     # spawned it again for nothing.
     if (profiles_have_nvidia_gpu(profiles) == 0) { return 0; }
-    var result = run_tool2("nvidia-smi", "nvlink", "-s", warnings);
+    # Its exit status is not judged (2.5.4): what `nvlink -s` returns on a GPU
+    # without NVLink is not documented (nvidia-smi's 3 is "the requested
+    # operation is not available on target device"), and the CUDA backend's
+    # own nvidia-smi run already reports a tool that fails. Not found and the
+    # deadline are still reported.
+    var nargs = vec_new();
+    vec_push(nargs, "nvlink");
+    vec_push(nargs, "-s");
+    var result = run_tool_status("nvidia-smi", nargs, warnings, 0);
     if (result != 0) {
         if (str_len(result) > 0) {
             # Count NVLink entries and estimate bandwidth

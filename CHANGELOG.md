@@ -5,6 +5,276 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.5.4] — 2026-10-29 — a tool's exit status, a macOS smoke job, and DCE on the Windows build
+
+The last of the 2.5.x roadmap. A tool that runs and fails is now reported.
+CI now runs the macOS wheel, which turned up an unsigned binary that Apple
+Silicon refuses to start. The Windows build is dead-code-eliminated again,
+after checks on `cass`. Detection output is unchanged on the dev host, `ecb`
+and `cass`; `--help` gains `--threaded`.
+
+### Fixed — macOS wheel
+
+- **The macOS binary is ad-hoc signed.** `cycc` writes an unsigned Mach-O,
+  and Apple Silicon kills an unsigned arm64 executable when it starts
+  (SIGKILL, exit 137). Measured on `ecb`: the output of `cycc` 6.6.4, 6.6.6
+  and 6.7.15 run there, and of 6.7.18's `cycc_aarch64` cross-compiler, all
+  died that way unsigned. cyrius's own `lib/regression.cyr` signs before it
+  runs one. Nothing in the wheel build signed the binary, and the `macos` job
+  never ran it, so the wheel's binary was most likely killed on every Apple
+  Silicon Mac. The shipped artifact itself could not be checked: the wheels
+  are CI artifacts, not on PyPI or the releases. `stage_binary.sh`'s macOS
+  branch now runs `codesign -s - -f` and `codesign -v`, and `build_remote.sh`
+  signs on a Darwin host. An ad-hoc signature (no identity, no notarization)
+  is enough to run, and a file pip installs carries no quarantine flag.
+
+### Fixed — a tool that fails
+
+- **A non-zero exit status is reported.** `run_tool` ignored it, and Linux
+  and macOS capture stdout only, so a tool that failed with its error on
+  stderr left no trace. It now pushes `warning_tool_failed` with the status,
+  and still returns what the tool printed. The message reads "exited with
+  status N", "killed by signal N", or, for a Windows code past 255, hex
+  ("exited with status 0xC0000005"). New `tool_exit_warning`,
+  `tool_run_warning` and `run_tool_status` (the status for the caller to
+  judge). A run whose output filled the 1 MiB buffer dies of SIGPIPE when
+  the read stops; only the cut is reported, as before. The `wmic` fallback
+  reports its status too.
+- **Tools whose status is judged differently:**
+  - `nvidia-smi nvlink -s` is not judged. What it returns on a GPU without
+    NVLink is undocumented, and the CUDA backend's own `nvidia-smi` run
+    already reports a failing tool. Not found and the deadline still are.
+  - `vulkaninfo` exits 1 both when it finds no GPU and when it fails
+    (Khronos Vulkan-Tools' `main()`). A failed run that named no device now
+    falls back to the sysfs scan, as a missing `vulkaninfo` does. Through
+    2.5.3 a run that failed after printing its header got neither its
+    devices nor the scan.
+  - `nvidia-smi` documents every non-zero code as a failure. After one, its
+    output is still parsed, so any rows it printed count, but its error text
+    no longer becomes a `cuda` parse warning, logged on stderr at the default
+    level. That had been the case in a container without the NVIDIA driver
+    (exit 9).
+
+  On the dev host, with stand-ins that fail as the tools do, 2.5.3 named none
+  of the failures and 2.5.4 names all three:
+
+  | stand-in on `PATH` | 2.5.3 `warnings` | 2.5.4 `warnings` |
+  |---|---|---|
+  | `nvidia-smi`, its no-driver text, exit 9 | `cuda` (a parse warning) | `nvidia-smi` |
+  | `vulkaninfo`, its header, exit 1 | — | `vulkaninfo`, and the sysfs scan runs |
+  | `xpu-smi` rejecting its arguments, exit 106 | — | `xpu-smi` |
+
+  On `cass`, a copy of `where.exe` installed as `xpu-smi.exe`, which exits
+  non-zero for those arguments, shows the same through the PE path.
+- **A Vulkan sysfs-scan name no longer replaces a better one.** The scan
+  names a GPU "AMD GPU (Vulkan)", "NVIDIA GPU (Vulkan)", "Intel GPU (Vulkan)"
+  or "Unknown GPU". The duplicate pass gave a survivor with a placeholder name
+  the dropped view's name, and those did not count as placeholders. Where
+  `vulkaninfo` was missing, or now fails, ROCm's GPU became "AMD GPU
+  (Vulkan)". Its own placeholder, "AMD Radeon (PCI 0x1002:0x1638)", has the
+  PCI IDs. `profile_name_is_placeholder` now counts the scan's names.
+
+### Changed — build and CI
+
+- **`CYRIUS_DCE=1` is back on the Windows build** (the maintainer's call),
+  after checks on `cass` under cyrius 6.7.18. The DCE build passes `windows-smoke`'s
+  checks (a)-(e), and on 18 CLI invocations it prints what the flagless build
+  prints, apart from `-vv` timings. The EXE stays 660 480 B, since PE still
+  declines compaction and NOP-fills dead code. Deflated, as the wheel ships
+  it, it is 67 553 B instead of 116 641 B (−42%). The 2.3.21 workaround
+  issue, fixed upstream in 6.6.1, is
+  [archived](docs/development/issues/archived/2026-09-07-cyrius-dce-pe-access-violation.md),
+  with its links updated.
+- **`macos-smoke`**, a new job in `wheels.yml`, installs the macOS wheel with
+  pip on a fresh `macos-14` runner. It checks:
+  - the binary is executable and signed;
+  - (a) JSON shape;
+  - (b) `-vv` spans on stderr, and stderr silent at the default level;
+  - (c) `--version`;
+  - (d) CPU memory equal to `sysctl hw.memsize`, and a Metal GPU whenever
+    `system_profiler` lists a GPU;
+  - (e) `--threaded` against the default run;
+  - (f) the Python API.
+- **`windows-smoke` gains (e)**, `--threaded` against the default run, on PE.
+- **The CLI takes `--threaded`**, to detect with `registry_detect_threaded()`.
+  It gives the same profiles and warnings, in another order, and is quicker
+  when several tools are installed. Both smoke jobs use it, since nothing
+  else ran the threaded path on a macOS or Windows runner. `--help` lists it,
+  and no longer says `--data-dir` is required on Windows because
+  `AI_HWACCEL_DATA_DIR` is unreadable there; that stopped being true in
+  2.3.21.
+
+### Docs
+
+- README, the testing, production, performance and troubleshooting guides
+  describe `--threaded`, the CI matrix, and failed-tool warnings.
+- The roadmap's 2.5.x section is done and removed. 35 items stay open, from
+  2.6.x on.
+
+### Tests
+
+- **1113 → 1157 assertions** in the same 15 units:
+  - `io_test` (55 → 77): `tool_exit_warning` (0, unknown, the deadline, a
+    status, a signal, `exit(137)`, a Windows code in hex), and real tools:
+    `sh` exiting 3 after printing, and killed by signal 9. Also
+    `run_tool_status` leaving the judgment to its caller, `true`, and
+    SIGPIPE after a cut.
+  - `gpu_parser_test` (148 → 162): `cuda_take_output` and
+    `vulkan_take_summary`, the decisions after a failed run (both new and
+    pure, factored out for these tests).
+  - `registry_test` (225 → 233): the scan's names as placeholders, and ROCm
+    keeping its own name next to a scan view.
+- **Each fix is caught when undone.** 9 mutants, each built and run in a copy
+  of the tree, and each fails the unit named:
+  - `run_tool` ignoring the status;
+  - the signal not named;
+  - no hex;
+  - an unknown status warned;
+  - SIGPIPE after a cut warned;
+  - `run_tool_status` judging too;
+  - the scan's names not placeholders;
+  - no scan after a failed `vulkaninfo`;
+  - `cuda` parse noise kept.
+
+  The signing fix has its own negative check: the `macos-smoke` steps, run on
+  `ecb` with signing skipped, fail at install with "the bundled binary is not
+  signed".
+
+### Consumers
+
+- **Warnings name tools that ran and failed.** A host where a tool exits
+  non-zero lists it in `warnings`, where 2.5.3 listed nothing. The JSON array
+  holds tool names, as before. `warning_message` gives the status.
+- **New functions:** `run_tool_status`, `tool_exit_warning`,
+  `tool_run_warning`, `cuda_take_output`, `vulkan_take_summary`.
+- `dist/ai-hwaccel.cyr`'s `# Requires` block is unchanged (13 leaves).
+
+### Performance
+
+**No regression in what 2.5.4 runs; one row moved by placement** (2.5.3 →
+2.5.4, both on cyrius 6.7.18). Same method as 2.5.3: 5 code layouts per arm,
+the three floor-bound rows batch-timed (†), and 80 rounds per suite, shuffled
+and pinned to one CPU. The table is the second run, made with a placement
+control arm, described below.
+
+| row | 2.5.3 | 2.5.4 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 13.62 µs | 13.68 µs | +0.5% | 0.10 | neutral |
+| `parse_vulkan_2gpu` | 2.50 µs | 2.47 µs | −1.3% | 0.31 | neutral |
+| `parse_neuron_2dev` | 1.59 µs | 1.59 µs | 0.0% | 0.99 | neutral |
+| `detect_safetensors` † | 410.6 ns | 406.2 ns | −1.1% | 0.48 | neutral |
+| `detect_gguf` † | 37.8 ns | 37.8 ns | 0.0% | 0.90 | neutral |
+| `parse_vulkan_summary_renoir` | 14.90 µs | 14.59 µs | −2.1% | 0.03 | neutral |
+| `vulkan_heaps_uhd600` | 611.41 µs | 634.42 µs | +3.8% | 0.007 | placement (below) |
+| `best_available_13dev` † | 173.4 ns | 172.1 ns | −0.7% | 0.33 | neutral |
+| `total_memory_13dev` | 104.0 ns | 104.0 ns | 0.0% | 1.00 | neutral |
+| `has_accelerator_13dev` | 18.4 ns | 18.4 ns | 0.0% | 0.96 | neutral |
+| `plan_70B_bf16_4gpu` | 1.42 µs | 1.43 µs | +0.2% | 0.56 | neutral |
+| `count_family_gpu_13dev` | 245.6 ns | 245.8 ns | +0.1% | 0.59 | neutral |
+| `json_serialize_13dev` | 23.12 µs | 23.25 µs | +0.6% | 0.002 | neutral (under 1%) |
+| `json_summary_13dev` | 3.17 µs | 3.19 µs | +0.8% | 0.03 | neutral |
+| `json_system_io` | 5.20 µs | 5.16 µs | −0.7% | < 0.001 | neutral (under 1%) |
+| `json_plan` | 17.14 µs | 17.29 µs | +0.8% | < 0.001 | neutral (under 1%; placement, below) |
+| `json_training` | 2.48 µs | 2.47 µs | −0.5% | 0.06 | neutral |
+| `dedup_17dev` | 903.7 ns | 906.2 ns | +0.3% | 0.16 | neutral |
+| `profile_from_json_cuda` | 7.35 µs | 7.36 µs | +0.1% | 0.46 | neutral |
+
+A verdict needs p < 0.01 and |Δ| > 1%. **`vulkan_heaps_uhd600` reaches both
+and is placement.** None of its code changed. `vulkan_take_summary` now sits
+in `src/detect/vulkan.cyr` ahead of it, and `command.cyr` and `cuda.cyr` grew
+ahead of that. The first run flagged it at +3.6% (p = 0.005), along with
+`json_plan` at +1.0% (p < 0.001). That run overlapped a load spike that also
+filled `/tmp`, and its absolute numbers were 5% to 8% high on both arms.
+
+The second run added a control arm: 2.5.3's tree with never-called functions
+in `command.cyr` and `src/registry.cyr`, sized so that both bench binaries
+match 2.5.4's sections. `.text` and `.rodata` match exactly for parsing, and
+`.text` is within 8 B for registry. Interleaved with both arms:
+
+| comparison | `vulkan_heaps_uhd600` | `json_plan` |
+|---|---:|---:|
+| 2.5.3 → padded 2.5.3 | +3.6% (p = 0.009) | +0.9% (p = 0.001) |
+| padded 2.5.3 → 2.5.4 | +0.2% (p = 0.58) | 0.0% (p = 0.79) |
+
+Every row the comparison covered is within ±0.4% (p ≥ 0.58) between padded
+2.5.3 and 2.5.4.
+
+**The `lazy` suite: neutral.** 20 interleaved runs per arm, medians:
+`lazy_tpu_query` 5.39 → 5.37 µs (−0.4%), `lazy_npu_query` 127.14 → 125.81 µs
+(−1.0%), with overlapping interquartile ranges. The host's load average was
+about 4 from other work, so both read above 2.5.3's record; a first 12-run
+sample read +1.7% and +3.8% with ranges overlapping as widely.
+
+In `bench-history.csv`, the `f7b8f99` rows at 07:25:29Z are 2.5.3, measured on
+the clean tree before any change, and the `f7b8f99-dirty` rows at 08:05:23Z
+are 2.5.4, all three suites, measured on the final source before the version
+bump.
+
+| binary | 2.5.3 | 2.5.4 | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 207 704 | 216 152 | +8 448 |
+| x86_64 ELF, no DCE | 535 384 | 535 640 | +256 |
+| ELF-aarch64 | 682 640 | 682 896 | +256 |
+| PE, as shipped (2.5.3 no DCE, 2.5.4 DCE) | 657 408 | 660 480 | +3 072 |
+| agnos, `CYRIUS_DCE=1` | 201 824 | 210 272 | +8 448 |
+| Mach-O arm64 (cross-built) | 672 252 | 672 252 | 0 |
+
+The code segment grows by 2 712 B without DCE and by 6 904 B with it on
+x86_64 (6 280 on agnos, 3 216 on aarch64), and data by 256 B. The larger DCE
+growth is `--threaded`. It makes `registry_detect_threaded` reachable from the
+CLI, so DCE no longer removes the threaded detector. The PE is the same size
+with or without DCE. Deflated, as the wheel ships it, it is 67 553 B, against
+116 641 B without DCE.
+
+### Verified
+
+- **Tests:** 1157 assertions in 15 units pass through CI's loop; fuzz 7/7.
+- **CI gates** (`ci.yml`), replayed on a fresh copy of the tree, all pass:
+  - vet over `src/main.cyr` and the 15 test units;
+  - `capacity --check`;
+  - raw-offset guard;
+  - fmt and `lint --strict`;
+  - `distlib --no-default-features`, fresh and deterministic;
+  - the DCE build and ELF check;
+  - the test and fuzz loops;
+  - the three bench suites;
+  - required docs;
+  - version and Python-bindings version consistency.
+
+  The dep-hash step ran in the checkout: 52 files, `cyrius.lock` current. A
+  first replay failed every compiling step with errno 28. Other work had
+  filled the shared `/tmp`, and nothing failed in the code. It passed once
+  space came back.
+- **CLI output on the dev host** is identical to 2.5.3's on 17 invocations
+  apart from `--version` and `--help`, on x86_64 with and without DCE and on
+  ELF-aarch64 under `qemu-aarch64`.
+- **`ecb`** (Apple M5 Pro, cross-built Mach-O):
+  - **CLI vs 2.5.3:** 18 runs match apart from `--help` and `-vv` times.
+  - **`macos-smoke` steps:** taken from `wheels.yml` and run against the
+    binary signed by `stage_binary.sh`'s `codesign` lines, all pass. They
+    check the signature, JSON shape, logging and `--version`. Memory equals
+    `hw.memsize` (51 539 607 552), the Metal GPU is found, `--threaded`
+    matches the default run, and the Python API works. With signing skipped
+    they fail at install. The unsigned binary is killed with exit 137.
+- **`cass`** (Windows 11), with the PE as now shipped, `CYRIUS_DCE=1`:
+  - **CLI vs 2.5.3's shipped PE:** 18 runs match apart from `--help` and
+    `-vv` times.
+  - **`windows-smoke`:** checks (a)-(e) pass. (b), (c) and the PowerShell
+    (d) ran on `cass`; (a) and (e) ran on its output, since `cass` has no
+    Python.
+  - **Exit statuses:** a failing `xpu-smi` stand-in is reported.
+  - **Timing:** a run takes 0.90–0.94 s, as 2.5.3's.
+- **Not verified:**
+  - the wheels were not built or installed, and the CI workflows, the new
+    `macos-smoke` job included, have not run;
+  - the shipped 2.5.3 macOS wheel was not checked. It is a CI artifact, and
+    downloading one needs authentication. Its binary being unsigned is
+    inferred: nothing in its build signed it, and every `cycc` output tested
+    was unsigned;
+  - `nvidia-smi nvlink -s`'s status on a GPU without NVLink, and the status
+    of `hl-smi`, `neuron-ls`, `gc-info` and `cerebras_cli`, are unknown, so a
+    status of theirs that is not a failure would now show as one.
+
 ## [2.5.3] — 2026-10-29 — vendor tools on Windows, and one profile per GPU there
 
 The 2.5.x roadmap's Windows items. Vendor tools now run on Windows, and the
@@ -2404,7 +2674,7 @@ Only the upstream changes that reach this repo, each checked against the tree:
 - **aarch64 binaries grow about 10%.** 6.6.5 renumbers raw syscalls through a
   per-target translation chain, which upstream prices at about 224 B per call
   site.
-- **The `CYRIUS_DCE=1` PE crash** ([our 2026-09-07 issue](docs/development/issues/2026-09-07-cyrius-dce-pe-access-violation.md))
+- **The `CYRIUS_DCE=1` PE crash** ([our 2026-09-07 issue](docs/development/issues/archived/2026-09-07-cyrius-dce-pe-access-violation.md))
   **was fixed upstream in 6.6.1.** PE builds now decline compaction and
   NOP-fill dead code instead, so the EXE is the same size either way. On
   `cass` the 6.6.6 DCE EXE passes every `windows-smoke` assertion.
@@ -2684,7 +2954,7 @@ Linux, single-threaded. This release was verified on **all four targets** instea
   `bindings/python/scripts/stage_win_cross.sh` therefore drops the flag on the
   `--win` build **only**; it bought nothing there anyway (497,152 bytes either
   way). Upstream defect, filed as
-  [2026-09-07-cyrius-dce-pe-access-violation](docs/development/issues/2026-09-07-cyrius-dce-pe-access-violation.md);
+  [2026-09-07-cyrius-dce-pe-access-violation](docs/development/issues/archived/2026-09-07-cyrius-dce-pe-access-violation.md);
   the toolchain is not this repo's to patch. Restore the flag when a cyrius
   release fixes it *and* `windows-smoke` passes with it on.
 

@@ -74,6 +74,15 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$TAG" = "native" ]; then
     ( cd "$REPO_ROOT" && env -i "$CYCC" < "$TU" > "$BIN_DIR/$EXE_NAME.tmp" )
     [ -s "$BIN_DIR/$EXE_NAME.tmp" ] || { echo "ERROR: cycc produced no binary" >&2; exit 1; }
     mv -f "$BIN_DIR/$EXE_NAME.tmp" "$BIN_DIR/$EXE_NAME"
+    # 2.5.4: cycc writes an unsigned Mach-O, and Apple Silicon kills an
+    # unsigned arm64 executable when it starts (SIGKILL, exit 137; measured on
+    # ecb with the output of cycc 6.6.4, 6.6.6 and 6.7.15). cyrius's own
+    # lib/regression.cyr ad-hoc signs a binary before running it on macOS for
+    # the same reason. Through 2.5.3 nothing here signed it, and the `macos`
+    # job never ran it. An ad-hoc signature (no identity, no notarization) is
+    # enough to run, and a file pip installs carries no quarantine flag.
+    codesign -s - -f "$BIN_DIR/$EXE_NAME"
+    codesign -v "$BIN_DIR/$EXE_NAME"
 else
     # `${arr[@]+"${arr[@]}"}` expands to nothing on an EMPTY array without
     # tripping `set -u` — the bare `"${arr[@]}"` is an "unbound variable"

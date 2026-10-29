@@ -675,6 +675,19 @@ fn test_placeholder_names() {
     assert_eq(profile_name_is_placeholder("Apple Silicon"), 1, "system_profiler default");
     assert_eq(profile_name_is_placeholder("AMD Radeon RX 7900 XTX"), 0, "a model");
     assert_eq(profile_name_is_placeholder("Apple M5 Pro"), 0, "a chip");
+    # 2.5.4: the Vulkan sysfs scan's names say less than ROCm's placeholder.
+    assert_eq(profile_name_is_placeholder("AMD GPU (Vulkan)"), 1, "vulkan scan: amd");
+    assert_eq(profile_name_is_placeholder("NVIDIA GPU (Vulkan)"), 1, "vulkan scan: nvidia");
+    assert_eq(profile_name_is_placeholder("Intel GPU (Vulkan)"), 1, "vulkan scan: intel");
+    assert_eq(profile_name_is_placeholder("Unknown GPU"), 1, "vulkan scan: unknown");
+    assert_eq(profile_name_is_placeholder("AMD Radeon Graphics (RADV RENOIR)"), 0, "a vulkaninfo name");
+    assert_eq(profile_name_is_placeholder("Vulkan GPU (Vulkan) Pro"), 0, "the suffix only at the end");
+    var v = vec_new();
+    var rocm = _gpu(ACCEL_ROCM, 0x1002, 0x1638, "AMD Radeon (PCI 0x1002:0x1638)", 8 * BYTES_PER_GIB);
+    vec_push(v, rocm);
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x1638, "AMD GPU (Vulkan)", 8 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(v), 1, "scan view dropped");
+    assert_streq(profile_device_name(rocm), "AMD Radeon (PCI 0x1002:0x1638)", "rocm keeps its own name, not the scan's");
     return 0;
 }
 

@@ -19,7 +19,12 @@ System32; older ones in `C:\Program Files\NVIDIA Corporation\NVSMI`). Through
 through DXGI either way, as Windows GPU profiles.
 
 The `warnings` array names each missing tool once (2.5.1), and each run of a
-tool that failed or timed out. The interconnect pass looks for `nvidia-smi`
+tool that failed, timed out, or exited with a non-zero status (2.5.4: the
+warning's message says "exited with status N" or "killed by signal N").
+Through 2.5.3 a tool that ran and failed was not listed. A failed
+`vulkaninfo` that named no device now falls back to the sysfs scan, as a
+missing one does, and a failed `nvidia-smi` no longer adds a `cuda` parse
+warning for its error text. The interconnect pass looks for `nvidia-smi`
 only when an NVIDIA GPU was found (2.5.2), and `system_profiler`, the Apple
 backend's fallback, is looked for on macOS only (2.5.1). Through 2.5.0
 `nvidia-smi` could appear twice and Linux runs listed `system_profiler`.

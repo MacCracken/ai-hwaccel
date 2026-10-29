@@ -110,6 +110,62 @@ fn test_run_echo() {
     return 0;
 }
 
+# --- A tool's exit status (2.5.4) ---
+
+fn test_tool_exit_warning() {
+    assert_eq(tool_exit_warning("t", 0, 0), 0, "status 0: no warning");
+    assert_eq(tool_exit_warning("t", 0 - 1, 0), 0, "unknown status: no warning");
+    assert_eq(tool_exit_warning("t", 0 - 2, 0), 0, "deadline: its own warning, not this one");
+    var w = tool_exit_warning("nvidia-smi", 9, 0);
+    assert_eq(warning_code(w), HWA_ERR_TOOL_FAILED, "status 9: a tool-failed warning");
+    assert_eq(warning_exit_code(w), 9, "status 9 kept");
+    assert_streq(warning_tool(w), "nvidia-smi", "tool named");
+    assert_streq(warning_message(w), "exited with status 9", "status message");
+    assert_streq(warning_message(tool_exit_warning("t", 137, 1)), "killed by signal 9", "signal 9");
+    assert_streq(warning_message(tool_exit_warning("t", 137, 0)), "exited with status 137", "exit(137) is not a signal");
+    assert_streq(warning_message(tool_exit_warning("t", 3221225477, 0)), "exited with status 0xC0000005", "a Windows crash, in hex");
+    return 0;
+}
+
+# A tool that fails is reported, and what it printed is still returned.
+# Through 2.5.3 both of these returned their output with no warning.
+fn test_run_tool_exit_status() {
+    var w = vec_new();
+    var args = vec_new();
+    vec_push(args, "-c");
+    vec_push(args, "echo partial; exit 3");
+    var out = run_tool("sh", args, w);
+    assert(out != 0, "exit 3: output returned");
+    assert(memeq(str_data(out), "partial", 7) == 1, "exit 3: what it printed");
+    assert_eq(vec_len(w), 1, "exit 3: one warning");
+    assert_eq(warning_exit_code(vec_get(w, 0)), 3, "exit 3: status in the warning");
+    var w2 = vec_new();
+    var args2 = vec_new();
+    vec_push(args2, "-c");
+    vec_push(args2, "kill -9 $$");
+    run_tool("sh", args2, w2);
+    assert_eq(vec_len(w2), 1, "signal: one warning");
+    assert_streq(warning_message(vec_get(w2, 0)), "killed by signal 9", "signal: named");
+    var w3 = vec_new();
+    var st[16];
+    var o3 = run_tool_status("sh", args, w3, &st);
+    assert(o3 != 0, "run_tool_status: output returned");
+    assert_eq(vec_len(w3), 0, "run_tool_status: the caller judges the status");
+    assert_eq(load64(&st), 3, "run_tool_status: status handed over");
+    var w4 = vec_new();
+    run_tool("true", vec_new(), w4);
+    assert_eq(vec_len(w4), 0, "exit 0: no warning");
+    # Output that fills the buffer: the tool dies of SIGPIPE when the read
+    # stops, and only the cut is reported (test_run_tool_output_cap).
+    var cut = str_new(alloc(CMD_MAX_STDOUT), CMD_MAX_STDOUT - 1);
+    var sp[16];
+    store64(&sp, 141);
+    store64(&sp + 8, 1);
+    assert_eq(tool_run_warning("head", cut, &sp), 0, "cut short: SIGPIPE not reported");
+    assert(tool_run_warning("head", str_from("x"), &sp) != 0, "not cut: SIGPIPE reported");
+    return 0;
+}
+
 fn test_run_missing_tool() {
     var warnings = vec_new();
     var args = vec_new();
@@ -312,6 +368,8 @@ alloc_init();
 test_which_echo();
 test_which_missing();
 test_which_candidates_posix();
+test_tool_exit_warning();
+test_run_tool_exit_status();
 test_which_candidates_windows();
 test_cmd_win_program_token();
 test_parse_csv_line();

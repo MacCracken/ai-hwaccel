@@ -208,7 +208,7 @@ initContainers:
 - **Time:** on the Linux dev host, a whole CLI run takes about 22 ms, most of
   it in `vulkaninfo`. With no vendor tool on `PATH` it takes under 2 ms.
 - **Threads:** `registry_detect()` uses one thread. `registry_detect_threaded()`
-  starts one per tool-based backend, briefly.
+  (the CLI's `--threaded`) starts one per tool-based backend, briefly.
 - **I/O:** sysfs reads, plus one run of each vendor tool that is installed.
 
 ## Other languages

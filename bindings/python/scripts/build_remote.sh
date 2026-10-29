@@ -43,10 +43,14 @@ echo ">> building on $HOST"
 # ./lib by name (the path fixed in cyrius v6.0.40–.43), so the build
 # populates its own lib. Keep the sync where it works, tolerate it where
 # it doesn't.
+# On a Mac, ad-hoc sign the binary before it leaves: cycc writes it unsigned,
+# and Apple Silicon kills an unsigned arm64 executable when it starts (2.5.4;
+# see stage_binary.sh).
 ssh "$HOST" "cd $REMOTE_DIR && tar xzf src.tar.gz && \
     export PATH=\"\$HOME/.cyrius/bin:\$PATH\" && \
     { cyrius lib sync || echo '>> lib sync unsupported here; [deps] resolution will populate ./lib'; } && \
     CYRIUS_DCE=1 cyrius build src/main.cyr $EXE && \
+    { [ \"\$(uname -s)\" != Darwin ] || codesign -s - -f $EXE; } && \
     file $EXE"
 
 echo ">> retrieving binary"

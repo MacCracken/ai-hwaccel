@@ -7,7 +7,7 @@ How to run the tests, check detection on real hardware, and read the results.
 Run everything from the repository root (some tests read `tests/fixtures/`):
 
 ```sh
-cyrius test tests/tcyr                           # 1113 assertions in 15 units
+cyrius test tests/tcyr                           # 1157 assertions in 15 units
 cyrius fuzz                                      # the 7 fuzz harnesses
 for f in src/*.cyr src/detect/*.cyr; do cyrius lint --strict "$f"; done   # fails on a warning
 for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do
@@ -21,7 +21,7 @@ lint step runs without `--strict`, so a lint warning does not fail CI yet.
 
 ## Test categories
 
-Tests are 15 `.tcyr` units under `tests/tcyr/`, with 1113 assertions in total.
+Tests are 15 `.tcyr` units under `tests/tcyr/`, with 1157 assertions in total.
 The README's *Test units* table lists what each unit covers. Real tool output
 used as fixtures lives in `tests/fixtures/`.
 
@@ -142,11 +142,13 @@ These need no tool:
 
 - `ubuntu-latest` (x86_64 Linux): the whole test suite, fuzzing, benchmarks
   and the static checks (`ci.yml`).
-- `macos-14` (arm64): builds the macOS wheel's binary but does not run it yet
-  (the roadmap's `macos-smoke`).
+- `macos-14` (arm64): `macos-smoke` (2.5.4) installs the macOS wheel with
+  pip and runs its binary: the signature, JSON shape, logging, `--version`,
+  memory against `sysctl hw.memsize`, a Metal GPU whenever `system_profiler`
+  lists a GPU, `--threaded` against the default run, and the Python API.
 - `windows-latest`: `windows-smoke` runs the cross-built EXE: JSON shape,
-  logging, `--version`, and memory and GPUs checked against what Windows
-  reports.
+  logging, `--version`, memory and GPUs checked against what Windows
+  reports, and `--threaded` against the default run.
 
 The one non-stdlib dependency, bayan's JSON sublib, is pinned by commit in
 `cyrius.lock`, and CI checks the vendored files' hashes on every run.

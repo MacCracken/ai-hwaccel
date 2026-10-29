@@ -285,8 +285,11 @@ fn builder_uses_exec(mask) {
 
 # 1 if `name` (a cstr, or 0) is a backend's stand-in rather than a model name:
 # missing, ROCm's sysfs fallback ("AMD Radeon (PCI 0x1002:0x1638)", or "AMD
-# Radeon"), or the Apple backend's "Apple Silicon" / "Apple Silicon (Asahi
-# Linux)". Pure.
+# Radeon"), the Apple backend's "Apple Silicon" / "Apple Silicon (Asahi
+# Linux)", or the Vulkan sysfs scan's "<vendor> GPU (Vulkan)" and "Unknown
+# GPU". Through 2.5.3 the scan's names did not count, so where vulkaninfo was
+# missing (or, since 2.5.4, fails) ROCm's GPU took "AMD GPU (Vulkan)" in place
+# of its own placeholder. Pure.
 fn profile_name_is_placeholder(name) {
     if (name == 0) { return 1; }
     var n = strlen(name);
@@ -297,6 +300,10 @@ fn profile_name_is_placeholder(name) {
     }
     if (streq(name, "Apple Silicon") == 1) { return 1; }
     if (streq(name, "Apple Silicon (Asahi Linux)") == 1) { return 1; }
+    if (streq(name, "Unknown GPU") == 1) { return 1; }
+    if (n > 13) {
+        if (memeq(name + n - 13, " GPU (Vulkan)", 13) == 1) { return 1; }
+    }
     return 0;
 }
 

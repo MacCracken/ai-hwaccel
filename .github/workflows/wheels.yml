@@ -227,3 +227,132 @@ jobs:
           foreach ($g in $gpu) { "reported GPU: $($g.accelerator) / $($g.device_name) / $($g.memory_bytes) B" }
           if ($hw.Count -gt 0 -and $gpu.Count -eq 0) { "FAIL: Windows lists $($hw.Count) GPU adapter(s) but no GPU profile was reported"; exit 1 }
           "OK native detection: RAM matches Windows, $($gpu.Count) GPU profile(s) for $($hw.Count) adapter(s)"
+      - name: (e) --threaded (registry_detect_threaded) reports what registry_detect reports
+        run: |
+          set -euo pipefail
+          "$BIN_DIR/ai-hwaccel.exe" > sync.json
+          "$BIN_DIR/ai-hwaccel.exe" --threaded > threaded.json
+          python -c "
+          import json
+          def key(path):
+              d = json.load(open(path))
+              return (sorted((p['accelerator'], p.get('device_name') or '', p['memory_bytes']) for p in d['profiles']),
+                      sorted(d['warnings']))
+          s, t = key('sync.json'), key('threaded.json')
+          print('registry_detect:', s)
+          print('registry_detect_threaded:', t)
+          assert s == t, 'registry_detect_threaded differs from registry_detect'
+          print('OK threaded')
+          "
+
+  macos-smoke:
+    name: macOS arm64 runtime smoke
+    # 2.5.4 — the `macos` job builds the arm64 binary natively but never ran
+    # it. That is how the RAM bug fixed in 2.3.27 survived, and how a wheel
+    # whose binary cycc left unsigned, which Apple Silicon kills when it
+    # starts, could ship. This job installs the wheel on a fresh macos-14
+    # runner the way a user does (pip), then checks what windows-smoke checks:
+    # (a) JSON shape, (b) logging, (c) --version, (d) RAM and GPU against what
+    # macOS reports, (e) --threaded, plus (f) the Python API.
+    needs: macos
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.x" }
+      - uses: actions/download-artifact@v4
+        with: { name: wheels-macos, path: dist }
+      - name: Install the wheel; the bundled binary must be signed
+        run: |
+          set -euo pipefail
+          python -m pip install dist/*.whl
+          bin="$(cd /tmp && python -c 'import ai_hwaccel, os; print(os.path.join(os.path.dirname(ai_hwaccel.__file__), "_bin"))')"
+          ls -la "$bin"
+          test -x "$bin/ai-hwaccel" || { echo 'FAIL: the installed binary is not executable'; exit 1; }
+          codesign -v "$bin/ai-hwaccel" \
+            || { echo 'FAIL: the bundled binary is not signed; Apple Silicon kills it when it starts'; exit 1; }
+          echo "BIN_DIR=$bin" >> "$GITHUB_ENV"
+      - name: (a) detection emits well-formed JSON (schema_version + non-empty profiles[])
+        run: |
+          set -euo pipefail
+          out="$("$BIN_DIR/ai-hwaccel")"
+          echo "${out:0:300}"
+          printf '%s' "$out" | python -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert 'schema_version' in d, 'missing schema_version'
+          p = d.get('profiles')
+          assert isinstance(p, list) and p, 'empty profiles[]'
+          print('OK schema_version=%s profiles=%d' % (d['schema_version'], len(p)))
+          "
+      - name: (b) -vv structured logging reaches stderr; default level stays silent
+        run: |
+          set -euo pipefail
+          "$BIN_DIR/ai-hwaccel" -vv > vv.out 2> vv.err
+          cat vv.err
+          grep -qE '\[(ENTER|EXIT)\] detect' vv.err \
+            || { echo 'FAIL: no detect span on stderr'; exit 1; }
+          "$BIN_DIR/ai-hwaccel" > d.out 2> d.err
+          test ! -s d.err || { echo "FAIL: stderr not silent at default level:"; cat d.err; exit 1; }
+          echo 'OK logging'
+      - name: (c) --version resolves the bundled VERSION
+        run: |
+          set -euo pipefail
+          expected="$(tr -d ' \t\r\n' < VERSION)"
+          got="$(cd "$BIN_DIR" && ./ai-hwaccel --version | tr -d ' \t\r\n')"
+          echo "expected=$expected got=$got"
+          test "$got" = "$expected" || { echo 'FAIL: --version did not resolve the bundled VERSION'; exit 1; }
+          echo 'OK version'
+      - name: (d) detected RAM and GPU match what macOS itself reports
+        run: |
+          set -euo pipefail
+          "$BIN_DIR/ai-hwaccel" > full.json
+          memsize="$(sysctl -n hw.memsize)"
+          gpus="$(system_profiler SPDisplaysDataType 2>/dev/null | grep -c 'Chipset Model:' || true)"
+          system_profiler SPDisplaysDataType 2>/dev/null | grep 'Chipset Model:' || true
+          MEMSIZE="$memsize" GPUS="${gpus:-0}" python -c "
+          import json, os
+          d = json.load(open('full.json'))
+          cpu = [p for p in d['profiles'] if p['accelerator'] == 'CPU']
+          assert len(cpu) == 1, 'expected one CPU profile, got %d' % len(cpu)
+          mem, want = cpu[0]['memory_bytes'], int(os.environ['MEMSIZE'])
+          print('CPU memory_bytes=%d  sysctl hw.memsize=%d' % (mem, want))
+          assert mem == want, 'CPU memory_bytes is not hw.memsize'
+          metal = [p for p in d['profiles'] if p['accelerator'] == 'Metal GPU']
+          for p in metal:
+              print('Metal GPU: %s, %d B' % (p.get('device_name'), p['memory_bytes']))
+          gpus = int(os.environ['GPUS'])
+          print('system_profiler lists %d GPU(s)' % gpus)
+          assert gpus == 0 or metal, 'system_profiler lists a GPU but no Metal GPU profile was reported'
+          print('OK native detection')
+          "
+      - name: (e) --threaded (registry_detect_threaded) reports what registry_detect reports
+        run: |
+          set -euo pipefail
+          "$BIN_DIR/ai-hwaccel" > sync.json
+          "$BIN_DIR/ai-hwaccel" --threaded > threaded.json
+          python -c "
+          import json
+          def key(path):
+              d = json.load(open(path))
+              return (sorted((p['accelerator'], p.get('device_name') or '', p['memory_bytes']) for p in d['profiles']),
+                      sorted(d['warnings']))
+          s, t = key('sync.json'), key('threaded.json')
+          print('registry_detect:', s)
+          print('registry_detect_threaded:', t)
+          assert s == t, 'registry_detect_threaded differs from registry_detect'
+          print('OK threaded')
+          "
+      - name: (f) the Python package runs the bundled binary
+        run: |
+          set -euo pipefail
+          cd /tmp
+          python -c "
+          import ai_hwaccel
+          r = ai_hwaccel.detect()
+          print('profiles:', [p.accelerator for p in r.profiles])
+          assert r.profiles, 'detect() returned no profile'
+          print('version:', ai_hwaccel.version())
+          print('OK python')
+          "

@@ -14,7 +14,7 @@ decide how to quantize and shard a model across them.
 |--------|-------|
 | Binary size | **199 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.7.18 |
-| Tests | 1113 assertions (15 test units) |
+| Tests | 1157 assertions (15 test units) |
 | Fuzz harnesses | 7 |
 | Dependencies | **0** third-party (bayan's JSON sublib: first-party, optional) |
 | Hardware families | 18 |
@@ -67,6 +67,7 @@ ai-hwaccel --plan 70B       # Sharding plan JSON (--quant int4, ...)
 ai-hwaccel --train 7B --method lora   # Training memory JSON
 ai-hwaccel --cost 70B       # Cloud instance recommendation (--json for JSON)
 ai-hwaccel --version        # Print version
+ai-hwaccel --threaded       # Any of the above, the vendor tools in parallel
 ai-hwaccel -v               # Log to stderr at debug level (-vv trace, -q silent)
 ```
 
@@ -202,7 +203,7 @@ src/
 |------|----------|----------|
 | Synchronous | `registry_detect()` | Simple, single-threaded |
 | No-exec | `registry_detect_no_exec()` | No subprocess at all (see above) |
-| Threaded | `registry_detect_threaded()` | CLI backends run in parallel threads |
+| Threaded | `registry_detect_threaded()` (CLI: `--threaded`) | CLI backends run in parallel threads |
 | Cached | `cached_get(c)` | Long-running services, configurable TTL |
 | Lazy | `lazy_by_family(lr, FAMILY_GPU)` | Probe only what you need (see below) |
 

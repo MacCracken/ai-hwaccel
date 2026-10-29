@@ -277,11 +277,58 @@ fn cmd_win_program_token(path) {
     return q;
 }
 
-# Run a tool with up to 5 args. Returns Str with stdout, or 0 on error.
-# Pushes a warning to the warnings vec on failure: not found, failed to run,
-# killed at the deadline (warning_timeout), or output that filled the buffer
-# and was cut short (a parse warning; the truncated output is still returned).
-fn run_tool(tool, args, warnings) {
+# The warning for a tool that ran and ended with exit status `code` (slot 0 of
+# exec_capture_status's status) and signal flag `sig` (slot 1), or 0 when the
+# status is not a failure (0) or not known (below 0; the deadline's -2 has its
+# own warning). The message says "exited with status N", or "killed by signal
+# N" (code 128 + N with the flag set); a Windows exit code past 255, such as
+# 0xC0000005 for a crash, is shown in hex (2.5.4). Pure.
+fn tool_exit_warning(tool, code, sig) {
+    if (code <= 0) { return 0; }
+    var sb = str_builder_new();
+    if (sig == 1 && code > 128) {
+        str_builder_add_cstr(sb, "killed by signal ");
+        str_builder_add_int(sb, code - 128);
+    } elif (code > 255) {
+        str_builder_add_cstr(sb, "exited with status 0x");
+        var digits = "0123456789ABCDEF";
+        var shift = 28;
+        var started = 0;
+        while (shift >= 0) {
+            var nib = (code >> shift) & 15;
+            if (nib != 0 || started == 1 || shift == 0) {
+                str_builder_putc(sb, load8(digits + nib));
+                started = 1;
+            }
+            shift = shift - 4;
+        }
+    } else {
+        str_builder_add_cstr(sb, "exited with status ");
+        str_builder_add_int(sb, code);
+    }
+    return warning_tool_failed(tool, code, str_data(str_builder_build(sb)));
+}
+
+# The exit-status warning for a run that returned `out` with status `st`
+# (exec_capture_status's two slots), or 0. A run whose output filled the
+# buffer ends with the tool killed by SIGPIPE, which this side caused when it
+# stopped reading; the cut is reported already, so the status is not.
+fn tool_run_warning(tool, out, st) {
+    if (out != 0) {
+        if (str_len(out) >= CMD_MAX_STDOUT - 1) { return 0; }
+    }
+    return tool_exit_warning(tool, load64(st), load64(st + 8));
+}
+
+# run_tool without the exit-status check (2.5.4): the tool's status goes to
+# `st_out` (exec_capture_status's two i64 slots, or 0), and a caller that
+# asks for it decides what a non-zero one means. The other warnings are the
+# same: not found, failed to start, the deadline, and output cut short.
+fn run_tool_status(tool, args, warnings, st_out) {
+    if (st_out != 0) {
+        store64(st_out, 0 - 1);
+        store64(st_out + 8, 0);
+    }
     var abs_path = which(tool);
     if (abs_path == 0) {
         if (warnings != 0) { vec_push(warnings, warning_tool_not_found(tool)); }
@@ -308,6 +355,10 @@ fn run_tool(tool, args, warnings) {
     var buf = alloc(CMD_MAX_STDOUT);
     var st[16];
     var n = cmd_capture(exec_args, buf, CMD_MAX_STDOUT - 1, &st);
+    if (st_out != 0) {
+        store64(st_out, load64(&st));
+        store64(st_out + 8, load64(&st + 8));
+    }
 
     if (load64(&st) == 0 - 2) {
         if (warnings != 0) { vec_push(warnings, warning_timeout(tool, CMD_DEFAULT_TIMEOUT_MS)); }
@@ -329,6 +380,22 @@ fn run_tool(tool, args, warnings) {
     # Null-terminate
     store8(buf + n, 0);
     return str_new(buf, n);
+}
+
+# Run a tool with up to 5 args. Returns Str with stdout, or 0 on error.
+# Pushes a warning to the warnings vec on failure: not found, failed to run,
+# killed at the deadline (warning_timeout), output that filled the buffer and
+# was cut short (a parse warning; the truncated output is still returned), or
+# a non-zero exit status (tool_exit_warning, 2.5.4; the output is still
+# returned, so a detector parses whatever the tool printed). Through 2.5.3 the
+# exit status was ignored, and a tool that failed with its error on stderr,
+# which Linux and macOS do not capture, left no trace.
+fn run_tool(tool, args, warnings) {
+    var st[16];
+    var out = run_tool_status(tool, args, warnings, &st);
+    var w = tool_run_warning(tool, out, &st);
+    if (w != 0 && warnings != 0) { vec_push(warnings, w); }
+    return out;
 }
 
 # Convenience: run tool with string args (up to 5)

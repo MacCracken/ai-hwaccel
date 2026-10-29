@@ -450,6 +450,8 @@ fn detect_windows_opts(profiles, warnings, allow_exec) {
         if (warnings != 0) { vec_push(warnings, warning_timeout("wmic", CMD_DEFAULT_TIMEOUT_MS)); }
         return 0;
     }
+    var ew = tool_exit_warning("wmic", load64(&st), load64(&st + 8));
+    if (ew != 0 && warnings != 0) { vec_push(warnings, ew); }
     if (got <= 0) {
         if (warnings != 0) {
             vec_push(warnings, warning_tool_failed("wmic", 0 - 1, "win32_VideoController query failed"));

@@ -1,18 +1,27 @@
 # cyrius 6.6.0: `CYRIUS_DCE=1` produces a PE that dies at startup with `0xC0000005`
 
+> **RESOLVED — the flag is restored in ai-hwaccel 2.5.4 (2026-10-29). Archived.**
+> Re-verified on `cass` under cyrius 6.7.18 before restoring it: the
+> `CYRIUS_DCE=1 cyrius build --win` EXE passes `windows-smoke`'s checks (a)-(e),
+> and its output on 18 CLI invocations is byte-identical to the flagless
+> build's, apart from `-vv` timings. The EXE is 660 480 B either way (PE still
+> declines compaction: "its import table is reached through rip-relative
+> disp32s this pass cannot repair"); deflated, as in the wheel, it is 67 553 B
+> instead of 116 641 B (−42%).
+> `bindings/python/scripts/stage_win_cross.sh` builds with the flag again.
+>
 > **FIXED UPSTREAM in cyrius 6.6.1; verified on `cass` under 6.6.6 (ai-hwaccel
-> 2.3.24, 2026-09-22). One step left to close this: restore the flag.**
+> 2.3.24, 2026-09-22).**
 > Upstream's root cause: `_pe_layout` ran off the pre-elimination code length, so
 > after compaction the section headers and the IAT RVA described a layout the code
 > no longer had. Every import resolved to 0. PE and x86 Mach-O now decline
 > compaction: dead bodies are NOP-filled in place, so the EXE is the same size
 > with or without the flag (510 976 B at 2.3.24). On `cass`, the
-> `CYRIUS_DCE=1 cyrius build --win` EXE passes all three `windows-smoke`
-> assertions and prints output identical to the flagless build on 10
+> `CYRIUS_DCE=1 cyrius build --win` EXE passed all three `windows-smoke`
+> assertions and printed output identical to the flagless build on 10
 > invocations. The only gain from restoring the flag is compression: the zeroed
-> bodies deflate the EXE to 43 684 B instead of 77 534 B (−44%, zip's default
-> level), which is what the wheel ships.
-> `bindings/python/scripts/stage_win_cross.sh` still builds without the flag.
+> bodies deflated the EXE to 43 684 B instead of 77 534 B (−44%, zip's default
+> level) at 2.3.24.
 
 **Filed:** 2026-09-07
 **Severity:** HIGH — it broke the `windows-smoke` CI gate and would have shipped a

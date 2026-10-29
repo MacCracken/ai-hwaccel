@@ -32,6 +32,25 @@ include "src/detect/vulkan.cyr"
 
 # --- CUDA parsing tests ---
 
+# After a failed run (2.5.4) nvidia-smi's error text is no parse warning, and
+# a row it printed still counts.
+fn test_cuda_take_output() {
+    var err = str_from("NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver. Make sure that the latest NVIDIA driver is installed and running.\n");
+    var p = vec_new();
+    var w = vec_new();
+    assert_eq(cuda_take_output(err, 1, p, w), 0, "failed run, error text: no profile");
+    assert_eq(vec_len(w), 0, "failed run, error text: no parse warning");
+    var w0 = vec_new();
+    cuda_take_output(err, 0, vec_new(), w0);
+    assert_eq(vec_len(w0), 1, "the same text from a run that succeeded: a parse warning");
+    var mixed = str_from("0, 24576, 1024, 23552, 8.9, 550.54, NVIDIA GeForce RTX 4090, 45, 120.5, 30, 1325\nUnable to determine the device handle for GPU0000:65:00.0: Unknown Error\n");
+    var w2 = vec_new();
+    assert_eq(cuda_take_output(mixed, 1, vec_new(), w2), 1, "failed run: the row it printed counts");
+    assert_eq(vec_len(w2), 0, "failed run: its error line is no parse warning");
+    assert_eq(cuda_take_output(0, 1, vec_new(), vec_new()), 0, "no output");
+    return 0;
+}
+
 fn test_cuda_single_gpu() {
     var csv = str_from("0, 24576, 1024, 23552, 8.9, 550.54, NVIDIA GeForce RTX 4090, 45, 120.5, 30, 1325");
     var profiles = vec_new();
@@ -548,7 +567,25 @@ fn test_vulkan_sysfs_helpers() {
 
 # --- Run all tests ---
 
+
+# A failed vulkaninfo that named no device sends the caller to the sysfs scan
+# (2.5.4); one that succeeded, or named devices, is the answer.
+fn test_vulkan_take_summary() {
+    var hdr = str_from("==========\nVULKANINFO\n==========\n\nVulkan Instance Version: 1.4.303\n\n");
+    var p = vec_new();
+    assert_eq(vulkan_take_summary(hdr, 1, p), 0, "failed, no device: scan instead");
+    assert_eq(vec_len(p), 0, "failed, no device: nothing pushed");
+    assert_eq(vulkan_take_summary(hdr, 0, p), 1, "succeeded, no device: an answer");
+    var r = vec_new();
+    assert_eq(vulkan_take_summary(_vk_fixture("tests/fixtures/vulkaninfo/renoir-linux-summary.txt"), 1, r), 1, "failed after naming a device: kept");
+    assert_eq(vec_len(r), 1, "failed after naming a device: one profile");
+    assert_eq(vulkan_take_summary(0, 0, p), 0, "no output: scan");
+    assert_eq(vulkan_take_summary(str_from("short"), 0, p), 0, "too short: scan");
+    return 0;
+}
+
 alloc_init();
+
 
 test_cuda_single_gpu();
 test_cuda_gh200_unified();
@@ -575,6 +612,8 @@ test_vulkan_nested_fields();
 test_vulkan_local_heap_largest();
 test_vulkan_size_shared();
 test_vulkan_sysfs_helpers();
+test_vulkan_take_summary();
+test_cuda_take_output();
 
 var fails = assert_summary();
 syscall(60, fails);

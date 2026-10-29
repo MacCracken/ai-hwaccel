@@ -6,48 +6,6 @@ platform validation come before new features. What already shipped is in
 
 ---
 
-## 2.5.x — Correct output, and CI that would notice
-
-Fix what ai-hwaccel reports wrong today, and close the CI gaps that let those
-bugs ship. This was the 2.4.x plan; 2.5.0 shipped first, as the cyrius 6.7.18
-toolchain release, 2.5.1 shipped the fixes and CI gates that could be made
-and checked in this repo, 2.5.2 the lazy registry's per-family detection, and
-2.5.3 vendor tools on Windows with the duplicate pass that builds on them.
-
-### Later in 2.5.x
-
-A tool's exit status, a macOS runner, and the PE build flag.
-
-#### Tool results
-
-- [ ] **A tool that runs and fails leaves no trace.** `run_tool`
-  (`src/detect/command.cyr`) ignores the exit status, and on Linux and macOS
-  it reads stdout only, so a tool that exits non-zero with its error on stderr
-  returns empty output and no warning. Found in 2.5.3: 2.5.2's `xpu-smi` call
-  passed `--dump` and its value as one argument; a stand-in that rejects
-  that, as Intel's documentation suggests the real parser does, exited 106,
-  and the registry said nothing about it. Push `warning_tool_failed` with the exit status when a tool exits
-  non-zero, and check each detector's tool for statuses that are not
-  failures.
-
-#### Build and CI
-
-- [ ] **Retire the `CYRIUS_DCE=1` PE workaround** (your call). This was fixed
-  upstream in cyrius 6.6.1 (PE declines compaction and NOP-fills dead code) and
-  verified on `cass` under 6.6.6. Restoring the flag in `stage_win_cross.sh`
-  shrinks the EXE inside the wheel from 77 534 to 43 684 B compressed. See
-  [the issue](issues/2026-09-07-cyrius-dce-pe-access-violation.md).
-- [ ] **A `macos-smoke` job.** `wheels.yml`'s `macos` job builds the arm64
-  binary but never runs it, which is how the RAM bug fixed in 2.3.27 survived.
-  Mirror `windows-smoke`: JSON shape, stderr silent at the default level,
-  `--version`, CPU memory against `sysctl hw.memsize`, and a Metal GPU whenever
-  `system_profiler` lists one. Run `registry_detect_threaded()` there too (so
-  far it has run on Apple Silicon only by hand, on `ecb`). Until then:
-  cross-build with the pinned `cycc_aarch64` and `CYRIUS_MACHO_ARM=1`, then
-  ad-hoc sign and run on `ecb`.
-
----
-
 ## 2.6.x — Platform validation, fixture-first
 
 Implement or lock each detection path against a captured fixture first (no

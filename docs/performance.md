@@ -72,7 +72,8 @@ re-read system memory.
 Neuron, Vulkan, oneAPI, Apple) in parallel threads and the sysfs ones on the
 calling thread. It returns when every thread has joined, so it cuts latency
 when several tools are installed. It is not asynchronous. `registry_detect()`
-runs the backends one after another, on one thread.
+runs the backends one after another, on one thread. The CLI takes
+`--threaded` to detect this way (2.5.4).
 
 ---
 

@@ -167,9 +167,35 @@ fn parse_cuda_output(output, profiles, warnings) {
 }
 
 # Detect CUDA GPUs
+# When nvidia-smi exits non-zero (2.5.4), its output is parsed all the same,
+# so any rows it printed still count, but the parse warnings are dropped: its
+# stdout is then its error text ("NVIDIA-SMI has failed because it couldn't
+# communicate with the NVIDIA driver", exit 9, in a container without the
+# driver), and the tool-failure warning says what happened. Through 2.5.3 that
+# text became a "cuda: too few CSV fields" warning, logged on stderr at the
+# default level.
 fn detect_cuda(profiles, warnings) {
-    var result = run_tool2("nvidia-smi", _NVSMI_QUERY, _NVSMI_FMT, warnings);
-    if (result == 0) { return 0; }
-    parse_cuda_output(result, profiles, warnings);
+    var args = vec_new();
+    vec_push(args, _NVSMI_QUERY);
+    vec_push(args, _NVSMI_FMT);
+    var st[16];
+    var result = run_tool_status("nvidia-smi", args, warnings, &st);
+    var w = tool_run_warning("nvidia-smi", result, &st);
+    if (w != 0 && warnings != 0) { vec_push(warnings, w); }
+    var failed = 0;
+    if (w != 0) { failed = 1; }
+    cuda_take_output(result, failed, profiles, warnings);
     return 0;
+}
+
+# Parse nvidia-smi's output `result` (a Str, or 0) into profiles; after a run
+# that failed (`failed` 1), without its parse warnings (see detect_cuda).
+# Returns the number of profiles pushed. Pure.
+fn cuda_take_output(result, failed, profiles, warnings) {
+    if (result == 0) { return 0; }
+    var first = vec_len(profiles);
+    var pw = warnings;
+    if (failed == 1) { pw = vec_new(); }
+    parse_cuda_output(result, profiles, pw);
+    return vec_len(profiles) - first;
 }
