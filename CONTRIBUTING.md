@@ -124,8 +124,9 @@ bindings/python/        the Python package
    position in `cyrius.cyml`'s `[lib] modules`. The compiler is single-pass, so
    it must come after the modules it uses. Then run
    `cyrius distlib --no-default-features`.
-4. **Wire it into every entry point**: `registry_detect_with_opts`
-   (`src/registry.cyr`), `registry_detect_threaded_with`
+4. **Wire it into every entry point**: `registry_run_detectors`
+   (`src/registry.cyr`, which `registry_detect_with_opts` and the lazy
+   registry share), `registry_detect_threaded_with`
    (`src/async_detect.cyr`: its thread list if the detector runs a tool,
    `_detect_sysfs_backends` if not), and `_family_builder_mask`
    (`src/lazy.cyr`). A backend missing from one of them is silently skipped by

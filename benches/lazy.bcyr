@@ -1,0 +1,92 @@
+# Benchmarks: lazy per-family detection on this host (2.5.2)
+# A query of a family without a tool-based backend reads sysfs and spawns
+# nothing. Each row times lazy_by_family on a fresh lazy registry (lazy_new,
+# which reads system memory, stays outside the timed window). Through 2.5.1
+# such a query also ran the system passes (storage, environment) and re-read
+# system memory; real detection, so the rows track this host's sysfs.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/bench.cyr"
+include "lib/fnptr.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+include "lib/args.cyr"
+
+include "lib/sakshi.cyr"
+include "src/log.cyr"
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/cuda.cyr"
+include "src/detect/rocm.cyr"
+include "src/detect/tpu.cyr"
+include "src/detect/gaudi.cyr"
+include "src/detect/neuron.cyr"
+include "src/detect/vulkan.cyr"
+include "src/detect/apple.cyr"
+include "src/detect/intel.cyr"
+include "src/detect/amd_xdna.cyr"
+include "src/detect/edge.cyr"
+include "src/detect/cloud_asic.cyr"
+include "src/detect/bandwidth.cyr"
+include "src/detect/pcie.cyr"
+include "src/detect/numa.cyr"
+include "src/detect/interconnect.cyr"
+include "src/detect/disk.cyr"
+include "src/detect/environment.cyr"
+include "src/registry.cyr"
+include "src/plan.cyr"
+include "src/training.cyr"
+include "src/cost.cyr"
+include "src/model.cyr"
+include "src/json_out.cyr"
+include "lib/thread.cyr"
+include "src/lazy.cyr"
+
+args_init();
+alloc_init();
+# WARN and up, as the CLI logs by default: an INFO line per query would be
+# timed too.
+hwlog_init();
+
+println("=== Lazy Detection Benchmarks ===");
+
+# --- TPU query: the TPU backend alone ---
+
+var b1 = bench_new("lazy_tpu_query");
+var ri = 0;
+while (ri < 1000) {
+    var lr1 = lazy_new();
+    bench_start(b1);
+    lazy_by_family(lr1, FAMILY_TPU);
+    bench_stop(b1);
+    ri = ri + 1;
+}
+bench_report(b1);
+
+# --- NPU query: Apple, Intel NPU, AMD XDNA, Samsung and MediaTek ---
+
+var b2 = bench_new("lazy_npu_query");
+ri = 0;
+while (ri < 1000) {
+    var lr2 = lazy_new();
+    bench_start(b2);
+    lazy_by_family(lr2, FAMILY_NPU);
+    bench_stop(b2);
+    ri = ri + 1;
+}
+bench_report(b2);
+
+syscall(60, 0);

@@ -3,7 +3,8 @@
 # its calls; detect_apple emits two (Metal GPU + Neural Engine), because it is
 # the one backend whose profiles span two families. A lazy query for a family
 # must return what full detection returns for that family, and no backend may
-# run twice however the families are queried.
+# run twice however the families are queried. The CUDA and Gaudi stubs also
+# push a warning, and the post-pass stubs count their calls (2.5.2).
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
@@ -38,7 +39,10 @@ fn _stub(profiles, backend, atype) {
     return 0;
 }
 
-fn detect_cuda(p, w) { return _stub(p, BACKEND_CUDA, ACCEL_CUDA); }
+fn detect_cuda(p, w) {
+    vec_push(w, warning_parse("cuda", "bad line"));
+    return _stub(p, BACKEND_CUDA, ACCEL_CUDA);
+}
 fn detect_rocm(p, w) { return _stub(p, BACKEND_ROCM, ACCEL_ROCM); }
 # When _vk_moltenvk is 1 the Vulkan stub reports what MoltenVK does on a Mac:
 # the Metal GPU again, as an integrated GPU on system RAM.
@@ -55,7 +59,10 @@ fn detect_vulkan_opts(p, w, a, l) {
 fn detect_intel_npu(p, w) { return _stub(p, BACKEND_INTEL_NPU, ACCEL_INTEL_NPU); }
 fn detect_amd_xdna(p, w) { return _stub(p, BACKEND_AMD_XDNA, ACCEL_AMD_XDNA); }
 fn detect_tpu(p, w) { return _stub(p, BACKEND_TPU, ACCEL_TPU); }
-fn detect_gaudi(p, w) { return _stub(p, BACKEND_GAUDI, ACCEL_GAUDI); }
+fn detect_gaudi(p, w) {
+    vec_push(w, warning_tool_not_found("hl-smi"));
+    return _stub(p, BACKEND_GAUDI, ACCEL_GAUDI);
+}
 fn detect_neuron(p, w) { return _stub(p, BACKEND_NEURON, ACCEL_NEURON); }
 fn detect_intel_oneapi(p, w) { return _stub(p, BACKEND_INTEL_ONEAPI, ACCEL_INTEL_ONEAPI); }
 fn detect_qualcomm(p, w) { return _stub(p, BACKEND_QUALCOMM, ACCEL_QUALCOMM); }
@@ -66,8 +73,12 @@ fn detect_samsung_npu(p, w) { return _stub(p, BACKEND_SAMSUNG_NPU, ACCEL_SAMSUNG
 fn detect_mediatek_apu(p, w) { return _stub(p, BACKEND_MEDIATEK_APU, ACCEL_MEDIATEK_APU); }
 
 # Apple Silicon: the Metal GPU and the Neural Engine, from one probe. The
-# registry calls the allow_exec-aware entry point.
+# registry calls the allow_exec-aware entry point; _apple_exec keeps the last
+# allow_exec it was given.
+var _apple_exec = 0 - 1;
+
 fn detect_apple_opts(p, w, a) {
+    _apple_exec = a;
     _stub(p, BACKEND_APPLE, ACCEL_METAL);
     vec_push(p, profile_new(ACCEL_APPLE_NPU, 0, 4 * BYTES_PER_GIB));
     return 0;
@@ -75,19 +86,58 @@ fn detect_apple_opts(p, w, a) {
 
 fn enrich_bandwidth(p) { return 0; }
 fn enrich_pcie(p) { return 0; }
-fn enrich_numa(p) { return 0; }
-fn detect_interconnects(s, p, w) { return 0; }
-fn detect_storage(s) { return 0; }
-fn detect_environment(s) { return 0; }
-fn detect_system_memory() { return 16 * BYTES_PER_GIB; }
-fn detect_system_memory_opts(a) { return 16 * BYTES_PER_GIB; }
+
+# Counts, in numa_node, how often each accelerator profile is enriched.
+fn enrich_numa(p) {
+    var n = vec_len(p);
+    var i = 0;
+    while (i < n) {
+        var q = vec_get(p, i);
+        i = i + 1;
+        if (profile_accel_type(q) == ACCEL_CPU) { continue; }
+        if (profile_numa_node(q) == PROFILE_NONE) { profile_set_numa_node(q, 1); }
+        else { profile_set_numa_node(q, profile_numa_node(q) + 1); }
+    }
+    return 0;
+}
+
+# Calls of the system passes and of the system-memory read.
+var _ic_calls = 0;
+var _storage_calls = 0;
+var _env_calls = 0;
+var _mem_calls = 0;
+
+fn detect_interconnects(s, p, w) { _ic_calls = _ic_calls + 1; return 0; }
+fn detect_storage(s) { _storage_calls = _storage_calls + 1; return 0; }
+fn detect_environment(s) { _env_calls = _env_calls + 1; return 0; }
+fn detect_system_memory() { _mem_calls = _mem_calls + 1; return 16 * BYTES_PER_GIB; }
+fn detect_system_memory_opts(a) { _mem_calls = _mem_calls + 1; return 16 * BYTES_PER_GIB; }
 
 include "src/registry.cyr"
 include "src/lazy.cyr"
 
 fn _reset_calls() {
     memset(_calls, 0, 8 * AIHW_BACKEND_COUNT);
+    _ic_calls = 0;
+    _storage_calls = 0;
+    _env_calls = 0;
+    _mem_calls = 0;
     return 0;
+}
+
+fn _system_pass_calls() { return _ic_calls + _storage_calls + _env_calls; }
+
+# Warnings in `v` with this code and tool.
+fn _count_warning(v, code, tool) {
+    var n = vec_len(v);
+    var c = 0;
+    var i = 0;
+    while (i < n) {
+        var w = vec_get(v, i);
+        if (warning_code(w) == code && streq(warning_tool(w), tool) == 1) { c = c + 1; }
+        i = i + 1;
+    }
+    return c;
 }
 
 fn _calls_of(backend) { return load64(_calls + backend * 8); }
@@ -250,6 +300,93 @@ fn test_into_registry_runs_each_backend_once() {
     return 0;
 }
 
+# --- A probe runs its family's detectors and nothing else (2.5.2) ---
+
+# Through 2.5.1 each probe was a full registry_detect_with: it read system
+# memory for a CPU profile it then dropped, and ran the system passes, whose
+# interconnect pass runs `nvidia-smi nvlink -s`.
+fn test_probe_runs_no_system_pass() {
+    var fam = FAMILY_GPU;
+    while (fam <= FAMILY_AI_ASIC) {
+        var lr = lazy_new();
+        _reset_calls();
+        lazy_by_family(lr, fam);
+        assert_eq(_system_pass_calls(), 0, family_name(fam));
+        assert_eq(_mem_calls, 0, family_name(fam));
+        fam = fam + 1;
+    }
+    return 0;
+}
+
+# lazy_into_registry runs each system pass once, after any queries before it.
+fn test_into_registry_system_passes_once() {
+    var lr = lazy_new();
+    lazy_by_family(lr, FAMILY_GPU);
+    lazy_by_family(lr, FAMILY_AI_ASIC);
+    _reset_calls();
+    lazy_into_registry(lr);
+    assert_eq(_ic_calls, 1, "interconnects once");
+    assert_eq(_storage_calls, 1, "storage once");
+    assert_eq(_env_calls, 1, "environment once");
+    _reset_calls();
+    lazy_into_registry(lazy_new());
+    assert_eq(_system_pass_calls(), 3, "fresh registry: each system pass once");
+    return 0;
+}
+
+# Every accelerator profile is enriched once, however the families are
+# queried; through 2.5.1 the probe's post-passes and lazy_into_registry's
+# both enriched it.
+fn test_enriched_once() {
+    var lr = lazy_new();
+    lazy_by_family(lr, FAMILY_NPU);
+    var all = reg_profiles(lazy_into_registry(lr));
+    var wrong = 0;
+    var accels = 0;
+    var i = 0;
+    while (i < vec_len(all)) {
+        var p = vec_get(all, i);
+        i = i + 1;
+        if (profile_accel_type(p) == ACCEL_CPU) { continue; }
+        accels = accels + 1;
+        if (profile_numa_node(p) != 1) { wrong = wrong + 1; }
+    }
+    assert(accels > 0, "accelerators found");
+    assert_eq(wrong, 0, "each accelerator enriched once");
+    return 0;
+}
+
+# The Neural Engine and the Metal GPU come from one Apple probe. When the NPU
+# family is asked first, that probe must still allow exec (the system_profiler
+# fallback), or the GPU family loses what registry_detect finds.
+fn test_npu_first_apple_allows_exec() {
+    _apple_exec = 0 - 1;
+    lazy_by_family(lazy_new(), FAMILY_NPU);
+    assert_eq(_apple_exec, 1, "npu first: apple with exec");
+    _apple_exec = 0 - 1;
+    lazy_by_family(lazy_new(), FAMILY_GPU);
+    assert_eq(_apple_exec, 1, "gpu first: apple with exec");
+    return 0;
+}
+
+# The probes' warnings are kept: in lazy_warnings after a query, and in the
+# registry lazy_into_registry returns, as in registry_detect's. Through 2.5.1
+# lazy_into_registry's registry had none of them.
+fn test_warnings_kept() {
+    var full = reg_warnings(registry_detect());
+    var lr = lazy_new();
+    lazy_by_family(lr, FAMILY_GPU);
+    assert_eq(_count_warning(lazy_warnings(lr), HWA_ERR_PARSE, "cuda"), 1, "gpu query: cuda warning");
+    assert_eq(_count_warning(lazy_warnings(lr), HWA_ERR_TOOL_NOT_FOUND, "hl-smi"), 0, "gpu query: no asic warning");
+    var rw = reg_warnings(lazy_into_registry(lr));
+    assert_eq(vec_len(rw), vec_len(full), "as many warnings as registry_detect");
+    assert_eq(_count_warning(rw, HWA_ERR_PARSE, "cuda"), 1, "registry: cuda warning");
+    assert_eq(_count_warning(rw, HWA_ERR_TOOL_NOT_FOUND, "hl-smi"), 1, "registry: gaudi warning");
+    var again = reg_warnings(lazy_into_registry(lr));
+    assert_eq(vec_len(again), vec_len(full), "second registry: not doubled");
+    return 0;
+}
+
 # --- Run all tests ---
 
 alloc_init();
@@ -262,6 +399,11 @@ test_family_query_matches_full_detection();
 test_tpu_query_runs_only_tpu();
 test_into_registry_runs_each_backend_once();
 test_lazy_dedup_across_families();
+test_probe_runs_no_system_pass();
+test_into_registry_system_passes_once();
+test_enriched_once();
+test_npu_first_apple_allows_exec();
+test_warnings_kept();
 
 var fails = assert_summary();
 syscall(60, fails);

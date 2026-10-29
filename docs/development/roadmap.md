@@ -10,14 +10,13 @@ platform validation come before new features. What already shipped is in
 
 Fix what ai-hwaccel reports wrong today, and close the CI gaps that let those
 bugs ship. This was the 2.4.x plan; 2.5.0 shipped first, as the cyrius 6.7.18
-toolchain release, and 2.5.1 shipped the fixes and CI gates that could be made
-and checked in this repo.
+toolchain release, 2.5.1 shipped the fixes and CI gates that could be made
+and checked in this repo, and 2.5.2 the lazy registry's per-family detection.
 
 ### Later in 2.5.x
 
 Work that needs new platform reach or a decision first: running vendor tools
-on Windows and what builds on it, the lazy registry's per-family detection, a
-macOS runner, and the PE build flag.
+on Windows and what builds on it, a macOS runner, and the PE build flag.
 
 #### Windows tools and the duplicate pass
 
@@ -43,17 +42,6 @@ macOS runner, and the PE build flag.
   profiles carry a `pci_id` (`DXGI_ADAPTER_DESC1` has `VendorId` and
   `DeviceId`) and count as the survivor for Vulkan. CUDA's profile should then
   win over DXGI's.
-
-#### Lazy detection
-
-- [ ] **Lazy queries should run only the detectors they need.** Every lazy
-  family probe goes through `registry_detect_with`, so it runs the post-passes
-  too, and `lazy_into_registry` runs them again. Since 2.5.1 a family without a
-  tool-based backend (TPU, NPU) spawns nothing, but a GPU or AI-ASIC probe
-  still runs `nvidia-smi nvlink -s` from the interconnect pass whenever no
-  NVSwitch sysfs node exists, and `lazy_into_registry` runs it once more. Run
-  the detectors per family and the post-passes once, in `lazy_into_registry`.
-  Consider also gating the NVLink probe on a CUDA profile being present.
 
 #### Build and CI
 

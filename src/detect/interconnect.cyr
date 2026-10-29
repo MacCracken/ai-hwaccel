@@ -3,7 +3,7 @@
 
 fn detect_interconnects(sio, profiles, warnings) {
     _detect_infiniband(sio);
-    _detect_nvlink_nvswitch(sio, warnings);
+    _detect_nvlink_nvswitch(sio, profiles, warnings);
     _detect_xgmi(sio);
     _detect_ici(sio, profiles);
     return 0;
@@ -56,7 +56,22 @@ fn _detect_infiniband(sio) {
 
 # --- NVLink / NVSwitch ---
 
-fn _detect_nvlink_nvswitch(sio, warnings) {
+# 1 if `profiles` holds an NVIDIA GPU: a CUDA profile, or any profile with
+# NVIDIA's PCI vendor ID (the Vulkan view of the card, when the CUDA backend
+# did not run). Pure.
+fn profiles_have_nvidia_gpu(profiles) {
+    var n = vec_len(profiles);
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(profiles, i);
+        i = i + 1;
+        if (profile_accel_type(p) == ACCEL_CUDA) { return 1; }
+        if ((profile_pci_id(p) >> 16) == PCI_VENDOR_NVIDIA) { return 1; }
+    }
+    return 0;
+}
+
+fn _detect_nvlink_nvswitch(sio, profiles, warnings) {
     # Check for NVSwitch via sysfs
     if (dir_exists("/sys/devices/virtual/nvidia-nvswitch") == 1) {
         var ic = interconnect_new(ICK_NVSWITCH, "nvswitch", 900000);
@@ -74,7 +89,12 @@ fn _detect_nvlink_nvswitch(sio, warnings) {
         }
     }
 
-    # Try nvidia-smi nvlink -s for NVLink
+    # `nvidia-smi nvlink -s` only when there is an NVIDIA GPU to ask about
+    # (2.5.2). Through 2.5.1 it ran whenever the NVSwitch nodes were missing:
+    # a host without nvidia-smi was told so a second time, and one with
+    # nvidia-smi but no GPU it can reach (a container without the driver)
+    # spawned it again for nothing.
+    if (profiles_have_nvidia_gpu(profiles) == 0) { return 0; }
     var result = run_tool2("nvidia-smi", "nvlink", "-s", warnings);
     if (result != 0) {
         if (str_len(result) > 0) {

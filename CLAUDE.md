@@ -81,7 +81,7 @@ just makes the "every version" cadence explicit and non-optional.
 - **Never skip benchmarks.** Numbers don't lie. The CSV history is the
   proof. **Every version** ships a before/after delta review proving no
   regression — see *Mandatory Benchmarking* above.
-- **Tests + benchmarks are the way.** 1002 assertions (15 units), 6 fuzz harnesses, 19 benchmarks (2 suites).
+- **Tests + benchmarks are the way.** 1039 assertions (15 units), 6 fuzz harnesses, 21 benchmarks (3 suites).
 - **Own the stack.** Zero external dependencies.
 - **No magic.** Every operation is measurable, auditable, traceable.
 - **Fixed-point arithmetic** — x1000 multipliers, no floats in the entire codebase.

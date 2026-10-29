@@ -61,7 +61,8 @@ registry_detect_with_opts(mask, allow_exec)
                                        GlobalMemoryStatusEx (Windows); 16 GiB if all fail
   2. each backend in the mask, in turn  sysfs / syscalls / DXGI / sysctl, and vendor
                                        tools only when allow_exec is 1
-  3. registry_post_passes:
+                                       (registry_run_detectors)
+  3. registry_post_passes = registry_profile_passes (a-d) + registry_system_passes (e-g):
      a. duplicate devices              profiles_dedup: a Vulkan profile with a CUDA or
                                        ROCm profile's PCI vendor:device ID, or a Vulkan
                                        iGPU next to Apple's Metal GPU, is dropped; the
@@ -69,15 +70,18 @@ registry_detect_with_opts(mask, allow_exec)
      b. bandwidth enrichment           clock x bus width, or an estimate
      c. PCIe enrichment                sysfs link speed x width
      d. NUMA enrichment                sysfs numa_node
-     e. interconnect detection         InfiniBand, NVLink, XGMI, ... (allow_exec 1 only)
+     e. interconnect detection         InfiniBand, NVLink, XGMI, ... (allow_exec 1 only;
+                                       `nvidia-smi nvlink -s` only with an NVIDIA GPU)
      f. storage detection              NVMe / SATA SSD / HDD
      g. environment detection          Docker, Kubernetes, cloud metadata
 ```
 
 The other entry points share the backends and `registry_post_passes`:
 `registry_detect_threaded()` runs the tool-based backends in threads and the
-sysfs ones on the calling thread; `lazy_by_family()` probes one family's
-backends on its first query and deduplicates as families accumulate;
+sysfs ones on the calling thread; `lazy_by_family()` runs one family's
+backends on its first query (`registry_run_detectors`, tools allowed) and the
+profile passes on what they found, deduplicating as families accumulate, and
+`lazy_into_registry()` runs the system passes once (2.5.2);
 `cached_get()` reuses a registry until its TTL runs out (the deprecated
 `disk_cached_get()` does the same; it no longer writes a file).
 

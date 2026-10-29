@@ -14,7 +14,7 @@ decide how to quantize and shard a model across them.
 |--------|-------|
 | Binary size | **199 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.7.18 |
-| Tests | 1002 assertions (15 test units) |
+| Tests | 1039 assertions (15 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** third-party (bayan's JSON sublib: first-party, optional) |
 | Hardware families | 18 |
@@ -108,7 +108,8 @@ include "lib/ai-hwaccel.cyr"
 # Full detection — sysfs probes plus vendor CLIs (nvidia-smi, hl-smi,
 # neuron-ls, xpu-smi, cerebras_cli, gc-info) for the six EXEC backends,
 # vulkaninfo for Vulkan, and `nvidia-smi nvlink -s` for the interconnect
-# post-pass (InfiniBand, NVSwitch and XGMI come from sysfs).
+# post-pass when an NVIDIA GPU was found (InfiniBand, NVSwitch and XGMI come
+# from sysfs).
 var r = registry_detect();
 # ... reg_profiles(r), reg_count(r), ...
 ```
@@ -198,7 +199,15 @@ src/
 | No-exec | `registry_detect_no_exec()` | No subprocess at all (see above) |
 | Threaded | `registry_detect_threaded()` | CLI backends run in parallel threads |
 | Cached | `cached_get(c)` | Long-running services, configurable TTL |
-| Lazy | `lazy_by_family(lr, FAMILY_GPU)` | Probe only what you need |
+| Lazy | `lazy_by_family(lr, FAMILY_GPU)` | Probe only what you need (see below) |
+
+A lazy query runs only that family's backends, with tools allowed as in
+`registry_detect()`, and the per-profile passes (duplicates, sysfs
+enrichment) on what they found. `lazy_into_registry(lr)` probes the families
+not yet asked for and runs the system passes (interconnects, storage,
+environment) once; its registry has the probes' warnings, as
+`registry_detect()`'s does. A TPU or NPU query spawns nothing (2.5.2). Read the
+warnings so far with `lazy_warnings(lr)`.
 
 ### Sharding Strategies
 
@@ -273,7 +282,7 @@ done
 | `json_roundtrip_test.tcyr` | profile JSON round-trip (`profile_from_json`) |
 | `model_catalog_test.tcyr` | `load_models` against the shipped `data/models.json`, `compatible_with_registry` |
 | `windows_test.tcyr` | Windows DXGI adapter descriptors + `wmic` fallback parsers |
-| `lazy_test.tcyr` | lazy registry: per-family queries vs full detection, no backend run twice |
+| `lazy_test.tcyr` | lazy registry: per-family queries vs full detection, no backend run twice, the system passes once, warnings kept |
 
 ### Pattern: derived struct accessors
 

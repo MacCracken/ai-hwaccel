@@ -50,6 +50,17 @@ Windows).
 
 ---
 
+## Lazy detection
+
+`lazy_by_family(lr, family)` runs only that family's backends, on its first
+query, and `lazy_into_registry(lr)` runs the system passes once (2.5.2). A TPU
+or NPU query spawns nothing. On the dev host a TPU query takes about 5 µs and
+an NPU query about 116 µs (`benches/lazy.bcyr`); through 2.5.1 they took 63
+and 175 µs, because each also ran the storage and environment passes and
+re-read system memory.
+
+---
+
 ## Threaded detection
 
 `registry_detect_threaded()` runs the tool-based backends (CUDA, Gaudi,
@@ -70,8 +81,10 @@ it and 461 KB without. Every backend is always compiled in: the per-backend
 
 ## Benchmarks
 
-Two suites, `benches/parsing.bcyr` and `benches/registry.bcyr`, cover the
+Three suites: `benches/parsing.bcyr` and `benches/registry.bcyr` cover the
 parsers (CUDA, Vulkan, Neuron, model formats), registry queries, the duplicate
-pass and JSON output. `./scripts/bench-history.sh` runs both from the
-repository root and appends the results to `bench-history.csv`. Every release's
+pass and JSON output; `benches/lazy.bcyr` times lazy TPU and NPU queries on
+the host it runs on (real sysfs, no tool). `./scripts/bench-history.sh` runs
+all three from the repository root and appends the results to
+`bench-history.csv`. Every release's
 CHANGELOG section carries its before/after table.

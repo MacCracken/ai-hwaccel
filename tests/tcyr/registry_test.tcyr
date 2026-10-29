@@ -372,6 +372,123 @@ fn check_tool_warnings_once(r, label) {
 fn test_tool_warnings_once() {
     check_tool_warnings_once(registry_detect(), "registry_detect: tools once");
     check_tool_warnings_once(registry_detect_threaded(), "registry_detect_threaded: tools once");
+    check_tool_warnings_once(lazy_into_registry(lazy_new()), "lazy_into_registry: tools once");
+    return 0;
+}
+
+# --- NVLink is probed only with an NVIDIA GPU (2.5.2) ---
+
+fn test_profiles_have_nvidia_gpu() {
+    var v = vec_new();
+    assert_eq(profiles_have_nvidia_gpu(v), 0, "empty: no NVIDIA GPU");
+    vec_push(v, profile_cpu(16 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_ROCM, 0x1002, 0x1638, "AMD Radeon", BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x8086, 0x3185, "Intel(R) UHD Graphics 600", BYTES_PER_GIB));
+    assert_eq(profiles_have_nvidia_gpu(v), 0, "AMD, Intel and CPU: no NVIDIA GPU");
+    var cuda = vec_new();
+    vec_push(cuda, _gpu(ACCEL_CUDA, 0, 0, "NVIDIA H100", 80 * BYTES_PER_GIB));
+    assert_eq(profiles_have_nvidia_gpu(cuda), 1, "a CUDA profile, even without a pci_id");
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x10DE, 0x2330, "NVIDIA H100", 80 * BYTES_PER_GIB));
+    assert_eq(profiles_have_nvidia_gpu(v), 1, "a Vulkan view of an NVIDIA card");
+    return 0;
+}
+
+fn _nvsmi_missing(warns) {
+    var c = 0;
+    var i = 0;
+    while (i < vec_len(warns)) {
+        var w = vec_get(warns, i);
+        if (warning_code(w) == HWA_ERR_TOOL_NOT_FOUND && streq(warning_tool(w), "nvidia-smi") == 1) { c = c + 1; }
+        i = i + 1;
+    }
+    return c;
+}
+
+# Through 2.5.1 the interconnect pass looked for `nvidia-smi` on every host
+# without NVSwitch nodes. Without an NVIDIA GPU it does not now. Where
+# nvidia-smi is missing and there are no NVSwitch nodes (the dev host, CI), an
+# NVIDIA GPU still makes it look, so it reports the tool missing.
+fn test_nvlink_probe_needs_nvidia_gpu() {
+    var w = vec_new();
+    var amd = vec_new();
+    vec_push(amd, _gpu(ACCEL_ROCM, 0x1002, 0x1638, "AMD Radeon", BYTES_PER_GIB));
+    detect_interconnects(system_io_new(), amd, w);
+    assert_eq(_nvsmi_missing(w), 0, "no NVIDIA GPU: nvidia-smi not looked for");
+    if (which("nvidia-smi") != 0) { return 0; }
+    if (dir_exists("/sys/devices/virtual/nvidia-nvswitch") == 1) { return 0; }
+    if (aihw_path_exists("/sys/bus/nvidia_nvswitch/devices") == 1) { return 0; }
+    var cw = vec_new();
+    var cuda = vec_new();
+    vec_push(cuda, _gpu(ACCEL_CUDA, 0x10DE, 0x2330, "NVIDIA H100", 80 * BYTES_PER_GIB));
+    detect_interconnects(system_io_new(), cuda, cw);
+    assert_eq(_nvsmi_missing(cw), 1, "CUDA GPU: nvidia-smi looked for");
+    var vw = vec_new();
+    var vk = vec_new();
+    vec_push(vk, _gpu(ACCEL_VULKAN, 0x10DE, 0x2330, "NVIDIA H100", 80 * BYTES_PER_GIB));
+    detect_interconnects(system_io_new(), vk, vw);
+    assert_eq(_nvsmi_missing(vw), 1, "Vulkan view of an NVIDIA GPU: nvidia-smi looked for");
+    return 0;
+}
+
+# --- The lazy registry on this host (2.5.2) ---
+
+# Warnings in `v` with the code and tool of warning `w`.
+fn _same_warnings(v, w) {
+    var c = 0;
+    var i = 0;
+    while (i < vec_len(v)) {
+        var e = vec_get(v, i);
+        if (warning_code(e) == warning_code(w) && streq(warning_tool(e), warning_tool(w)) == 1) { c = c + 1; }
+        i = i + 1;
+    }
+    return c;
+}
+
+# lazy_into_registry reports what registry_detect reports: the same warnings,
+# by code and tool, and the same profiles by type. Through 2.5.1 it had only
+# the interconnect pass's warnings.
+fn test_lazy_matches_full_detection() {
+    var full = registry_detect();
+    var lazy = lazy_into_registry(lazy_new());
+    var fw = reg_warnings(full);
+    var lw = reg_warnings(lazy);
+    assert_eq(vec_len(lw), vec_len(fw), "lazy: as many warnings as registry_detect");
+    var off = 0;
+    var i = 0;
+    while (i < vec_len(fw)) {
+        var w = vec_get(fw, i);
+        if (_same_warnings(lw, w) != _same_warnings(fw, w)) { off = off + 1; }
+        i = i + 1;
+    }
+    assert_eq(off, 0, "lazy: the same warnings as registry_detect");
+    var fp = reg_profiles(full);
+    var lp = reg_profiles(lazy);
+    assert_eq(vec_len(lp), vec_len(fp), "lazy: as many profiles as registry_detect");
+    var types = 0;
+    var t = 0;
+    while (t <= ACCEL_AGNOS_GPU) {
+        var a = 0;
+        var b = 0;
+        i = 0;
+        while (i < vec_len(fp)) { if (profile_accel_type(vec_get(fp, i)) == t) { a = a + 1; } i = i + 1; }
+        i = 0;
+        while (i < vec_len(lp)) { if (profile_accel_type(vec_get(lp, i)) == t) { b = b + 1; } i = i + 1; }
+        if (a != b) { types = types + 1; }
+        t = t + 1;
+    }
+    assert_eq(types, 0, "lazy: the same profiles by type as registry_detect");
+    return 0;
+}
+
+# No AI-ASIC backend is NVIDIA's, so an AI-ASIC query never looks for
+# `nvidia-smi`; through 2.5.1 its probe's interconnect pass did.
+fn test_lazy_asic_query_no_nvidia_smi() {
+    var lr = lazy_new();
+    lazy_by_family(lr, FAMILY_AI_ASIC);
+    assert_eq(_nvsmi_missing(lazy_warnings(lr)), 0, "asic query: nvidia-smi not looked for");
+    lazy_by_family(lr, FAMILY_TPU);
+    lazy_by_family(lr, FAMILY_NPU);
+    assert_eq(_nvsmi_missing(lazy_warnings(lr)), 0, "tpu, npu queries: nvidia-smi not looked for");
     return 0;
 }
 
@@ -863,6 +980,10 @@ test_builder_uses_exec();
 test_exec_free_masks_spawn_nothing();
 test_warnings_dedup_missing();
 test_tool_warnings_once();
+test_profiles_have_nvidia_gpu();
+test_nvlink_probe_needs_nvidia_gpu();
+test_lazy_matches_full_detection();
+test_lazy_asic_query_no_nvidia_smi();
 test_monotonic_clock();
 test_cached_ttl();
 test_disk_cached_in_memory();

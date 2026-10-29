@@ -16,10 +16,11 @@ Common issues and their solutions.
 On Windows no vendor tool runs yet (see the roadmap), so the warnings always
 name them. The GPUs are still found, as Windows GPU profiles, through DXGI.
 
-The `warnings` array names each tool that was missing or failed, once per
-attempt. So `nvidia-smi` can appear twice (the CUDA backend and the
-interconnect pass). On Linux it also lists `system_profiler`, the Apple
-backend's macOS fallback. Neither is a problem.
+The `warnings` array names each missing tool once (2.5.1), and each run of a
+tool that failed or timed out. The interconnect pass looks for `nvidia-smi`
+only when an NVIDIA GPU was found (2.5.2), and `system_profiler`, the Apple
+backend's fallback, is looked for on macOS only (2.5.1). Through 2.5.0
+`nvidia-smi` could appear twice and Linux runs listed `system_profiler`.
 
 ---
 

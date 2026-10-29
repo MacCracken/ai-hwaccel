@@ -5,7 +5,241 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
-## [2.5.1] — 2026-10-28 — correct output, and CI that would notice
+## [2.5.2] — 2026-10-28 — lazy detection runs only what a query needs
+
+The lazy registry's per-family detection, from the 2.5.x roadmap. A lazy
+query runs its family's detectors and nothing else; `lazy_into_registry` runs
+the system passes once and keeps the detectors' warnings. On every entry
+point, the interconnect pass runs `nvidia-smi nvlink -s` only when an NVIDIA
+GPU was found. `registry_detect`'s output is unchanged on the dev host, `ecb`
+and `cass`; `lazy_into_registry`'s gains the warnings it was missing.
+
+### Fixed — lazy detection
+
+- **A lazy query runs its family's detectors and nothing else.** Through 2.5.1
+  each probe was a `registry_detect_with(mask)`. It re-read system memory for a
+  CPU profile it then dropped, and ran every post-pass, storage, environment
+  and the interconnect pass's `nvidia-smi nvlink -s` included. Then
+  `lazy_into_registry` ran them all again over every profile. A probe now runs
+  the detectors and the profile passes on what they found (duplicates, sysfs
+  enrichment), so each profile is enriched once. `lazy_into_registry` runs the
+  system passes (interconnects, storage, environment, the missing-tool fold)
+  once. On the dev host a TPU query takes 4.85 µs instead of 63.4 µs, and an
+  NPU query 116 µs instead of 175 µs (`benches/lazy.bcyr`, under
+  *Performance*).
+- **`lazy_into_registry`'s registry has the detectors' warnings.** Through
+  2.5.1 each probe's registry was dropped with its warnings, so the lazy
+  registry listed only what its own interconnect pass pushed: on the dev host
+  `nvidia-smi` alone, where `registry_detect` lists 6 tools. The lazy registry
+  now keeps them in a new `warnings` field, which `lazy_warnings(lr)` reads
+  after `lazy_by_family`. A probe logs its parse warnings as `registry_detect`
+  does.
+- **Asking for NPUs first no longer runs the Apple backend without its
+  fallback.** Under 2.5.1's rule for `registry_detect_with`, a probe allowed
+  tools only when its family had a tool-based backend, and the NPU family has
+  none. The Apple backend reports the Metal GPU and the Neural Engine in one
+  run. When NPUs were asked for first, it ran without its `system_profiler`
+  fallback, and a later GPU query did not run it again. On a Mac where sysctl
+  cannot name the chip, both devices were missing, while asking for GPUs first
+  found them. Probes now allow tools, as `registry_detect` does. A TPU or NPU
+  query still spawns nothing off macOS, since none of those detectors runs a
+  tool there, and on macOS only when sysctl cannot name the chip.
+
+### Fixed — detection
+
+- **`nvidia-smi nvlink -s` runs only when an NVIDIA GPU was found**: a CUDA
+  profile, or any profile with NVIDIA's PCI vendor ID, such as the Vulkan view
+  of the card (new `profiles_have_nvidia_gpu(profiles)`). Through 2.5.1 the
+  interconnect pass ran it on every host without NVSwitch sysfs nodes. NVSwitch
+  detection from sysfs is unchanged. With the CUDA and Vulkan backends both
+  masked off, NVLink is no longer probed. Tool runs on the dev host, counted
+  with a stand-in `nvidia-smi` that fails as one without a driver does (a
+  container, for example) and the real `vulkaninfo`:
+
+  | call | 2.5.1 | 2.5.2 |
+  |---|---:|---:|
+  | `lazy_by_family(lr, FAMILY_TPU)`, `FAMILY_NPU` | 0 | 0 |
+  | `lazy_by_family(lr, FAMILY_GPU)` | 3 | 2 |
+  | `lazy_by_family(lr, FAMILY_AI_ASIC)` | 1 | 0 |
+  | `lazy_into_registry(lazy_new())` | 5 | 2 |
+  | `registry_detect()` | 3 | 2 |
+
+  The runs that went are all `nvidia-smi nvlink -s`. With no `nvidia-smi`
+  installed, the pass only searched `PATH`. 2.5.1 already folded that second
+  "not found" into the CUDA backend's, so the CLI's output does not change.
+
+### Changed — internals
+
+- **The detector dispatch and the post-passes are split for reuse**
+  (`src/registry.cyr`):
+  - `registry_run_detectors(profs, warns, mask, allow_exec)` runs the masked
+    detectors, with no CPU profile and no post-passes. `registry_detect_with_opts`
+    and the lazy registry share it; the threaded entry point keeps its own.
+  - `registry_post_passes(r, allow_exec)` is now `registry_profile_passes`
+    (duplicates, bandwidth, PCIe, NUMA) followed by `registry_system_passes`
+    (interconnects, storage, environment, the missing-tool fold). It behaves as
+    before.
+  - CONTRIBUTING's checklist for a new backend names `registry_run_detectors`.
+- `lazy_into_registry` copies the profiles and warnings under the lazy
+  registry's mutex; through 2.5.1 the profile copy ran after unlocking.
+
+### Docs
+
+- `docs/troubleshooting.md` still said `nvidia-smi` could appear twice in
+  `warnings` and that Linux runs list `system_profiler`, both fixed in 2.5.1.
+  It now says how the list is built.
+- README, the architecture overview and the performance guide describe the
+  lazy registry's passes and the NVLink rule.
+- The roadmap's lazy-detection item, including its suggestion to gate the
+  NVLink probe, is done and removed; 40 items stay open.
+
+### Tests
+
+- **1002 → 1039 assertions** in the same 15 units:
+  - `lazy_test` (38 → 60). The stubs now count system-pass calls and
+    system-memory reads, count each profile's enrichments, record the
+    `allow_exec` the Apple backend gets, and the CUDA and Gaudi stubs push a
+    warning. No probe of any family runs a system pass or reads system memory.
+    `lazy_into_registry` runs each system pass once, after earlier queries too.
+    Every accelerator profile is enriched once. Apple runs with tools allowed
+    whether NPUs or GPUs are asked for first. Warnings appear in
+    `lazy_warnings` after a query and in the lazy registry, as many as
+    `registry_detect`'s, and a second `lazy_into_registry` does not double
+    them.
+  - `registry_test` (180 → 195). `profiles_have_nvidia_gpu`, then the
+    interconnect pass looks for `nvidia-smi` only with an NVIDIA GPU, a CUDA
+    profile or a Vulkan view of one. The half that expects a look runs where
+    `nvidia-smi` and the NVSwitch nodes are both missing, as on the dev host
+    and CI. On the host itself: `lazy_into_registry` has `registry_detect`'s
+    warnings and profiles, no AI-ASIC, TPU or NPU query looks for
+    `nvidia-smi`, and the lazy registry lists each missing tool once.
+- **Each fix is caught when undone.** 8 mutants, each built and run in a copy
+  of the tree, and each fails a test:
+  - the probe runs the system passes;
+  - the probe reads system memory;
+  - no NVLink gate;
+  - the gate ignores the PCI vendor;
+  - warnings not handed to the registry;
+  - the probe allows tools by mask, as in 2.5.1;
+  - `lazy_into_registry` enriches again;
+  - no profile passes in the probe.
+
+### Consumers
+
+- **`lazy_into_registry(lr)` returns warnings now**, the same tools as
+  `registry_detect()`. The lazy registry struct grows from 32 to 40 bytes;
+  `lazy_new` is its only allocator.
+- **New functions:** `registry_run_detectors`, `registry_profile_passes`,
+  `registry_system_passes`, `profiles_have_nvidia_gpu` and the derived
+  `lazy_warnings` / `lazy_set_warnings`.
+- `dist/ai-hwaccel.cyr`'s `# Requires` block is unchanged (13 leaves).
+
+### Performance
+
+**The 19 existing rows: 19 neutral, 0 regressions** (2.5.1 → 2.5.2, both on
+cyrius 6.7.18). Same method as 2.5.1: each arm built at 5 code layouts, the
+three floor-bound rows batch-timed (†), and 80 rounds per suite, shuffled and
+pinned to one CPU. No benchmarked path runs the changed code, since the
+benchmarks run no detection. The source changes move the layout of
+`src/detect/interconnect.cyr` and everything after it, which is what the
+layouts control for.
+
+| row | 2.5.1 | 2.5.2 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 13.58 µs | 13.56 µs | −0.1% | 0.71 | neutral |
+| `parse_vulkan_2gpu` | 2.43 µs | 2.43 µs | −0.1% | 0.77 | neutral |
+| `parse_neuron_2dev` | 1.60 µs | 1.60 µs | −0.1% | 0.78 | neutral |
+| `detect_safetensors` † | 396.1 ns | 395.6 ns | −0.1% | 0.92 | neutral |
+| `detect_gguf` † | 37.6 ns | 37.5 ns | −0.2% | 0.68 | neutral |
+| `parse_vulkan_summary_renoir` | 14.58 µs | 14.59 µs | 0.0% | 0.91 | neutral |
+| `vulkan_heaps_uhd600` | 598.22 µs | 598.59 µs | +0.1% | 0.83 | neutral |
+| `best_available_13dev` † | 169.8 ns | 170.1 ns | +0.2% | 0.85 | neutral |
+| `total_memory_13dev` | 99.7 ns | 99.9 ns | +0.2% | 0.28 | neutral |
+| `has_accelerator_13dev` | 18.4 ns | 18.0 ns | −1.7% | 0.41 | neutral |
+| `plan_70B_bf16_4gpu` | 1.41 µs | 1.43 µs | +1.1% | 0.09 | neutral |
+| `count_family_gpu_13dev` | 236.3 ns | 236.4 ns | 0.0% | 0.83 | neutral |
+| `json_serialize_13dev` | 22.24 µs | 22.24 µs | 0.0% | 1.00 | neutral |
+| `json_summary_13dev` | 3.09 µs | 3.09 µs | +0.3% | 0.65 | neutral |
+| `json_system_io` | 4.99 µs | 5.00 µs | +0.1% | 0.64 | neutral |
+| `json_plan` | 16.52 µs | 16.52 µs | 0.0% | 0.88 | neutral |
+| `json_training` | 2.40 µs | 2.40 µs | +0.1% | 0.83 | neutral |
+| `dedup_17dev` | 860.7 ns | 862.1 ns | +0.2% | 0.59 | neutral |
+| `profile_from_json_cuda` | 7.11 µs | 7.08 µs | −0.4% | 0.28 | neutral |
+
+A verdict needs p < 0.01 and |Δ| > 1%; no row reaches both.
+`has_accelerator_13dev`'s −1.7% is one 2.5.1 layout at 19.7 ns (the others
+read 18.0 to 18.1 ns), and `plan_70B_bf16_4gpu`'s +1.1% has p = 0.09.
+
+**The new `lazy` suite: an improvement on both rows.** `benches/lazy.bcyr`
+was built against 2.5.1's source and against 2.5.2's and run 3 times each on
+the dev host (1 000 queries per row, mean per query with the timer floor
+subtracted):
+
+| row | 2.5.1 | 2.5.2 | Δ |
+|---|---:|---:|---:|
+| `lazy_tpu_query` | 63.43 µs (63.19–63.84) | 4.85 µs (4.81–4.87) | −92% |
+| `lazy_npu_query` | 175.17 µs (174.50–175.60) | 116.30 µs (115.70–116.83) | −34% |
+
+An in-process timing of 1 200 queries per arm agrees (medians): TPU 64.2 →
+6.6 µs, NPU 175.9 → 117.3 µs, AI-ASIC 449 → 345 µs. The AI-ASIC query is not
+a benchmark row, because its cost is mostly the `PATH` search for each
+missing tool. The 2.5.1 time is the storage and environment passes plus the
+system-memory read, which a query no longer runs.
+
+In `bench-history.csv`, the `e8bd410` rows at 05:44:00Z are 2.5.1, measured on
+the clean tree before any change. The `e8bd410` `lazy` rows at 05:59:43Z are
+the new suite built against 2.5.1's source, and the `e8bd410-dirty` rows at
+05:59:43Z are 2.5.2, all three suites.
+
+| binary | 2.5.1 | 2.5.2 | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 199 312 | 203 448 | +4 136 |
+| x86_64 ELF, no DCE | 522 896 | 527 032 | +4 136 |
+| ELF-aarch64 | 616 904 | 616 944 | +40 |
+| PE, as shipped (no DCE) | 644 096 | 645 632 | +1 536 |
+| agnos, `CYRIUS_DCE=1` | 193 432 | 197 568 | +4 136 |
+| Mach-O arm64 (cross-built) | 655 868 | 655 868 | 0 |
+
+The code segment grows by 800 B with DCE on x86_64 (1 272 without, 776 on
+agnos, 1 208 on aarch64), and data by 40 B. The x86_64 and agnos files grow by
+a page because the code segment now ends past a page boundary.
+
+### Verified
+
+- **Tests:** 1039 assertions in 15 units pass through CI's loop; fuzz 6/6.
+- **CI gates**, replayed from `ci.yml` on a fresh copy of the tree: vet over
+  `src/main.cyr` and the 15 test units, `capacity --check`, raw-offset guard,
+  fmt, `lint --strict`, `distlib --no-default-features` fresh and
+  deterministic, the DCE build and ELF check, the three bench suites, required
+  docs, and version and Python-bindings version consistency. The dep-hash step
+  ran in the checkout: 52 files verified, `cyrius.lock` current.
+- **CLI output** is identical to 2.5.1's on 17 invocations apart from
+  `--version`, on x86_64 with and without DCE and on ELF-aarch64 under
+  `qemu-aarch64`. Live sensor fields are masked.
+- **On three hosts, a probe** checked that `lazy_into_registry` has
+  `registry_detect`'s warnings by code and tool and its profiles by type. It
+  also checked that NPU, TPU and AI-ASIC queries never look for `nvidia-smi`,
+  and that an NPU-first lazy registry matches full detection. 7/7 on each:
+  - the dev host: ROCm GPU, 6 tool warnings;
+  - `ecb` (Apple M5 Pro, cross-built Mach-O): Metal GPU and Neural Engine,
+    7 warnings;
+  - `cass` (Windows 11, PE): the DXGI GPU, 7 warnings.
+
+  On `ecb` and `cass`, the CLI matched 2.5.1's on 18 runs, byte for byte
+  apart from a span time in the `-vv` log. Those binaries were built before
+  the version bump, which changed no source.
+- **Tool runs** were counted on the dev host with stand-in tools (the table
+  under *Fixed — detection*).
+- **Not verified:**
+  - the wheels were not built or installed, and the CI workflows have not run
+    on this tree;
+  - no host here has an NVIDIA GPU. The NVLink probe's positive path is
+    covered by a test with a CUDA profile, which shows the probe still looks
+    for `nvidia-smi`, but not on NVIDIA hardware;
+  - the Apple fallback that an NPU-first query now keeps is tested with stub
+    detectors only: no Mac here fails to name its chip through sysctl.
+
+
 
 The first of the 2.5.x fixes: tools get a deadline, full reads stop writing a
 byte past their buffers, an Intel Mac no longer reports Apple Silicon, a
