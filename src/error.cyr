@@ -112,6 +112,38 @@ fn warnings_log_parse(warns, from) {
     return 0;
 }
 
+# Drop each tool-not-found warning that repeats an earlier one for the same
+# tool, keeping the order (2.5.1). `nvidia-smi` is run by the CUDA backend and
+# again by the interconnect pass, and through 2.5.0 a host without it listed
+# it twice. Other warnings stay as they are: two failures of one tool can say
+# different things. Returns the new length.
+fn warnings_dedup_missing(warns) {
+    var n = vec_len(warns);
+    var out = 0;
+    var i = 0;
+    while (i < n) {
+        var w = vec_get(warns, i);
+        var keep = 1;
+        if (warning_code(w) == HWA_ERR_TOOL_NOT_FOUND) {
+            var j = 0;
+            while (j < out) {
+                var e = vec_get(warns, j);
+                if (warning_code(e) == HWA_ERR_TOOL_NOT_FOUND) {
+                    if (streq(warning_tool(e), warning_tool(w)) == 1) { keep = 0; }
+                }
+                j = j + 1;
+            }
+        }
+        if (keep == 1) {
+            vec_set(warns, out, w);
+            out = out + 1;
+        }
+        i = i + 1;
+    }
+    vec_truncate(warns, out);
+    return out;
+}
+
 fn warning_print(w) {
     var sb = str_builder_new();
     var code = warning_code(w);

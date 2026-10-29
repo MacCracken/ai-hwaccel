@@ -84,7 +84,22 @@ jobs:
         # `cyrius vet` walks every `include` from src/main.cyr and
         # reports untrusted / missing entries. Catches drift between
         # the in-tree includes and the manifest [deps] stdlib snapshot.
-        run: cyrius vet src/main.cyr
+        # Each test unit is its own compilation root with its own include
+        # list, so each is vetted too (2.5.1; only src/main.cyr was before).
+        # vet exits 1 on a missing include.
+        run: |
+          cyrius vet src/main.cyr
+          for t in tests/tcyr/*.tcyr; do
+            [ -f "$t" ] || continue
+            cyrius vet "$t" > /dev/null || { cyrius vet "$t"; echo "FAIL: vet $t"; exit 1; }
+          done
+          echo "vet: src/main.cyr and $(ls tests/tcyr/*.tcyr | wc -l) test units clean"
+
+      - name: Capacity check
+        # `--check` fails when one of the compiler's tables for the CLI's
+        # compilation unit passes 85%. At 2.5.1 on cyrius 6.7.18 the largest
+        # use is the fn-name hash, 1 630 of 4 096 slots.
+        run: cyrius capacity --check src/main.cyr
 
       - name: Raw-offset guard (#derive(accessors) structs)
         # For each struct with `#derive(accessors)`, no file outside its
@@ -184,11 +199,16 @@ jobs:
           [ $fail -eq 0 ] || { echo "fmt: drift detected"; exit 1; }
 
       - name: Lint
+        # `--strict` exits 2 on a warning. Plain `cyrius lint` exits 0 whatever
+        # it reports, and through 2.5.0 this loop also ended in `|| true`, so
+        # lint could never fail the build.
         run: |
+          fail=0
           for f in src/*.cyr src/detect/*.cyr; do
             [ -f "$f" ] || continue
-            cyrius lint "$f" || true
+            cyrius lint --strict "$f" || { echo "lint: $f"; fail=1; }
           done
+          [ $fail -eq 0 ] || { echo "lint: warnings found"; exit 1; }
 
       - name: distlib drift + determinism
         # `cyrius distlib` reads [lib].modules and emits

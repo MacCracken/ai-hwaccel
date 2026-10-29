@@ -44,6 +44,7 @@ include "src/plan.cyr"
 include "src/training.cyr"
 include "lib/thread.cyr"
 include "src/async_detect.cyr"
+include "src/cache.cyr"
 include "src/lazy.cyr"
 include "src/json_out.cyr"
 
@@ -279,6 +280,144 @@ fn test_vulkan_sysfs_leaves_amdgpu() {
         i = i + 1;
     }
     assert_eq(vk, vec_len(left), "no-exec: the scan's Vulkan profiles only");
+    return 0;
+}
+
+# --- A mask without an exec backend spawns nothing (2.5.1) ---
+
+fn test_builder_uses_exec() {
+    assert_eq(builder_uses_exec(builder_all()), 1, "all: uses exec");
+    assert_eq(builder_uses_exec(builder_no_exec()), 0, "no_exec mask: no exec");
+    assert_eq(builder_uses_exec(builder_none()), 0, "none: no exec");
+    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_VULKAN)), 0, "vulkan alone: no exec");
+    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_CUDA)), 1, "cuda: exec");
+    assert_eq(builder_uses_exec(builder_with(builder_no_exec(), BACKEND_GRAPHCORE)), 1, "no_exec + graphcore: exec");
+    return 0;
+}
+
+# Warnings that mean detection tried to run a tool: not found, failed, or
+# killed at the deadline.
+fn _tool_warnings(r) {
+    var warns = reg_warnings(r);
+    var n = 0;
+    var i = 0;
+    while (i < vec_len(warns)) {
+        var c = warning_code(vec_get(warns, i));
+        if (c == HWA_ERR_TOOL_NOT_FOUND) { n = n + 1; }
+        if (c == HWA_ERR_TOOL_FAILED) { n = n + 1; }
+        if (c == HWA_ERR_TIMEOUT) { n = n + 1; }
+        i = i + 1;
+    }
+    return n;
+}
+
+# Through 2.5.0 the interconnect pass looked for `nvidia-smi` whatever the
+# mask, and Vulkan ran `vulkaninfo`, so a host without them got tool warnings
+# from an exec-free mask.
+fn test_exec_free_masks_spawn_nothing() {
+    assert_eq(_tool_warnings(registry_detect_with(builder_no_exec())), 0, "detect_with(no_exec): no tool run");
+    assert_eq(_tool_warnings(registry_detect_with(builder_none())), 0, "detect_with(none): no tool run");
+    assert_eq(_tool_warnings(registry_detect_threaded_with(builder_no_exec())), 0, "threaded(no_exec): no tool run");
+    return 0;
+}
+
+# --- Each missing tool is reported once (2.5.1) ---
+
+fn test_warnings_dedup_missing() {
+    var w = vec_new();
+    vec_push(w, warning_tool_not_found("nvidia-smi"));
+    vec_push(w, warning_tool_not_found("hl-smi"));
+    vec_push(w, warning_parse("cuda", "bad line"));
+    vec_push(w, warning_tool_not_found("nvidia-smi"));
+    vec_push(w, warning_parse("cuda", "bad line"));
+    assert_eq(warnings_dedup_missing(w), 4, "the repeated not-found is dropped");
+    assert_eq(vec_len(w), 4, "vec shortened");
+    assert(streq(warning_tool(vec_get(w, 0)), "nvidia-smi") == 1, "first kept, in order");
+    assert(streq(warning_tool(vec_get(w, 1)), "hl-smi") == 1, "order kept");
+    assert_eq(warning_code(vec_get(w, 3)), HWA_ERR_PARSE, "a repeated parse warning stays");
+    assert_eq(warnings_dedup_missing(vec_new()), 0, "empty vec");
+    return 0;
+}
+
+# A registry lists each missing tool once, and off macOS never names
+# `system_profiler`, which only macOS has.
+fn check_tool_warnings_once(r, label) {
+    var warns = reg_warnings(r);
+    var n = vec_len(warns);
+    var dupes = 0;
+    var sp = 0;
+    var i = 0;
+    while (i < n) {
+        var w = vec_get(warns, i);
+        if (warning_code(w) == HWA_ERR_TOOL_NOT_FOUND) {
+            if (streq(warning_tool(w), "system_profiler") == 1) { sp = sp + 1; }
+            var j = i + 1;
+            while (j < n) {
+                var e = vec_get(warns, j);
+                if (warning_code(e) == HWA_ERR_TOOL_NOT_FOUND) {
+                    if (streq(warning_tool(e), warning_tool(w)) == 1) { dupes = dupes + 1; }
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+    assert_eq(dupes, 0, label);
+    #ifndef CYRIUS_TARGET_MACOS
+    assert_eq(sp, 0, label);
+    #endif
+    return 0;
+}
+
+fn test_tool_warnings_once() {
+    check_tool_warnings_once(registry_detect(), "registry_detect: tools once");
+    check_tool_warnings_once(registry_detect_threaded(), "registry_detect_threaded: tools once");
+    return 0;
+}
+
+# --- Cache TTL on any target's clock (2.5.1) ---
+
+# Nothing here reads a Linux-only source: the clock is _monotonic_secs, which
+# has a branch per target, and the checks hold on macOS and Windows as on
+# Linux (cross-built and run on ecb and cass for 2.5.1). Through 2.3.21 the
+# clock read an uninitialised stack slot on macOS and Windows, so a cache
+# could be served for ever or never.
+fn test_monotonic_clock() {
+    var a = _monotonic_secs();
+    assert(a >= 0, "clock reads");
+    var b = _monotonic_secs();
+    assert(b >= a, "clock does not go back");
+    return 0;
+}
+
+fn test_cached_ttl() {
+    var c = cached_registry_new(3600);
+    assert_eq(cached_is_valid(c), 0, "empty cache is not valid");
+    var r1 = cached_get(c);
+    var r2 = cached_get(c);
+    assert_eq(r1, r2, "within the TTL: the same registry");
+    assert_eq(cached_is_valid(c), 1, "valid within the TTL");
+    cached_invalidate(c);
+    assert_eq(cached_is_valid(c), 0, "invalidated");
+    var r3 = cached_get(c);
+    assert(r3 != r1, "after invalidate: detected again");
+    var z = cached_registry_new(0);
+    var z1 = cached_get(z);
+    var z2 = cached_get(z);
+    assert(z1 != z2, "TTL 0: detects every time");
+    assert_eq(cached_is_valid(z), 0, "TTL 0: never valid");
+    return 0;
+}
+
+# The deprecated disk cache is an in-memory cache with no file (2.5.1).
+fn test_disk_cached_in_memory() {
+    var c = disk_cached_new(3600);
+    assert_eq(disk_cached_cache_path(c), 0, "no cache file");
+    var r1 = disk_cached_get(c);
+    var r2 = disk_cached_get(c);
+    assert_eq(r1, r2, "disk_cached: same registry within the TTL");
+    disk_cached_invalidate(c);
+    assert(disk_cached_get(c) != r1, "disk_cached: detected again after invalidate");
     return 0;
 }
 
@@ -720,6 +859,13 @@ test_backend_uses_exec();
 test_builder_no_exec_mask();
 test_no_exec_strips_exec_bits();
 test_no_exec_memory();
+test_builder_uses_exec();
+test_exec_free_masks_spawn_nothing();
+test_warnings_dedup_missing();
+test_tool_warnings_once();
+test_monotonic_clock();
+test_cached_ttl();
+test_disk_cached_in_memory();
 test_detection_entry_points();
 test_vulkan_sysfs_leaves_amdgpu();
 test_totals_apple_unified();

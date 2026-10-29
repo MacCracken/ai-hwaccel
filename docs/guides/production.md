@@ -47,13 +47,15 @@ while (i < reg_num_warnings(r)) {
 
 In the JSON, the same warnings are the `warnings` array of tool names.
 
-### No timeout on vendor tools
+### Tool deadline
 
-Vendor tools run without a time limit: a hung `nvidia-smi` (common when a GPU
-is in an error state) blocks detection until it exits. Bounding every run is
-on the roadmap. Until then, use `registry_detect_no_exec()` where a hang is
-unacceptable. It spawns nothing, so it cannot hang on a tool, but it misses the
-backends that need one (CUDA, Gaudi, Neuron, oneAPI, Cerebras, Graphcore).
+A vendor tool that prints nothing for 10 s is killed and listed in `warnings`
+as a timeout (2.5.1; `CMD_DEFAULT_TIMEOUT_MS`), so a hung `nvidia-smi`
+(common when a GPU is in an error state) costs 10 s, not the whole detection.
+The deadline is idle-based: a tool still printing is not cut, and its output
+is capped at 1 MiB. AGNOS has no deadline. Where even 10 s is too long, use
+`registry_detect_no_exec()`. It spawns nothing, but it misses the backends
+that need a tool (CUDA, Gaudi, Neuron, oneAPI, Cerebras, Graphcore).
 
 ### PATH requirements
 
@@ -85,10 +87,9 @@ while (1 == 1) {
 ```
 
 `cached_invalidate(c)` forces the next `cached_get` to re-detect (after a
-GPU reset, for example). `disk_cached_new(ttl)` / `disk_cached_get(c)` also
-write each fresh registry's JSON to `~/.cache/ai-hwaccel/registry.json`, but
-they do not read it back yet (see the roadmap), so a new process detects
-again.
+GPU reset, for example). `disk_cached_new(ttl)` / `disk_cached_get(c)` are
+deprecated (2.5.1): they wrote a file they never read back, and now cache in
+memory exactly as `cached_*` does. They are removed in 2.6.0.
 
 ## Selective detection
 
@@ -102,8 +103,11 @@ var r = registry_detect_with(builder_with(builder_none(), BACKEND_CUDA));
 var r2 = registry_detect_with(builder_without(builder_all(), BACKEND_VULKAN));
 ```
 
-`registry_detect_with` allows the backends to run tools. For a mask that must
-stay spawn-free, call `registry_detect_with_opts(mask, 0)`.
+`registry_detect_with` lets the backends run tools when the mask holds a
+tool-based backend. A mask without one spawns nothing (2.5.1): Vulkan uses its
+sysfs scan, and the `system_profiler`, `wmic` and NVLink runs are skipped.
+`registry_detect_with_opts(mask, 0)` forbids tools for any mask, and
+`registry_detect_with_opts(mask, 1)` allows them for any mask.
 
 ## Security considerations
 

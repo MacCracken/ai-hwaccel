@@ -75,10 +75,16 @@ fn inst_rec_new(inst, mem_req) {
 # Load cloud pricing from JSON file
 # Returns vec of CloudGpuInstance pointers
 fn load_cloud_instances() {
+    # One byte short of the buffer, so the NUL below always fits (through
+    # 2.5.0 a 32 KiB file put it one byte past), and a warning when the file
+    # fills it, as load_models has done since 2.3.22.
     var buf = alloc(32768);
-    var n = file_read_all(data_file_path("data/cloud_pricing.json"), buf, 32768);
+    var n = file_read_all(data_file_path("data/cloud_pricing.json"), buf, 32767);
     if (n <= 0) { return vec_new(); }
     store8(buf + n, 0);
+    if (n >= 32767) {
+        hwlog_warn("load_cloud_instances: cloud_pricing.json filled the read buffer — instances may be missing");
+    }
 
     var instances = vec_new();
     # Simple JSON array parsing — find each { ... } object

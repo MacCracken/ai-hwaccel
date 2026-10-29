@@ -335,8 +335,14 @@ fn detect_windows_opts(profiles, warnings, allow_exec) {
     vec_push(args, "Name,AdapterRAM");
     vec_push(args, "/format:list");
     var buf = alloc(CMD_MAX_STDOUT);
-    # One byte short of the buffer, so the NUL below always fits.
-    var got = exec_capture(args, buf, CMD_MAX_STDOUT - 1);
+    var st[16];
+    # One byte short of the buffer, so the NUL below always fits. Under the
+    # tool deadline (cmd_capture).
+    var got = cmd_capture(args, buf, CMD_MAX_STDOUT - 1, &st);
+    if (load64(&st) == 0 - 2) {
+        if (warnings != 0) { vec_push(warnings, warning_timeout("wmic", CMD_DEFAULT_TIMEOUT_MS)); }
+        return 0;
+    }
     if (got <= 0) {
         if (warnings != 0) {
             vec_push(warnings, warning_tool_failed("wmic", 0 - 1, "win32_VideoController query failed"));

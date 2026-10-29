@@ -66,6 +66,17 @@ fn test_apple_m2_ane() {
     return 0;
 }
 
+# An Intel Mac's system_profiler output has no `Chip:` line: no Metal GPU and
+# no Neural Engine (2.5.1; through 2.5.0 both appeared, named "Apple Silicon"
+# and sized by the Mac's RAM).
+fn test_apple_intel_mac() {
+    var hw = str_from("Hardware Overview:\n  Model Name: MacBook Pro\n  Processor Name: Quad-Core Intel Core i7\n  Processor Speed: 2.3 GHz\n  Memory: 32 GB\n");
+    var profiles = vec_new();
+    _parse_apple_macos(hw, profiles);
+    assert_eq(vec_len(profiles), 0, "Intel Mac: no Apple GPU or ANE");
+    return 0;
+}
+
 # --- Edge device defaults ---
 
 fn test_edge_defaults() {
@@ -216,16 +227,19 @@ fn _tool_warnings(w, tool) {
     return c;
 }
 
-# Without exec, the system_profiler fallback is never attempted. With exec
-# it is (this unit runs on Linux, where system_profiler does not exist, so
-# the attempt shows up as a warning).
+# Without exec, the system_profiler fallback is never attempted, and off
+# macOS it is not attempted with exec either (2.5.1). This unit runs on Linux,
+# where through 2.5.0 the exec attempt showed up as a `system_profiler`
+# not-found warning.
 fn test_apple_no_exec_spawns_nothing() {
     var w0 = vec_new();
     detect_apple_opts(vec_new(), w0, 0);
     assert_eq(_tool_warnings(w0, "system_profiler"), 0, "no-exec: no system_profiler attempt");
+    #ifndef CYRIUS_TARGET_MACOS
     var w1 = vec_new();
     detect_apple_opts(vec_new(), w1, 1);
-    assert_eq(_tool_warnings(w1, "system_profiler"), 1, "exec: system_profiler attempted");
+    assert_eq(_tool_warnings(w1, "system_profiler"), 0, "exec, off macOS: no system_profiler attempt");
+    #endif
     return 0;
 }
 
@@ -235,6 +249,7 @@ alloc_init();
 
 test_apple_macos_parse();
 test_apple_m2_ane();
+test_apple_intel_mac();
 test_apple_silicon_brand();
 test_apple_emit_silicon();
 test_apple_native_matches_system_profiler();

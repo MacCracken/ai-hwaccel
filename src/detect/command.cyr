@@ -3,13 +3,71 @@
 #   - PATH resolution (absolute path)
 #   - Environment sanitization (strip LD_PRELOAD etc.)
 #   - Output size limits (1 MiB stdout)
-#   - Timeout (via alarm signal — future enhancement)
+#   - A deadline: a tool silent for CMD_DEFAULT_TIMEOUT_MS is killed (2.5.1)
 #   - CSV parsing helpers
 #   - Device ID validation
 
 var CMD_MAX_STDOUT = 1048576;
-var CMD_DEFAULT_TIMEOUT_MS = 5000;
+var CMD_DEFAULT_TIMEOUT_MS = 10000;
 var CMD_MAX_DEVICE_ID = 1024;
+
+# --- Tool deadline (2.5.1) ---
+# Through 2.5.0 every tool ran without a time limit, so a hung `nvidia-smi`
+# blocked detection for ever. lib/process.cyr's deadline is IDLE-based: a tool
+# still printing is never cut, one silent for the deadline is killed and its
+# capture reports -2. The bound is a process-wide value (proc_set_timeout_ms),
+# and registry_detect_threaded runs tools on several threads at once, so a
+# plain set-and-restore around each call would race: one thread's restore
+# could unbound another's capture mid-run. The first capture in flight sets
+# the deadline and the last one out restores the caller's own value, under a
+# mutex, so an embedding program's subprocesses keep their deadline outside
+# detection. AGNOS has no deadline (process_agnos.cyr does not define
+# proc_set_timeout_ms), so there the helpers do nothing.
+var _cmd_dl_mtx = 0;
+var _cmd_dl_inflight = 0;
+var _cmd_dl_saved = 0;
+
+# The deadline mutex, created on first use. Two threads may race to create
+# it; the CAS keeps one, and the loser's 8-byte cell is never freed.
+fn _cmd_dl_mutex() {
+    var m = atomic_load(&_cmd_dl_mtx);
+    if (m != 0) { return m; }
+    var fresh = mutex_new();
+    if (atomic_cas(&_cmd_dl_mtx, 0, fresh) == 1) { return fresh; }
+    return atomic_load(&_cmd_dl_mtx);
+}
+
+fn _cmd_dl_enter() {
+    #ifndef CYRIUS_TARGET_AGNOS
+    var m = _cmd_dl_mutex();
+    mutex_lock(m);
+    if (_cmd_dl_inflight == 0) { _cmd_dl_saved = proc_set_timeout_ms(CMD_DEFAULT_TIMEOUT_MS); }
+    _cmd_dl_inflight = _cmd_dl_inflight + 1;
+    mutex_unlock(m);
+    #endif
+    return 0;
+}
+
+fn _cmd_dl_exit() {
+    #ifndef CYRIUS_TARGET_AGNOS
+    var m = _cmd_dl_mutex();
+    mutex_lock(m);
+    _cmd_dl_inflight = _cmd_dl_inflight - 1;
+    if (_cmd_dl_inflight == 0) { proc_set_timeout_ms(_cmd_dl_saved); }
+    mutex_unlock(m);
+    #endif
+    return 0;
+}
+
+# exec_capture_status under the tool deadline: bytes read (-1 if nothing
+# ran), with the end in `st` (two i64 slots; slot 0 is -2 when the deadline
+# killed the tool). Every subprocess detection starts goes through here.
+fn cmd_capture(args, buf, buflen, st) {
+    _cmd_dl_enter();
+    var n = exec_capture_status(args, buf, buflen, st);
+    _cmd_dl_exit();
+    return n;
+}
 
 # Read an environment variable. Returns a null-terminated string, or 0 if
 # unset.
@@ -116,7 +174,9 @@ fn which(name) {
 }
 
 # Run a tool with up to 5 args. Returns Str with stdout, or 0 on error.
-# Pushes a warning to the warnings vec on failure.
+# Pushes a warning to the warnings vec on failure: not found, failed to run,
+# killed at the deadline (warning_timeout), or output that filled the buffer
+# and was cut short (a parse warning; the truncated output is still returned).
 fn run_tool(tool, args, warnings) {
     var abs_path = which(tool);
     if (abs_path == 0) {
@@ -134,16 +194,27 @@ fn run_tool(tool, args, warnings) {
         ai = ai + 1;
     }
 
-    # Capture stdout (1 MiB buffer)
+    # Capture stdout (1 MiB buffer). One byte short of the buffer, so the NUL
+    # below always fits: through 2.5.0 a full read wrote it one byte past.
     var buf = alloc(CMD_MAX_STDOUT);
-    var n = exec_capture(exec_args, buf, CMD_MAX_STDOUT);
+    var st[16];
+    var n = cmd_capture(exec_args, buf, CMD_MAX_STDOUT - 1, &st);
 
+    if (load64(&st) == 0 - 2) {
+        if (warnings != 0) { vec_push(warnings, warning_timeout(tool, CMD_DEFAULT_TIMEOUT_MS)); }
+        return 0;
+    }
     if (n < 0) {
         if (warnings != 0) { vec_push(warnings, warning_tool_failed(tool, 0 - 1, "exec failed")); }
         return 0;
     }
     if (n == 0) {
         return str_new(buf, 0);
+    }
+    if (n >= CMD_MAX_STDOUT - 1) {
+        if (warnings != 0) {
+            vec_push(warnings, warning_parse(tool, "output filled the 1 MiB buffer and was cut short"));
+        }
     }
 
     # Null-terminate

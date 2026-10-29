@@ -126,25 +126,16 @@ fn cached_is_valid(c) {
     return now - last < ttl;
 }
 
-# --- Disk-backed cache ---
-# Reads/writes JSON to ~/.cache/ai-hwaccel/registry.json
-
-fn _disk_cache_path() {
-    var home = cmd_getenv("HOME");
-    if (home == 0) { return "/tmp/ai-hwaccel-cache.json"; }
-    var sb = str_builder_new();
-    str_builder_add_cstr(sb, home);
-    str_builder_add_cstr(sb, "/.cache/ai-hwaccel/registry.json");
-    return str_data(str_builder_build(sb));
-}
-
-# DiskCachedRegistry — extends CachedRegistry with disk fallback.
-# 2.1.7: hand-rolled accessors replaced with #derive(accessors).
-# Struct name `disk_cached` matches the `disk_cached_*` accessor
-# convention; constructor stays `disk_cached_new`. Param `c` is
-# shared with `cached` above — both files use it (same file here),
-# and the field-count bound check on each struct keeps offsets
-# within the registered ranges.
+# --- Disk-backed cache (deprecated, 2.5.1) ---
+# Through 2.5.0 disk_cached_get wrote ~/.cache/ai-hwaccel/registry.json after
+# every detection, but its read path was never written: a cold start read the
+# file, dropped it and detected again. The file was never used, and without HOME the
+# write went to /tmp/ai-hwaccel-cache.json and followed symlinks, so another
+# local user could aim it at a file the caller can write. The disk_cached_*
+# functions keep their signatures and touch no file: they cache in memory with
+# a TTL, as cached_registry_new / cached_get / cached_invalidate do, and they
+# warn at every call site. They are removed in 2.6.0. A file an earlier release
+# wrote is left in place; nothing reads it.
 
 #derive(accessors)
 struct disk_cached {
@@ -155,16 +146,19 @@ struct disk_cached {
     cache_path;
 }
 
+# cache_path is 0: there is no file.
+#deprecated("the disk cache never read its file and now caches in memory only; use cached_registry_new")
 fn disk_cached_new(ttl_secs) {
     var c = alloc(40);
     disk_cached_set_registry(c, 0);
     disk_cached_set_last_detect_secs(c, 0);
     disk_cached_set_ttl_secs(c, ttl_secs);
     disk_cached_set_mutex(c, mutex_new());
-    disk_cached_set_cache_path(c, _disk_cache_path());
+    disk_cached_set_cache_path(c, 0);
     return c;
 }
 
+#deprecated("the disk cache never read its file and now caches in memory only; use cached_get")
 fn disk_cached_get(c) {
     var mtx = disk_cached_mutex(c);
     mutex_lock(mtx);
@@ -174,61 +168,17 @@ fn disk_cached_get(c) {
     var ttl = disk_cached_ttl_secs(c);
     var now = _monotonic_secs();
 
-    # Memory cache hit
     if (reg != 0 && now - last < ttl) {
         mutex_unlock(mtx);
         hwlog_debug("disk_cache: hit (in-memory)");
         return reg;
     }
 
-    # Try disk cache
-    var path = disk_cached_cache_path(c);
-    var dbuf = alloc(65536);
-    var dn = file_read_all(path, dbuf, 65536);
-    if (dn > 0) {
-        # Check file age via stat
-        # For simplicity, trust memory TTL — disk is fallback for cold start
-        store8(dbuf + dn, 0);
-        # TODO: parse JSON registry from disk (requires from_json)
-        # For now, fall through to fresh detection
-    }
-
     mutex_unlock(mtx);
 
-    # Cache miss: detect
     hwlog_debug("disk_cache: miss -> detecting");
     var new_reg = registry_detect();
 
-    # Write to disk (best effort)
-    var json = registry_to_json(new_reg);
-    var jdata = str_data(json);
-    var jlen = str_len(json);
-    # Ensure directory exists
-    var dir_sb = str_builder_new();
-    var home = cmd_getenv("HOME");
-    if (home != 0) {
-        str_builder_add_cstr(dir_sb, home);
-        str_builder_add_cstr(dir_sb, "/.cache/ai-hwaccel");
-        var dir_s = str_builder_build(dir_sb);
-        # 2.3.21: was `syscall(83, ..., 493)` — the x86_64 SYS_MKDIR number,
-        # unguarded. ELF-aarch64 has no mkdir syscall at all (only mkdirat 34),
-        # and cyrius does not remap 83, so on that target this returned -9
-        # (EBADF) and the cache directory was never created — measured under
-        # qemu-aarch64. Same class as the readlink defect in detect/platform.cyr:
-        # take the number AND the arity from the stdlib peer that owns both.
-        # AGNOS's sys_mkdir takes an explicit pathlen.
-        #ifdef CYRIUS_TARGET_AGNOS
-        sys_mkdir(str_data(dir_s), str_len(dir_s));
-        #endif
-        #ifndef CYRIUS_TARGET_AGNOS
-        sys_mkdir(str_data(dir_s), 493);  # 0o755
-        #endif
-    }
-    if (file_write_all(path, jdata, jlen) < 0) {
-        hwlog_warn("disk_cache: write failed");
-    }
-
-    # Store in memory
     mutex_lock(mtx);
     disk_cached_set_registry(c, new_reg);
     disk_cached_set_last_detect_secs(c, _monotonic_secs());
@@ -237,22 +187,12 @@ fn disk_cached_get(c) {
     return new_reg;
 }
 
+#deprecated("the disk cache never read its file and now caches in memory only; use cached_invalidate")
 fn disk_cached_invalidate(c) {
     var mtx = disk_cached_mutex(c);
     mutex_lock(mtx);
     disk_cached_set_registry(c, 0);
     disk_cached_set_last_detect_secs(c, 0);
     mutex_unlock(mtx);
-    # Remove disk cache
-    var path = disk_cached_cache_path(c);
-    # 2.3.21: was `syscall(87, path)` — the x86_64 SYS_UNLINK number. On
-    # ELF-aarch64 that is not unlink (only unlinkat 35 exists) and it returned
-    # -14 (EFAULT), so the cache file was never removed. See the mkdir note.
-    #ifdef CYRIUS_TARGET_AGNOS
-    sys_unlink(path, strlen(path));
-    #endif
-    #ifndef CYRIUS_TARGET_AGNOS
-    sys_unlink(path);
-    #endif
     return 0;
 }

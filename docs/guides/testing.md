@@ -7,7 +7,7 @@ How to run the tests, check detection on real hardware, and read the results.
 Run everything from the repository root (some tests read `tests/fixtures/`):
 
 ```sh
-cyrius test tests/tcyr                           # 952 assertions in 15 units
+cyrius test tests/tcyr                           # 1002 assertions in 15 units
 cyrius fuzz                                      # the 6 fuzz harnesses
 for f in src/*.cyr src/detect/*.cyr; do cyrius lint --strict "$f"; done   # fails on a warning
 for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do
@@ -21,7 +21,7 @@ lint step runs without `--strict`, so a lint warning does not fail CI yet.
 
 ## Test categories
 
-Tests are 15 `.tcyr` units under `tests/tcyr/`, with 952 assertions in total.
+Tests are 15 `.tcyr` units under `tests/tcyr/`, with 1002 assertions in total.
 The README's *Test units* table lists what each unit covers. Real tool output
 used as fixtures lives in `tests/fixtures/`.
 

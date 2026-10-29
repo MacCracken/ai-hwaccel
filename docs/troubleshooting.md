@@ -34,7 +34,11 @@ or the backend was not asked to run.
 3. Are sysfs paths accessible? (`ls /sys/class/drm/card*`)
 4. Did the caller mask the backend out? `registry_detect_no_exec()` skips the
    tool-based backends (CUDA, Gaudi, Neuron, oneAPI, Cerebras, Graphcore), and
-   `registry_detect_with(mask)` runs only the backends in `mask`.
+   `registry_detect_with(mask)` runs only the backends in `mask`. A mask
+   without a tool-based backend runs no tool at all (2.5.1), so Vulkan falls
+   back to its sysfs scan.
+5. Did the tool time out? A tool that prints nothing for 10 s is killed and
+   its name appears in `warnings` (a timeout, `HWA_ERR_TIMEOUT`).
 
 ---
 
@@ -80,9 +84,10 @@ Silicon, laptop NPUs, integrated GPUs) carries `shared_memory_bytes`, and
 
 ## "Detection is slow or hangs"
 
-**Cause**: Vendor tools have startup overhead, and they run without a time
-limit (bounding them is on the roadmap). A tool that hangs, such as
-`nvidia-smi` on a GPU in an error state, blocks detection until it exits.
+**Cause**: Vendor tools have startup overhead. A tool that hangs, such as
+`nvidia-smi` on a GPU in an error state, is killed once it has printed
+nothing for 10 s (2.5.1), and is listed in `warnings` as a timeout; before
+2.5.1 it blocked detection until it exited.
 
 **Fix**:
 - Find the tool: at `-vv` the log shows `[ENTER] detect` with no matching
@@ -96,7 +101,7 @@ limit (bounding them is on the roadmap). A tool that hangs, such as
   var c = cached_registry_new(60);
   var r = cached_get(c);
   ```
-- Where a hang is unacceptable, use `registry_detect_no_exec()`, which runs no
+- Where even 10 s is too long, use `registry_detect_no_exec()`, which runs no
   tool at all.
 
 ---

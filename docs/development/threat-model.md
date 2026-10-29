@@ -18,9 +18,10 @@ mitigations in `ai-hwaccel`.
    `system_profiler` (macOS) and `wmic` (Windows) fallbacks.
 4. **Deserializing JSON** — `profile_from_json_str`, when a caller loads a
    saved profile.
-5. **Writing one file** — only the opt-in disk cache (`disk_cached_get`)
-   writes: `~/.cache/ai-hwaccel/registry.json`, or
-   `/tmp/ai-hwaccel-cache.json` when `HOME` is unset. The CLI never uses it.
+5. **Writing files** — none since 2.5.1. Through 2.5.0 the opt-in disk cache
+   (`disk_cached_get`) wrote `~/.cache/ai-hwaccel/registry.json`, or
+   `/tmp/ai-hwaccel-cache.json` when `HOME` was unset; it now caches in
+   memory only.
 
 There is no network access.
 
@@ -43,8 +44,8 @@ There is no network access.
 | Threat | Mitigation |
 |---|---|
 | `$PATH` hijacking (a malicious `nvidia-smi` earlier on `$PATH`) | Not mitigated beyond trusting `$PATH`: a tool is resolved once through `$PATH` and run by absolute path. On Linux it runs with an empty environment, so `LD_PRELOAD` and similar variables are not passed on. |
-| Hung or slow tool (e.g. `nvidia-smi` stalls when a GPU is in an error state) | **Not mitigated in the binary:** tools run without a time limit (bounding them is on the roadmap). `registry_detect_no_exec()` runs no tool. The Python package bounds each CLI run (30 s by default). On Linux a tool is killed if ai-hwaccel itself dies (`PR_SET_PDEATHSIG`). |
-| Excessive output (a tool writes gigabytes to stdout) | stdout is capped at **1 MiB** (`CMD_MAX_STDOUT`); the rest is not read. stderr goes to `/dev/null`. **Gap:** output that fills the cap is cut off without a warning, and its NUL terminator lands one byte past the buffer. The file reads have the same flaw at their caps (4 KiB for sysfs, 32 KiB for `cloud_pricing.json`, 64 KiB for the disk cache). Fixing both is on the roadmap. |
+| Hung or slow tool (e.g. `nvidia-smi` stalls when a GPU is in an error state) | A tool that prints nothing for 10 s (`CMD_DEFAULT_TIMEOUT_MS`) is killed, with its process group, and reported as a timeout warning (2.5.1). The deadline is idle-based: a tool still printing is not cut, and the output cap (next row) bounds it. AGNOS has no deadline. `registry_detect_no_exec()` runs no tool. The Python package bounds each CLI run (30 s by default). On Linux a tool is killed if ai-hwaccel itself dies (`PR_SET_PDEATHSIG`). |
+| Excessive output (a tool writes gigabytes to stdout) | stdout is capped one byte short of **1 MiB** (`CMD_MAX_STDOUT`), so its NUL fits; the rest is not read, the tool dies of SIGPIPE, and a warning says the output was cut short. stderr goes to `/dev/null`. The file reads stop one byte short of their buffers too (4 KiB for sysfs and `/proc/meminfo`, 32 KiB for `cloud_pricing.json`, which warns when full). Through 2.5.0 each of them put the NUL one byte past the buffer. |
 | Malformed output (unexpected CSV, JSON, or text format) | Parsed fields are validated: device IDs must be 0 to 1024, memory values 0 to 16 TiB. A bad line is skipped with a parse warning. |
 | Injected arguments | No user-controlled data is interpolated into tool arguments: every argument is a string literal. |
 
@@ -59,7 +60,7 @@ There is no network access.
 
 | Threat | Mitigation |
 |---|---|
-| Symlink attack on the disk cache's `/tmp` fallback (another local user creates `/tmp/ai-hwaccel-cache.json` as a symlink, and the cache write truncates its target) | **Not mitigated:** the write follows symlinks. It happens only when a caller uses the disk cache with `HOME` unset. Fixing it (a private directory, or refusing to write without `HOME`) is on the roadmap. |
+| Symlink attack on the disk cache's `/tmp` fallback (another local user creates `/tmp/ai-hwaccel-cache.json` as a symlink, and the cache write truncates its target) | **Removed in 2.5.1:** the disk cache writes no file. Through 2.5.0 the write followed symlinks when a caller used the disk cache with `HOME` unset. |
 
 ### Supply chain
 

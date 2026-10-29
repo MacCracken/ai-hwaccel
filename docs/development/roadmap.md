@@ -10,88 +10,8 @@ platform validation come before new features. What already shipped is in
 
 Fix what ai-hwaccel reports wrong today, and close the CI gaps that let those
 bugs ship. This was the 2.4.x plan; 2.5.0 shipped first, as the cyrius 6.7.18
-toolchain release.
-
-### 2.5.1
-
-Defects in what ai-hwaccel reports, or in how it runs on the platforms already
-tested, and the CI gates that need no new runner. Each can be fixed and
-checked in this repo.
-
-#### Detection output
-
-- [ ] **Vendor tools run without a time limit.** A hung tool (`nvidia-smi` on
-  a GPU in an error state, for example) blocks detection until it exits. The
-  stdlib waits for ever by default, and ai-hwaccel never sets a deadline.
-  cyrius 6.6.6 added `proc_set_timeout_ms()`, which kills a child that stays
-  idle past the deadline, and since 6.6.8 Windows has it too (the child's Job
-  object ends with it). AGNOS still does not define it, so the call needs an
-  AGNOS gate. Set a deadline around the tool runs, and report a timeout with
-  `warning_timeout`, which exists but nothing emits.
-  Until then, the Python package's 30 s limit on each CLI run is the only
-  bound.
-- [ ] **A read that fills its buffer writes one byte past it.** Several
-  readers NUL-terminate with `store8(buf + n, 0)` when `n` can equal the
-  buffer size:
-  - `run_tool` (1 MiB of tool output);
-  - `sysfs_read` and the `/proc/meminfo` read (4 KiB);
-  - `load_cloud_instances` (32 KiB);
-  - the disk cache (64 KiB).
-
-  The output is also cut off without a warning. 2.3.22 fixed the same defect
-  in `load_models`: read at most `size - 1` bytes and warn when the buffer
-  fills. Apply that to the others. The tool cap is the easiest to reach:
-  `vulkaninfo`'s full output is 60–85 KB per GPU in `tests/fixtures/vulkaninfo/`.
-- [ ] **Intel Macs report a phantom Apple Silicon GPU and Neural Engine.** On
-  an Intel Mac the sysctl brand check fails, so detection falls back to
-  `system_profiler SPHardwareDataType`. `_parse_apple_macos` then emits a
-  Metal GPU and a Neural Engine whatever the output says (named "Apple
-  Silicon", sized by the Mac's RAM). It should emit nothing without a `Chip:`
-  line. The Intel Mac's own GPU is not detected at all. This comes from
-  reading the code; it has not been run on `ach`, and no wheel targets Intel
-  Macs.
-- [ ] **`registry_detect_with(builder_no_exec())` still spawns.** The mask
-  removes the exec backends, but the call passes `allow_exec = 1`: Vulkan runs
-  `vulkaninfo`, the interconnect pass runs `nvidia-smi`, and the Apple and
-  Windows fallbacks may run `system_profiler` and `wmic`. The comment on
-  `builder_no_exec()` and the README now say so and point to
-  `registry_detect_with_opts(mask, 0)`. Decide whether a mask without exec
-  backends should imply `allow_exec = 0`.
-- [ ] **Warnings name tools that could never exist.** On Linux the Apple
-  backend's fallback adds `system_profiler` to `warnings` on every run, and a
-  missing `nvidia-smi` is listed twice (the CUDA backend and the interconnect
-  pass). Run the `system_profiler` fallback on macOS only, and report each
-  missing tool once.
-
-#### Disk cache
-
-- [ ] **The disk cache writes a file it never reads.** `disk_cached_get`
-  writes `registry.json` after each detection, but its read path is a `TODO`:
-  on a cold start it loads the file, discards it and detects again. Either
-  parse it back with `profile_from_json` (bayan-json is optional, so fall back
-  to detection without it), or drop the disk layer. While there:
-  - without `HOME` the cache is `/tmp/ai-hwaccel-cache.json`, and the write
-    follows symlinks, so another local user can aim it at a file the caller
-    can write;
-  - the directory is created one level deep, so without an existing
-    `~/.cache` nothing is written;
-  - on Windows, where `HOME` is usually unset, it takes the `/tmp` path.
-
-#### CI coverage
-
-- [ ] **Make the lint step fail.** A lint warning never fails the build:
-  `cyrius lint` exits 0 even when it reports warnings, and CI's loop adds
-  `|| true` anyway. `cyrius lint --strict` exits 2 on a warning, and every
-  file in `src/` passes it today, so switch the loop to `--strict` and drop
-  the `|| true`.
-- [ ] **qemu-aarch64 disk-cache test**
-  ([issue](issues/archived/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md)).
-- [ ] **A cache TTL test that does not assume Linux**
-  ([issue](issues/archived/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md)).
-- [ ] **`cyrius capacity --check` as a CI gate.** On 6.7.18 it passes against
-  `src/main.cyr` (750 variable slots in use, every table under 85%).
-- [ ] **`cyrius vet` over `tests/tcyr/`.** CI vets only `src/main.cyr`, and
-  each test unit is its own compilation root.
+toolchain release, and 2.5.1 shipped the fixes and CI gates that could be made
+and checked in this repo.
 
 ### Later in 2.5.x
 
@@ -128,11 +48,11 @@ macOS runner, and the PE build flag.
 
 - [ ] **Lazy queries should run only the detectors they need.** Every lazy
   family probe goes through `registry_detect_with`, so it runs the post-passes
-  too, and `detect_interconnects` spawns `nvidia-smi nvlink -s` whenever no
-  NVSwitch sysfs node exists. A TPU-only query therefore still starts
-  `nvidia-smi`, the exact spawn `lazy.cyr` exists to avoid, and
-  `lazy_into_registry` repeats the post-passes for every family. Run the
-  detectors per family and the post-passes once, in `lazy_into_registry`.
+  too, and `lazy_into_registry` runs them again. Since 2.5.1 a family without a
+  tool-based backend (TPU, NPU) spawns nothing, but a GPU or AI-ASIC probe
+  still runs `nvidia-smi nvlink -s` from the interconnect pass whenever no
+  NVSwitch sysfs node exists, and `lazy_into_registry` runs it once more. Run
+  the detectors per family and the post-passes once, in `lazy_into_registry`.
   Consider also gating the NVLink probe on a CUDA profile being present.
 
 #### Build and CI
@@ -159,6 +79,12 @@ Implement or lock each detection path against a captured fixture first (no
 hardware needed: `tests/fixtures/` or inline strings), then confirm on real
 hardware when access happens. Missing hardware never blocks the source-side
 work.
+
+- [ ] **Remove the deprecated `disk_cached_*` functions** in 2.6.0.
+  `disk_cached_new`, `disk_cached_get` and `disk_cached_invalidate` were
+  deprecated in 2.5.1, when they stopped writing a file they never read back;
+  they now behave as `cached_registry_new`, `cached_get` and
+  `cached_invalidate`.
 
 - [ ] **Fixtures for every parser.** `tests/fixtures/vulkaninfo/` holds real
   captures (Renoir on Linux, UHD 600 on Windows). The other parsers are still

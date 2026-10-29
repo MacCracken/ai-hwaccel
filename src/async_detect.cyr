@@ -113,6 +113,11 @@ fn registry_detect_threaded() {
 }
 
 fn registry_detect_threaded_with(builder_mask) {
+    # A mask without an exec backend spawns nothing, as in registry_detect_with
+    # (2.5.1), and with no tool to wait for there is nothing to run in parallel.
+    if (builder_uses_exec(builder_mask) == 0) {
+        return registry_detect_with_opts(builder_mask, 0);
+    }
     hwlog_span_enter("detect_threaded");
     var r = hw_registry_new();
     var profs = reg_profiles(r);

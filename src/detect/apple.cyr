@@ -71,6 +71,10 @@ fn _mac_sysctl_string(name) {
 # the chip and sizes its unified memory without a subprocess, so this runs in
 # registry_detect_no_exec() too; the system_profiler fallback runs only when
 # `allow_exec` is 1. On Linux the Asahi device-tree check needs no subprocess.
+#
+# 2.5.1: the system_profiler fallback runs on macOS only. Through 2.5.0 it ran
+# on every target, so every Linux and Windows run listed `system_profiler` in
+# its warnings, a tool that cannot exist there.
 fn detect_apple_opts(profiles, warnings, allow_exec) {
     #ifdef CYRIUS_TARGET_MACOS
     var brand = _mac_sysctl_string("machdep.cpu.brand_string");
@@ -81,8 +85,6 @@ fn detect_apple_opts(profiles, warnings, allow_exec) {
             return 0;
         }
     }
-    #endif
-
     if (allow_exec == 1) {
         var hw = run_tool1("system_profiler", "SPHardwareDataType", warnings);
         if (hw != 0) {
@@ -92,6 +94,7 @@ fn detect_apple_opts(profiles, warnings, allow_exec) {
             }
         }
     }
+    #endif
 
     # Linux Asahi fallback
     var compat = sysfs_read("/proc/device-tree/compatible");
@@ -120,10 +123,15 @@ fn detect_apple(profiles, warnings) {
 
 # Parse `system_profiler SPHardwareDataType` output: "Chip: Apple M4 Pro" and
 # "Memory: 36 GB". Only the fallback uses it now; see detect_apple_opts.
+#
+# 2.5.1: emits nothing without a `Chip:` line. An Intel Mac prints
+# "Processor Name:" instead, and through 2.5.0 it got a Metal GPU and a Neural
+# Engine named "Apple Silicon" and sized by its RAM.
 fn _parse_apple_macos(hw_output, profiles) {
     var lines = str_split(hw_output, 10);
     var nlines = vec_len(lines);
-    var chip_name = "Apple Silicon";
+    var chip_name = 0;
+    var have_chip = 0;
     var mem_bytes = 8 * BYTES_PER_GIB;
 
     var li = 0;
@@ -138,6 +146,7 @@ fn _parse_apple_macos(hw_output, profiles) {
                 var cn = str_trim(str_sub(line, col + 1, str_len(line) - col - 1));
                 if (str_len(cn) > 0) {
                     chip_name = str_cstr(cn);
+                    have_chip = 1;
                 }
             }
         }
@@ -153,6 +162,7 @@ fn _parse_apple_macos(hw_output, profiles) {
         }
     }
 
+    if (have_chip == 0) { return 0; }
     apple_emit_silicon(profiles, chip_name, mem_bytes);
     return 0;
 }

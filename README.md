@@ -14,7 +14,7 @@ decide how to quantize and shard a model across them.
 |--------|-------|
 | Binary size | **199 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.7.18 |
-| Tests | 952 assertions (15 test units) |
+| Tests | 1002 assertions (15 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** third-party (bayan's JSON sublib: first-party, optional) |
 | Hardware families | 18 |
@@ -135,13 +135,13 @@ var r = registry_detect_no_exec();
 ```
 
 The classification lives in `backend_uses_exec(b)` in `src/types.cyr`.
-To compose your own mask and stay spawn-free, pass it to
-`registry_detect_with_opts(mask, 0)`, for example
-`registry_detect_with_opts(builder_without(builder_no_exec(), BACKEND_GROQ), 0)`.
-`registry_detect_with(mask)` allows exec whatever the mask: the Vulkan
-backend runs `vulkaninfo`, the Apple and Windows fallbacks may run
-`system_profiler` and `wmic`, and the interconnect post-pass runs
-`nvidia-smi`.
+A mask without a tool-based backend stays spawn-free through
+`registry_detect_with(mask)` too (2.5.1), for example
+`registry_detect_with(builder_without(builder_no_exec(), BACKEND_GROQ))`:
+Vulkan uses its sysfs scan, and the `system_profiler`, `wmic` and
+`nvidia-smi nvlink` runs are skipped. Through 2.5.0 `registry_detect_with`
+allowed tools whatever the mask. `registry_detect_with_opts(mask, 0)` forbids
+tools for any mask.
 
 ## Architecture
 

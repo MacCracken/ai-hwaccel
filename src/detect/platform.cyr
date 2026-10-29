@@ -3,10 +3,14 @@
 
 var SYSFS_MAX_READ = 4096;
 
-# Read a sysfs/procfs file into a Str. Returns Str or 0 on error.
+# Read a sysfs/procfs file into a Str. Returns Str or 0 on error. Reads at
+# most SYSFS_MAX_READ - 1 bytes, so the NUL always fits (through 2.5.0 a
+# 4 KiB file put it one byte past the buffer). A longer file is cut short
+# without a warning: this runs on detector threads, which must not log, and
+# every file read here is a short sysfs value or device-tree string.
 fn sysfs_read(path) {
     var buf = alloc(SYSFS_MAX_READ);
-    var n = file_read_all(path, buf, SYSFS_MAX_READ);
+    var n = file_read_all(path, buf, SYSFS_MAX_READ - 1);
     if (n <= 0) { return 0; }
     store8(buf + n, 0);
     # Trim trailing newline
@@ -189,8 +193,11 @@ fn detect_system_memory_opts(allow_exec) {
     vec_push(wargs, "TotalPhysicalMemory");
     vec_push(wargs, "/value");
     var wbuf = alloc(4096);
-    # One byte short of the buffer, so the NUL below always fits.
-    var wn = exec_capture(wargs, wbuf, 4095);
+    var wst[16];
+    # One byte short of the buffer, so the NUL below always fits. Under the
+    # tool deadline (cmd_capture, src/detect/command.cyr).
+    var wn = cmd_capture(wargs, wbuf, 4095, &wst);
+    if (load64(&wst) == 0 - 2) { return 0; }
     if (wn > 0) {
         store8(wbuf + wn, 0);
         return win_parse_total_memory(str_new(wbuf, wn));
@@ -200,8 +207,10 @@ fn detect_system_memory_opts(allow_exec) {
     #ifdef CYRIUS_TARGET_MACOS
     return mac_total_phys_bytes();
     #endif
+    # One byte short of the buffer, so the NUL below always fits. MemTotal is
+    # the file's first line, so a cut-short read still holds it.
     var buf = alloc(4096);
-    var n = file_read_all("/proc/meminfo", buf, 4096);
+    var n = file_read_all("/proc/meminfo", buf, 4095);
     if (n <= 0) { return 0; }
     store8(buf + n, 0);
     # Find "MemTotal:" line, parse kB value

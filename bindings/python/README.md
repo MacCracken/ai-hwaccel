@@ -64,8 +64,8 @@ df = reg.to_dataframe()          # requires ai-hwaccel[pandas]
 | `version()` | `str` | binary's self-reported version |
 
 All accept `binary=<path>` and `timeout=<seconds>` (30 by default). The
-binary puts no time limit on the vendor tools it runs, so `timeout` is what
-bounds a hung `nvidia-smi`. `TrainingMemory`, `ShardingPlan` and
+binary kills a vendor tool that prints nothing for 10 s; `timeout` bounds the
+whole run. `TrainingMemory`, `ShardingPlan` and
 `CostRecommendation` also expose the fixed-point fields as floats (`total_gib`,
 `est_tokens_per_sec`, `price_per_hour_usd`).
 

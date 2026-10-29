@@ -12,8 +12,8 @@ Linux dev host (Ryzen 7 5800H, Radeon iGPU), a whole CLI run takes about
 takes under 2 ms. Each installed tool adds its own startup time, typically tens
 of milliseconds, often more for `nvidia-smi` on a many-GPU host.
 
-Vendor tools also run without a time limit, so a hung tool blocks detection
-(bounding them is on the roadmap).
+A tool that prints nothing for 10 s is killed and reported as a timeout
+(2.5.1), so a hung tool delays detection by that much, not for ever.
 
 ---
 

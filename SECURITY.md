@@ -42,15 +42,17 @@ within 14 days of confirmation.
 
 - **Command execution**: tools are resolved through `$PATH` and run without a
   shell, with fixed arguments; on Linux they get an empty environment. Make
-  sure `$PATH` is trusted in your deployment. Tools run without a time limit,
-  so a hung tool blocks detection: `registry_detect_no_exec()` runs none, and
-  the Python package bounds each call (30 s by default).
+  sure `$PATH` is trusted in your deployment. A tool that prints nothing for
+  10 s is killed and reported as a timeout (an idle deadline, so a tool still
+  printing is not cut; AGNOS has none), and its output is capped at 1 MiB.
+  `registry_detect_no_exec()` runs no tool, and the Python package bounds each
+  call (30 s by default).
 - **sysfs/procfs reads**: the library reads system files but never writes to
   them.
-- **File writes**: the CLI writes nothing. Only the opt-in disk cache
-  (`disk_cached_get`) writes a file: `~/.cache/ai-hwaccel/registry.json`, or
-  `/tmp/ai-hwaccel-cache.json` when `HOME` is unset. The write follows
-  symlinks, so don't use the disk cache without `HOME` on a shared host.
+- **File writes**: none. Through 2.5.0 the opt-in disk cache
+  (`disk_cached_get`) wrote `~/.cache/ai-hwaccel/registry.json`, or
+  `/tmp/ai-hwaccel-cache.json` when `HOME` was unset, following symlinks.
+  Since 2.5.1 it caches in memory only, and it is deprecated.
 - **Deserialization**: `profile_from_json_str` parses with bayan-json, reads
   the keys it knows and ignores the rest. If you deserialize untrusted input,
   apply your own size limits and validation.

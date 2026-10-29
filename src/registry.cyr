@@ -259,12 +259,9 @@ fn builder_without(mask, backend) { return mask & (~(1 << backend)); }
 fn builder_is_enabled(mask, backend) { return (mask >> backend) & 1; }
 
 # Mask of backends that can run without spawning a subprocess (sysfs,
-# syscalls, DXGI, sysctl). It selects backends; it does not forbid exec.
-# Library consumers with a no-exec contract (mihi's probe surface) call
-# registry_detect_no_exec(), or registry_detect_with_opts(mask, 0) with a
-# mask built from this one. registry_detect_with(builder_no_exec()) passes
-# allow_exec 1, so vulkaninfo, the system_profiler / wmic fallbacks and the
-# interconnect post-pass's nvidia-smi may still run.
+# syscalls, DXGI, sysctl). registry_detect_with() of this mask, or of any mask
+# without an exec backend, spawns nothing (2.5.1; see registry_detect_with).
+# registry_detect_no_exec() is the same call.
 fn builder_no_exec() {
     var mask = 0;
     var b = 0;
@@ -275,6 +272,13 @@ fn builder_no_exec() {
         b = b + 1;
     }
     return mask;
+}
+
+# 1 if `mask` enables a backend that runs a vendor tool (backend_uses_exec),
+# else 0. Without one, the detect entry points spawn nothing (2.5.1).
+fn builder_uses_exec(mask) {
+    if ((mask & (~builder_no_exec())) == 0) { return 0; }
+    return 1;
 }
 
 # --- One physical device, one profile (2.4.0) ---
@@ -413,6 +417,9 @@ fn registry_post_passes(r, allow_exec) {
     }
     detect_storage(sio);
     detect_environment(sio);
+    # Last, so the interconnect pass's own "nvidia-smi not found" folds into
+    # the CUDA backend's.
+    warnings_dedup_missing(reg_warnings(r));
     return 0;
 }
 
@@ -420,8 +427,15 @@ fn registry_detect() {
     return registry_detect_with_opts(builder_all(), 1);
 }
 
+# Detect with only the backends in `builder_mask`. A mask that holds no exec
+# backend (backend_uses_exec) spawns nothing: it runs with allow_exec 0, so
+# Vulkan uses its sysfs scan instead of `vulkaninfo`, the system_profiler and
+# wmic fallbacks are skipped, and so is the interconnect pass's
+# `nvidia-smi nvlink -s`. Through 2.5.0 every mask ran with exec allowed, so
+# registry_detect_with(builder_no_exec()) still spawned all four. For tools
+# with an exec-free mask, call registry_detect_with_opts(mask, 1).
 fn registry_detect_with(builder_mask) {
-    return registry_detect_with_opts(builder_mask, 1);
+    return registry_detect_with_opts(builder_mask, builder_uses_exec(builder_mask));
 }
 
 # No-subprocess detection — masks off exec-shelling backends (defense

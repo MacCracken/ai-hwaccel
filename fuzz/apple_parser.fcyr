@@ -34,14 +34,15 @@ var p2 = vec_new();
 var hw2 = str_from("  Chip: Apple M2\n  Memory: 16 GB\n");
 _parse_apple_macos(hw2, p2);
 
-# Empty — still creates default profiles (Apple Silicon assumed)
+# Empty — no `Chip:` line, so nothing (2.5.1; it assumed Apple Silicon)
 var p3 = vec_new();
 _parse_apple_macos(str_from(""), p3);
-if (vec_len(p3) != 2) { syscall(60, 3); }
+if (vec_len(p3) != 0) { syscall(60, 3); }
 
 # No chip line
 var p4 = vec_new();
 _parse_apple_macos(str_from("Memory: 32 GB\n"), p4);
+if (vec_len(p4) != 0) { syscall(60, 4); }
 
 # No memory line
 var p5 = vec_new();

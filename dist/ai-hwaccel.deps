@@ -9,6 +9,7 @@ alloc
 vec
 fs
 syscalls
+atomic
+sync
 args
 thread
-sync

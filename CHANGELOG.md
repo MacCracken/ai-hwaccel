@@ -5,14 +5,122 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
-## [Unreleased] — the roadmap re-planned from 2.5.x
+## [2.5.1] — 2026-10-28 — correct output, and CI that would notice
 
-Documentation only. The one source change is a comment, so the CLI, both
-benchmark binaries, the PE and the aarch64 build are byte-identical to 2.5.0
-(the CLI is 199 296 B with `CYRIUS_DCE=1`), and there is no benchmark delta to
-review.
+The first of the 2.5.x fixes: tools get a deadline, full reads stop writing a
+byte past their buffers, an Intel Mac no longer reports Apple Silicon, a
+no-exec mask spawns nothing, each missing tool is reported once, the disk
+cache stops writing a file it never read, and CI's lint, capacity and vet
+steps can fail. Detection output changes only in the `warnings` list. Released
+with the roadmap re-plan that was `[Unreleased]`.
 
-### Changed
+### Fixed — detection
+
+- **Vendor tools have a deadline.** A tool that prints nothing for 10 s
+  (`CMD_DEFAULT_TIMEOUT_MS`, which was 5 000 and unused) is killed and
+  reported with `warning_timeout`, which existed but nothing emitted. Through
+  2.5.0 a hung `nvidia-smi` blocked detection for ever. The deadline is
+  lib/process.cyr's, which is idle-based: a tool still printing is never cut.
+  It is a process-wide value, and `registry_detect_threaded` runs tools on
+  several threads, so the first capture in flight sets it and the last one out
+  puts the caller's own value back, under a mutex (`cmd_capture`,
+  `src/detect/command.cyr`). An embedding program's subprocesses keep their
+  deadline outside detection. The two Windows `wmic` fallbacks run under it
+  too. AGNOS has no deadline to set.
+- **A read that fills its buffer no longer writes one byte past it.**
+  `run_tool` (1 MiB), `sysfs_read` and the `/proc/meminfo` read (4 KiB) and
+  `load_cloud_instances` (32 KiB) now read one byte less than the buffer, so
+  the NUL fits. `run_tool` pushes a warning when the output fills the buffer,
+  and still returns what it read; `load_cloud_instances` logs one, as
+  `load_models` has since 2.3.22. `sysfs_read` and the meminfo read stay
+  silent: they run on detector threads, which must not log, and every file
+  they read is far shorter. (The disk cache's 64 KiB read went with the disk
+  layer, below.)
+- **An Intel Mac no longer reports an Apple Silicon GPU and Neural Engine.**
+  `_parse_apple_macos` emits nothing without a `Chip:` line, which an Intel
+  Mac's `system_profiler` does not print. Through 2.5.0 it got a Metal GPU
+  and a Neural Engine named "Apple Silicon" and sized by its RAM. (Tested
+  against a listing in an Intel Mac's layout written for the test; not run on
+  `ach`.)
+- **A mask without a tool-based backend spawns nothing.**
+  `registry_detect_with(mask)` now runs with `allow_exec` 0 when the mask holds
+  no backend that `backend_uses_exec` marks, and so does
+  `registry_detect_threaded_with`. Through 2.5.0 both ran with exec allowed
+  whatever the mask, so `registry_detect_with(builder_no_exec())` still ran
+  `vulkaninfo`, the `system_profiler` and `wmic` fallbacks and the
+  interconnect pass's `nvidia-smi nvlink -s`. A Vulkan-only mask now uses the
+  sysfs scan; `registry_detect_with_opts(mask, 1)` keeps the tools. New
+  `builder_uses_exec(mask)`. Lazy TPU and NPU queries stop spawning
+  `nvidia-smi` as a result.
+- **Each missing tool is reported once, and `system_profiler` only on macOS.**
+  The Apple backend's `system_profiler` fallback runs on macOS only; through
+  2.5.0 every Linux and Windows run listed it in `warnings`. The CUDA backend
+  and the interconnect pass both look for `nvidia-smi`, and
+  `warnings_dedup_missing` (new, `src/error.cyr`), run last in
+  `registry_post_passes`, now folds the second "not found" into the first. On
+  the dev host the CLI's `warnings` go from 8 names to 6, and `--summary`'s
+  `warnings` count from 8 to 6; nothing else in the output changes.
+
+### Deprecated
+
+- **`disk_cached_new`, `disk_cached_get` and `disk_cached_invalidate`.** The
+  disk cache wrote `~/.cache/ai-hwaccel/registry.json` after every detection,
+  but its read path was never written, so a cold start detected again; without
+  `HOME` the write went to `/tmp/ai-hwaccel-cache.json` and followed
+  symlinks. The three keep their signatures and touch no file: they cache in
+  memory with a TTL, as `cached_registry_new`, `cached_get` and
+  `cached_invalidate` do, and `#deprecated` warns at every call site.
+  `disk_cached_cache_path(c)` is 0. They are removed in 2.6.0 (roadmap). A
+  file an earlier release wrote is left where it is; nothing reads it. This
+  also closes the roadmap's aarch64 disk-cache test: there is no disk I/O left
+  to test.
+
+### Changed — CI
+
+- **Lint can fail the build.** The loop runs `cyrius lint --strict` (exit 2
+  on a warning) and fails on any file; through 2.5.0 it ran plain
+  `cyrius lint`, which exits 0 on warnings, followed by `|| true`.
+- **`cyrius capacity --check src/main.cyr`** is a step: it fails when a
+  compiler table passes 85%. The largest use is the fn-name hash, 1 630 of
+  4 096 slots.
+- **`cyrius vet` runs over every test unit** as well as `src/main.cyr`; each
+  unit is its own compilation root. vet exits 1 on a missing include.
+- Checked that each step fails: `lint --strict` exits 2 on a planted tab and
+  trailing blank, and `vet` exits 1 on a unit with a missing include.
+
+### Tests
+
+- **952 → 1002 assertions** in the same 15 units. Each check of a fix fails
+  against 2.5.0's code or against a mutant that undoes it; the cache TTL
+  checks guard behaviour that already held on Linux:
+  - `io_test` (28 → 46): the two `run_tool` tests skipped since a stdlib that
+    hung in test binaries run again; a tool that sleeps 5 s is killed at a
+    300 ms deadline and the caller's deadline is back afterwards (against
+    2.5.0 the run took the full 5 s); 2 MB of output comes back cut one byte
+    short of the buffer with a warning; `sysfs_read` of a 4 196-byte file
+    returns 4 095 bytes (2.5.0: 4 096).
+  - `registry_test` (149 → 180): `builder_uses_exec`; an exec-free mask runs
+    no tool through `registry_detect_with` and the threaded entry point;
+    `warnings_dedup_missing`; every entry point lists each missing tool once
+    and never `system_profiler` off macOS; the cache TTL on any target's clock
+    (`cached_*`, and the deprecated `disk_cached_*` as an in-memory cache).
+    The TTL checks were also run on macOS and Windows (*Verified*).
+  - `backend_test` (60 → 61): an Intel Mac's `system_profiler` output gives
+    no profile; the no-exec Apple test now expects no `system_profiler`
+    attempt off macOS with exec allowed either.
+  - The Apple fuzz harness expects nothing from empty and `Chip:`-less input.
+
+### Consumers
+
+- **`registry_detect_with(mask)` with a mask that has no tool-based backend
+  no longer runs tools.** Use `registry_detect_with_opts(mask, 1)` to keep
+  them (for `vulkaninfo` with a Vulkan-only mask, for example).
+- **The `disk_cached_*` calls warn** and no longer touch the filesystem;
+  switch to `cached_registry_new` / `cached_get` / `cached_invalidate`.
+- **`dist/ai-hwaccel.cyr`'s `# Requires` block gains `atomic` and `sync`**
+  (13 leaves), for the deadline's lock in `src/detect/command.cyr`.
+
+### Changed — the roadmap re-planned from 2.5.x
 
 - **The roadmap starts at 2.5.x.** The 2.4.x plan (correct output, and CI
   that would notice) was still open when 2.5.0 shipped as a toolchain
@@ -41,6 +149,92 @@ review.
   `src/detect/vulkan.cyr` (and so `dist/ai-hwaccel.cyr`) called the
   duplicate-device handling "roadmap 2.4.x" work; it now names
   `profiles_dedup`, which shipped in 2.4.0.
+
+### Performance
+
+**19 neutral, 0 regressions** (2.5.0 → 2.5.1, both on cyrius 6.7.18). Same
+method as 2.5.0: each arm built at 5 code layouts, the three floor-bound rows
+batch-timed (†), and 80 rounds per suite, shuffled and pinned to one CPU. No
+benchmarked path runs the changed code: the benchmarks spawn no tool, and the
+duplicate-warning pass is not in them. The source changes move the layout of
+everything after `src/detect/command.cyr`, which is what the layouts control
+for.
+
+| row | 2.5.0 | 2.5.1 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 13.62 µs | 13.65 µs | +0.2% | 0.37 | neutral |
+| `parse_vulkan_2gpu` | 2.48 µs | 2.44 µs | −1.3% | 0.13 | neutral |
+| `parse_neuron_2dev` | 1.59 µs | 1.59 µs | +0.1% | 0.86 | neutral |
+| `detect_safetensors` † | 414.4 ns | 397.3 ns | −4.1% | 0.05 | neutral |
+| `detect_gguf` † | 37.7 ns | 37.9 ns | +0.3% | 0.29 | neutral |
+| `parse_vulkan_summary_renoir` | 14.81 µs | 14.67 µs | −0.9% | 0.02 | neutral |
+| `vulkan_heaps_uhd600` | 609.67 µs | 602.76 µs | −1.1% | 0.04 | neutral |
+| `best_available_13dev` † | 169.7 ns | 171.8 ns | +1.2% | 0.26 | neutral |
+| `total_memory_13dev` | 102.1 ns | 101.8 ns | −0.3% | 0.48 | neutral |
+| `has_accelerator_13dev` | 18.3 ns | 18.6 ns | +1.9% | 0.36 | neutral |
+| `plan_70B_bf16_4gpu` | 1.43 µs | 1.43 µs | −0.3% | 0.28 | neutral |
+| `count_family_gpu_13dev` | 240.5 ns | 240.5 ns | 0.0% | 1.00 | neutral |
+| `json_serialize_13dev` | 22.64 µs | 22.62 µs | −0.1% | 0.72 | neutral |
+| `json_summary_13dev` | 3.17 µs | 3.15 µs | −0.6% | 0.03 | neutral |
+| `json_system_io` | 5.08 µs | 5.10 µs | +0.4% | 0.19 | neutral |
+| `json_plan` | 16.88 µs | 16.84 µs | −0.2% | 0.25 | neutral |
+| `json_training` | 2.47 µs | 2.45 µs | −0.5% | 0.02 | neutral |
+| `dedup_17dev` | 877.8 ns | 878.6 ns | +0.1% | 0.73 | neutral |
+| `profile_from_json_cuda` | 7.18 µs | 7.17 µs | −0.1% | 0.61 | neutral |
+
+A verdict needs p < 0.01 and |Δ| > 1%; no row reaches both. `detect_safetensors`
+is the row that moves most with layout (2.4.1 recorded 393–440 ns across
+layouts on one toolchain), and `has_accelerator_13dev`'s +1.9% comes from one
+layout at 19.9 ns. The host was under other load during this run (load average
+about 2), so absolute numbers sit a few percent above 2.5.0's record; both arms
+ran interleaved under the same load.
+
+In `bench-history.csv`, the `bfa135d` rows at 00:31:27Z are 2.5.0, measured on
+the clean tree before any change. The `bfa135d-dirty` rows at 00:54:35Z are
+2.5.1.
+
+| binary | 2.5.0 | 2.5.1 | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 199 296 | 199 312 | +16 |
+| x86_64 ELF, no DCE | 522 880 | 522 896 | +16 |
+| ELF-aarch64 | 616 880 | 616 904 | +24 |
+| PE, as shipped (no DCE) | 642 048 | 644 096 | +2 048 |
+| agnos, `CYRIUS_DCE=1` | 193 408 | 193 432 | +24 |
+| Mach-O arm64 (cross-built) | 655 868 | 655 868 | 0 |
+
+The deadline helpers are the new code; the disk cache's file code was already
+dead in the CLI, which never calls it.
+
+### Verified
+
+- **Tests:** 1002 assertions in 15 units pass through CI's loop; fuzz 6/6.
+- **CI gates**, replayed on a fresh copy of the tree: fmt, `lint --strict`
+  (the new failing step), vet over `src/main.cyr` and the 15 test units,
+  `capacity --check`, raw-offset guard, `cyrius.lock` current (52 entries),
+  DCE build, `distlib --no-default-features` fresh and deterministic, and
+  version and Python-bindings version consistency.
+- **CLI output** differs from 2.5.0's on 17 invocations only in `warnings`
+  and `--version`, on x86_64 with and without DCE and on ELF-aarch64 under
+  `qemu-aarch64`; the profiles and every other field are identical. Live
+  sensor fields are masked.
+- **`ecb`** (Apple M5 Pro): the cross-built Mach-O matches 2.5.0's on 18 runs
+  apart from `warnings` (8 → 7: the second `nvidia-smi`) and `--version`.
+  CPU memory equals `hw.memsize`, the Metal GPU and the Neural Engine are
+  found, and stderr is silent at the default level.
+- **`cass`** (Windows 11): the PE matches 2.5.0's on the same 18 runs apart
+  from `warnings` (9 → 7: `system_profiler` and the second `nvidia-smi`) and
+  `--version`. CPU memory equals CIM's `TotalPhysicalMemory`, DXGI finds the
+  UHD 600, and stderr is silent at the default level.
+- **The cache TTL checks** (`test_monotonic_clock`, `test_cached_ttl`,
+  `test_disk_cached_in_memory`, copied out of `registry_test` into one probe)
+  pass 12/12 on x86_64, on ELF-aarch64 under `qemu-aarch64`, as a Mach-O on
+  `ecb` and as a PE on `cass`. `registry_test` itself does not build as a PE:
+  its include list lacks `src/detect/windows.cyr`.
+- **Consumers:** a program that includes only `dist/ai-hwaccel.cyr` builds
+  and finds the CLI's profiles, with bayan (0 undefined functions) and without
+  it (the 7 `bayan_json_*`, as before).
+- **Not verified:** the wheels were not built or installed, the CI workflows
+  have not run on this tree, and the Intel Mac fix was not run on `ach`.
 
 ## [2.5.0] — 2026-10-28 — cyrius 6.7.18, bayan 1.11.1
 

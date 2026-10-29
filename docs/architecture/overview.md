@@ -55,6 +55,7 @@ src/
 ```
 registry_detect()                      = registry_detect_with_opts(builder_all(), allow_exec 1)
 registry_detect_no_exec()              = registry_detect_with_opts(builder_no_exec(), allow_exec 0)
+registry_detect_with(mask)             = registry_detect_with_opts(mask, allow_exec 1 iff mask has a tool backend)
 registry_detect_with_opts(mask, allow_exec)
   1. CPU profile                       total RAM: /proc/meminfo, sysctl hw.memsize (macOS),
                                        GlobalMemoryStatusEx (Windows); 16 GiB if all fail
@@ -77,7 +78,8 @@ The other entry points share the backends and `registry_post_passes`:
 `registry_detect_threaded()` runs the tool-based backends in threads and the
 sysfs ones on the calling thread; `lazy_by_family()` probes one family's
 backends on its first query and deduplicates as families accumulate;
-`cached_get()` / `disk_cached_get()` reuse a registry until its TTL runs out.
+`cached_get()` reuses a registry until its TTL runs out (the deprecated
+`disk_cached_get()` does the same; it no longer writes a file).
 
 Totals (`reg_total_memory`, `reg_total_accel_memory`) count system RAM once:
 a profile's `shared_memory_bytes` is folded into one pool, the largest shared

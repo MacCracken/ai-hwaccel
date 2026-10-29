@@ -64,6 +64,50 @@ fn test_run_missing_tool() {
     return 0;
 }
 
+# --- tool deadline and output cap (2.5.1) ---
+
+# A tool silent past the deadline is killed and reported, and the caller's own
+# deadline (0, unbounded) is back once no tool is in flight. A 300 ms bound
+# keeps the test quick; the tool would sleep 5 s.
+fn test_run_tool_deadline() {
+    var saved = CMD_DEFAULT_TIMEOUT_MS;
+    CMD_DEFAULT_TIMEOUT_MS = 300;
+    var warnings = vec_new();
+    var args = vec_new();
+    vec_push(args, "-c");
+    vec_push(args, "exec sleep 5");
+    var result = run_tool("sh", args, warnings);
+    CMD_DEFAULT_TIMEOUT_MS = saved;
+    assert_eq(result, 0, "silent tool past the deadline returns 0");
+    assert_eq(vec_len(warnings), 1, "deadline: 1 warning");
+    if (vec_len(warnings) > 0) {
+        var w = vec_get(warnings, 0);
+        assert_eq(warning_code(w), HWA_ERR_TIMEOUT, "timeout warning");
+        assert_eq(warning_timeout_ms(w), 300, "timeout warning carries the bound");
+    }
+    assert_eq(proc_timeout_ms(), 0, "caller's deadline restored");
+    return 0;
+}
+
+# Output past the 1 MiB buffer is cut one byte short of it (room for the NUL)
+# and still returned, with a warning that it was cut.
+fn test_run_tool_output_cap() {
+    var warnings = vec_new();
+    var args = vec_new();
+    vec_push(args, "-c");
+    vec_push(args, "head -c 2000000 /dev/zero");
+    var result = run_tool("sh", args, warnings);
+    assert(result != 0, "oversized output is still returned");
+    if (result != 0) {
+        assert_eq(str_len(result), CMD_MAX_STDOUT - 1, "cut one byte short of the buffer");
+    }
+    assert_eq(vec_len(warnings), 1, "output cap: 1 warning");
+    if (vec_len(warnings) > 0) {
+        assert_eq(warning_code(vec_get(warnings, 0)), HWA_ERR_PARSE, "cut-short warning");
+    }
+    return 0;
+}
+
 # --- CSV parsing tests ---
 
 fn test_parse_csv_line() {
@@ -136,6 +180,30 @@ fn test_sysfs_read_missing() {
     return 0;
 }
 
+# A file longer than the buffer reads one byte short of it, so the NUL fits
+# (2.5.1; a 4 KiB read used to put it one byte past).
+fn test_sysfs_read_cap() {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "/tmp/ai-hwaccel-io-test-");
+    str_builder_add_int(sb, sys_getpid());
+    var path = str_data(str_builder_build(sb));
+    var n = SYSFS_MAX_READ + 100;
+    var buf = alloc(n);
+    var i = 0;
+    while (i < n) {
+        store8(buf + i, 65);
+        i = i + 1;
+    }
+    assert(file_write_all(path, buf, n) == n, "temp file written");
+    var s = sysfs_read(path);
+    assert(s != 0, "long file readable");
+    if (s != 0) {
+        assert_eq(str_len(s), SYSFS_MAX_READ - 1, "read stops one byte short of the buffer");
+    }
+    sys_unlink(path);
+    return 0;
+}
+
 fn test_path_exists() {
     assert_eq(aihw_path_exists("/proc/self/status"), 1, "/proc/self/status exists");
     assert_eq(aihw_path_exists("/nonexistent_xyz"), 0, "nonexistent path");
@@ -193,14 +261,18 @@ test_validate_memory_mb();
 test_sysfs_read_proc();
 test_sysfs_read_int();
 test_sysfs_read_missing();
+test_sysfs_read_cap();
 test_path_exists();
 test_detect_system_memory();
 test_sysfs_path();
 test_parse_value_suffix();
-# Subprocess tests skipped — exec_capture hangs in test binary.
-# run_tool/which will be validated via integration tests with real detectors.
-# test_run_echo();
-# test_run_missing_tool();
+# 2.5.1: the subprocess tests run again. They were skipped while
+# exec_capture hung inside a test binary, which no longer happens on cyrius
+# 6.7.18.
+test_run_echo();
+test_run_missing_tool();
+test_run_tool_deadline();
+test_run_tool_output_cap();
 
 var fails = assert_summary();
 syscall(60, fails);
