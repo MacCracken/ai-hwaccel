@@ -5,6 +5,152 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.5.0] — 2026-10-28 — cyrius 6.7.18, bayan 1.11.1
+
+A toolchain and dependency bump, and the first release on the cyrius 6.7
+language minor. The CLI's output does not change. `profile_from_json_str` now
+refuses JSON it used to accept, and it is about 50% slower, both from bayan
+1.11.1's hardening (see *Consumers* and *Performance*).
+
+### Changed — toolchain and dependency
+
+- **cyrius `6.6.20` → `6.7.18`.** `./lib/` was re-vendored from an empty tree
+  (`lib sync`, then `deps`): 52 files, two more than 2.4.2. The new ones are
+  `math` and `slice`, which bayan 1.11.1's JSON sublib requires. The CLI and
+  every cross target build with 0 warnings; the PE build's last two
+  unrouted-syscall warnings are gone. `lib/bench.cyr` is byte-identical to
+  6.6.20's, so both sides of the benchmarks below use the same instrument.
+- **bayan `1.5.12` → `1.11.1`**, the latest tag and the bayan cyrius 6.7.18
+  folds (commit `965298d`; 6.7.18's `lib/bayan.cyr` is byte-identical to that
+  tag's bundle). The seven `bayan_json_v_*` calls behind
+  `profile_from_json_str` keep their names and arguments. `is_obj` and
+  `is_str` now return `bool`, which the existing `== 0` tests still read.
+- **`cyrius.lock`** has 52 file rows and pins bayan 1.11.1 only. CI's sequence
+  (`lib sync`, `deps`, `deps --verify`, the content compare) reproduces it byte
+  for byte. `deps` now prints a note that `lib/hashmap_fast.cyr`, which
+  `lib sync` copies, is outside its footprint. The file stays in `lib/` and in
+  the lock, so the check still agrees.
+- **None of 6.7.x's language changes reaches this code.** Checked:
+  - before 6.7.3 a lone `!` was dropped (`!x` compiled as `x`); the three in
+    `src/` are in comments;
+  - since 6.7.16 a `u8`/`i16`/`i32` parameter is narrowed; `src/` has none;
+  - newly reserved words (`trait`, `const`, `true`/`false`, `do`, `dyn`), the
+    struct-literal and struct-result refusals, and 6.7.11's new lint rules:
+    the build has 0 warnings and `lint --strict` passes on every file.
+- **`cyrius tests` was removed in 6.7.12.** CONTRIBUTING and the testing guide
+  now say `cyrius test tests/tcyr`, which runs the 15 units.
+
+### Consumers
+
+- **`profile_from_json_str` refuses a duplicate key and a leading-zero
+  number** and returns 0, as it does for any malformed document. Through
+  2.4.2, `{"memory_bytes":5,"memory_bytes":7}` gave a profile with the first
+  value, and `"memory_bytes":05` read as 5. bayan 1.11.1 refuses both
+  (RFC 8259). `tests/tcyr/json_roundtrip_test.tcyr` gains both cases (950 →
+  952 assertions); they fail against 2.4.2.
+- **A consumer that supplies bayan 1.11.1** for `profile_from_json_str` gets
+  `math`, `slice` and `hashseed` as well, through bayan's own sidecar and
+  `# Requires` block.
+- **`dist/ai-hwaccel.cyr` differs from 2.4.2's in its version line only.** Its
+  `# Requires` block is the same 12 leaves. On 6.7.18 a consumer that includes
+  only the bundle builds and finds the CLI's profiles, with bayan included
+  first (0 undefined functions) or without it (the 7 `bayan_json_*`, as
+  before).
+
+### Performance
+
+**17 neutral, 1 faster from the toolchain, 1 slower from bayan, 0 regressions
+in ai-hwaccel's code** (2.4.2 on cyrius 6.6.20 → 2.5.0 on 6.7.18). Same method
+as 2.4.2: each arm built at 5 code layouts, the three floor-bound rows
+batch-timed (†), and 80 rounds per suite, shuffled and pinned to one CPU.
+
+| row | 2.4.2 | 2.5.0 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 12.91 µs | 12.97 µs | +0.5% | 0.28 | neutral |
+| `parse_vulkan_2gpu` | 2.41 µs | 2.37 µs | −1.8% | 0.14 | neutral |
+| `parse_neuron_2dev` | 1.55 µs | 1.55 µs | −0.3% | 0.80 | neutral |
+| `detect_safetensors` † | 392.9 ns | 393.1 ns | +0.1% | 0.98 | neutral |
+| `detect_gguf` † | 35.8 ns | 35.8 ns | 0.0% | 0.96 | neutral |
+| `parse_vulkan_summary_renoir` | 14.38 µs | 14.09 µs | −2.0% | <0.01 | faster (toolchain) |
+| `vulkan_heaps_uhd600` | 587.22 µs | 581.56 µs | −1.0% | 0.13 | neutral |
+| `best_available_13dev` † | 169.8 ns | 167.2 ns | −1.5% | 0.14 | neutral |
+| `total_memory_13dev` | 97.6 ns | 97.6 ns | 0.0% | 0.79 | neutral |
+| `has_accelerator_13dev` | 17.4 ns | 17.4 ns | −0.1% | 0.02 | neutral |
+| `plan_70B_bf16_4gpu` | 1.39 µs | 1.40 µs | +0.4% | 0.20 | neutral |
+| `count_family_gpu_13dev` | 232.2 ns | 232.0 ns | −0.1% | 0.37 | neutral |
+| `json_serialize_13dev` | 21.93 µs | 21.85 µs | −0.4% | <0.01 | neutral |
+| `json_summary_13dev` | 3.02 µs | 3.03 µs | +0.3% | 0.17 | neutral |
+| `json_system_io` | 4.87 µs | 4.87 µs | 0.0% | 0.90 | neutral |
+| `json_plan` | 16.32 µs | 16.25 µs | −0.4% | 0.03 | neutral |
+| `json_training` | 2.35 µs | 2.36 µs | +0.2% | 0.25 | neutral |
+| `dedup_17dev` | 845.2 ns | 844.5 ns | −0.1% | 0.76 | neutral |
+| `profile_from_json_cuda` (new) | 4.66 µs | 6.92 µs | +48% | — | slower (bayan 1.11.1) |
+
+A verdict needs p < 0.01 and |Δ| > 1%. No measured ai-hwaccel code changed.
+
+- **`parse_vulkan_summary_renoir` is faster on 6.7.18.** −1.6% at 7 larger
+  layouts per arm (a never-called pad of 0 to about 31 KiB ahead of `src/`):
+  14.33–14.44 µs on 6.6.20, 14.08–14.19 µs on 6.7.18, ranges apart. It wins
+  back part of the +2.1% recorded at 2.4.1.
+- **`profile_from_json_str` is about 50% slower, justified.** bayan 1.11.1
+  reads JSON through bounds-checked slices and keeps a set to refuse
+  duplicate keys. Its changelog prices that at about 1.5×, and it closes
+  findings from cyrius 6.7.18's security audit. No suite row covered the
+  function, so `benches/registry.bcyr` gains `profile_from_json_cuda` (one CUDA
+  profile's `profile_to_json` output, 20 000 parses per window), appended last
+  so the rows above keep their layout. It was added after the A/B above, so
+  its two columns come from the row itself run alternately, 6 times per
+  version (2.4.2 4.66–4.74 µs, 2.5.0 6.89–7.09 µs). A separate 30-round run on
+  a profile with more fields gave 5.59 → 8.42 µs (+50.6%). The function runs
+  once per profile a consumer rebuilds from JSON; the CLI never calls it.
+- `vulkan_heaps_uhd600` is −0.8% at the larger layouts (p 0.001), under the
+  bar.
+
+In `bench-history.csv`, the `4d689d5` rows at 23:54:48Z are 2.4.2, measured on
+the clean tree before any change. The `4d689d5-dirty` rows at 2026-10-29
+00:09:39Z are 2.5.0 and include the new row.
+
+| binary | 2.4.2 (6.6.20) | 2.5.0 (6.7.18) | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 258 616 | 199 296 | −59 320 |
+| x86_64 ELF, no DCE | 541 240 | 522 880 | −18 360 |
+| ELF-aarch64 | 676 224 | 616 880 | −59 344 |
+| PE, as shipped (no DCE) | 655 872 | 642 048 | −13 824 |
+| agnos, `CYRIUS_DCE=1` | 256 656 | 193 408 | −63 248 |
+| Mach-O arm64 (cross-built) | 672 252 | 655 868 | −16 384 |
+
+The drop is static data, not code. In the x86_64 DCE binary `.text` grows by
+448 B, while `.bss`, which cyrius's ELF writer stores in the file, goes from
+75 704 to 15 912 B. cyrius 6.7.11's changelog records the cause: the sakshi
+2.5.10 fold cut sakshi's static data from 69 232 to 9 088 B. A five-line
+program built with this repo's manifest drops from 107 224 to 43 800 B the
+same way.
+
+### Verified
+
+- **Tests:** 952 assertions in 15 units pass through CI's loop and through
+  `cyrius test tests/tcyr`; fuzz 6/6. Apart from the two new assertions, the
+  gate output (the test units' `undefined function` warnings included) is
+  identical to 2.4.2's.
+- **CI gates**, replayed on a fresh copy of the tree: fmt, lint (`--strict`,
+  0 warnings in `src/`), vet (38 deps, 0 untrusted), raw-offset guard,
+  `cyrius.lock` current (52 entries), DCE build, `distlib
+  --no-default-features` fresh and deterministic, and version and
+  Python-bindings version consistency.
+- **CLI output** is identical between 2.4.2 on 6.6.20 and 2.5.0 on 6.7.18 on
+  17 invocations, on x86_64 with and without DCE and on ELF-aarch64 under
+  `qemu-aarch64`. Only `--version` differs. Live sensor fields are masked.
+- **`ecb`** (Apple M5 Pro): the cross-built Mach-O matches 2.4.2's on 18 runs
+  apart from `--version`. CPU memory equals `hw.memsize`; the Metal GPU and the
+  Neural Engine are found; stderr is silent at the default level. `ecb` has
+  cyrius up to 6.7.15, so the wheel's native macOS staging was not run.
+- **`cass`** (Windows 11): the PE as `stage_win_cross.sh` builds it matches
+  2.4.2's on the same 18 runs apart from `--version`. CPU memory equals CIM's
+  `TotalPhysicalMemory`, DXGI finds the UHD 600, and stderr is silent at the
+  default level.
+- **Not verified:** the wheels were not built or installed, and the CI
+  workflows have not run on this tree.
+
 ## [2.4.2] — 2026-10-28 — cyrius 6.6.20, bayan 1.5.12
 
 A toolchain and dependency bump. The CLI's output does not change.

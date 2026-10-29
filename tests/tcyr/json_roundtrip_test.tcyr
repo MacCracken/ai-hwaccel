@@ -134,6 +134,10 @@ fn test_roundtrip_shared_memory() {
 fn test_from_json_malformed() {
     assert_eq(profile_from_json_str("not json"), 0, "malformed -> 0");
     assert_eq(profile_from_json_str("[1,2,3]"), 0, "array root -> 0");
+    # bayan 1.11.1 (2.5.0) refuses both; through 2.4.2 the first kept the
+    # first value and the second read 05 as 5.
+    assert_eq(profile_from_json_str("{\"accel_type_id\":1,\"memory_bytes\":5,\"memory_bytes\":7}"), 0, "duplicate key -> 0");
+    assert_eq(profile_from_json_str("{\"accel_type_id\":1,\"memory_bytes\":05}"), 0, "leading zero -> 0");
     return 0;
 }
 

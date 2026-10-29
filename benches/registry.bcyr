@@ -313,4 +313,26 @@ while (ri < 20000) {
 bench_batch_stop(b11, 20000);
 bench_report(b11);
 
+# --- profile JSON parse (2.5.0) ---
+# profile_from_json_str on one CUDA profile's profile_to_json output. bayan
+# 1.11.1 made this parse ~50% slower (bounds-checked reads, duplicate-key
+# set) and no row saw it. Appended last so the rows above keep their layout.
+
+var pj_p = vec_get(mock_profs, 1);
+profile_set_driver_version(pj_p, "535.104.05");
+profile_set_compute_cap(pj_p, "8.0");
+var pj_sb = str_builder_new();
+profile_to_json(pj_sb, pj_p);
+var pj_js = str_data(str_builder_build(pj_sb));
+
+var b12 = bench_new("profile_from_json_cuda");
+bench_batch_start(b12);
+ri = 0;
+while (ri < 20000) {
+    profile_from_json_str(pj_js);
+    ri = ri + 1;
+}
+bench_batch_stop(b12, 20000);
+bench_report(b12);
+
 syscall(60, 0);

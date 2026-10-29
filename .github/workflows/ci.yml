@@ -57,7 +57,7 @@ jobs:
         run: cyrius deps
 
       - name: Verify dep hashes
-        # `cyrius.lock` pins the bayan commit, a SHA-256 for each of the 50
+        # `cyrius.lock` pins the bayan commit, a SHA-256 for each of the 52
         # vendored lib files, and the cyrius pin (its last line).
         #
         # A stale lock already fails the step above: since cyrius 6.6.4,
@@ -78,7 +78,7 @@ jobs:
             echo "Run 'cyrius lib sync && cyrius deps' locally and commit cyrius.lock."
             exit 1
           fi
-          echo "cyrius.lock is current (50 entries, content-compared)."
+          echo "cyrius.lock is current (52 entries, content-compared)."
 
       - name: Include-graph audit
         # `cyrius vet` walks every `include` from src/main.cyr and

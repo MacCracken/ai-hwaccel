@@ -12,9 +12,9 @@ decide how to quantize and shard a model across them.
 
 | Metric | Value |
 |--------|-------|
-| Binary size | **259 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
-| Compiler | Cyrius cycc 6.6.20 |
-| Tests | 950 assertions (15 test units) |
+| Binary size | **199 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
+| Compiler | Cyrius cycc 6.7.18 |
+| Tests | 952 assertions (15 test units) |
 | Fuzz harnesses | 6 |
 | Dependencies | **0** third-party (bayan's JSON sublib: first-party, optional) |
 | Hardware families | 18 |
@@ -95,7 +95,7 @@ Wire it from a consumer's `cyrius.cyml`:
 ```toml
 [deps.ai-hwaccel]
 git = "https://github.com/MacCracken/ai-hwaccel.git"
-tag = "2.4.2"
+tag = "2.5.0"
 modules = ["dist/ai-hwaccel.cyr"]
 ```
 

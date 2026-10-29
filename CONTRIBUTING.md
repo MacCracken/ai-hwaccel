@@ -7,7 +7,7 @@ started, what we expect from contributions, and how the review process works.
 
 1. **Fork and clone** the repository.
 2. Install the Cyrius toolchain at the version `cyrius.cyml` pins
-   (`cyrius = "6.6.20"`).
+   (`cyrius = "6.7.18"`).
 3. Vendor the standard library and dependencies into `lib/` (gitignored). Run
    both commands, in this order; `lib sync` alone leaves `lib/` incomplete:
 
@@ -24,7 +24,7 @@ Run everything from the repository root (some tests read `tests/fixtures/`):
 
 ```sh
 CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # build the CLI
-cyrius tests tests/tcyr                                   # 15 test units
+cyrius test tests/tcyr                                    # 15 test units
 cyrius fuzz                                               # 6 fuzz harnesses
 cyrius vet src/main.cyr                                   # include-graph audit
 for f in src/*.cyr src/detect/*.cyr; do cyrius lint --strict "$f"; done   # fails on a warning
