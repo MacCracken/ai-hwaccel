@@ -12,6 +12,11 @@ Linux dev host (Ryzen 7 5800H, Radeon iGPU), a whole CLI run takes about
 takes under 2 ms. Each installed tool adds its own startup time, typically tens
 of milliseconds, often more for `nvidia-smi` on a many-GPU host.
 
+On Windows, `vulkaninfo` runs since 2.5.3 and costs far more: about 0.9 s per
+run on `cass` (a Celeron J4125), where the whole 2.5.2 run took 0.14 s. It
+runs once: Windows sizes an integrated GPU from DXGI rather than from a second,
+full `vulkaninfo` run.
+
 A tool that prints nothing for 10 s is killed and reported as a timeout
 (2.5.1), so a hung tool delays detection by that much, not for ever.
 

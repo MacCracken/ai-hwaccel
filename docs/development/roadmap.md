@@ -11,37 +11,24 @@ platform validation come before new features. What already shipped is in
 Fix what ai-hwaccel reports wrong today, and close the CI gaps that let those
 bugs ship. This was the 2.4.x plan; 2.5.0 shipped first, as the cyrius 6.7.18
 toolchain release, 2.5.1 shipped the fixes and CI gates that could be made
-and checked in this repo, and 2.5.2 the lazy registry's per-family detection.
+and checked in this repo, 2.5.2 the lazy registry's per-family detection, and
+2.5.3 vendor tools on Windows with the duplicate pass that builds on them.
 
 ### Later in 2.5.x
 
-Work that needs new platform reach or a decision first: running vendor tools
-on Windows and what builds on it, a macOS runner, and the PE build flag.
+A tool's exit status, a macOS runner, and the PE build flag.
 
-#### Windows tools and the duplicate pass
+#### Tool results
 
-- [ ] **No `pci_id` on oneAPI, Windows or Apple GPU profiles.** The duplicate
-  pass matches on `pci_id`, which only the CUDA, ROCm and Vulkan detectors
-  set. An Intel Data Center GPU that both `xpu-smi` and `vulkaninfo` report is
-  therefore listed twice. DXGI profiles need one too (next items).
-- [ ] **Integrated GPUs on Windows report their dedicated carve-out.** An
-  integrated (UMA) adapter's `DedicatedVideoMemory` is its boot-time carve-out
-  (128 MiB on an Intel UHD 600), not the shared system memory it can also use
-  (`SharedSystemMemory`, typically half of RAM). Reporting the shared budget
-  needs an integrated-vs-discrete signal, which `DXGI_ADAPTER_DESC1` does not
-  carry. `vulkaninfo` has both the signal (`deviceType`) and the size (the
-  device-local heap: 4 202 799 104 bytes on `cass`, half its RAM), once tools
-  run on Windows at all (next item).
-- [ ] **No vendor tool ever runs on Windows.** `which()` (`src/detect/command.cyr`)
-  splits `PATH` on `:` and looks for the bare name. Windows separates with `;`,
-  has drive letters and needs `.exe`. So every `run_tool` backend reports
-  "tool not found" there: `nvidia-smi`, `vulkaninfo` (`cass` has
-  `C:\Windows\System32\vulkaninfo.exe`) and the rest. GPUs are still found,
-  through DXGI, but with no CUDA details. Fixing it adds CUDA and Vulkan
-  profiles next to the DXGI ones. The duplicate pass would drop them once DXGI
-  profiles carry a `pci_id` (`DXGI_ADAPTER_DESC1` has `VendorId` and
-  `DeviceId`) and count as the survivor for Vulkan. CUDA's profile should then
-  win over DXGI's.
+- [ ] **A tool that runs and fails leaves no trace.** `run_tool`
+  (`src/detect/command.cyr`) ignores the exit status, and on Linux and macOS
+  it reads stdout only, so a tool that exits non-zero with its error on stderr
+  returns empty output and no warning. Found in 2.5.3: 2.5.2's `xpu-smi` call
+  passed `--dump` and its value as one argument; a stand-in that rejects
+  that, as Intel's documentation suggests the real parser does, exited 106,
+  and the registry said nothing about it. Push `warning_tool_failed` with the exit status when a tool exits
+  non-zero, and check each detector's tool for statuses that are not
+  failures.
 
 #### Build and CI
 
@@ -91,7 +78,11 @@ work.
     covering the per-core count math.
   - [ ] Intel Gaudi 3: `hl-smi --query-aip` (AWS DL2), locking in the HL-325
     device-name override.
-  - [ ] Intel Data Center GPU Max: HBM vs DDR memory tiers.
+  - [ ] Intel Data Center GPU Max: HBM vs DDR memory tiers, and
+    `xpu-smi discovery --dump 1,2,16,24` from any oneAPI GPU. The parser
+    (2.5.3) follows the XPU Manager V1.x user guide's CSV format and maps
+    columns by header label; it has not met real output, and V2.x was not
+    checked.
   - [ ] `vulkaninfo` (`--summary` and full) from more drivers: Intel ANV on
     Linux; lavapipe alone (it must not be reported); RADV and AMDVLK installed
     together (two Vulkan devices for one AMD GPU); MoltenVK on macOS and

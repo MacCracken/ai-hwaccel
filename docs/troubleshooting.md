@@ -13,8 +13,10 @@ Common issues and their solutions.
 - Verify: `which nvidia-smi` should return a path.
 - In containers, ensure the NVIDIA runtime is configured (`--gpus all` for Docker).
 
-On Windows no vendor tool runs yet (see the roadmap), so the warnings always
-name them. The GPUs are still found, as Windows GPU profiles, through DXGI.
+On Windows, `nvidia-smi.exe` must be on `PATH` (recent drivers put it in
+System32; older ones in `C:\Program Files\NVIDIA Corporation\NVSMI`). Through
+2.5.2 no vendor tool ran on Windows, whatever `PATH` held. The GPUs are found
+through DXGI either way, as Windows GPU profiles.
 
 The `warnings` array names each missing tool once (2.5.1), and each run of a
 tool that failed or timed out. The interconnect pass looks for `nvidia-smi`

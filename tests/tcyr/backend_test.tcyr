@@ -136,6 +136,61 @@ fn test_intel_profiles() {
 
 # --- AMD XDNA ---
 
+# --- xpu-smi discovery --dump (2.5.3) ---
+# Inline output in the format Intel's XPU Manager V1.x user guide documents for
+# `xpu-smi discovery --dump`: a header of property labels, then a CSV row per
+# device, strings quoted. Not a capture from hardware.
+
+fn test_xpu_smi_dump() {
+    var out = str_from("Device ID,Device Name,Memory Physical Size,PCI Device ID\n0,\"Intel(R) Data Center GPU Max 1550\",\"131072.00 MiB\",\"0x0bd5\"\n1,\"Intel(R) Data Center GPU Max 1550\",\"131072.00 MiB\",\"0x0bd5\"\n");
+    var profs = vec_new();
+    var w = vec_new();
+    assert_eq(parse_xpu_smi_dump(out, profs, w), 2, "max 1550 x2: two profiles");
+    assert_eq(vec_len(w), 0, "max 1550 x2: no warning");
+    var p = vec_get(profs, 1);
+    assert_eq(profile_accel_type(p), ACCEL_INTEL_ONEAPI, "oneapi type");
+    assert_eq(profile_device_id(p), 1, "device id from its column");
+    assert_streq(profile_device_name(p), "Intel(R) Data Center GPU Max 1550", "name, unquoted");
+    assert_eq(profile_memory_bytes(p), 128 * BYTES_PER_GIB, "131072 MiB");
+    assert_eq(profile_pci_id(p), pci_id_make(0x8086, 0x0BD5), "pci_id 8086:0bd5");
+    return 0;
+}
+
+# Columns are found by label, in any order; N/A falls back (16 GiB, row index);
+# CRLF lines and a comma inside a quoted name parse.
+fn test_xpu_smi_dump_order_and_gaps() {
+    var out = str_from("Device Name,PCI Device ID,Device ID,Memory Physical Size\r\n\"Intel(R) Arc(TM) A770 Graphics\",\"0x56a0\",N/A,\"N/A\"\r\n\"Intel(R) Graphics, rev 2\",\"N/A\",3,\"16384.00 MiB\"\r\n");
+    var profs = vec_new();
+    assert_eq(parse_xpu_smi_dump(out, profs, vec_new()), 2, "reordered: two profiles");
+    var a = vec_get(profs, 0);
+    var b = vec_get(profs, 1);
+    assert_streq(profile_device_name(a), "Intel(R) Arc(TM) A770 Graphics", "reordered: name");
+    assert_eq(profile_pci_id(a), pci_id_make(0x8086, 0x56A0), "reordered: pci_id");
+    assert_eq(profile_device_id(a), 0, "N/A device id: the row index");
+    assert_eq(profile_memory_bytes(a), 16 * BYTES_PER_GIB, "N/A memory: 16 GiB");
+    assert_streq(profile_device_name(b), "Intel(R) Graphics, rev 2", "quoted comma kept");
+    assert_eq(profile_device_id(b), 3, "device id 3");
+    assert_eq(profile_memory_bytes(b), 16 * BYTES_PER_GIB, "16384 MiB");
+    assert_eq(profile_pci_id(b), 0, "N/A pci id: none");
+    return 0;
+}
+
+# xpu-smi prints a service error with exit status 0: no profile, a warning.
+# Empty output and a bare header (no device) are answers, not errors.
+fn test_xpu_smi_dump_errors() {
+    var w = vec_new();
+    var profs = vec_new();
+    assert_eq(parse_xpu_smi_dump(str_from("Error: XPUM Service Status Error. \n"), profs, w), 0, "service error: no profile");
+    assert_eq(vec_len(w), 1, "service error: one warning");
+    assert_eq(warning_code(vec_get(w, 0)), HWA_ERR_PARSE, "service error: a parse warning");
+    var w2 = vec_new();
+    assert_eq(parse_xpu_smi_dump(str_from(""), profs, w2), 0, "empty: no profile");
+    assert_eq(parse_xpu_smi_dump(str_from("Device ID,Device Name,Memory Physical Size,PCI Device ID\n"), profs, w2), 0, "header only: no profile");
+    assert_eq(vec_len(w2), 0, "empty, header only: no warning");
+    assert_eq(vec_len(profs), 0, "nothing pushed");
+    return 0;
+}
+
 fn test_amd_xdna_profile() {
     var xp = profile_new(ACCEL_AMD_XDNA, 0, 2 * BYTES_PER_GIB);
     assert_eq(profile_family(xp), FAMILY_NPU, "XDNA = NPU");
@@ -258,6 +313,9 @@ test_edge_defaults();
 test_cloud_asic_defaults();
 test_intel_profiles();
 test_amd_xdna_profile();
+test_xpu_smi_dump();
+test_xpu_smi_dump_order_and_gaps();
+test_xpu_smi_dump_errors();
 test_all_backend_names();
 
 var fails = assert_summary();

@@ -34,7 +34,7 @@ src/
     rocm.cyr             AMD via sysfs (/sys/class/drm, amdgpu)
     apple.cyr            Metal GPU + Neural Engine via sysctl (system_profiler fallback), Asahi device tree
     vulkan.cyr           Vulkan via vulkaninfo, or a sysfs scan of the DRM cards
-    windows.cyr          Windows GPUs via DXGI adapter enumeration (wmic fallback)
+    windows.cyr          Windows GPUs via DXGI adapter enumeration, PCI IDs (wmic fallback)
     tpu.cyr              Google TPU via sysfs (/sys/class/accel)
     gaudi.cyr            Intel Gaudi via hl-smi CSV
     neuron.cyr           AWS Neuron via neuron-ls JSON, or /dev/neuron*
@@ -63,10 +63,12 @@ registry_detect_with_opts(mask, allow_exec)
                                        tools only when allow_exec is 1
                                        (registry_run_detectors)
   3. registry_post_passes = registry_profile_passes (a-d) + registry_system_passes (e-g):
-     a. duplicate devices              profiles_dedup: a Vulkan profile with a CUDA or
-                                       ROCm profile's PCI vendor:device ID, or a Vulkan
-                                       iGPU next to Apple's Metal GPU, is dropped; the
-                                       survivor keeps its own memory and fields
+     a. duplicate devices              profiles_dedup: of the profiles with one PCI
+                                       vendor:device ID, the best-ranked survives (CUDA,
+                                       ROCm or oneAPI, then Windows DXGI, then Vulkan),
+                                       with its own memory and fields; a Vulkan iGPU next
+                                       to Apple's Metal GPU is dropped; a Windows GPU
+                                       takes its integrated Vulkan view's shared size
      b. bandwidth enrichment           clock x bus width, or an estimate
      c. PCIe enrichment                sysfs link speed x width
      d. NUMA enrichment                sysfs numa_node

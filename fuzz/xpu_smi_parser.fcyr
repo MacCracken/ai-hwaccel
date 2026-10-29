@@ -1,0 +1,103 @@
+# Fuzz: xpu-smi `discovery --dump` parser (2.5.3)
+# Exercises parse_xpu_smi_dump with valid, empty, malformed and mutated input.
+
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/vec.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/io.cyr"
+include "lib/syscalls.cyr"
+include "lib/fs.cyr"
+include "lib/tagged.cyr"
+include "lib/process.cyr"
+
+include "src/units.cyr"
+include "src/error.cyr"
+include "src/types.cyr"
+include "src/quantization.cyr"
+include "src/profile.cyr"
+include "src/system_io.cyr"
+include "src/detect/platform.cyr"
+include "src/detect/command.cyr"
+include "src/detect/vulkan.cyr"
+include "src/detect/intel.cyr"
+
+# Every profile has memory, and a pci_id that is 0 or Intel's.
+fn fz_check(profs) {
+    var i = 0;
+    while (i < vec_len(profs)) {
+        var p = vec_get(profs, i);
+        if (profile_memory_bytes(p) <= 0) { return 0; }
+        var pid = profile_pci_id(p);
+        if (pid != 0 && (pid >> 16) != PCI_VENDOR_INTEL) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+alloc_init();
+
+# Valid: the documented layout, two devices.
+var good = "Device ID,Device Name,Memory Physical Size,PCI Device ID\r\n0,\"Intel(R) Data Center GPU Max 1550\",\"131072.00 MiB\",\"0x0bd5\"\r\n1,\"Intel(R) Data Center GPU Max 1550\",\"131072.00 MiB\",\"0x0bd5\"\r\n";
+var p1 = vec_new();
+if (parse_xpu_smi_dump(str_from(good), p1, vec_new()) != 2) { syscall(60, 1); }
+if (fz_check(p1) == 0) { syscall(60, 2); }
+
+# Empty, garbage, a header alone, a service error.
+var p3 = vec_new();
+parse_xpu_smi_dump(str_from(""), p3, vec_new());
+parse_xpu_smi_dump(str_from("not csv at all"), p3, vec_new());
+parse_xpu_smi_dump(str_from("Device ID"), p3, vec_new());
+parse_xpu_smi_dump(str_from("Error: XPUM Service Status Error. \n"), p3, vec_new());
+if (vec_len(p3) != 0) { syscall(60, 3); }
+
+# Every byte replaced in turn by each of a few structural bytes, then cut
+# short there: nothing may crash, the profile count never exceeds the rows,
+# and every profile keeps its invariants.
+var subs = ",\"\n\r 0xN";
+var nsub = strlen(subs);
+var glen = strlen(good);
+var pos = 0;
+while (pos < glen) {
+    var si = 0;
+    while (si < nsub) {
+        var buf = alloc(glen + 1);
+        memcpy(buf, good, glen);
+        store8(buf + glen, 0);
+        store8(buf + pos, load8(subs + si));
+        var pm = vec_new();
+        parse_xpu_smi_dump(str_new(buf, glen), pm, vec_new());
+        if (vec_len(pm) > 3) { syscall(60, 4); }
+        if (fz_check(pm) == 0) { syscall(60, 5); }
+        var pc = vec_new();
+        parse_xpu_smi_dump(str_new(buf, pos), pc, vec_new());
+        if (fz_check(pc) == 0) { syscall(60, 5); }
+        si = si + 1;
+    }
+    pos = pos + 1;
+}
+
+# Malformed fields: an unterminated quote, huge numbers, bad hex, short rows.
+var bad = "Device ID,Device Name,Memory Physical Size,PCI Device ID\n99999999999999999999999,\"unterminated,\"9999999999999999999999 MiB\",\"0xFFFFFFFFFFFFFFFFFF\"\n,\n\"\"\n7\n";
+var p6 = vec_new();
+parse_xpu_smi_dump(str_from(bad), p6, vec_new());
+if (fz_check(p6) == 0) { syscall(60, 6); }
+# 2^44 MiB times 2^20 wraps to a small positive size without the bound.
+var p8 = vec_new();
+parse_xpu_smi_dump(str_from("Device ID,Memory Physical Size\n0,\"17592186044417.00 MiB\"\n"), p8, vec_new());
+if (profile_memory_bytes(vec_get(p8, 0)) != 16 * BYTES_PER_GIB) { syscall(60, 8); }
+
+# Many devices.
+var sb = str_builder_new();
+str_builder_add_cstr(sb, "Device ID,Device Name,Memory Physical Size,PCI Device ID\n");
+var di = 0;
+while (di < 200) {
+    str_builder_add_int(sb, di);
+    str_builder_add_cstr(sb, ",\"GPU\",\"1024.00 MiB\",\"0x56a0\"\n");
+    di = di + 1;
+}
+var p7 = vec_new();
+if (parse_xpu_smi_dump(str_builder_build(sb), p7, vec_new()) != 200) { syscall(60, 7); }
+
+syscall(60, 0);

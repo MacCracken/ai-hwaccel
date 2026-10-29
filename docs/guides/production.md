@@ -68,8 +68,12 @@ FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
 # nvidia-smi is included in the CUDA runtime image
 ```
 
-On Windows no vendor tool runs yet (the PATH lookup does not understand
-Windows paths; see the roadmap). GPUs are still found, through DXGI.
+On Windows the tools are found through `PATH` like anywhere else (2.5.3), and
+DXGI lists every GPU without one. `vulkaninfo` (Windows' Vulkan Runtime puts it
+in System32) is what tells an integrated GPU from a discrete one there. It
+takes about 0.9 s per run on a low-end Celeron, where 2.5.2's detection took
+0.14 s, so cache the registry on such hosts, or detect with
+`registry_detect_no_exec()` when the carve-out figure is enough.
 
 ## Caching
 

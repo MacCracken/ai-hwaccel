@@ -783,6 +783,115 @@ fn test_dedup_apple() {
 # kept, and a second pass drops nothing.
 var _lcg = 12345;
 
+# --- Windows GPUs and oneAPI in the duplicate pass (2.5.3) ---
+
+# The twin is the best-ranked view of the same pci_id: a vendor backend
+# (CUDA, ROCm, oneAPI) over DXGI over Vulkan, whatever the list order.
+fn test_dedup_twin_ranks() {
+    var vk = _gpu(ACCEL_VULKAN, 0x10DE, 0x2684, "RTX 4090", 4 * BYTES_PER_GIB);
+    var dx = _gpu(ACCEL_WIN_GPU, 0x10DE, 0x2684, "RTX 4090", 24 * BYTES_PER_GIB);
+    var cu = _gpu(ACCEL_CUDA, 0x10DE, 0x2684, "RTX 4090", 24 * BYTES_PER_GIB);
+    var v = vec_new();
+    vec_push(v, vk);
+    vec_push(v, dx);
+    assert(_dedup_twin(v, vk) == dx, "vulkan with dxgi: dxgi");
+    assert_eq(_dedup_twin(v, dx), 0, "dxgi with vulkan only: none");
+    vec_push(v, cu);
+    assert(_dedup_twin(v, vk) == cu, "vulkan with dxgi then cuda: cuda");
+    assert(_dedup_twin(v, dx) == cu, "dxgi with cuda: cuda");
+    assert_eq(_dedup_twin(v, cu), 0, "cuda: never a view");
+    var w = vec_new();
+    var max = _gpu(ACCEL_INTEL_ONEAPI, 0x8086, 0x0BD5, "Max 1550", 128 * BYTES_PER_GIB);
+    var wdx = _gpu(ACCEL_WIN_GPU, 0x8086, 0x0BD5, "Max 1550", 128 * BYTES_PER_GIB);
+    vec_push(w, wdx);
+    vec_push(w, max);
+    assert(_dedup_twin(w, wdx) == max, "dxgi with oneapi: oneapi");
+    assert_eq(_dedup_twin(w, profile_cpu(BYTES_PER_GIB)), 0, "cpu: never a view");
+    return 0;
+}
+
+# cass end to end: DXGI's UHD 600 (8086:3185, its 128 MiB carve-out) and
+# vulkaninfo's view of it, parsed from the captured --summary and sized from
+# the captured full output, in the order registry_run_detectors pushes them.
+# Through 2.5.2 both stayed and the GPU counted its 128 MiB as its own.
+fn test_dedup_cass_uhd600() {
+    var profs = vec_new();
+    vec_push(profs, profile_cpu(8405598208));
+    var ids = vec_new();
+    _parse_vulkaninfo_ids(_fixture("tests/fixtures/vulkaninfo/uhd600-windows-summary.txt"), profs, ids);
+    vulkan_size_shared(profs, 1, ids, _fixture("tests/fixtures/vulkaninfo/uhd600-windows-full.txt"));
+    var dx = _gpu(ACCEL_WIN_GPU, 0x8086, 0x3185, "Intel(R) UHD Graphics 600", 134217728);
+    vec_push(profs, dx);
+    assert_eq(vec_len(profs), 3, "cpu, vulkan view, dxgi");
+    assert_eq(profiles_dedup(profs), 1, "uhd600: the Vulkan view is dropped");
+    assert_eq(vec_len(profs), 2, "uhd600: cpu and one gpu");
+    assert(vec_get(profs, 1) == dx, "uhd600: the Windows GPU survives");
+    assert_eq(profile_memory_bytes(dx), 4202799104, "uhd600: memory is the Vulkan heap");
+    assert_eq(profile_shared_mem(dx), 4202799104, "uhd600: all of it shared");
+    var r = registry_from_profiles(profs);
+    assert_eq(reg_total_memory(r), 8405598208, "uhd600: system RAM counted once");
+    assert_eq(reg_total_accel_memory(r), 4202799104, "uhd600: accelerator memory is the heap");
+    return 0;
+}
+
+# A discrete card, and an AMD APU, whose Vulkan view is not on system RAM:
+# DXGI's own figure stays (VRAM; the APU's carve-out, as ROCm reports it on
+# Linux).
+fn test_dedup_dxgi_keeps_own_memory() {
+    var v = vec_new();
+    var rx = _gpu(ACCEL_WIN_GPU, 0x1002, 0x73FF, "AMD Radeon RX 6600", 8 * BYTES_PER_GIB);
+    var apu = _gpu(ACCEL_WIN_GPU, 0x1002, 0x1638, "AMD Radeon(TM) Graphics", 512 * 1024 * 1024);
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x73FF, "AMD Radeon RX 6600", 4 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x1638, "AMD Radeon(TM) Graphics", 4 * BYTES_PER_GIB));
+    vec_push(v, rx);
+    vec_push(v, apu);
+    assert_eq(profiles_dedup(v), 2, "both Vulkan views dropped");
+    assert_eq(profile_memory_bytes(rx), 8 * BYTES_PER_GIB, "discrete: VRAM kept");
+    assert_eq(profile_shared_mem(rx), 0, "discrete: nothing shared");
+    assert_eq(profile_memory_bytes(apu), 512 * 1024 * 1024, "apu: carve-out kept");
+    return 0;
+}
+
+# A Windows laptop with an NVIDIA card and an Intel iGPU, each listed by CUDA
+# or DXGI and by Vulkan: CUDA's profile and the DXGI iGPU survive, and the
+# iGPU takes its Vulkan view's shared heap.
+fn test_dedup_cuda_over_dxgi() {
+    var v = vec_new();
+    var cuda = _gpu(ACCEL_CUDA, 0x10DE, 0x2684, "NVIDIA GeForce RTX 4090", 24 * BYTES_PER_GIB);
+    var igpu = _gpu(ACCEL_WIN_GPU, 0x8086, 0xA780, "Intel(R) UHD Graphics 770", 128 * 1024 * 1024);
+    var ivk = _gpu(ACCEL_VULKAN, 0x8086, 0xA780, "Intel(R) UHD Graphics 770", 16 * BYTES_PER_GIB);
+    profile_set_shared_mem(ivk, 16 * BYTES_PER_GIB);
+    vec_push(v, cuda);
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x10DE, 0x2684, "NVIDIA GeForce RTX 4090", 4 * BYTES_PER_GIB));
+    vec_push(v, ivk);
+    vec_push(v, _gpu(ACCEL_WIN_GPU, 0x10DE, 0x2684, "NVIDIA GeForce RTX 4090", 24 * BYTES_PER_GIB));
+    vec_push(v, igpu);
+    assert_eq(profiles_dedup(v), 3, "laptop: three views dropped");
+    assert_eq(vec_len(v), 2, "laptop: two GPUs");
+    assert(vec_get(v, 0) == cuda, "laptop: CUDA's profile first");
+    assert(vec_get(v, 1) == igpu, "laptop: then the DXGI iGPU");
+    assert_eq(profile_shared_mem(igpu), 16 * BYTES_PER_GIB, "laptop: iGPU heap, shared");
+    assert_eq(profile_memory_bytes(cuda), 24 * BYTES_PER_GIB, "laptop: CUDA memory untouched");
+    return 0;
+}
+
+# oneAPI outranks DXGI and Vulkan; a profile without a pci_id matches nothing.
+fn test_dedup_oneapi_and_unknown_ids() {
+    var v = vec_new();
+    var max = _gpu(ACCEL_INTEL_ONEAPI, 0x8086, 0x0BD5, "Intel(R) Data Center GPU Max 1550", 128 * BYTES_PER_GIB);
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x8086, 0x0BD5, "Intel(R) Data Center GPU Max 1550", 4 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_WIN_GPU, 0x8086, 0x0BD5, "Intel(R) Data Center GPU Max 1550", 128 * BYTES_PER_GIB));
+    vec_push(v, max);
+    assert_eq(profiles_dedup(v), 2, "oneapi: Vulkan and DXGI views dropped");
+    assert(vec_get(v, 0) == max, "oneapi: its profile survives");
+    var u = vec_new();
+    vec_push(u, profile_new(ACCEL_WIN_GPU, 0, BYTES_PER_GIB));
+    vec_push(u, profile_new(ACCEL_INTEL_ONEAPI, 0, BYTES_PER_GIB));
+    vec_push(u, _gpu(ACCEL_VULKAN, 0x8086, 0x3185, "Intel(R) UHD Graphics 600", BYTES_PER_GIB));
+    assert_eq(profiles_dedup(u), 0, "no pci_id: no match");
+    return 0;
+}
+
 fn _rnd(n) {
     _lcg = (_lcg * 1103515245 + 12345) & 0x7FFFFFFF;
     return (_lcg >> 8) % n;
@@ -797,12 +906,16 @@ fn test_dedup_properties() {
         var n = _rnd(13);
         var k = 0;
         while (k < n) {
-            var kind = _rnd(4);
+            var kind = _rnd(6);
             var atype = ACCEL_VULKAN;
             if (kind == 0) { atype = ACCEL_CUDA; }
             if (kind == 1) { atype = ACCEL_ROCM; }
             if (kind == 2) {
                 if (_rnd(4) == 0) { atype = ACCEL_METAL; }
+            }
+            if (kind == 3) { atype = ACCEL_WIN_GPU; }
+            if (kind == 4) {
+                if (_rnd(2) == 0) { atype = ACCEL_INTEL_ONEAPI; }
             }
             var p = profile_new(atype, k, BYTES_PER_GIB);
             var ids = _rnd(4);
@@ -833,14 +946,17 @@ fn test_dedup_properties() {
             if (j < vec_len(v)) {
                 if (vec_get(v, j) == q) { here = 1; }
             }
+            var viewable = 0;
+            if (profile_accel_type(q) == ACCEL_VULKAN) { viewable = 1; }
+            if (profile_accel_type(q) == ACCEL_WIN_GPU) { viewable = 1; }
             if (here == 1) {
                 j = j + 1;
-                if (profile_accel_type(q) == ACCEL_VULKAN) {
+                if (viewable == 1) {
                     if (_dedup_twin(before, q) != 0) { bad = bad + 1; }
                 }
             } else {
-                # Only a Vulkan profile with a twin may be missing.
-                if (profile_accel_type(q) != ACCEL_VULKAN) { bad = bad + 1; }
+                # Only a Vulkan or Windows GPU profile with a twin may be missing.
+                if (viewable == 0) { bad = bad + 1; }
                 elif (_dedup_twin(before, q) == 0) { bad = bad + 1; }
             }
         }
@@ -861,7 +977,8 @@ fn _dupes(r) {
     while (i < n) {
         var p = vec_get(profs, i);
         i = i + 1;
-        if (profile_accel_type(p) == ACCEL_VULKAN) {
+        var t = profile_accel_type(p);
+        if (t == ACCEL_VULKAN || t == ACCEL_WIN_GPU) {
             if (_dedup_twin(profs, p) != 0) { d = d + 1; }
         }
     }
@@ -1002,6 +1119,11 @@ test_dedup_cuda_keeps_other_gpus();
 test_dedup_two_vulkan_drivers();
 test_dedup_no_false_matches();
 test_dedup_apple();
+test_dedup_twin_ranks();
+test_dedup_cass_uhd600();
+test_dedup_dxgi_keeps_own_memory();
+test_dedup_cuda_over_dxgi();
+test_dedup_oneapi_and_unknown_ids();
 test_dedup_properties();
 test_dedup_entry_points();
 test_suggest_quant_gpu_small();

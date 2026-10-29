@@ -5,6 +5,295 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.5.3] — 2026-10-29 — vendor tools on Windows, and one profile per GPU there
+
+The 2.5.x roadmap's Windows items. Vendor tools now run on Windows, and the
+duplicate pass knows DXGI's view of a GPU. An integrated GPU on Windows now
+reports the system memory it shares, not its boot-time carve-out. The oneAPI
+detector was also fixed: it asked `xpu-smi` for the wrong fields, in a form
+its parser rejects. On `cass` the CLI's output changes as intended (the UHD
+600's memory, one fewer warning); on the dev host and `ecb` it does not change.
+
+### Fixed — Windows
+
+- **Vendor tools run on Windows.** `which()` split `PATH` on `:` and looked
+  for the bare name on every target, so on Windows no tool was ever found and
+  every `run_tool` backend reported "not found". It now splits on `;`, drops a
+  directory's surrounding quotes and appends `.exe`
+  (`which_candidates`, new and pure). On `cass` it finds
+  `C:\WINDOWS\system32\vulkaninfo.exe`, so a CLI run there lists one tool
+  warning fewer (7 → 6).
+- **A tool path with a blank is quoted on the Windows command line**
+  (`cmd_win_program_token`). `lib/process_win.cyr` joins arguments with spaces
+  and quotes none. Unquoted, `CreateProcessW` starts the first
+  space-delimited prefix of the path that exists. Shown on `cass`: with
+  `vulkaninfo.exe` copied under `dir with space\`, first on `PATH`, and a
+  `dir.exe` planted beside that directory, an unquoted build ran `dir.exe`.
+  The quoted one ran `vulkaninfo`.
+- **`wmic` is started by its absolute path.** Both `wmic` fallbacks (GPUs,
+  when DXGI is unavailable; RAM, when `GlobalMemoryStatusEx` fails) started
+  `wmic` by its bare name, which Windows looks up in the current directory
+  before System32. They now resolve it through `which()`. A host without
+  `wmic` (Windows 11 24H2 and later) now reports it "not found" instead of
+  "failed".
+- **An integrated GPU reports the system memory it shares.** DXGI gives an
+  integrated GPU its boot-time carve-out (`DedicatedVideoMemory`: 128 MiB for
+  `cass`'s UHD 600), and its descriptor cannot tell integrated from discrete.
+  `vulkaninfo` can. Its view of the same GPU now hands the Windows GPU profile
+  its size, all of it shared: 4 202 799 104 bytes on `cass`, half its RAM.
+  The size comes from DXGI's own `SharedSystemMemory`, the same figure the
+  full `vulkaninfo` output reports, read for that GPU's PCI IDs. That saves the
+  second `vulkaninfo` run: on `cass` a CLI run takes 0.9 s, and 1.7 s with
+  the full run. An AMD APU keeps its carve-out, as it does on Linux. In
+  no-exec mode only DXGI runs, so an integrated GPU keeps its carve-out there.
+
+  `cass`'s CLI output, 2.5.2 → 2.5.3:
+
+  | field | 2.5.2 | 2.5.3 |
+  |---|---:|---:|
+  | Windows GPU `memory_bytes` | 134 217 728 | 4 202 799 104 |
+  | Windows GPU `shared_memory_bytes` | — | 4 202 799 104 |
+  | `--summary` `total_memory_bytes` | 8 539 815 936 | 8 405 598 208 |
+  | `--summary` `accelerator_memory_bytes` | 134 217 728 | 4 202 799 104 |
+  | `warnings` | 7 | 6 (no `vulkaninfo`) |
+
+  The total now counts system RAM once, as the shared figure is RAM the CPU
+  profile already counts.
+
+### Fixed — one profile per GPU
+
+- **Windows GPU and oneAPI profiles carry a `pci_id`.** DXGI's profile takes
+  the adapter's `VendorId` and `DeviceId`, and the `wmic` fallback parses them
+  from `PNPDeviceID` (`win_pnp_pci_id`, new). The oneAPI profile takes
+  `xpu-smi`'s PCI Device ID, with Intel's vendor ID.
+- **The duplicate pass ranks the backends** (`_dedup_twin`): a vendor
+  backend (CUDA, ROCm, oneAPI), then DXGI, then Vulkan. Of the profiles with
+  one `pci_id`, the best-ranked stays. On Windows, an NVIDIA card listed by
+  CUDA, DXGI and Vulkan is CUDA's profile alone, and an Intel GPU listed by
+  `xpu-smi` and `vulkaninfo` is oneAPI's. Through 2.5.2 only CUDA and ROCm
+  could drop a Vulkan view, and nothing dropped a Windows GPU profile.
+
+### Fixed — Intel oneAPI
+
+- **`xpu-smi` is asked for the right fields, as separate arguments.** The
+  detector passed `"--dump 1,2,18,19"` as one argument. In the XPU Manager
+  V1.x user guide, 18 and 19 are Memory Bus Width and Number of EUs, and it
+  read the third column as memory in MB. It now passes `--dump` and
+  `1,2,16,24` (Device ID, Device Name, Memory Physical Size, PCI Device ID) and
+  finds each column by its header label (`parse_xpu_smi_dump`, new and pure).
+  Values are unquoted, "131072.00 MiB" is read as MiB, and "N/A" falls back.
+  The service error `xpu-smi` prints with exit status 0 pushes a parse
+  warning. Checked against the guide's format and against a stand-in
+  `xpu-smi` on `PATH`. 2.5.2 handed the stand-in `[discovery] [--dump
+  1,2,18,19]`, which it rejected; 2.5.3 hands it three arguments and gets the
+  device. Not run against a real `xpu-smi` (no Intel GPU here), and V2.x's
+  format was not checked.
+
+### Changed
+
+- **`which()` skips relative and empty `PATH` entries on every target.** A
+  POSIX empty entry means the current directory, and a relative one is
+  relative to it, so a tool found that way was whatever file of that name the
+  current directory held. Through 2.5.2 an empty entry also became
+  `/<name>`.
+
+### Docs
+
+- README, the threat model, the production, performance and troubleshooting
+  guides and CONTRIBUTING describe tools on Windows, quoting, and the ranked
+  duplicate pass. The threat model now says a Windows tool inherits the
+  environment and shares its stderr with the capped stdout pipe.
+- The roadmap's three Windows items are done and removed. One item is added:
+  `run_tool` ignores exit statuses, so a tool that runs and fails leaves no
+  warning. The Intel capture item now notes that the `xpu-smi` parser has not
+  met real output. 38 items stay open.
+
+### Tests
+
+- **1039 → 1113 assertions** in the same 15 units, and a seventh fuzz
+  harness:
+  - `io_test` (46 → 55): `which_candidates` on POSIX (absolute entries only,
+    in order) and on Windows: `;`, `.exe` added once, quoted, UNC and
+    `D:/` directories kept, and empty, relative, drive-relative and
+    stray-quote entries skipped. Also `cmd_win_program_token`.
+  - `windows_test` (57 → 69): the UHD 600 descriptor's `pci_id` and shared
+    memory, `win_pnp_pci_id` (case, non-PCI, short, bad hex), and the `wmic`
+    parser's `PNPDeviceID`.
+  - `registry_test` (195 → 225): which view `_dedup_twin` picks, whatever
+    the list order. `cass` end to end: the
+    captured `vulkaninfo` summary and full output plus DXGI's UHD 600 give one
+    Windows GPU of 4 202 799 104 shared bytes, RAM counted once. Further
+    cases: a discrete card and an AMD APU keep DXGI's figure; a laptop with
+    CUDA, DXGI and Vulkan views of an NVIDIA card plus a DXGI iGPU; oneAPI
+    over both views; no match without a `pci_id`. The random-set property
+    test now draws DXGI and oneAPI profiles too.
+  - `backend_test` (61 → 84): `parse_xpu_smi_dump` on the documented layout,
+    reordered columns, N/A values, CRLF, a quoted comma, the service error,
+    empty output and a header alone.
+  - `fuzz/xpu_smi_parser.fcyr`, new: byte substitutions and truncations,
+    huge numbers, an unterminated quote, 200 devices. It also checks a
+    2^44 MiB size that wrapped to a small positive one before the 16 TiB bound
+    was added.
+- **Each fix is caught when undone.** 18 mutants, each built and run in a copy
+  of the tree, and each fails the unit named:
+  - PATH split on `:`;
+  - relative entries kept;
+  - no `.exe`;
+  - no quoting;
+  - DXGI without `pci_id`;
+  - PnP ignoring `DEV_`;
+  - dedup visiting Vulkan only;
+  - DXGI never a view;
+  - DXGI never a survivor;
+  - oneAPI not a vendor backend;
+  - an earlier DXGI view beating a later CUDA profile;
+  - no memory hand-over;
+  - a hand-over off system RAM;
+  - the Metal rule lost;
+  - `xpu-smi` columns by position;
+  - no oneAPI `pci_id`;
+  - quotes kept;
+  - the unbounded MiB multiply (the fuzz harness).
+
+  Two Windows-only paths were mutated on `cass` itself: no quoting (above),
+  and DXGI sizing turned off, which gives the same answer in 1.7 s instead of
+  0.9 s.
+
+### Consumers
+
+- **On Windows, detection runs `nvidia-smi`, `vulkaninfo` and `xpu-smi` when
+  they are on `PATH`.** It takes longer, by about 0.9 s per `vulkaninfo` run on
+  a low-end Celeron. An NVIDIA card is now a CUDA profile, not a Windows GPU
+  profile.
+- **New functions:** `which_candidates`, `cmd_win_program_token`,
+  `win_pnp_pci_id`, `win_dxgi_desc_shared` and `parse_xpu_smi_dump`; on PE
+  also `win_dxgi_shared_bytes`. `win_emit_gpu` takes a `pci_id`.
+- `dist/ai-hwaccel.cyr`'s `# Requires` block is unchanged (13 leaves).
+
+### Performance
+
+**19 neutral, 0 regressions in the parsing and registry suites** (2.5.2 →
+2.5.3, both on cyrius 6.7.18). Same method as 2.5.2: 5 code layouts per arm,
+the three floor-bound rows batch-timed (†), 80 rounds per suite, shuffled and
+pinned to one CPU.
+
+| row | 2.5.2 | 2.5.3 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 13.93 µs | 13.90 µs | −0.2% | 0.37 | neutral |
+| `parse_vulkan_2gpu` | 2.50 µs | 2.56 µs | +2.6% | 0.13 | neutral (placement, below) |
+| `parse_neuron_2dev` | 1.61 µs | 1.62 µs | +1.0% | 0.16 | neutral |
+| `detect_safetensors` † | 405.7 ns | 420.1 ns | +3.5% | 0.07 | neutral (placement, below) |
+| `detect_gguf` † | 38.5 ns | 38.4 ns | −0.3% | 0.34 | neutral |
+| `parse_vulkan_summary_renoir` | 14.94 µs | 15.21 µs | +1.8% | 0.04 | neutral (placement, below) |
+| `vulkan_heaps_uhd600` | 612.21 µs | 622.82 µs | +1.7% | 0.11 | neutral (placement, below) |
+| `best_available_13dev` † | 170.7 ns | 169.7 ns | −0.6% | 0.54 | neutral |
+| `total_memory_13dev` | 98.1 ns | 98.2 ns | +0.1% | 0.62 | neutral |
+| `has_accelerator_13dev` | 17.4 ns | 17.5 ns | +0.4% | 0.52 | neutral |
+| `plan_70B_bf16_4gpu` | 1.42 µs | 1.40 µs | −0.9% | 0.20 | neutral |
+| `count_family_gpu_13dev` | 233.3 ns | 233.3 ns | 0.0% | 1.00 | neutral |
+| `json_serialize_13dev` | 21.96 µs | 21.95 µs | 0.0% | 0.88 | neutral |
+| `json_summary_13dev` | 3.04 µs | 3.03 µs | −0.3% | 0.29 | neutral |
+| `json_system_io` | 4.93 µs | 4.95 µs | +0.4% | 0.09 | neutral |
+| `json_plan` | 16.28 µs | 16.22 µs | −0.4% | 0.001 | neutral (under 1%) |
+| `json_training` | 2.36 µs | 2.37 µs | +0.6% | 0.008 | neutral (under 1%) |
+| `dedup_17dev` | 847.5 ns | 855.5 ns | +0.9% | 0.009 | neutral (under 1%; below) |
+| `profile_from_json_cuda` | 6.99 µs | 7.00 µs | +0.1% | 0.27 | neutral |
+
+A verdict needs p < 0.01 and |Δ| > 1%; no row reaches both.
+
+- **`dedup_17dev`, the changed hot path.** The first version of the ranked
+  duplicate pass measured +6.3% (889.8 → 945.5 ns, p < 0.001). It called a
+  rank function per profile and `profile_shared_bytes` again per dropped
+  view, and in Cyrius an ordinary call costs where a derived accessor does
+  not. The ranks are now inline type tests in `_dedup_twin`, and the
+  shared-size check runs only when the survivor is a Windows GPU. What is left
+  is +0.9%, the cost of the wider type tests, under the 1% bar. It is
+  significant (p = 0.009), so it is reported, not rounded away.
+- **The Vulkan parse rows and `detect_safetensors` are placement.** They
+  read +1.7% to +3.5% in both A/B runs, below the bar each time, though their
+  code did not change. The new `which()` code sits in `src/detect/command.cyr`,
+  ahead of them, which the five `log.cyr` layouts cannot reproduce. A control
+  arm, 2.5.2's tree with a never-called function in `command.cyr` sized to the
+  2.5.3 growth (`.text` 0x64ec8, `.rodata` 0x1c92, as 2.5.3's parsing bench),
+  ran interleaved with both: 2.5.2 → control was +0.9% to +3.9% on those four
+  rows, and control → 2.5.3 within ±0.8% (p ≥ 0.29).
+
+**The `lazy` suite: neutral.** 12 runs per arm, medians: `lazy_tpu_query`
+5.08 → 5.12 µs (+0.7%, ranges 4.92–5.21 and 4.91–5.21), `lazy_npu_query`
+115.35 → 115.45 µs (+0.1%).
+
+**On Windows, detection now costs a `vulkaninfo` run.** On `cass` a CLI run
+takes about 0.9 s, where 2.5.2 took 0.14 s. Each `vulkaninfo` run there takes
+0.88 to 0.94 s (summary or full). Sizing the integrated GPU from DXGI rather
+than a second, full run saves the other 0.8 s: the build without it measured
+1.71 to 1.88 s.
+
+In `bench-history.csv`, the `8df8448` rows at 06:13:39Z are 2.5.2, measured on
+the clean tree before any change, and the `8df8448-dirty` rows at 06:57:17Z
+are 2.5.3, all three suites, measured on the final source before the version
+bump.
+
+| binary | 2.5.2 | 2.5.3 | Δ |
+|---|---:|---:|---:|
+| x86_64 ELF, `CYRIUS_DCE=1` | 203 448 | 207 704 | +4 256 |
+| x86_64 ELF, no DCE | 527 032 | 535 384 | +8 352 |
+| ELF-aarch64 | 616 944 | 682 640 | +65 696 |
+| PE, as shipped (no DCE) | 645 632 | 657 408 | +11 776 |
+| agnos, `CYRIUS_DCE=1` | 197 568 | 201 824 | +4 256 |
+| Mach-O arm64 (cross-built) | 655 868 | 672 252 | +16 384 |
+
+The code segment grows by 6 160 B with DCE on x86_64 (8 536 without, 6 216 on
+agnos, 9 856 on aarch64), and data by 160 B. The aarch64 and Mach-O files grow
+by whole pages (64 KiB and 16 KiB) as their code crosses a page boundary.
+
+### Verified
+
+- **Tests:** 1113 assertions in 15 units pass through CI's loop; fuzz 7/7.
+- **CI gates**, replayed from `ci.yml` on a fresh copy of the tree:
+  - vet over `src/main.cyr` and the 15 test units;
+  - `capacity --check`;
+  - raw-offset guard;
+  - fmt and `lint --strict`;
+  - `distlib --no-default-features`, fresh and deterministic;
+  - the DCE build and ELF check;
+  - the test and fuzz loops;
+  - the three bench suites;
+  - required docs;
+  - version and Python-bindings version consistency.
+
+  The dep-hash step ran in the checkout: 52 files verified, `cyrius.lock`
+  current.
+- **CLI output on the dev host** is identical to 2.5.2's on 17 invocations
+  apart from `--version`, on x86_64 with and without DCE and on ELF-aarch64
+  under `qemu-aarch64`.
+- **`cass`** (Windows 11, Intel UHD 600):
+  - **CLI vs 2.5.2:** across 18 runs the PE CLI differs only as the table
+    under *Fixed — Windows* shows. One `vulkaninfo` run replaces a missing
+    tool, and the GPU reports its shared heap.
+  - **Entry points:** `registry_detect`, `registry_detect_threaded` (whose
+    Vulkan thread queries DXGI) and `lazy_into_registry` each report one
+    Windows GPU of 4 202 799 104 shared bytes. `registry_detect_no_exec`
+    reports DXGI's 128 MiB.
+  - **Tool lookup:** `which("vulkaninfo")` finds
+    `C:\WINDOWS\system32\vulkaninfo.exe`, or the copy under `dir with space\`
+    when that directory comes first, and `which("wmic")` finds nothing (no
+    `wmic` on that build).
+  - **Mutants:** the quoting and DXGI-sizing mutants ran on this host and were
+    caught (*Tests*).
+- **`ecb`** (Apple M5 Pro, cross-built Mach-O): the CLI matches 2.5.2's on 18
+  runs, apart from span times in the `-vv` log.
+- **`xpu-smi`**, with a stand-in on the dev host's `PATH`: 2.5.3 passes
+  `discovery`, `--dump` and `1,2,16,24` as three arguments and reports the
+  stand-in's device. 2.5.2 passed `--dump 1,2,18,19` as one.
+- **Not verified:**
+  - the wheels were not built or installed, and the CI workflows have not run
+    on this tree;
+  - nothing ran on Windows with an NVIDIA or Intel oneAPI GPU, so CUDA and
+    oneAPI winning over DXGI is covered by tests only;
+  - the oneAPI parser has not met a real `xpu-smi`; it follows the V1.x
+    user guide, and V2.x was not checked;
+  - the `wmic` fallbacks did not run, as `cass` has no `wmic`.
+
 ## [2.5.2] — 2026-10-28 — lazy detection runs only what a query needs
 
 The lazy registry's per-family detection, from the 2.5.x roadmap. A lazy

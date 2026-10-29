@@ -47,7 +47,7 @@ fn mk_desc(name, vendor, device, ded_video, ded_sys, shared_sys, flags) {
     store32(d + WIN_DXGI_DESC_DEVICE, device);
     store64(d + WIN_DXGI_DESC_DEDICATED_VIDEO, ded_video);
     store64(d + WIN_DXGI_DESC_DEDICATED_SYSTEM, ded_sys);
-    store64(d + 288, shared_sys);
+    store64(d + WIN_DXGI_DESC_SHARED_SYSTEM, shared_sys);
     store32(d + WIN_DXGI_DESC_FLAGS, flags);
     return d;
 }
@@ -74,6 +74,10 @@ fn test_dxgi_cass_uhd600() {
     assert_eq(profile_device_id(p), 0, "uhd600 device 0");
     assert_eq(profile_memory_bytes(p), 134217728, "uhd600 dedicated 128 MiB, not shared");
     assert_streq(profile_device_name(p), "Intel(R) UHD Graphics 600", "uhd600 name");
+    # 2.5.3: the adapter's PCI IDs, so the duplicate pass can match it with
+    # vulkaninfo's view; SharedSystemMemory is what Vulkan sizes it with.
+    assert_eq(profile_pci_id(p), pci_id_make(0x8086, 0x3185), "uhd600 pci_id 8086:3185");
+    assert_eq(win_dxgi_desc_shared(d), 4202799104, "uhd600 shared system memory");
 }
 
 # The Microsoft Basic Render Driver as cass enumerates it: 1414:008C with
@@ -155,6 +159,28 @@ fn test_dxgi_enumeration_ids() {
     assert_eq(profile_device_id(vec_get(profiles, 1)), 1, "dgpu id 1");
     assert_streq(profile_device_name(vec_get(profiles, 1)), "NVIDIA GeForce RTX 3060", "dgpu name");
     assert_eq(profile_memory_bytes(vec_get(profiles, 1)), 12884901888, "dgpu 12 GiB");
+}
+
+# --- PnP device IDs and the wmic fallback's pci_id (2.5.3) ---
+
+fn test_pnp_pci_id() {
+    assert_eq(win_pnp_pci_id(str_from("PCI\\VEN_8086&DEV_3185&SUBSYS_20828086&REV_06\\3&11583659&0&10")), pci_id_make(0x8086, 0x3185), "intel uhd 600");
+    assert_eq(win_pnp_pci_id(str_from("PCI\\VEN_10DE&DEV_2684&SUBSYS_16F310DE&REV_A1\\4&1")), pci_id_make(0x10DE, 0x2684), "nvidia, upper-case hex");
+    assert_eq(win_pnp_pci_id(str_from("PCI\\VEN_1002&dev_73ff")), 0, "lower-case key is not matched");
+    assert_eq(win_pnp_pci_id(str_from("ROOT\\BasicRender\\0000")), 0, "not a PCI device");
+    assert_eq(win_pnp_pci_id(str_from("PCI\\VEN_8086")), 0, "no device ID");
+    assert_eq(win_pnp_pci_id(str_from("PCI\\VEN_80G6&DEV_3185")), 0, "bad hex digit");
+    assert_eq(win_pnp_pci_id(str_from("")), 0, "empty");
+    return 0;
+}
+
+fn test_win_gpu_pnp() {
+    var out = str_from("AdapterRAM=1073741824\r\nName=Intel(R) UHD Graphics 600\r\nPNPDeviceID=PCI\\VEN_8086&DEV_3185&SUBSYS_20828086&REV_06\\3&11583659&0&10\r\n\r\nName=Other\r\n");
+    var profiles = vec_new();
+    assert_eq(win_parse_videocontrollers(out, profiles), 2, "two controllers");
+    assert_eq(profile_pci_id(vec_get(profiles, 0)), pci_id_make(0x8086, 0x3185), "pci_id from PNPDeviceID");
+    assert_eq(profile_pci_id(vec_get(profiles, 1)), 0, "no PNPDeviceID, no pci_id (not carried over)");
+    return 0;
 }
 
 # --- win_utf16_to_cstr ---
@@ -310,6 +336,8 @@ test_utf16_unicode();
 test_utf16_pair_split_by_bound();
 test_dxgi_name_unterminated();
 test_wmic_fallback_rule();
+test_pnp_pci_id();
+test_win_gpu_pnp();
 test_win_gpu_single();
 test_win_gpu_multi();
 test_win_gpu_crlf();

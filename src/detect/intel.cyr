@@ -10,45 +10,159 @@ fn detect_intel_npu(profiles, warnings) {
     return 0;
 }
 
-# Intel oneAPI (Arc / Data Center GPU Max): xpu-smi CLI
-fn detect_intel_oneapi(profiles, warnings) {
-    var result = run_tool2("xpu-smi", "discovery", "--dump 1,2,18,19", warnings);
-    if (result == 0) { return 0; }
+# --- Intel oneAPI GPUs (Arc, Flex, Data Center GPU Max): xpu-smi ---
+#
+# `xpu-smi discovery --dump 1,2,16,24` prints CSV: a header of property labels
+# in the order asked, then a row per device. Properties 1, 2, 16 and 24 are
+# Device ID, Device Name, Memory Physical Size and PCI Device ID, in Intel's
+# XPU Manager V1.x user guide. Strings are quoted, and the memory size carries
+# its unit ("32768.00 MiB"). Columns are found by their header label, not by
+# position, so a release that orders them otherwise still parses. Not checked
+# against a real capture yet (the roadmap's 2.6.x Data Center GPU Max item).
+#
+# Through 2.5.2 the detector passed "--dump 1,2,18,19" as ONE argument, and
+# 18 and 19 are Memory Bus Width and Number of EUs, so a profile, if any came
+# out, was sized from the bus width. It also set no pci_id, so profiles_dedup
+# could not match a GPU that vulkaninfo reports too.
 
-    var lines = str_split(result, 10);
-    var nlines = vec_len(lines);
+# `line` (a Str) split at commas outside double quotes, each field trimmed and
+# unquoted, as Strs. xpu-smi does not escape a quote inside a field. Pure.
+fn _xpu_csv_fields(line) {
+    var out = vec_new();
+    var d = str_data(line);
+    var n = str_len(line);
+    var start = 0;
+    var inq = 0;
+    var i = 0;
+    while (i <= n) {
+        var c = 44;
+        if (i < n) { c = load8(d + i); }
+        if (c == 34) { inq = 1 - inq; }
+        if (c == 44 && inq == 0) {
+            var f = str_trim(str_new(d + start, i - start));
+            var fl = str_len(f);
+            if (fl >= 2) {
+                if (load8(str_data(f)) == 34 && load8(str_data(f) + fl - 1) == 34) {
+                    f = str_new(str_data(f) + 1, fl - 2);
+                }
+            }
+            vec_push(out, f);
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+# Index of the field labelled `label` (a cstr) in `fields`, or -1. Pure.
+fn _xpu_column(fields, label) {
+    var i = 0;
+    while (i < vec_len(fields)) {
+        if (str_eq_cstr(vec_get(fields, i), label) == 1) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+# Field `col` of `fields`, or 0 when the row is short, the column is missing
+# (-1), or the value is N/A or empty. Pure.
+fn _xpu_value(fields, col) {
+    if (col < 0) { return 0; }
+    if (col >= vec_len(fields)) { return 0; }
+    var v = vec_get(fields, col);
+    if (str_len(v) == 0) { return 0; }
+    if (str_eq_cstr(v, "N/A") == 1) { return 0; }
+    return v;
+}
+
+# The whole number a value (a Str, or 0) starts with, or -1 when it starts
+# with no digit: 0 for "0", 32768 for "32768.00 MiB". Pure.
+fn _xpu_leading_int(v) {
+    if (v == 0) { return 0 - 1; }
+    var d = str_data(v);
+    var n = str_len(v);
+    var x = 0;
+    var digits = 0;
+    while (digits < n && digits < 18) {
+        var c = load8(d + digits);
+        if (c < '0' || c > '9') { break; }
+        x = x * 10 + (c - '0');
+        digits = digits + 1;
+    }
+    if (digits == 0) { return 0 - 1; }
+    return x;
+}
+
+# The bytes in a Memory Physical Size value: "32768.00 MiB", whole MiB only
+# (the fraction is dropped), or "... GiB". 0 when there is no leading number,
+# or past validate_memory_mb's 16 TiB bound, which also keeps the multiply from
+# wrapping. Pure.
+fn _xpu_memory_bytes(v) {
+    var x = _xpu_leading_int(v);
+    if (x <= 0) { return 0; }
+    if (str_contains_cstr(v, "GiB") == 1) { x = x * 1024; }
+    if (x > 16 * 1024 * 1024) { return 0; }
+    return x * 1024 * 1024;
+}
+
+# Parse `xpu-smi discovery --dump 1,2,16,24` output (see above) into
+# ACCEL_INTEL_ONEAPI profiles: name, memory (16 GiB when missing) and pci_id
+# from the PCI Device ID (Intel's vendor ID, which every xpu-smi device has).
+# Output with no "Device ID" header, such as xpu-smi's "Error: XPUM Service
+# Status Error." (printed with exit status 0), pushes a parse warning and no
+# profile. Returns the number of profiles pushed. Pure.
+fn parse_xpu_smi_dump(out, profiles, warnings) {
+    var lines = str_split(out, 10);
+    var nl = vec_len(lines);
+    var hdr = 0 - 1;
+    var c_id = 0 - 1;
+    var c_name = 0 - 1;
+    var c_mem = 0 - 1;
+    var c_pci = 0 - 1;
+    var count = 0;
     var li = 0;
-    while (li < nlines) {
-        var line = vec_get(lines, li);
+    while (li < nl) {
+        var line = str_trim(vec_get(lines, li));
         li = li + 1;
         if (str_len(line) == 0) { continue; }
-        # Skip header lines
-        if (str_contains_cstr(line, "DeviceId") == 1) { continue; }
-
-        var fields = parse_csv_line(line, 2);
-        if (fields == 0) { continue; }
-
-        var dev_id = str_to_int(vec_get(fields, 0));
-        if (dev_id < 0) { dev_id = 0; }
-
-        # Memory field (MB) — usually field 2 or 3
-        var mem_bytes = 16 * BYTES_PER_GIB;
-        if (vec_len(fields) > 2) {
-            var mem_mb = str_to_int(vec_get(fields, 2));
-            if (mem_mb > 0) { mem_bytes = mem_mb * 1024 * 1024; }
+        var fields = _xpu_csv_fields(line);
+        if (hdr < 0) {
+            c_id = _xpu_column(fields, "Device ID");
+            if (c_id < 0) { continue; }
+            hdr = li;
+            c_name = _xpu_column(fields, "Device Name");
+            c_mem = _xpu_column(fields, "Memory Physical Size");
+            c_pci = _xpu_column(fields, "PCI Device ID");
+            continue;
         }
-
-        var p = profile_new(ACCEL_INTEL_ONEAPI, dev_id, mem_bytes);
-
-        # Device name from field 1
-        if (vec_len(fields) > 1) {
-            var nm = vec_get(fields, 1);
-            if (str_len(nm) > 0) {
-                profile_set_device_name(p, str_cstr(nm));
-            }
-        }
-
+        var dev_id = _xpu_leading_int(_xpu_value(fields, c_id));
+        if (dev_id < 0) { dev_id = count; }
+        var mem = _xpu_memory_bytes(_xpu_value(fields, c_mem));
+        if (mem <= 0) { mem = 16 * BYTES_PER_GIB; }
+        var p = profile_new(ACCEL_INTEL_ONEAPI, dev_id, mem);
+        var nm = _xpu_value(fields, c_name);
+        if (nm != 0) { profile_set_device_name(p, str_cstr(nm)); }
+        var pv = _xpu_value(fields, c_pci);
+        if (pv != 0) { profile_set_pci_id(p, pci_id_make(PCI_VENDOR_INTEL, parse_hex_field(pv))); }
         vec_push(profiles, p);
+        count = count + 1;
     }
+    if (hdr < 0 && nl > 0 && str_len(str_trim(out)) > 0) {
+        if (warnings != 0) {
+            vec_push(warnings, warning_parse("xpu-smi", "no Device ID header in `discovery --dump` output"));
+        }
+    }
+    return count;
+}
+
+# Intel oneAPI GPUs through xpu-smi. The property list is its own argument.
+fn detect_intel_oneapi(profiles, warnings) {
+    var args = vec_new();
+    vec_push(args, "discovery");
+    vec_push(args, "--dump");
+    vec_push(args, "1,2,16,24");
+    var result = run_tool("xpu-smi", args, warnings);
+    if (result == 0) { return 0; }
+    parse_xpu_smi_dump(result, profiles, warnings);
     return 0;
 }

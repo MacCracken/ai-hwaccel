@@ -38,6 +38,63 @@ fn test_which_missing() {
     return 0;
 }
 
+# --- PATH lookup on POSIX and Windows (2.5.3) ---
+
+# 1 if vec `v` holds exactly the cstrs `want` (a vec of cstrs), in order.
+fn _same_paths(v, want) {
+    if (vec_len(v) != vec_len(want)) { return 0; }
+    var i = 0;
+    while (i < vec_len(v)) {
+        if (streq(vec_get(v, i), vec_get(want, i)) == 0) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+# Empty and relative entries are skipped; through 2.5.2 the empty one gave
+# "/nvidia-smi" and the relative one "bin/nvidia-smi", a file in the current
+# directory.
+fn test_which_candidates_posix() {
+    var c = which_candidates("/usr/bin::bin:/opt/nv/:./x", "nvidia-smi", 0);
+    var want = vec_new();
+    vec_push(want, "/usr/bin/nvidia-smi");
+    vec_push(want, "/opt/nv/nvidia-smi");
+    assert_eq(_same_paths(c, want), 1, "posix: absolute entries only, in order");
+    assert_eq(vec_len(which_candidates("", "sh", 0)), 0, "posix: empty PATH");
+    return 0;
+}
+
+# Windows splits on ';', appends ".exe" once, drops a directory's quotes, and
+# skips empty, relative and drive-relative ("C:tools") entries. Through 2.5.2
+# which() split this on ':' too, so no tool was ever found on Windows.
+fn test_which_candidates_windows() {
+    var path = "C:\\WINDOWS\\system32;;.\\bin;C:tools;\"C:\\Program Files\\NVIDIA Corporation\\NVSMI\";D:/sdk/;\\\\srv\\share\\bin";
+    var c = which_candidates(path, "nvidia-smi", 1);
+    var want = vec_new();
+    vec_push(want, "C:\\WINDOWS\\system32\\nvidia-smi.exe");
+    vec_push(want, "C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe");
+    vec_push(want, "D:/sdk/nvidia-smi.exe");
+    vec_push(want, "\\\\srv\\share\\bin\\nvidia-smi.exe");
+    assert_eq(_same_paths(c, want), 1, "windows: absolute entries, .exe added");
+    var e = which_candidates("C:\\WINDOWS\\System32\\wbem", "wmic.EXE", 1);
+    assert_streq(vec_get(e, 0), "C:\\WINDOWS\\System32\\wbem\\wmic.EXE", "windows: .exe not added twice");
+    assert_eq(vec_len(which_candidates("C:\\a\"b;\"C:\\x", "t", 1)), 0, "windows: an entry with a stray quote is skipped");
+    var posix_on_win = which_candidates("/usr/bin:/bin", "sh", 1);
+    assert_eq(vec_len(posix_on_win), 0, "windows: a POSIX PATH finds nothing");
+    return 0;
+}
+
+# A path with a blank is quoted as a Windows command line's first token.
+# Unquoted, CreateProcessW starts the first space-delimited prefix that exists:
+# on cass, with vulkaninfo.exe under "dir with space" first on PATH and a
+# dir.exe planted beside it, the unquoted line ran dir.exe (2.5.3).
+fn test_cmd_win_program_token() {
+    assert_streq(cmd_win_program_token("C:\\WINDOWS\\system32\\vulkaninfo.exe"), "C:\\WINDOWS\\system32\\vulkaninfo.exe", "no blank: unchanged");
+    assert_streq(cmd_win_program_token("C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe"), "\"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe\"", "blank: quoted");
+    assert_streq(cmd_win_program_token("C:\\a\tb.exe"), "\"C:\\a\tb.exe\"", "tab: quoted");
+    return 0;
+}
+
 # --- run_tool tests ---
 
 fn test_run_echo() {
@@ -254,6 +311,9 @@ alloc_init();
 
 test_which_echo();
 test_which_missing();
+test_which_candidates_posix();
+test_which_candidates_windows();
+test_cmd_win_program_token();
 test_parse_csv_line();
 test_parse_csv_too_few();
 test_validate_device_id();

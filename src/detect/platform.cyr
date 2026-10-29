@@ -178,7 +178,9 @@ fn mac_total_phys_bytes() {
 
 # Get total system memory (in bytes). Windows: GlobalMemoryStatusEx, with a
 # `wmic computersystem` spawn only if that fails AND `allow_exec` is 1 (wmic
-# is absent on Windows 11 24H2+). macOS: sysctl hw.memsize. Else:
+# is absent on Windows 11 24H2+), started by the absolute path which() finds
+# (2.5.3; it was its bare name, which Windows looks up in the current
+# directory first). macOS: sysctl hw.memsize. Else:
 # /proc/meminfo. `allow_exec` matters only on Windows. Returns 0 on failure
 # (caller substitutes a default).
 fn detect_system_memory_opts(allow_exec) {
@@ -186,8 +188,10 @@ fn detect_system_memory_opts(allow_exec) {
     var native = win_total_phys_bytes();
     if (native > 0) { return native; }
     if (allow_exec == 0) { return 0; }
+    var wmic = which("wmic");
+    if (wmic == 0) { return 0; }
     var wargs = vec_new();
-    vec_push(wargs, "wmic");
+    vec_push(wargs, cmd_win_program_token(wmic));
     vec_push(wargs, "computersystem");
     vec_push(wargs, "get");
     vec_push(wargs, "TotalPhysicalMemory");

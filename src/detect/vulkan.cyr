@@ -387,10 +387,40 @@ fn vulkan_size_shared(profiles, first, ids, full) {
     return 0;
 }
 
+# On Windows, size each integrated GPU on system RAM among the profiles from
+# `first` on from DXGI's SharedSystemMemory for its PCI IDs, the heap the full
+# vulkaninfo output gives (2.5.3). Returns 1 when every such GPU was sized, 0
+# when one was not (DXGI unavailable, or no adapter with its IDs).
+fn _vulkan_size_from_dxgi(profiles, first, ids) {
+    #ifdef CYRIUS_TARGET_WIN
+    var n = vec_len(profiles) - first;
+    var all = 1;
+    var k = 0;
+    while (k < n) {
+        var vendor = vec_get(ids, k * 3);
+        var device = vec_get(ids, k * 3 + 1);
+        if (vulkan_uses_system_memory(vec_get(ids, k * 3 + 2), vendor) == 1) {
+            var heap = win_dxgi_shared_bytes(vendor, device);
+            if (heap > 0) {
+                var p = vec_get(profiles, first + k);
+                profile_set_memory_bytes(p, heap);
+                profile_set_shared_mem(p, heap);
+            } else {
+                all = 0;
+            }
+        }
+        k = k + 1;
+    }
+    return all;
+    #endif
+    return 0;
+}
+
 # Size the integrated GPUs that _parse_vulkaninfo_ids just pushed (profiles
 # from index `first` on, a vendor/device/type triple each in `ids`). An AMD
 # APU gets its sysfs carve-out. The others are sized by vulkan_size_shared from
-# one run of the full vulkaninfo, made only when such a GPU is present.
+# one run of the full vulkaninfo, made only when such a GPU is present, or on
+# Windows from DXGI (_vulkan_size_from_dxgi), with the full run as the fallback.
 fn _vulkan_size_integrated(profiles, first, ids) {
     var n = vec_len(profiles) - first;
     var need_full = 0;
@@ -406,6 +436,7 @@ fn _vulkan_size_integrated(profiles, first, ids) {
         k = k + 1;
     }
     if (need_full == 1) {
+        if (_vulkan_size_from_dxgi(profiles, first, ids) == 1) { return 0; }
         # The --summary run already warned if vulkaninfo is missing.
         var full = run_tool("vulkaninfo", vec_new(), 0);
         if (full != 0) { vulkan_size_shared(profiles, first, ids, full); }

@@ -141,36 +141,140 @@ fn data_file_path(rel) {
     return str_data(str_builder_build(sb));
 }
 
-# Resolve tool name to absolute path by searching $PATH.
-# Returns heap-allocated path string, or 0 if not found.
+# 1 if the PATH entry `d` (a Str) is an absolute directory: "/..." on POSIX
+# (`win` 0); on Windows (`win` 1) drive-rooted ("C:\..." or "C:/...") or UNC
+# ("\\server\share"). Pure.
+fn _which_dir_is_absolute(d, win) {
+    var n = str_len(d);
+    if (n == 0) { return 0; }
+    var c0 = load8(str_data(d));
+    if (win == 0) { return c0 == '/'; }
+    if (n >= 3) {
+        var c1 = load8(str_data(d) + 1);
+        var c2 = load8(str_data(d) + 2);
+        var letter = 0;
+        if (c0 >= 'A' && c0 <= 'Z') { letter = 1; }
+        if (c0 >= 'a' && c0 <= 'z') { letter = 1; }
+        if (letter == 1 && c1 == ':' && (c2 == 92 || c2 == '/')) { return 1; }
+    }
+    if (n >= 2) {
+        if (c0 == 92 && load8(str_data(d) + 1) == 92) { return 1; }
+    }
+    return 0;
+}
+
+# 1 if cstr `name` ends in ".exe", in any case. Pure.
+fn _which_has_exe(name) {
+    var n = strlen(name);
+    if (n < 4) { return 0; }
+    var i = 0;
+    var ext = ".exe";
+    while (i < 4) {
+        var c = load8(name + n - 4 + i);
+        if (c >= 'A' && c <= 'Z') { c = c + 32; }
+        if (c != load8(ext + i)) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+# The paths which() tries for tool `name` (a cstr) in the PATH value
+# `path_val` (a cstr), in order, as a vec of cstrs (2.5.3). Pure.
+#   - POSIX (`win` 0): PATH splits on ':', and a candidate is "<dir>/<name>".
+#   - Windows (`win` 1): PATH splits on ';', a directory may be wrapped in
+#     double quotes (they are dropped), and a candidate is "<dir>\<name>.exe"
+#     (".exe" is not added twice).
+# An empty or relative entry is skipped on both. POSIX reads an empty entry as
+# the current directory, so a tool found through one is whatever file of that
+# name the current directory holds. A Windows entry with a `"` left in it is
+# skipped too: a path with a quote cannot be quoted on a command line
+# (cmd_win_program_token). Through 2.5.2 which() split on ':' on every target,
+# so on Windows no tool was ever found, and an empty POSIX entry became
+# "/<name>".
+fn which_candidates(path_val, name, win) {
+    var out = vec_new();
+    var sep = ':';
+    var slash = '/';
+    if (win == 1) {
+        sep = ';';
+        slash = 92;
+    }
+    var dirs = str_split(str_from(path_val), sep);
+    var nd = vec_len(dirs);
+    var di = 0;
+    while (di < nd) {
+        var dir = vec_get(dirs, di);
+        di = di + 1;
+        if (win == 1) {
+            dir = str_trim(dir);
+            var dl = str_len(dir);
+            if (dl >= 2) {
+                if (load8(str_data(dir)) == 34 && load8(str_data(dir) + dl - 1) == 34) {
+                    dir = str_new(str_data(dir) + 1, dl - 2);
+                }
+            }
+            if (str_index_of(dir, 34) >= 0) { continue; }
+        }
+        if (_which_dir_is_absolute(dir, win) == 0) { continue; }
+        var sb = str_builder_new();
+        str_builder_add(sb, dir);
+        var last = load8(str_data(dir) + str_len(dir) - 1);
+        var ends = 0;
+        if (last == '/') { ends = 1; }
+        if (win == 1 && last == 92) { ends = 1; }
+        if (ends == 0) { str_builder_putc(sb, slash); }
+        str_builder_add_cstr(sb, name);
+        if (win == 1 && _which_has_exe(name) == 0) { str_builder_add_cstr(sb, ".exe"); }
+        vec_push(out, str_cstr(str_builder_build(sb)));
+    }
+    return out;
+}
+
+# Resolve tool name to an absolute path through $PATH: the first of
+# which_candidates that exists. Returns a heap cstr, or 0 if not found.
 fn which(name) {
     var path_val = cmd_getenv("PATH");
     if (path_val == 0) { return 0; }
-    var path_str = str_from(path_val);
-    var dirs = str_split(path_str, 58);
-
-    var di = 0;
-    var ndir = vec_len(dirs);
-    while (di < ndir) {
-        var dir = vec_get(dirs, di);
-        # Build candidate: dir/name
-        var sb = str_builder_new();
-        str_builder_add(sb, dir);
-        str_builder_add_cstr(sb, "/");
-        str_builder_add_cstr(sb, name);
-        var candidate = str_builder_build(sb);
-        # Check if file exists
-        if (file_exists(str_data(candidate)) == 1) {
-            # Return null-terminated copy
-            var clen = str_len(candidate);
-            var result = alloc(clen + 1);
-            memcpy(result, str_data(candidate), clen);
-            store8(result + clen, 0);
-            return result;
-        }
-        di = di + 1;
+    var win = 0;
+    #ifdef CYRIUS_TARGET_WIN
+    win = 1;
+    #endif
+    var cands = which_candidates(path_val, name, win);
+    var n = vec_len(cands);
+    var i = 0;
+    while (i < n) {
+        var c = vec_get(cands, i);
+        if (file_exists(c) == 1) { return c; }
+        i = i + 1;
     }
     return 0;
+}
+
+# `path` as the first token of a Windows command line (2.5.3): wrapped in
+# double quotes when it holds a blank, as "C:\Program Files\..." does.
+# lib/process_win.cyr joins a command's arguments with spaces and quotes
+# none of them. CreateProcessW reads an unquoted first token one blank at a
+# time and starts the first prefix that exists: "C:\Program.exe", then
+# "C:\Program Files\NVIDIA.exe", and so on, so a file planted at one of them
+# runs instead of the tool. Measured on cass: with "...\dir with space\" first
+# on PATH and a dir.exe planted next to it, the unquoted line ran dir.exe. A
+# path from which() has no `"` in it. Pure.
+fn cmd_win_program_token(path) {
+    var n = strlen(path);
+    var blank = 0;
+    var i = 0;
+    while (i < n) {
+        var c = load8(path + i);
+        if (c == ' ' || c == 9) { blank = 1; }
+        i = i + 1;
+    }
+    if (blank == 0) { return path; }
+    var q = alloc(n + 3);
+    store8(q, 34);
+    memcpy(q + 1, path, n);
+    store8(q + n + 1, 34);
+    store8(q + n + 2, 0);
+    return q;
 }
 
 # Run a tool with up to 5 args. Returns Str with stdout, or 0 on error.
@@ -186,7 +290,12 @@ fn run_tool(tool, args, warnings) {
 
     # Build exec args vec
     var exec_args = vec_new();
+    #ifdef CYRIUS_TARGET_WIN
+    vec_push(exec_args, cmd_win_program_token(abs_path));
+    #endif
+    #ifndef CYRIUS_TARGET_WIN
     vec_push(exec_args, abs_path);
+    #endif
     var ai = 0;
     var nargs = vec_len(args);
     while (ai < nargs) {

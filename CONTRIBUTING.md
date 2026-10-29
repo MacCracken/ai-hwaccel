@@ -25,7 +25,7 @@ Run everything from the repository root (some tests read `tests/fixtures/`):
 ```sh
 CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # build the CLI
 cyrius test tests/tcyr                                    # 15 test units
-cyrius fuzz                                               # 6 fuzz harnesses
+cyrius fuzz                                               # 7 fuzz harnesses
 cyrius vet src/main.cyr                                   # include-graph audit
 for f in src/*.cyr src/detect/*.cyr; do cyrius lint --strict "$f"; done   # fails on a warning
 for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do
@@ -131,9 +131,9 @@ bindings/python/        the Python package
    `_detect_sysfs_backends` if not), and `_family_builder_mask`
    (`src/lazy.cyr`). A backend missing from one of them is silently skipped by
    that entry point.
-5. **Duplicates**: if Vulkan can see the same device, set the profile's
-   `pci_id` (`pci_id_make(vendor, device)`) and teach `_dedup_twin`
-   (`src/registry.cyr`) about the new type, so the device is listed once.
+5. **Duplicates**: if Vulkan or DXGI can see the same device, set the
+   profile's `pci_id` (`pci_id_make(vendor, device)`) and give the new type a
+   rank in `_dedup_twin` (`src/registry.cyr`), so the device is listed once.
 6. **Tests**: parser tests against captured output (in `tests/fixtures/`, or
    inline) in the matching unit (`gpu_parser_test`, `backend_test`),
    `foundation_test` for the new names and backend count, and a fuzz harness

@@ -14,8 +14,8 @@ decide how to quantize and shard a model across them.
 |--------|-------|
 | Binary size | **199 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.7.18 |
-| Tests | 1039 assertions (15 test units) |
-| Fuzz harnesses | 6 |
+| Tests | 1113 assertions (15 test units) |
+| Fuzz harnesses | 7 |
 | Dependencies | **0** third-party (bayan's JSON sublib: first-party, optional) |
 | Hardware families | 18 |
 | Derived structs | 16 (`#derive(accessors)`) |
@@ -45,8 +45,13 @@ decide how to quantize and shard a model across them.
 | Windows GPU | Any hardware display adapter | DXGI adapter enumeration (`wmic` fallback) |
 | CPU | Always present | `/proc/meminfo`, `sysctl hw.memsize` (macOS), `GlobalMemoryStatusEx` (Windows); 16 GiB fallback |
 
-On Windows no vendor tool runs yet (the roadmap's `which()` item), so every
-GPU there, NVIDIA included, is a Windows GPU profile.
+On Windows the vendor tools run too since 2.5.3, found through `PATH` with
+their `.exe` (`nvidia-smi`, and `vulkaninfo`, which Windows' Vulkan Runtime
+puts in System32). DXGI lists every GPU as a Windows GPU profile. Where CUDA or
+oneAPI report the same card, their profile is kept instead. A Windows GPU that
+`vulkaninfo` calls integrated reports the system memory it shares, rather than
+its boot-time carve-out. In no-exec mode only DXGI runs, so an integrated GPU
+keeps its carve-out.
 
 ## Quick Start
 
@@ -281,7 +286,7 @@ done
 | `json_output_test.tcyr` | JSON serialization (registry, summary, profile) |
 | `json_roundtrip_test.tcyr` | profile JSON round-trip (`profile_from_json`) |
 | `model_catalog_test.tcyr` | `load_models` against the shipped `data/models.json`, `compatible_with_registry` |
-| `windows_test.tcyr` | Windows DXGI adapter descriptors + `wmic` fallback parsers |
+| `windows_test.tcyr` | Windows DXGI adapter descriptors (memory, PCI IDs) + `wmic` fallback parsers |
 | `lazy_test.tcyr` | lazy registry: per-family queries vs full detection, no backend run twice, the system passes once, warnings kept |
 
 ### Pattern: derived struct accessors

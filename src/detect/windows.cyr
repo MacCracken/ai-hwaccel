@@ -25,10 +25,15 @@
 # lists only software adapters has no GPU, and wmic is not consulted.
 # Total RAM comes from kernel32!GlobalMemoryStatusEx (platform.cyr).
 #
-# Integrated GPUs report their dedicated carve-out (the Intel UHD 600 on cass:
-# 128 MiB). The wmic-era figure was the driver's AdapterRAM (1 GiB there),
-# which DXGI does not expose. Neither figure is the shared system memory the
-# adapter can also draw on (DXGI's SharedSystemMemory: half of RAM on cass).
+# DXGI reports an integrated GPU's dedicated carve-out (the Intel UHD 600 on
+# cass: 128 MiB), not the system memory it draws on, and DXGI_ADAPTER_DESC1
+# cannot tell integrated from discrete. Each profile carries the adapter's PCI
+# vendor and device IDs (2.5.3), so profiles_dedup (src/registry.cyr) matches
+# it with vulkaninfo's view of the same GPU, which can: an integrated GPU on
+# system RAM there gives the Windows profile its heap, all shared (4 202 799 104
+# bytes on cass, half its RAM). Without vulkaninfo, and in no-exec mode, the
+# carve-out stays. The wmic-era figure was the driver's AdapterRAM (1 GiB
+# there).
 #
 # The descriptor readers (win_dxgi_desc_*, win_utf16_to_cstr) and the wmic
 # parser (win_parse_videocontrollers) are ungated and pure, so the Linux-hosted
@@ -45,6 +50,7 @@ enum WinDxgi {
     WIN_DXGI_DESC_DEVICE = 260;         # UINT DeviceId
     WIN_DXGI_DESC_DEDICATED_VIDEO = 272;    # SIZE_T DedicatedVideoMemory
     WIN_DXGI_DESC_DEDICATED_SYSTEM = 280;   # SIZE_T DedicatedSystemMemory
+    WIN_DXGI_DESC_SHARED_SYSTEM = 288;      # SIZE_T SharedSystemMemory
     WIN_DXGI_DESC_FLAGS = 304;          # UINT Flags
     WIN_DXGI_DESC_BUF = 320;
     WIN_DXGI_FLAG_SOFTWARE = 0x2;       # DXGI_ADAPTER_FLAG_SOFTWARE
@@ -132,12 +138,24 @@ fn win_dxgi_desc_vram(desc) {
     return 0;
 }
 
+# The system memory (bytes) a DXGI adapter can share: SharedSystemMemory, the
+# heap vulkaninfo reports for an integrated GPU (cass's UHD 600: both
+# 4 202 799 104). Every adapter has one, discrete ones too, so it says nothing
+# about whether the adapter is integrated. Pure.
+fn win_dxgi_desc_shared(desc) {
+    var v = load64(desc + WIN_DXGI_DESC_SHARED_SYSTEM);
+    if (v < 0) { return 0; }
+    return v;
+}
+
 # Push an ACCEL_WIN_GPU profile (device `dev_id`) for one DXGI_ADAPTER_DESC1
-# unless it is a software adapter. Returns 1 if a profile was pushed, else 0.
-# Pure — the COM walk that fills `desc` is win_dxgi_enum_adapters.
+# unless it is a software adapter, with the adapter's VendorId and DeviceId as
+# its pci_id (2.5.3). Returns 1 if a profile was pushed, else 0. Pure — the COM
+# walk that fills `desc` is win_dxgi_enum_adapters.
 fn win_dxgi_desc_emit(desc, dev_id, profiles) {
     if (win_dxgi_desc_is_software(desc) == 1) { return 0; }
     var p = profile_new(ACCEL_WIN_GPU, dev_id, win_dxgi_desc_vram(desc));
+    profile_set_pci_id(p, pci_id_make(load32(desc + WIN_DXGI_DESC_VENDOR), load32(desc + WIN_DXGI_DESC_DEVICE)));
     var name = win_utf16_to_cstr(desc + WIN_DXGI_DESC_NAME, WIN_DXGI_DESC_NAME_WCHARS);
     if (load8(name) != 0) { profile_set_device_name(p, name); }
     vec_push(profiles, p);
@@ -153,22 +171,63 @@ fn win_gpu_use_wmic_fallback(dxgi_count, allow_exec) {
     return 0;
 }
 
+# The pci_id in a PnP device ID, as wmic's PNPDeviceID gives it
+# ("PCI\VEN_8086&DEV_3185&SUBSYS_...", a Str): VEN_ and DEV_ each followed by
+# four hex digits. 0 when either is missing or the ID is not a PCI one. Pure.
+fn win_pnp_pci_id(s) {
+    var d = str_data(s);
+    var n = str_len(s);
+    if (n < 4) { return 0; }
+    if (memeq(d, "PCI", 3) == 0) { return 0; }
+    var vendor = 0 - 1;
+    var device = 0 - 1;
+    var i = 0;
+    while (i + 8 <= n) {
+        var which_id = 0;
+        if (memeq(d + i, "VEN_", 4) == 1) { which_id = 1; }
+        if (memeq(d + i, "DEV_", 4) == 1) { which_id = 2; }
+        if (which_id != 0) {
+            var v = 0;
+            var k = 0;
+            while (k < 4) {
+                var c = load8(d + i + 4 + k);
+                var x = 0 - 1;
+                if (c >= '0' && c <= '9') { x = c - '0'; }
+                if (c >= 'a' && c <= 'f') { x = c - 'a' + 10; }
+                if (c >= 'A' && c <= 'F') { x = c - 'A' + 10; }
+                if (x < 0) { return 0; }
+                v = v * 16 + x;
+                k = k + 1;
+            }
+            if (which_id == 1 && vendor < 0) { vendor = v; }
+            if (which_id == 2 && device < 0) { device = v; }
+            i = i + 8;
+            continue;
+        }
+        i = i + 1;
+    }
+    if (vendor < 0 || device < 0) { return 0; }
+    return pci_id_make(vendor, device);
+}
+
 # Push an ACCEL_WIN_GPU profile (name copied to a NUL-terminated cstr).
-fn win_emit_gpu(profiles, dev_id, name, ram) {
+fn win_emit_gpu(profiles, dev_id, name, ram, pci_id) {
     var mem = ram;
     if (mem < 0) { mem = 0; }
     var p = profile_new(ACCEL_WIN_GPU, dev_id, mem);
+    profile_set_pci_id(p, pci_id);
     var sb = str_builder_new();
     str_builder_add(sb, name);
     profile_set_device_name(p, str_data(str_builder_build(sb)));
     vec_push(profiles, p);
 }
 
-# Parse `wmic ... win32_VideoController get Name,AdapterRAM /format:list`
-# output into ACCEL_WIN_GPU profiles. Each controller is a block of
-# `Key=Value` lines (AdapterRAM= and Name=, any order) separated by blank
-# lines. Returns the count of GPUs pushed. Pure — no I/O. Only reached when
-# DXGI is unavailable (see detect_windows).
+# Parse `wmic ... win32_VideoController get Name,AdapterRAM,PNPDeviceID
+# /format:list` output into ACCEL_WIN_GPU profiles. Each controller is a block
+# of `Key=Value` lines (AdapterRAM=, Name= and PNPDeviceID=, any order)
+# separated by blank lines; PNPDeviceID gives the pci_id (2.5.3). Returns the
+# count of GPUs pushed. Pure — no I/O. Only reached when DXGI is unavailable
+# (see detect_windows).
 fn win_parse_videocontrollers(out, profiles) {
     var lines = str_split(out, 10);
     var nl = vec_len(lines);
@@ -177,6 +236,7 @@ fn win_parse_videocontrollers(out, profiles) {
     var have_name = 0;
     var cur_name = 0;
     var cur_ram = 0;
+    var cur_pci = 0;
     var count = 0;
     while (i < nl) {
         var line = str_trim(vec_get(lines, i));
@@ -184,11 +244,12 @@ fn win_parse_videocontrollers(out, profiles) {
         var ll = str_len(line);
         if (ll == 0) {
             if (have_name == 1) {
-                win_emit_gpu(profiles, dev_id, cur_name, cur_ram);
+                win_emit_gpu(profiles, dev_id, cur_name, cur_ram, cur_pci);
                 dev_id = dev_id + 1;
                 count = count + 1;
                 have_name = 0;
                 cur_ram = 0;
+                cur_pci = 0;
             }
         } else {
             if (ll >= 11) {
@@ -202,11 +263,16 @@ fn win_parse_videocontrollers(out, profiles) {
                     have_name = 1;
                 }
             }
+            if (ll >= 12) {
+                if (memeq(ld, "PNPDeviceID=", 12) == 1) {
+                    cur_pci = win_pnp_pci_id(str_new(ld + 12, ll - 12));
+                }
+            }
         }
         i = i + 1;
     }
     if (have_name == 1) {
-        win_emit_gpu(profiles, dev_id, cur_name, cur_ram);
+        win_emit_gpu(profiles, dev_id, cur_name, cur_ram, cur_pci);
         count = count + 1;
     }
     return count;
@@ -308,11 +374,47 @@ fn win_dxgi_enum_adapters(profiles, warnings) {
     return count;
 }
 
+# SharedSystemMemory of the first hardware adapter with these PCI vendor and
+# device IDs, or 0 (no such adapter, or DXGI unavailable). The Vulkan detector
+# sizes an integrated GPU with it on Windows (2.5.3), instead of running the
+# full vulkaninfo a second time (about 0.9 s on cass).
+fn win_dxgi_shared_bytes(vendor, device) {
+    var iid[16];
+    win_dxgi_iid_factory1(&iid);
+    var pFactory = 0;
+    var hr = syscall(0xF012, &iid, &pFactory);     # CreateDXGIFactory1
+    if ((hr & 0xFFFFFFFF) != 0) { return 0; }
+    if (pFactory == 0) { return 0; }
+    var fvtbl = load64(pFactory);
+    var found = 0;
+    var idx = 0;
+    while (idx < WIN_DXGI_MAX_ADAPTERS) {
+        var pAdapter = 0;
+        var hr2 = callptr(load64(fvtbl + 12 * 8), pFactory, idx, &pAdapter);
+        if ((hr2 & 0xFFFFFFFF) != 0) { break; }
+        if (pAdapter == 0) { break; }
+        var avtbl = load64(pAdapter);
+        var desc[WIN_DXGI_DESC_BUF];
+        var hr3 = callptr(load64(avtbl + 10 * 8), pAdapter, &desc);
+        var r1 = win_dxgi_release(pAdapter);
+        idx = idx + 1;
+        if ((hr3 & 0xFFFFFFFF) != 0) { continue; }
+        if (win_dxgi_desc_is_software(&desc) == 1) { continue; }
+        if (load32(&desc + WIN_DXGI_DESC_VENDOR) != vendor) { continue; }
+        if (load32(&desc + WIN_DXGI_DESC_DEVICE) != device) { continue; }
+        found = win_dxgi_desc_shared(&desc);
+        break;
+    }
+    var r2 = win_dxgi_release(pFactory);
+    return found;
+}
+
 # Detect Windows-visible GPUs. DXGI always runs (no subprocess). Only when
 # DXGI is unavailable, and only if `allow_exec` is 1, does it fall back to
-# wmic; CreateProcessW resolves `wmic` from System32\wbem on PATH, so the
-# fallback needs no which()/PATH lookup of its own. DXGI being unavailable is
-# always reported in `warnings`, so a missing GPU list is never silent.
+# wmic, found through which() and started by that absolute path (2.5.3).
+# Through 2.5.2 it was started by its bare name, which CreateProcessW looks up
+# in the current directory before System32. DXGI being unavailable is always
+# reported in `warnings`, so a missing GPU list is never silent.
 fn detect_windows_opts(profiles, warnings, allow_exec) {
     var n = win_dxgi_enum_adapters(profiles, warnings);
     if (n >= 0) {
@@ -327,12 +429,17 @@ fn detect_windows_opts(profiles, warnings, allow_exec) {
         return 0;
     }
     hwlog_debug("windows: dxgi unavailable, falling back to wmic");
+    var wmic = which("wmic");
+    if (wmic == 0) {
+        if (warnings != 0) { vec_push(warnings, warning_tool_not_found("wmic")); }
+        return 0;
+    }
     var args = vec_new();
-    vec_push(args, "wmic");
+    vec_push(args, cmd_win_program_token(wmic));
     vec_push(args, "path");
     vec_push(args, "win32_VideoController");
     vec_push(args, "get");
-    vec_push(args, "Name,AdapterRAM");
+    vec_push(args, "Name,AdapterRAM,PNPDeviceID");
     vec_push(args, "/format:list");
     var buf = alloc(CMD_MAX_STDOUT);
     var st[16];
