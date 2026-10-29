@@ -51,7 +51,7 @@ Contributions are welcome in several areas:
 
 - **Captures from real hardware** -- the output of a vendor tool (`nvidia-smi`,
   `neuron-ls --json`, `hl-smi`, ...) or a sysfs tree from a machine we have no
-  access to, added under `tests/fixtures/`. The roadmap's 2.5.x section lists
+  access to, added under `tests/fixtures/`. The roadmap's 2.6.x section lists
   the ones we need most.
 - **New accelerator backends** -- see *Adding a new accelerator* below.
 - **Improved detection accuracy** -- better sysfs paths, parser robustness,

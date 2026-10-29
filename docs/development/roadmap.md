@@ -6,20 +6,28 @@ platform validation come before new features. What already shipped is in
 
 ---
 
-## 2.4.x — Correct output, and CI that would notice
+## 2.5.x — Correct output, and CI that would notice
 
 Fix what ai-hwaccel reports wrong today, and close the CI gaps that let those
-bugs ship.
+bugs ship. This was the 2.4.x plan; 2.5.0 shipped first, as the cyrius 6.7.18
+toolchain release.
 
-### Detection output
+### 2.5.1
+
+Defects in what ai-hwaccel reports, or in how it runs on the platforms already
+tested, and the CI gates that need no new runner. Each can be fixed and
+checked in this repo.
+
+#### Detection output
 
 - [ ] **Vendor tools run without a time limit.** A hung tool (`nvidia-smi` on
   a GPU in an error state, for example) blocks detection until it exits. The
   stdlib waits for ever by default, and ai-hwaccel never sets a deadline.
   cyrius 6.6.6 added `proc_set_timeout_ms()`, which kills a child that stays
-  idle past the deadline. It is POSIX-only (Windows and AGNOS don't define
-  it), so the call needs a target gate. Set a deadline around the tool runs,
-  and report a timeout with `warning_timeout`, which exists but nothing emits.
+  idle past the deadline, and since 6.6.8 Windows has it too (the child's Job
+  object ends with it). AGNOS still does not define it, so the call needs an
+  AGNOS gate. Set a deadline around the tool runs, and report a timeout with
+  `warning_timeout`, which exists but nothing emits.
   Until then, the Python package's 30 s limit on each CLI run is the only
   bound.
 - [ ] **A read that fills its buffer writes one byte past it.** Several
@@ -42,18 +50,6 @@ bugs ship.
   line. The Intel Mac's own GPU is not detected at all. This comes from
   reading the code; it has not been run on `ach`, and no wheel targets Intel
   Macs.
-- [ ] **No `pci_id` on oneAPI, Windows or Apple GPU profiles.** The duplicate
-  pass matches on `pci_id`, which only the CUDA, ROCm and Vulkan detectors
-  set. An Intel Data Center GPU that both `xpu-smi` and `vulkaninfo` report is
-  therefore listed twice. DXGI profiles need one too (next items).
-- [ ] **Lazy queries should run only the detectors they need.** Every lazy
-  family probe goes through `registry_detect_with`, so it runs the post-passes
-  too, and `detect_interconnects` spawns `nvidia-smi nvlink -s` whenever no
-  NVSwitch sysfs node exists. A TPU-only query therefore still starts
-  `nvidia-smi`, the exact spawn `lazy.cyr` exists to avoid, and
-  `lazy_into_registry` repeats the post-passes for every family. Run the
-  detectors per family and the post-passes once, in `lazy_into_registry`.
-  Consider also gating the NVLink probe on a CUDA profile being present.
 - [ ] **`registry_detect_with(builder_no_exec())` still spawns.** The mask
   removes the exec backends, but the call passes `allow_exec = 1`: Vulkan runs
   `vulkaninfo`, the interconnect pass runs `nvidia-smi`, and the Apple and
@@ -66,6 +62,49 @@ bugs ship.
   missing `nvidia-smi` is listed twice (the CUDA backend and the interconnect
   pass). Run the `system_profiler` fallback on macOS only, and report each
   missing tool once.
+
+#### Disk cache
+
+- [ ] **The disk cache writes a file it never reads.** `disk_cached_get`
+  writes `registry.json` after each detection, but its read path is a `TODO`:
+  on a cold start it loads the file, discards it and detects again. Either
+  parse it back with `profile_from_json` (bayan-json is optional, so fall back
+  to detection without it), or drop the disk layer. While there:
+  - without `HOME` the cache is `/tmp/ai-hwaccel-cache.json`, and the write
+    follows symlinks, so another local user can aim it at a file the caller
+    can write;
+  - the directory is created one level deep, so without an existing
+    `~/.cache` nothing is written;
+  - on Windows, where `HOME` is usually unset, it takes the `/tmp` path.
+
+#### CI coverage
+
+- [ ] **Make the lint step fail.** A lint warning never fails the build:
+  `cyrius lint` exits 0 even when it reports warnings, and CI's loop adds
+  `|| true` anyway. `cyrius lint --strict` exits 2 on a warning, and every
+  file in `src/` passes it today, so switch the loop to `--strict` and drop
+  the `|| true`.
+- [ ] **qemu-aarch64 disk-cache test**
+  ([issue](issues/archived/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md)).
+- [ ] **A cache TTL test that does not assume Linux**
+  ([issue](issues/archived/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md)).
+- [ ] **`cyrius capacity --check` as a CI gate.** On 6.7.18 it passes against
+  `src/main.cyr` (750 variable slots in use, every table under 85%).
+- [ ] **`cyrius vet` over `tests/tcyr/`.** CI vets only `src/main.cyr`, and
+  each test unit is its own compilation root.
+
+### Later in 2.5.x
+
+Work that needs new platform reach or a decision first: running vendor tools
+on Windows and what builds on it, the lazy registry's per-family detection, a
+macOS runner, and the PE build flag.
+
+#### Windows tools and the duplicate pass
+
+- [ ] **No `pci_id` on oneAPI, Windows or Apple GPU profiles.** The duplicate
+  pass matches on `pci_id`, which only the CUDA, ROCm and Vulkan detectors
+  set. An Intel Data Center GPU that both `xpu-smi` and `vulkaninfo` report is
+  therefore listed twice. DXGI profiles need one too (next items).
 - [ ] **Integrated GPUs on Windows report their dedicated carve-out.** An
   integrated (UMA) adapter's `DedicatedVideoMemory` is its boot-time carve-out
   (128 MiB on an Intel UHD 600), not the shared system memory it can also use
@@ -85,30 +124,24 @@ bugs ship.
   `DeviceId`) and count as the survivor for Vulkan. CUDA's profile should then
   win over DXGI's.
 
-### Disk cache
+#### Lazy detection
 
-- [ ] **The disk cache writes a file it never reads.** `disk_cached_get`
-  writes `registry.json` after each detection, but its read path is a `TODO`:
-  on a cold start it loads the file, discards it and detects again. Either
-  parse it back with `profile_from_json` (bayan-json is optional, so fall back
-  to detection without it), or drop the disk layer. While there:
-  - without `HOME` the cache is `/tmp/ai-hwaccel-cache.json`, and the write
-    follows symlinks, so another local user can aim it at a file the caller
-    can write;
-  - the directory is created one level deep, so without an existing
-    `~/.cache` nothing is written;
-  - on Windows, where `HOME` is usually unset, it takes the `/tmp` path.
+- [ ] **Lazy queries should run only the detectors they need.** Every lazy
+  family probe goes through `registry_detect_with`, so it runs the post-passes
+  too, and `detect_interconnects` spawns `nvidia-smi nvlink -s` whenever no
+  NVSwitch sysfs node exists. A TPU-only query therefore still starts
+  `nvidia-smi`, the exact spawn `lazy.cyr` exists to avoid, and
+  `lazy_into_registry` repeats the post-passes for every family. Run the
+  detectors per family and the post-passes once, in `lazy_into_registry`.
+  Consider also gating the NVLink probe on a CUDA profile being present.
 
-### Build
+#### Build and CI
 
 - [ ] **Retire the `CYRIUS_DCE=1` PE workaround** (your call). This was fixed
   upstream in cyrius 6.6.1 (PE declines compaction and NOP-fills dead code) and
   verified on `cass` under 6.6.6. Restoring the flag in `stage_win_cross.sh`
   shrinks the EXE inside the wheel from 77 534 to 43 684 B compressed. See
   [the issue](issues/2026-09-07-cyrius-dce-pe-access-violation.md).
-
-### CI coverage — run what ships, on every target
-
 - [ ] **A `macos-smoke` job.** `wheels.yml`'s `macos` job builds the arm64
   binary but never runs it, which is how the RAM bug fixed in 2.3.27 survived.
   Mirror `windows-smoke`: JSON shape, stderr silent at the default level,
@@ -117,23 +150,10 @@ bugs ship.
   far it has run on Apple Silicon only by hand, on `ecb`). Until then:
   cross-build with the pinned `cycc_aarch64` and `CYRIUS_MACHO_ARM=1`, then
   ad-hoc sign and run on `ecb`.
-- [ ] **Make the lint step fail.** A lint warning never fails the build:
-  `cyrius lint` exits 0 even when it reports warnings, and CI's loop adds
-  `|| true` anyway. `cyrius lint --strict` exits 2 on a warning, and every
-  file in `src/` passes it today, so switch the loop to `--strict` and drop
-  the `|| true`.
-- [ ] **qemu-aarch64 disk-cache test**
-  ([issue](issues/archived/2026-09-07-cache-raw-syscalls-wrong-on-aarch64.md)).
-- [ ] **A cache TTL test that does not assume Linux**
-  ([issue](issues/archived/2026-09-07-monotonic-secs-unguarded-on-macos-windows.md)).
-- [ ] **`cyrius capacity --check` as a CI gate.** On 6.6.6 it passes against
-  `src/main.cyr` (597 variable slots in use, every table under 85%).
-- [ ] **`cyrius vet` over `tests/tcyr/`.** CI vets only `src/main.cyr`, and
-  each test unit is its own compilation root.
 
 ---
 
-## 2.5.x — Platform validation, fixture-first
+## 2.6.x — Platform validation, fixture-first
 
 Implement or lock each detection path against a captured fixture first (no
 hardware needed: `tests/fixtures/` or inline strings), then confirm on real
@@ -189,7 +209,7 @@ work.
 
 ---
 
-## 2.6.x — Multi-node and hot-plug
+## 2.7.x — Multi-node and hot-plug
 
 ### Multi-node detection
 
@@ -207,7 +227,7 @@ work.
 
 ---
 
-## 2.7.x — Fleet and scale
+## 2.8.x — Fleet and scale
 
 Fleet-wide inventory, health monitoring and capacity planning at datacenter
 scale.
@@ -258,7 +278,7 @@ scale.
   already select backends at run time.
 - [ ] **Android** — HAL `hwbinder` for the NNAPI accelerator list.
 - [ ] **FreeBSD** — DRM sysctl equivalents for GPU detection.
-- [ ] **JS/TS bindings.** cyrius 6.6.6 has `--target js`, but it cannot build
+- [ ] **JS/TS bindings.** cyrius 6.7.18's `--target js` still cannot build
   `src/` ("ts lex error before emit"), and detection needs processes and the
   filesystem anyway. A Node package can wrap the CLI and its JSON, exactly as
   the Python package does.
@@ -266,14 +286,11 @@ scale.
 - [ ] **Thermal throttling prediction** — warn as devices approach their
   limits.
 - [ ] **Plugin system** — third-party backends via dynamic loading.
-
-### Blocked outside this repo
-
 - [ ] **`switch` dispatch for the enum tables** (`accel_name()`,
   `family_name()`, `format_name()`, `_gguf_file_type_name()`,
-  `requirement_satisfied()`). cyrius still rejects an enum name as a `case`
-  label: 6.6.6 gives `expected number, got identifier`. `case 0:` with
-  comments was rejected as too brittle against renumbering.
+  `requirement_satisfied()`). No longer blocked: cyrius 6.7.18 accepts an enum
+  name as a `case` label, where 6.6.6 gave `expected number, got identifier`.
+  (`case 0:` with comments was rejected as too brittle against renumbering.)
 
 ---
 

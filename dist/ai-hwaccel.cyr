@@ -2664,8 +2664,8 @@ fn _parse_neuron_json(output, profiles) {
 #   - A software implementation (deviceType CPU: lavapipe, SwiftShader) is not
 #     a GPU and is not reported, as DXGI's Basic Render Driver is not.
 #   - Discrete and virtual GPUs keep the 4 GiB estimate. CUDA and ROCm report
-#     the same cards; which profile survives, with which memory figure, is the
-#     duplicate-device work (roadmap 2.4.x).
+#     the same cards; profiles_dedup (src/registry.cyr, 2.4.0) drops this
+#     view and keeps theirs, with their memory figure.
 # Without vulkaninfo, and in no-exec mode, a sysfs scan of the DRM cards finds
 # the GPUs by PCI vendor instead. Through 2.3.28 every Vulkan GPU carried the
 # 4 GiB estimate and counted as memory of its own.

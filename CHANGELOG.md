@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [Unreleased] — the roadmap re-planned from 2.5.x
+
+Documentation only. The one source change is a comment, so the CLI, both
+benchmark binaries, the PE and the aarch64 build are byte-identical to 2.5.0
+(the CLI is 199 296 B with `CYRIUS_DCE=1`), and there is no benchmark delta to
+review.
+
+### Changed
+
+- **The roadmap starts at 2.5.x.** The 2.4.x plan (correct output, and CI
+  that would notice) was still open when 2.5.0 shipped as a toolchain
+  release, so it becomes 2.5.x:
+  - **2.5.1:** the defects that can be fixed and checked in this repo (tool
+    time limits, the one-byte buffer overrun, the phantom GPU on Intel Macs,
+    `builder_no_exec()` spawning, impossible tool warnings, the disk cache)
+    and the CI gates that need no new runner (`lint --strict`, the two cache
+    tests, `capacity --check`, `vet` over the test units);
+  - **later in 2.5.x:** vendor tools on Windows and the `pci_id` and
+    integrated-GPU work that builds on it, per-family lazy detection, the PE
+    `CYRIUS_DCE=1` flag (the maintainer's call) and a `macos-smoke` job.
+
+  The later releases move back one minor each: platform validation is now
+  2.6.x, multi-node and hot-plug 2.7.x, fleet and scale 2.8.x. No item was
+  added or dropped.
+- **Roadmap facts re-checked on cyrius 6.7.18:**
+  - `switch` on the enum tables is no longer blocked: 6.7.18 accepts an enum
+    name as a `case` label, where 6.6.6 refused it. The item moves from
+    *Blocked outside this repo* to *Later*;
+  - `proc_set_timeout_ms()` exists on Windows since cyrius 6.6.8, so the
+    tool-deadline item needs an AGNOS gate only;
+  - `capacity --check` still passes (750 variable slots in use);
+  - `--target js` still cannot build `src/`.
+- CONTRIBUTING points to the 2.6.x section for hardware captures. A comment in
+  `src/detect/vulkan.cyr` (and so `dist/ai-hwaccel.cyr`) called the
+  duplicate-device handling "roadmap 2.4.x" work; it now names
+  `profiles_dedup`, which shipped in 2.4.0.
+
 ## [2.5.0] — 2026-10-28 — cyrius 6.7.18, bayan 1.11.1
 
 A toolchain and dependency bump, and the first release on the cyrius 6.7
