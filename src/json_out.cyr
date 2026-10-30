@@ -212,16 +212,19 @@ fn profile_to_json(sb, p) {
 #     unavailable device, a null shared_memory_bytes no shared memory;
 #   - a value no producer can mean refuses the profile, as malformed JSON
 #     does: a negative accel_type_id, a device_id outside 0..1024, memory
-#     past PJ_MAX_*_MEMORY, shared memory past memory_bytes, and
-#     tpu_chips or neuron_cores outside 0..1024 (planning loops once per
-#     chip). An accel_type_id this build does not know is kept: a newer
-#     producer's device stays an accelerator of an unknown kind.
+#     past PJ_MAX_*_MEMORY (a TPU's past its chips' HBM, below), shared
+#     memory past memory_bytes, and tpu_chips or neuron_cores outside
+#     0..1024 (planning loops once per chip). An accel_type_id this build
+#     does not know is kept: a newer producer's device stays an accelerator
+#     of an unknown kind.
 
 # The bounds profile_from_json applies: CMD_MAX_DEVICE_ID and
 # validate_memory_mb's 16 TiB, the ones the tool parsers apply (command.cyr,
 # which some of this module's units do not include). The CPU profile is the
 # host's RAM, which /proc/meminfo reports past 16 TiB on the largest hosts,
-# so it gets 1 PiB.
+# so it gets 1 PiB. A TPU's memory is no parsed value but tpu.cyr's chip
+# count times the chip's HBM (profile_tpu), up to 1024 v5p chips of 95 GiB,
+# so it may also reach tpu_chips times the largest chip's.
 var PJ_MAX_DEVICE_ID = 1024;
 var PJ_MAX_DEVICE_MEMORY = 17592186044416;
 var PJ_MAX_HOST_MEMORY = 1125899906842624;
@@ -287,12 +290,18 @@ fn profile_from_json(v) {
         m_shared = 0;
     }
     if (atype < 0) { return 0; }
+    # chips first: it bounds a TPU's memory, and 1024 x 95 GiB fits an i64.
+    if (_pj_in(chips, PJ_MAX_DEVICE_ID) == 0) { return 0; }
+    if (atype == ACCEL_TPU) {
+        # v5p's HBM, the largest tpu_hbm_per_chip knows.
+        var tpu_max = chips * tpu_hbm_per_chip(TPU_V5P);
+        if (tpu_max > mem_max) { mem_max = tpu_max; }
+    }
     if (_pj_in(dev_id, PJ_MAX_DEVICE_ID) == 0) { return 0; }
     if (_pj_in(mem, mem_max) == 0) { return 0; }
     if (m_used != PROFILE_NONE && _pj_in(m_used, mem_max) == 0) { return 0; }
     if (m_free != PROFILE_NONE && _pj_in(m_free, mem_max) == 0) { return 0; }
     if (m_shared != 0 && _pj_in(m_shared, mem) == 0) { return 0; }
-    if (_pj_in(chips, PJ_MAX_DEVICE_ID) == 0) { return 0; }
     if (_pj_in(cores, PJ_MAX_DEVICE_ID) == 0) { return 0; }
     var p = profile_new(atype, dev_id, mem);
     profile_set_available(p, _pj_bool(v, "available", 1));

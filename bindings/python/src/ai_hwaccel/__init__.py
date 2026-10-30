@@ -140,7 +140,9 @@ def training_memory(
 
     ``method`` is one of: full, lora, qlora-4bit, qlora-8bit, prefix,
     dpo, rlhf, distillation. The weights are bf16 unless the method is a
-    QLoRA one, which picks 4- or 8-bit weights itself.
+    QLoRA one, which picks 4- or 8-bit weights itself. ``model`` is 1M
+    parameters or more: the estimate works in whole millions, and the
+    binary refuses a smaller size (CommandError).
 
     ``quant`` is deprecated and ignored: ``--train`` never read ``--quant``,
     so every value gave the bf16 figures. Passing it warns; it is removed in
@@ -177,5 +179,5 @@ def cost(
 
 
 def version(*, binary: Optional[str] = None, timeout: float = 60.0) -> str:
-    """Return the version reported by the binary."""
+    """Return the version built into the binary (it reads no file)."""
     return _runner.run_text(["--version"], binary=binary, timeout=timeout).strip()

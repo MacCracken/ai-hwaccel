@@ -13,11 +13,20 @@ hardware needed: `tests/fixtures/` or inline strings), then confirm on real
 hardware when access happens. Missing hardware never blocks the source-side
 work.
 
-- [ ] **Remove the deprecated `disk_cached_*` functions** in 2.6.0.
-  `disk_cached_new`, `disk_cached_get` and `disk_cached_invalidate` were
-  deprecated in 2.5.1, when they stopped writing a file they never read back;
-  they now behave as `cached_registry_new`, `cached_get` and
-  `cached_invalidate`.
+- [ ] **Remove the deprecated functions** in 2.6.0:
+  - `disk_cached_new`, `disk_cached_get` and `disk_cached_invalidate`,
+    deprecated in 2.5.1, when they stopped writing a file they never read
+    back; they behave as `cached_registry_new`, `cached_get` and
+    `cached_invalidate`.
+  - `cmd_data_dir_arg`, deprecated in 2.5.5: in a library build the argv it
+    reads is the host program's. The CLI hands `--data-dir` to
+    `data_dir_set`.
+- [ ] **Drop the 2.5.5 stdlib workarounds once the pinned cyrius fixes them**
+  (issues `docs/development/issues/2026-10-29-*`): the capture mutex in
+  `cmd_capture` (which makes `--threaded` run the tools one at a time), the
+  environment preload before the detector threads start, and the PE
+  `GetEnvironmentVariableA` reader for values past 4096 bytes. The deadline
+  issue (about 20 s per hung tool) needs no workaround removed, only a check.
 
 - [ ] **Fixtures for every parser.** `tests/fixtures/vulkaninfo/` holds real
   captures (Renoir on Linux, UHD 600 on Windows). The other parsers are still
@@ -27,15 +36,35 @@ work.
   `tests/fixtures/`".
 - [ ] **Captures from real hardware:**
   - [ ] NVIDIA H100 / A100 / GH200: `nvidia-smi` CSV (AWS p5 / GCP a3-high),
-    including a real `pci.device_id`, the duplicate pass's key. GH200's
-    unified memory (`mem_bytes + 480 GiB`) is coded; a fixture locks it in.
-  - [ ] AMD MI300X / MI250: `/sys/class/drm/*/device/*`. The MI300X CXL path
-    (`mem_info_vis_vram_total`) is coded.
-  - [ ] Google TPU v5e / v5p: `/sys/class/accel/*` on a GCE v5 slice.
-  - [ ] AWS Neuron trn1 / inf2: `neuron-ls --json` from trn1.32xlarge,
-    covering the per-core count math.
-  - [ ] Intel Gaudi 3: `hl-smi --query-aip` (AWS DL2), locking in the HL-325
-    device-name override.
+    including a real `pci.device_id` (the duplicate pass's key) and
+    `pci.bus_id` (the NUMA and PCIe key since 2.5.5). GH200's unified memory
+    (`mem_bytes + 480 GiB`) is coded; a fixture locks it in. Also from 2.5.5,
+    coded from documentation: `power.draw` decimals, `[N/A]` memory on GB10 /
+    Jetson (sized from host RAM), a GPU whose memory cannot be read (listed
+    unavailable), Blackwell bus widths by device-ID range, and the query
+    without `compute_cap` for drivers before R510. `nvidia-smi nvlink -s` from
+    an NVLink host (the per-GPU, active-link parse; the fixtures in
+    `tests/fixtures/from-docs/` follow NVIDIA's documentation).
+  - [ ] AMD MI300X / MI250 and a Navi dGPU: `/sys/class/drm/*/device/*`,
+    `pp_dpm_mclk` and the KFD topology nodes. 2.5.5 computes memory bandwidth
+    from the top `pp_dpm_mclk` level with a memory-type multiplier, reads
+    `compute_capability` from KFD's `gfx_target_version`, and clips the PCIe
+    link past the card's own switch to the slot; only the Renoir APU on the
+    dev host has confirmed it.
+  - [ ] Google TPU v5e / v5p: `/sys/class/accel/*/device/{driver,vendor}` on a
+    GCE v5 slice. Since 2.5.5 an accel node is a TPU only when nothing says
+    otherwise (driver, PCI vendor 0x1ae0); a real TPU VM must still be found.
+  - [ ] Intel Core Ultra NPU: `/sys/class/accel/*` with the `intel_vpu`
+    driver (2.5.5; the old `/sys/class/misc/intel_npu` node never existed).
+  - [ ] AWS Neuron trn1 / trn2 / inf2: `neuron-ls --json-output` from a real
+    instance. 2.5.5 parses the keys AWS documents (`neuron_device`,
+    `nc_count`, `memory_size`) and sizes the `/dev/neuron<N>` fallback from
+    the DMI product name (trn2: 8 cores, 96 GiB a device); the fixtures are
+    built from the documentation.
+  - [ ] Intel Gaudi 3: `hl-smi --query-aip` (AWS DL2), locking in that every
+    HL-3xx board is a Gaudi 3, and the habanalabs accel-node fallback.
+  - [ ] Containers: a cgroup v1 and a v2 memory limit, to confirm the CPU
+    profile's cap (2.5.5) on Docker and Kubernetes.
   - [ ] Intel Data Center GPU Max: HBM vs DDR memory tiers, and
     `xpu-smi discovery --dump 1,2,16,24` from any oneAPI GPU. The parser
     (2.5.3) follows the XPU Manager V1.x user guide's CSV format and maps
@@ -53,10 +82,12 @@ work.
   functions. Their parsing sits next to the tool and sysfs reads, so factor out
   pure parsers first, then test them against fixtures (from vendor docs until
   real captures exist):
-  - [ ] Cerebras WSE (`cloud_asic.cyr`): `/dev/cerebras*` + sysfs; a sample
-    from Cerebras docs or a contributor with access.
-  - [ ] Graphcore IPU (`cloud_asic.cyr`): `gc-info` output, which can be
-    synthesized from the public SDK documentation.
+  - [ ] Cerebras WSE (`cloud_asic.cyr`): `/dev/cerebras*` + sysfs, and real
+    `cerebras_cli system-info` output. 2.5.5 factored out the memory parse and
+    tests it on samples synthesized from documentation.
+  - [ ] Graphcore IPU (`cloud_asic.cyr`): real `gc-info` output; the 2.5.5
+    parse is tested on samples synthesized from the public SDK documentation,
+    and the `/dev/ipu<N>` fallback no longer takes Intel IPU6 camera nodes.
   - [ ] Groq LPU (`cloud_asic.cyr`): `/dev/groq*` sysfs. The driver is not in
     public distros, but the sysfs format is documented.
   - [ ] Qualcomm Cloud AI 100 (`edge.cyr`).

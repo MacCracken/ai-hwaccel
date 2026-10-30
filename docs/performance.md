@@ -17,8 +17,11 @@ run on `cass` (a Celeron J4125), where the whole 2.5.2 run took 0.14 s. It
 runs once: Windows sizes an integrated GPU from DXGI rather than from a second,
 full `vulkaninfo` run.
 
-A tool that prints nothing for 10 s is killed and reported as a timeout
-(2.5.1), so a hung tool delays detection by that much, not for ever.
+A tool that prints nothing for 10 s is cut and reported as a timeout (2.5.1),
+so a hung tool delays detection by about 20 s on Linux and macOS: it is cut after 10 s of silence, gets a second
+10 s to exit, then TERM, up to 5 s of grace and KILL (25 s if it ignores
+TERM), on Windows by 10 s, but not
+for ever.
 
 ---
 
@@ -68,20 +71,25 @@ re-read system memory.
 
 ## Threaded detection
 
-`registry_detect_threaded()` runs the tool-based backends (CUDA, Gaudi,
-Neuron, Vulkan, oneAPI, Apple) in parallel threads and the sysfs ones on the
-calling thread. It returns when every thread has joined, so it cuts latency
-when several tools are installed. It is not asynchronous. `registry_detect()`
-runs the backends one after another, on one thread. The CLI takes
-`--threaded` to detect this way (2.5.4).
+`registry_detect_threaded()` runs every backend that can start a vendor tool
+(`backend_may_exec`: CUDA, oneAPI, Vulkan, Apple, Gaudi, Neuron, Cerebras,
+Graphcore) on a thread of its own and the sysfs ones on the calling thread. It
+returns when every thread has joined. It is not asynchronous. Since 2.5.5 the
+tools themselves run one at a time (`cmd_capture`): the stdlib's capture
+state is process-wide (issue 2026-10-29-cyrius-process-capture-state-not-
+thread-safe), so what overlaps is the parsing, sysfs reads and OS calls
+around the tools, and where the tools dominate the latency is about that of
+`registry_detect()`, which runs the backends one after another on one
+thread. The CLI takes `--threaded` to detect this way (2.5.4).
 
 ---
 
 ## Binary size
 
-`CYRIUS_DCE=1` removes unreachable code: the x86_64 CLI is about 216 KB with
-it and 544 KB without. Every backend is always compiled in: the per-backend
-`-D` flags described in ADR-004 were never implemented.
+`CYRIUS_DCE=1` removes unreachable code: the x86_64 CLI is about 289 KB with
+it and 608 KB without (2.5.5; 216 KB and 536 KB in 2.5.4). Every backend is
+always compiled in: the per-backend `-D` flags described in ADR-004 were never
+implemented.
 
 ---
 

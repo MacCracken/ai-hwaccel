@@ -1,5 +1,5 @@
 {
-  "_comment": "Static cloud GPU instance pricing. Prices in USD/hour, approximate on-demand rates as of 2025-Q1. Update without recompiling by replacing this file.",
+  "_comment": "Static cloud GPU instance pricing. Prices in USD/hour, approximate on-demand rates as of 2025-Q1. Update without recompiling by replacing this file; a running library consumer calls cloud_pricing_reload() after replacing it.",
   "instances": [
     {
       "name": "p5.48xlarge",

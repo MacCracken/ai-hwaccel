@@ -7,8 +7,8 @@ How to run the tests, check detection on real hardware, and read the results.
 Run everything from the repository root (some tests read `tests/fixtures/`):
 
 ```sh
-cyrius test tests/tcyr                           # 1226 assertions in 15 units
-cyrius fuzz                                      # the 7 fuzz harnesses
+cyrius test tests/tcyr                           # 2536 assertions in 19 units
+cyrius fuzz                                      # the 8 fuzz harnesses
 for f in src/*.cyr src/detect/*.cyr; do cyrius lint --strict "$f"; done   # fails on a warning
 for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do
     cyrius fmt "$f" --check                      # plain `cyrius fmt <file>` rewrites the file
@@ -26,14 +26,17 @@ A unit passes CI when it exits 0 and its last line reads
 
 ## Test categories
 
-Tests are 15 `.tcyr` units under `tests/tcyr/`, with 1226 assertions in total.
+Tests are 19 `.tcyr` units under `tests/tcyr/`, with 2536 assertions in total.
+Run them from the repository root, on Linux, with a `/tmp` that allows exec:
+`io_test`, `accel_test` and `system_test` write small fake tools and sysfs trees
+there and run them.
 The README's *Test units* table lists what each unit covers. Real tool output
 used as fixtures lives in `tests/fixtures/`.
 
 | Suite | Location | What it tests |
 |---|---|---|
-| Unit tests | `tests/tcyr/*.tcyr` | Types, profiles, registry queries and totals, the duplicate-device pass, every detection entry point, parsers, planning, JSON output and round-trip, Windows, lazy detection |
-| Fuzz harnesses | `fuzz/*.fcyr` | The CUDA, Vulkan, Neuron, Gaudi, Apple, `xpu-smi` and model-format parsers |
+| Unit tests | `tests/tcyr/*.tcyr` | Types, profiles, registry queries and totals, the duplicate-device pass, every detection entry point, parsers, planning, cost, JSON output and round-trip, the CLI's checks, Windows, lazy detection, the accel class, the container and environment rules |
+| Fuzz harnesses | `fuzz/*.fcyr` | The CUDA, Vulkan, Neuron, Gaudi, Apple, `xpu-smi` and model-format parsers, and the JSON profile reader (`profile_from_json`) |
 | Benchmarks | `benches/*.bcyr` | 21 rows in three suites, `parsing`, `registry` and `lazy` |
 | Python bindings | `bindings/python/tests/` | The runner and the dataclasses against fixtures; with a binary (`AI_HWACCEL_BIN`), every API call end to end |
 

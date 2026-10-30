@@ -22,8 +22,9 @@ fn storage_name_skipped(name) {
 }
 
 # The kind of /sys/block entry `name` (a Str), from its queue/rotational
-# flag `rot` (0, 1, or -1 when unreadable) and, for NVMe, its controller's
-# model and transport (Strs, or 0). An NVMe device is STK_NVME unless it is
+# flag `rot` (0, 1, or -1 when unreadable) and, for NVMe, its model and its
+# controller's transport (Strs, or 0; see storage_nvme_transport). An NVMe
+# device is STK_NVME unless it is
 # backed by the network: NVMe over fabrics (transport tcp, rdma or fc), or an
 # AWS EBS volume on Nitro, whose model is "Amazon Elastic Block Store" and
 # whose gp3 baseline is 125 MB/s, not a local SSD's 3.5 GB/s (2.5.5). Those
@@ -41,6 +42,34 @@ fn storage_classify(name, rot, model, transport) {
     if (rot == 0) { return STK_SATA_SSD; }
     if (rot == 1) { return STK_HDD; }
     return STK_UNKNOWN;
+}
+
+# The NVMe transport ("pcie", "tcp", "rdma", "fc", ...) of /sys/block entry
+# `name` (a Str) under `root`, as a Str, or 0. A namespace's device is its
+# controller, which has `transport`, except under native NVMe multipath (the
+# default on most distro kernels) for a subsystem with several controllers,
+# as NVMe over fabrics targets report: there the disk's device is the
+# subsystem, which has the model but no transport, and links to its
+# controllers (nvme<N>), so the first of those with one answers. The
+# listing runs only when device/transport is missing.
+fn storage_nvme_transport(root, name) {
+    var t = sysfs_read(sysfs_path_str(root, name, "device/transport"));
+    if (t != 0) { return t; }
+    var dev = sysfs_path_str(root, name, "device");
+    var ents = sysfs_list_dir(dev);
+    var n = vec_len(ents);
+    var i = 0;
+    while (i < n) {
+        var e = vec_get(ents, i);
+        i = i + 1;
+        if (str_starts_with(e, "nvme") == 1) {
+            # The subsystem's own namespace entries (nvme<N>n<M>) have no
+            # transport file; their read just fails.
+            t = sysfs_read(sysfs_path_str(dev, e, "transport"));
+            if (t != 0) { return t; }
+        }
+    }
+    return 0;
 }
 
 # The nominal sequential bandwidth of a storage kind, in GB/s x1000. Pure.
@@ -72,7 +101,7 @@ fn detect_storage_in(sio, root) {
         var transport = 0;
         if (str_starts_with(name, "nvme") == 1) {
             model = sysfs_read(sysfs_path_str(root, name, "device/model"));
-            transport = sysfs_read(sysfs_path_str(root, name, "device/transport"));
+            transport = storage_nvme_transport(root, name);
         } else {
             rot = sysfs_read_int(sysfs_path_str(root, name, "queue/rotational"));
         }

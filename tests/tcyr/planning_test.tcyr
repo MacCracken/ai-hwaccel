@@ -252,6 +252,61 @@ fn test_plan_pipeline_layer_balance() {
     return 0;
 }
 
+# benches/registry.bcyr's 13-device mock, whose plan_70B_bf16_4gpu row is a
+# pipeline over 11 devices. The split is pinned: working each device's
+# capacity and share out once (2.5.5) must give the plan the recomputing
+# loops gave.
+fn test_plan_pipeline_bench_mock() {
+    var profiles = vec_new();
+    vec_push(profiles, profile_cpu(64 * BYTES_PER_GIB));
+    var i = 0;
+    while (i < 4) {
+        vec_push(profiles, profile_new(ACCEL_CUDA, i, 80 * BYTES_PER_GIB));
+        i = i + 1;
+    }
+    i = 0;
+    while (i < 2) {
+        var t = profile_new(ACCEL_TPU, i + 4, 32 * BYTES_PER_GIB);
+        profile_set_tpu_version(t, TPU_V4);
+        vec_push(profiles, t);
+        i = i + 1;
+    }
+    i = 0;
+    while (i < 2) {
+        var g = profile_new(ACCEL_GAUDI, i + 6, 96 * BYTES_PER_GIB);
+        profile_set_gaudi_gen(g, GAUDI2);
+        vec_push(profiles, g);
+        i = i + 1;
+    }
+    vec_push(profiles, profile_new(ACCEL_NEURON, 8, 32 * BYTES_PER_GIB));
+    vec_push(profiles, profile_new(ACCEL_NEURON, 9, 32 * BYTES_PER_GIB));
+    vec_push(profiles, profile_new(ACCEL_VULKAN, 10, 8 * BYTES_PER_GIB));
+    vec_push(profiles, profile_new(ACCEL_INTEL_NPU, 11, 4 * BYTES_PER_GIB));
+    var r = registry_from_profiles(profiles);
+    var sp = reg_plan_sharding(r, 70000000000, QUANT_BF16);
+    assert_eq(plan_strategy(sp), SHARD_PIPELINE, "bench mock: pipeline");
+    assert_eq(plan_num_shards(sp), 11, "bench mock: 11 stages");
+    assert_eq(_layers_contiguous(sp, 280), 1, "bench mock: stages cover all 280 layers");
+    assert_eq(_shards_fit(r, sp), 1, "bench mock: every stage fits");
+    var sh = plan_shards(sp);
+    var s0 = vec_get(sh, 0);
+    assert_eq(shard_layer_end(s0), 34, "bench mock: A100 0 = layers 0-34");
+    assert_eq(shard_memory_bytes(s0), 21000000000, "bench mock: A100 0 holds 21e9");
+    var s4 = vec_get(sh, 4);
+    assert(shard_layer_start(s4) == 140 && shard_layer_end(s4) == 153, "bench mock: TPU 4 = layers 140-153");
+    var s6 = vec_get(sh, 6);
+    assert_eq(shard_layer_end(s6), 209, "bench mock: Gaudi 6 takes a leftover layer");
+    assert_eq(shard_memory_bytes(s6), 25200000000, "bench mock: Gaudi 6 holds 42 layers");
+    var s7 = vec_get(sh, 7);
+    assert(shard_layer_start(s7) == 210 && shard_layer_end(s7) == 250, "bench mock: Gaudi 7 = layers 210-250");
+    assert_eq(shard_memory_bytes(s7), 24600000000, "bench mock: Gaudi 7 holds 24.6e9");
+    var s10 = vec_get(sh, 10);
+    assert_eq(shard_layer_start(s10), 277, "bench mock: Vulkan = layers 277-279");
+    assert_eq(shard_memory_bytes(s10), 1800000000, "bench mock: Vulkan holds 1.8e9");
+    assert_eq(shard_device_id(s10), 10, "bench mock: the last stage is the Vulkan GPU");
+    return 0;
+}
+
 fn test_plan_tensor_needs_one_kind() {
     # 2 x 80 GiB CUDA + a 24 GiB Vulkan iGPU on NVSwitch, 70B BF16: an equal
     # 56e9 slice does not fit the iGPU, so tensor parallel is out.
@@ -595,6 +650,7 @@ test_plan_cpu_fallback();
 test_plan_pipeline_heterogeneous();
 test_plan_laptop_dgpu_igpu();
 test_plan_pipeline_layer_balance();
+test_plan_pipeline_bench_mock();
 test_plan_tensor_needs_one_kind();
 test_plan_tpu_slice_fits_smallest_chip();
 test_plan_tpu_chips_bounded();

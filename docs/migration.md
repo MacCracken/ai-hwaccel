@@ -50,7 +50,7 @@ than assuming a shape.
 
 - `model_format.cyr` — SafeTensors/GGUF/ONNX/PyTorch header detection
 - `requirement.cyr` — accelerator requirement matching for scheduling
-- `async_detect.cyr` — threaded detection (CLI backends in parallel)
+- `async_detect.cyr` — threaded detection (tool backends on threads; the tools run one at a time)
 - `cache.cyr` — TTL-based caching (memory + disk)
 - `lazy.cyr` — per-family lazy detection
 

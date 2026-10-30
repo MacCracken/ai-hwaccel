@@ -117,7 +117,15 @@ var _storage_calls = 0;
 var _env_calls = 0;
 var _mem_calls = 0;
 
-fn detect_interconnects_opts(s, p, w, x) { _ic_calls = _ic_calls + 1; return 0; }
+# When _ic_timeout is 1 the interconnect stub reports what a hung
+# `nvidia-smi nvlink -s` leaves: a deadline kill.
+var _ic_timeout = 0;
+
+fn detect_interconnects_opts(s, p, w, x) {
+    _ic_calls = _ic_calls + 1;
+    if (_ic_timeout == 1) { vec_push(w, warning_timeout("nvidia-smi", 10000)); }
+    return 0;
+}
 fn detect_storage(s) { _storage_calls = _storage_calls + 1; return 0; }
 fn detect_environment(s) { _env_calls = _env_calls + 1; return 0; }
 fn detect_system_memory() { _mem_calls = _mem_calls + 1; return 16 * BYTES_PER_GIB; }
@@ -397,6 +405,34 @@ fn test_warnings_kept() {
     return 0;
 }
 
+# lazy_into_registry logs its system pass's warnings, as registry_detect does
+# (2.5.5): a hung `nvidia-smi nvlink -s` was a WARN line from registry_detect
+# and silent from the lazy registry. Every family is probed first, so the
+# CUDA stub's parse warning is logged before the ring is cleared.
+fn test_into_registry_logs_system_pass() {
+    var lr = lazy_new();
+    lazy_by_family(lr, FAMILY_GPU);
+    lazy_by_family(lr, FAMILY_NPU);
+    lazy_by_family(lr, FAMILY_TPU);
+    lazy_by_family(lr, FAMILY_AI_ASIC);
+    var lvl = sakshi_get_level();
+    sakshi_set_level(SK_WARN);
+    sakshi_output_buffer();
+    sakshi_ring_clear();
+    _ic_timeout = 1;
+    lazy_into_registry(lr);
+    var n_lazy = sakshi_ring_event_count();
+    sakshi_ring_clear();
+    registry_detect();
+    var n_full = sakshi_ring_event_count();
+    _ic_timeout = 0;
+    sakshi_set_output(SK_OUT_STDERR);
+    sakshi_set_level(lvl);
+    assert_eq(n_lazy, 1, "lazy: the nvlink timeout logged");
+    assert_eq(n_full, 2, "registry_detect: the cuda parse warning and the nvlink timeout logged");
+    return 0;
+}
+
 # --- No-exec detection finds Gaudi and Neuron (2.5.5) ---
 
 # Through 2.5.4 a no-exec mask dropped both backends, so registry_detect_no_exec
@@ -417,14 +453,29 @@ fn test_no_exec_finds_gaudi_neuron() {
     registry_detect();
     assert_eq(_gaudi_exec, 1, "registry_detect: Gaudi may exec");
     assert_eq(_neuron_exec, 1, "registry_detect: Neuron may exec");
+    # A selective mask of them runs their tools, as through 2.5.4; only
+    # with_opts(mask, 0) holds them to their device nodes.
     var mask = builder_with(builder_none(), BACKEND_NEURON);
     _neuron_exec = 0 - 1;
     var only = reg_profiles(registry_detect_with(mask));
     assert_eq(_count_type(only, ACCEL_NEURON), 1, "a Neuron-only mask: Neuron found");
-    assert_eq(_neuron_exec, 0, "a Neuron-only mask spawns nothing");
+    assert_eq(_neuron_exec, 1, "a Neuron-only mask may run neuron-ls, as in 2.5.4");
+    _gaudi_exec = 0 - 1;
+    _apple_exec = 0 - 1;
+    registry_detect_with(builder_without(builder_without(builder_all(), BACKEND_CUDA), BACKEND_INTEL_ONEAPI));
+    assert_eq(_gaudi_exec, 1, "all but CUDA and oneAPI: Gaudi may run hl-smi");
+    assert_eq(_apple_exec, 1, "all but CUDA and oneAPI: Apple may run system_profiler");
     _neuron_exec = 0 - 1;
-    registry_detect_with_opts(mask, 1);
-    assert_eq(_neuron_exec, 1, "with_opts(mask, 1): Neuron may exec");
+    var held = reg_profiles(registry_detect_with_opts(mask, 0));
+    assert_eq(_count_type(held, ACCEL_NEURON), 1, "with_opts(mask, 0): Neuron found");
+    assert_eq(_neuron_exec, 0, "with_opts(mask, 0): Neuron told not to exec");
+    # with_opts(all, 0) strips the backends that need a tool before dispatch,
+    # whatever the caller's mask holds.
+    _reset_calls();
+    registry_detect_with_opts(builder_all(), 0);
+    assert_eq(_calls_of(BACKEND_CUDA), 0, "with_opts(all, 0): CUDA stripped");
+    assert_eq(_calls_of(BACKEND_INTEL_ONEAPI), 0, "with_opts(all, 0): oneAPI stripped");
+    assert_eq(_calls_of(BACKEND_ROCM), 1, "with_opts(all, 0): ROCm kept");
     return 0;
 }
 
@@ -545,6 +596,33 @@ fn test_by_family_into_bounded() {
     return 0;
 }
 
+# The getters' _into forms refill the caller's vec under the lock: repeat
+# calls allocate nothing (each plain getter call allocates a vec), and what
+# they hold is still a copy.
+fn test_getters_into_bounded() {
+    var lr = lazy_new();
+    lazy_by_family(lr, FAMILY_GPU);
+    lazy_by_family(lr, FAMILY_AI_ASIC);
+    var wo = vec_new();
+    var po = vec_new();
+    lazy_warnings_into(lr, wo);
+    lazy_probed_profiles_into(lr, po);
+    var u0 = alloc_used();
+    var i = 0;
+    while (i < 1000) {
+        lazy_warnings_into(lr, wo);
+        lazy_probed_profiles_into(lr, po);
+        i = i + 1;
+    }
+    assert_eq(alloc_used() - u0, 0, "getters into: 1000 repeat calls allocate nothing");
+    assert_eq(vec_len(wo), vec_len(lazy_warnings(lr)), "warnings_into: the same warnings");
+    var n = vec_len(lazy_probed_profiles(lr));
+    assert_eq(vec_len(po), n, "probed_into: the same profiles");
+    vec_push(po, profile_cpu(BYTES_PER_GIB));
+    assert_eq(vec_len(lazy_probed_profiles(lr)), n, "probed_into: the caller's pushes stay its own");
+    return 0;
+}
+
 # --- Run all tests ---
 
 alloc_init();
@@ -562,12 +640,14 @@ test_into_registry_system_passes_once();
 test_enriched_once();
 test_npu_first_apple_allows_exec();
 test_warnings_kept();
+test_into_registry_logs_system_pass();
 test_no_exec_finds_gaudi_neuron();
 test_probed_profiles_is_snapshot();
 test_warnings_is_snapshot();
 test_lazy_concurrent_readers();
 test_family_bits();
 test_by_family_into_bounded();
+test_getters_into_bounded();
 
 var fails = assert_summary();
 syscall(60, fails);

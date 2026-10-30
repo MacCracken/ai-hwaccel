@@ -2,12 +2,13 @@
 # Stage the per-platform binary + its data files into the Python package
 # so a wheel (2.3.4) bundles a self-contained ai-hwaccel.
 #
-# Layout produced (consumed by ai_hwaccel._runner, which sets
-# AI_HWACCEL_DATA_DIR to this dir for the bundled binary):
+# Layout produced (consumed by ai_hwaccel._runner, which points the bundled
+# binary at this dir with --data-dir and AI_HWACCEL_DATA_DIR):
 #
 #   src/ai_hwaccel/_bin/
 #     ai-hwaccel                   (the compiled binary)
-#     VERSION                      (so --version works off-cwd)
+#     VERSION                      (the version it was built as; --version
+#                                   is built in since 2.5.5 and reads none)
 #     data/cloud_pricing.json      (so --cost works off-cwd)
 #
 # Builds with the PINNED cyrius (matching CI), falling back to PATH.

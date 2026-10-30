@@ -231,7 +231,8 @@ fn _handle_cost(model_str) {
 # --- Training memory mode (--train) ---
 
 # The estimate is for a GPU target (TARGET_GPU): bf16 weights, or the 4- and
-# 8-bit ones a QLoRA method picks.
+# 8-bit ones a QLoRA method picks. It works in whole millions of parameters;
+# cli_check_args has refused a size under 1M, which would truncate to 0.
 fn _handle_train(model_str) {
     var method = TRAIN_FULL;
     var ms = _get_val("--method");
@@ -266,12 +267,16 @@ var bad_args = cli_check_args(_args);
 if (bad_args != 0) { _usage_die(bad_args); }
 
 # Logging: stderr, WARN+ by default. env (read in hwlog_init) sets the
-# floor; CLI flags below override it. stdout stays clean for JSON.
+# floor; CLI flags below override it. The CLI owns its process, so each sets
+# sakshi's level as well as ai-hwaccel's. stdout stays clean for JSON.
 hwlog_init();
 hwlog_apply_level_name(_get_val("--log-level"));
-if (_has_flag("-v") == 1) { sakshi_set_level(SK_DEBUG); }
-if (_has_flag("-vv") == 1) { sakshi_set_level(SK_TRACE); }
-if (_has_flag("-q") == 1) { sakshi_set_level(0 - 1); }
+if (_has_flag("-v") == 1) { hwlog_set_process_level(SK_DEBUG); }
+if (_has_flag("-vv") == 1) { hwlog_set_process_level(SK_TRACE); }
+if (_has_flag("-q") == 1) { hwlog_set_process_level(0 - 1); }
+# An unknown AI_HWACCEL_LOG warns at the level the flags settled on: under
+# -q, nothing.
+hwlog_report_env();
 
 # --data-dir: where data_file_path reads data/ from (--cost). The library
 # never reads argv itself (2.5.5), so the CLI hands it over.

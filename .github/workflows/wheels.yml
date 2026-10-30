@@ -143,9 +143,9 @@ jobs:
     # gate runs the actual cross-built EXE on an ephemeral windows-latest
     # runner (the roadmap's preferred venue: self-contained, no secrets, no
     # self-hosted wiring) and asserts the runtime contracts below: (a)-(c)
-    # since 2.3.11, (d) since the wmic-free detection. If the cross-built PE
-    # ever fails to *run* cleanly here (vs. on cass), the roadmap fallback is
-    # an `ssh cass` self-hosted leg.
+    # since 2.3.11, (d) since the wmic-free detection, (g) since 2.5.5. If
+    # the cross-built PE ever fails to *run* cleanly here (vs. on cass), the
+    # roadmap fallback is an `ssh cass` self-hosted leg.
     needs: windows
     runs-on: windows-latest
     timeout-minutes: 10
@@ -205,22 +205,40 @@ jobs:
           derr="$("$BIN_DIR/ai-hwaccel.exe" 2>&1 1>/dev/null)"
           test -z "$derr" || { echo "FAIL: stderr not silent at default level:"; printf '%s\n' "$derr"; exit 1; }
           echo 'OK logging'
-      - name: (c) --version resolves the bundled VERSION on PE
-        # Confirms the wheel layout's data_file_path resolution on PE. Run
-        # from the _bin/ dir, where the wheel co-locates VERSION beside the
-        # EXE, and assert --version reports the bundled version (not
-        # "unknown"). NB: AI_HWACCEL_DATA_DIR IS readable on PE as of 2.3.21
-        # (cmd_getenv delegates to the stdlib getenv, which calls the 0xF015
-        # GetEnvironmentVariableA reroute) — verified on cass. It was a silent
-        # no-op there before, which is what this comment used to describe.
+      - name: (c) --version reports the VERSION it was built from
+        # The version is built in (2.5.5, CYRIUS_PKG_VERSION from VERSION), so
+        # this reads no file: through 2.5.4 it read the VERSION beside the EXE
+        # and also covered data_file_path, which (g) now does.
         run: |
           set -euo pipefail
           expected="$(tr -d ' \t\r\n' < VERSION)"
-          got="$(cd "$BIN_DIR" && ./ai-hwaccel.exe --version | tr -d ' \t\r\n')"
+          got="$("$BIN_DIR/ai-hwaccel.exe" --version | tr -d ' \t\r\n')"
           echo "expected=$expected got=$got"
           test "$got" = "$expected" \
-            || { echo 'FAIL: --version did not resolve the bundled VERSION on PE'; exit 1; }
+            || { echo 'FAIL: --version is not the VERSION it was built from'; exit 1; }
           echo 'OK version'
+      - name: (g) --cost finds the bundled pricing data by --data-dir alone and by AI_HWACCEL_DATA_DIR alone
+        # The wheel's _bin/data/cloud_pricing.json, from a foreign cwd. The
+        # runner passes both, so each channel alone is checked here: the flag
+        # (data_dir_set) and the env var, which PE reads through
+        # _cmd_getenv_win (2.5.5; GetEnvironmentVariableA, 0xF015). With
+        # neither the list is empty, so the data dir is what fills it. BIN_DIR
+        # is relative here; the EXE gets the Windows form of its absolute path.
+        run: |
+          set -euo pipefail
+          unset AI_HWACCEL_DATA_DIR
+          dir="$(cd "$BIN_DIR" && pwd -W)"
+          exe="$(cd "$BIN_DIR" && pwd)/ai-hwaccel.exe"
+          cd "$RUNNER_TEMP"
+          count() { python -c "import json, sys; print(len(json.load(sys.stdin)['recommendations']))"; }
+          flag="$("$exe" --data-dir "$dir" --cost 70B --json | count)"
+          env="$(AI_HWACCEL_DATA_DIR="$dir" "$exe" --cost 70B --json | count)"
+          none="$("$exe" -q --cost 70B --json | count)"
+          echo "recommendations: --data-dir=$flag AI_HWACCEL_DATA_DIR=$env neither=$none"
+          test "$flag" -gt 0 || { echo 'FAIL: --data-dir alone did not find data/cloud_pricing.json'; exit 1; }
+          test "$env" -gt 0 || { echo 'FAIL: AI_HWACCEL_DATA_DIR alone did not find data/cloud_pricing.json'; exit 1; }
+          test "$none" -eq 0 || { echo 'FAIL: pricing rows found with no data dir; the checks above prove nothing'; exit 1; }
+          echo 'OK data dir'
       - name: (d) detected RAM and GPUs match what Windows itself reports
         # Compares the EXE's answer with Windows' own CIM view (Get-CimInstance
         # talks to WMI directly; no wmic.exe, which Windows 11 24H2+ removes).
@@ -289,7 +307,8 @@ jobs:
     # starts, could ship. This job installs the wheel on a fresh macos-14
     # runner the way a user does (pip), then checks what windows-smoke checks:
     # (a) JSON shape, (b) logging, (c) --version, (d) RAM and GPU against what
-    # macOS reports, (e) --threaded, plus (f) the Python API.
+    # macOS reports, (e) --threaded, plus (f) the Python API and (g) the data
+    # dir.
     needs: macos
     runs-on: macos-14
     timeout-minutes: 10
@@ -334,14 +353,31 @@ jobs:
           "$BIN_DIR/ai-hwaccel" > d.out 2> d.err
           test ! -s d.err || { echo "FAIL: stderr not silent at default level:"; cat d.err; exit 1; }
           echo 'OK logging'
-      - name: (c) --version resolves the bundled VERSION
+      - name: (c) --version reports the VERSION it was built from
+        # Built in (2.5.5); (g) checks the data dir.
         run: |
           set -euo pipefail
           expected="$(tr -d ' \t\r\n' < VERSION)"
-          got="$(cd "$BIN_DIR" && ./ai-hwaccel --version | tr -d ' \t\r\n')"
+          got="$("$BIN_DIR/ai-hwaccel" --version | tr -d ' \t\r\n')"
           echo "expected=$expected got=$got"
-          test "$got" = "$expected" || { echo 'FAIL: --version did not resolve the bundled VERSION'; exit 1; }
+          test "$got" = "$expected" || { echo 'FAIL: --version is not the VERSION it was built from'; exit 1; }
           echo 'OK version'
+      - name: (g) --cost finds the bundled pricing data by --data-dir alone and by AI_HWACCEL_DATA_DIR alone
+        # As in windows-smoke (g): each channel alone, from a foreign cwd, and
+        # an empty list with neither.
+        run: |
+          set -euo pipefail
+          unset AI_HWACCEL_DATA_DIR
+          cd "$RUNNER_TEMP"
+          count() { python -c "import json, sys; print(len(json.load(sys.stdin)['recommendations']))"; }
+          flag="$("$BIN_DIR/ai-hwaccel" --data-dir "$BIN_DIR" --cost 70B --json | count)"
+          env="$(AI_HWACCEL_DATA_DIR="$BIN_DIR" "$BIN_DIR/ai-hwaccel" --cost 70B --json | count)"
+          none="$("$BIN_DIR/ai-hwaccel" -q --cost 70B --json | count)"
+          echo "recommendations: --data-dir=$flag AI_HWACCEL_DATA_DIR=$env neither=$none"
+          test "$flag" -gt 0 || { echo 'FAIL: --data-dir alone did not find data/cloud_pricing.json'; exit 1; }
+          test "$env" -gt 0 || { echo 'FAIL: AI_HWACCEL_DATA_DIR alone did not find data/cloud_pricing.json'; exit 1; }
+          test "$none" -eq 0 || { echo 'FAIL: pricing rows found with no data dir; the checks above prove nothing'; exit 1; }
+          echo 'OK data dir'
       - name: (d) detected RAM and GPU match what macOS itself reports
         run: |
           set -euo pipefail
@@ -406,7 +442,7 @@ jobs:
     # could ship green. Each leg installs one wheel with pip on a runner of
     # that architecture, the aarch64 one natively rather than under qemu, and
     # checks: the bundled binary's ELF machine, (a) JSON shape, (c) --version,
-    # and (f) the Python API.
+    # (g) the data dir and (f) the Python API.
     needs: linux
     strategy:
       fail-fast: false
@@ -449,14 +485,31 @@ jobs:
           assert isinstance(p, list) and p, 'empty profiles[]'
           print('OK schema_version=%s profiles=%d' % (d['schema_version'], len(p)))
           "
-      - name: (c) --version resolves the bundled VERSION
+      - name: (c) --version reports the VERSION it was built from
+        # Built in (2.5.5); (g) checks the data dir.
         run: |
           set -euo pipefail
           expected="$(tr -d ' \t\r\n' < VERSION)"
-          got="$(cd "$BIN_DIR" && ./ai-hwaccel --version | tr -d ' \t\r\n')"
+          got="$("$BIN_DIR/ai-hwaccel" --version | tr -d ' \t\r\n')"
           echo "expected=$expected got=$got"
-          test "$got" = "$expected" || { echo 'FAIL: --version did not resolve the bundled VERSION'; exit 1; }
+          test "$got" = "$expected" || { echo 'FAIL: --version is not the VERSION it was built from'; exit 1; }
           echo 'OK version'
+      - name: (g) --cost finds the bundled pricing data by --data-dir alone and by AI_HWACCEL_DATA_DIR alone
+        # As in windows-smoke (g): each channel alone, from a foreign cwd, and
+        # an empty list with neither.
+        run: |
+          set -euo pipefail
+          unset AI_HWACCEL_DATA_DIR
+          cd "$RUNNER_TEMP"
+          count() { python -c "import json, sys; print(len(json.load(sys.stdin)['recommendations']))"; }
+          flag="$("$BIN_DIR/ai-hwaccel" --data-dir "$BIN_DIR" --cost 70B --json | count)"
+          env="$(AI_HWACCEL_DATA_DIR="$BIN_DIR" "$BIN_DIR/ai-hwaccel" --cost 70B --json | count)"
+          none="$("$BIN_DIR/ai-hwaccel" -q --cost 70B --json | count)"
+          echo "recommendations: --data-dir=$flag AI_HWACCEL_DATA_DIR=$env neither=$none"
+          test "$flag" -gt 0 || { echo 'FAIL: --data-dir alone did not find data/cloud_pricing.json'; exit 1; }
+          test "$env" -gt 0 || { echo 'FAIL: AI_HWACCEL_DATA_DIR alone did not find data/cloud_pricing.json'; exit 1; }
+          test "$none" -eq 0 || { echo 'FAIL: pricing rows found with no data dir; the checks above prove nothing'; exit 1; }
+          echo 'OK data dir'
       - name: (f) the Python package runs the bundled binary
         run: |
           set -euo pipefail

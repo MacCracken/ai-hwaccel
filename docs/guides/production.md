@@ -8,7 +8,7 @@ Build the binary from source with the toolchain `cyrius.cyml` pins:
 
 ```sh
 cyrius lib sync && cyrius deps
-CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # ≈216 KB, x86_64
+CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # ≈289 KB, x86_64
 ```
 
 `CYRIUS_DCE=1` drops unreachable code and gives the smallest binary. Every
@@ -21,10 +21,11 @@ Wheels workflow's artifacts, not from PyPI, where the project does not own the
 name `ai-hwaccel`; never install it by name from an index (see
 [bindings/python](../../bindings/python/README.md#install)).
 
-`--version` reads the `VERSION` file and `--cost` reads
-`data/cloud_pricing.json`. When the binary runs outside the repository, point
-it at a directory holding both with `--data-dir <path>` or
-`AI_HWACCEL_DATA_DIR`.
+`--version` prints the version built into the binary and reads no file
+(2.5.5). `--cost` reads `data/cloud_pricing.json`: when the binary runs
+outside the repository, point it at the directory holding `data/` with
+`--data-dir <path>` or `AI_HWACCEL_DATA_DIR`. A long-lived library consumer
+that replaces the file calls `cloud_pricing_reload()`.
 
 ## Detection behaviour
 
@@ -52,13 +53,21 @@ In the JSON, the same warnings are the `warnings` array of tool names.
 
 ### Tool deadline
 
-A vendor tool that prints nothing for 10 s is killed and listed in `warnings`
-as a timeout (2.5.1; `CMD_DEFAULT_TIMEOUT_MS`), so a hung `nvidia-smi`
-(common when a GPU is in an error state) costs 10 s, not the whole detection.
+A vendor tool that prints nothing for 10 s is cut and listed in `warnings` as
+a timeout (2.5.1; `CMD_DEFAULT_TIMEOUT_MS`), so a hung `nvidia-smi` (common
+when a GPU is in an error state) costs about 20 s on Linux and macOS: it is cut after 10 s of silence, gets a second
+10 s to exit, then TERM, up to 5 s of grace and KILL (25 s if it ignores
+TERM), not the whole detection.
+Tools run one after another, so each hung tool adds that, and the NVLink probe
+is skipped after `nvidia-smi` hit its deadline (2.5.5). A tool stuck in the
+kernel (D state) is not bounded. On Windows the bound is 10 s of wall-clock.
 The deadline is idle-based: a tool still printing is not cut, and its output
-is capped at 1 MiB. AGNOS has no deadline. Where even 10 s is too long, use
-`registry_detect_no_exec()`. It spawns nothing, but it misses the backends
-that need a tool (CUDA, Gaudi, Neuron, oneAPI, Cerebras, Graphcore).
+is capped at 1 MiB. AGNOS has no deadline. Size an outer timeout at about
+2 x `CMD_DEFAULT_TIMEOUT_MS` + 5 s per tool that may hang (the Python
+package's default is 60 s). Where that is too long, use
+`registry_detect_no_exec()`. It spawns nothing; it misses CUDA and oneAPI
+devices, and sizes Gaudi, Neuron, Cerebras and Graphcore from their device
+nodes.
 
 ### PATH requirements
 
@@ -217,9 +226,12 @@ will do.
 - **Time:** on the Linux dev host, a whole CLI run takes about 22 ms, most of
   it in `vulkaninfo`. With no vendor tool on `PATH` it takes under 2 ms.
 - **Threads:** `registry_detect()` uses one thread. `registry_detect_threaded()`
-  (the CLI's `--threaded`) briefly starts one each for the CUDA, Gaudi, Neuron,
-  Vulkan, oneAPI and Apple backends. Cerebras and Graphcore run their tools on
-  the calling thread, with the sysfs backends.
+  (the CLI's `--threaded`) briefly starts one each for the backends that can
+  run a vendor tool: CUDA, oneAPI, Vulkan, Apple, Gaudi, Neuron, Cerebras and
+  Graphcore. The sysfs backends run on the calling thread. The tools
+  themselves run one at a time (2.5.5, `cmd_capture`, until the upstream
+  cyrius capture issue is fixed), so the threads overlap sysfs reads, DXGI
+  calls and parsing, not the tool runs.
 - **I/O:** sysfs reads, plus one run of each vendor tool that is installed.
 
 ## Other languages

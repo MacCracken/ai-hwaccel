@@ -37,17 +37,23 @@ class CommandError(RuntimeError):
 
 class CommandTimeoutError(CommandError, subprocess.TimeoutExpired):
     """The binary ran past ``timeout``. It is also the
-    ``subprocess.TimeoutExpired`` these calls raised before 2.5.5."""
+    ``subprocess.TimeoutExpired`` these calls raised before 2.5.5, with what
+    the binary printed before it was killed in ``.stdout`` / ``.output`` and
+    ``.stderr``, or None, as subprocess gives them: bytes on POSIX, str on
+    Windows."""
 
-    def __init__(self, message: str, cmd: list, timeout: float):
-        subprocess.TimeoutExpired.__init__(self, cmd, timeout)
+    def __init__(
+        self, message: str, cmd: list, timeout: float, output=None, stderr=None
+    ):
+        subprocess.TimeoutExpired.__init__(self, cmd, timeout, output, stderr)
         self.args = (message,)
 
     def __str__(self) -> str:
         return self.args[0]
 
     def __reduce__(self):  # picklable, e.g. out of a process pool
-        return (type(self), (self.args[0], self.cmd, self.timeout))
+        state = (self.args[0], self.cmd, self.timeout, self.output, self.stderr)
+        return (type(self), state)
 
 
 class InvalidOutputError(CommandError, json.JSONDecodeError):
@@ -99,8 +105,9 @@ def find_binary(explicit: Optional[str] = None) -> str:
 
 def _data_dir_for(exe: str) -> Optional[str]:
     """If ``exe`` is the wheel-bundled binary, return the dir holding its
-    bundled ``VERSION`` + ``data/`` (so the binary's --version / --cost
-    work regardless of cwd via AI_HWACCEL_DATA_DIR). Otherwise None."""
+    bundled ``data/`` (so the binary's --cost finds data/cloud_pricing.json
+    regardless of cwd). Otherwise None. ``--version`` is built into the
+    binary (2.5.5) and reads no file."""
     try:
         if Path(exe).resolve() == _bundled_path().resolve():
             return str(_bundled_path().parent)
@@ -121,9 +128,9 @@ def _run(args: list, binary: Optional[str], timeout: float) -> str:
         if data_dir is not None:
             # Pass it as a CLI flag, which every binary honours: before 2.3.21
             # the binary read environment variables only from
-            # /proc/self/environ, so on macOS and Windows --version/--cost
-            # ignored AI_HWACCEL_DATA_DIR. Still export the env var for
-            # consumers that read it.
+            # /proc/self/environ, so on macOS and Windows --cost ignored
+            # AI_HWACCEL_DATA_DIR. Still export the env var for consumers
+            # that read it.
             cmd += ["--data-dir", data_dir]
             env["AI_HWACCEL_DATA_DIR"] = data_dir
     cmd += args
@@ -141,8 +148,13 @@ def _run(args: list, binary: Optional[str], timeout: float) -> str:
             env=env,
         )
     except subprocess.TimeoutExpired as e:
+        # Keep the partial output: the stderr log names the detector that hung.
         raise CommandTimeoutError(
-            f"ai-hwaccel {' '.join(args)} timed out after {timeout} s", cmd, timeout
+            f"ai-hwaccel {' '.join(args)} timed out after {timeout} s",
+            cmd,
+            timeout,
+            e.output,
+            e.stderr,
         ) from e
     if proc.returncode != 0:
         raise CommandError(

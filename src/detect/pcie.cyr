@@ -1,7 +1,7 @@
 # pcie.cyr — PCIe link bandwidth enrichment post-pass
 # Reads the link capability of the device at a profile's PCI address
 # (profile_pci_bdf): /sys/bus/pci/devices/<addr>/max_link_{width,speed},
-# clipped to the upstream port's.
+# clipped to the upstream port's, past an AMD card's own PCIe switch.
 
 fn enrich_pcie(profiles) {
     return enrich_pcie_at(profiles, "/sys/bus/pci/devices");
@@ -47,8 +47,8 @@ fn pcie_link_bw_x1000(speed_x1000, width) {
 
 # One link attribute of the device at sysfs dir `dev` (a cstr) as a number:
 # a speed (`is_speed` 1) in GT/s x1000, or a width in lanes; 0 if unreadable.
-fn _pcie_attr(dev, up, name, is_speed) {
-    var s = sysfs_read(sysfs_path(dev, up, name));
+fn _pcie_attr(dev, name, is_speed) {
+    var s = sysfs_read(sysfs_path(dev, 0, name));
     if (s == 0) { return 0; }
     var v = 0;
     if (is_speed == 1) { v = parse_decimal_x1000(s); } else { v = str_leading_uint(s); }
@@ -57,16 +57,30 @@ fn _pcie_attr(dev, up, name, is_speed) {
 }
 
 # The link capability of the device at sysfs dir `dev` (a cstr): its
-# `max_name` attribute, clipped to the same attribute of the port above it
-# ("<dev>/..", the parent bridge: a Gen5 card in a Gen4 slot runs Gen4), or
-# its `cur_name` attribute when there is no max. Not the current link alone:
-# an idle NVIDIA or amdgpu GPU trains its link down to Gen1, so on an idle
-# host the current link reported 2.5 GT/s (through 2.5.4, read as 2). A link
-# that trained down for a fault shows its capability, not the degraded rate.
+# `max_name` attribute, clipped to the same attribute of each bridge above it
+# up to the first that is not AMD's (vendor 0x1002), the slot's root or switch
+# port: a Gen5 card in a Gen4 slot runs Gen4. Every Radeon since Navi 10 sits
+# behind a PCIe switch on the card (1002:1478 upstream, 1002:1479 downstream
+# port) that advertises the card's own link, so a clip to the one bridge
+# above the GPU never saw the slot; amdgpu skips the same ports
+# (amdgpu_device_partner_bandwidth). AMD's root ports are vendor 0x1022. At
+# most 4 bridges (an AMD card's switch is two, then the slot's port); one
+# without a vendor file ends the walk. With no max, the device's `cur_name`
+# attribute. Not the current link alone: an idle NVIDIA or amdgpu GPU trains
+# its link down to Gen1, so on an idle host the current link reported 2.5
+# GT/s (through 2.5.4, read as 2). A link that trained down for a fault shows
+# its capability, not the degraded rate.
 fn pcie_link_cap(dev, max_name, cur_name, is_speed) {
-    var v = _pcie_attr(dev, 0, max_name, is_speed);
-    if (v <= 0) { return _pcie_attr(dev, 0, cur_name, is_speed); }
-    var up = _pcie_attr(dev, "..", max_name, is_speed);
-    if (up > 0 && up < v) { v = up; }
+    var v = _pcie_attr(dev, max_name, is_speed);
+    if (v <= 0) { return _pcie_attr(dev, cur_name, is_speed); }
+    var up = sysfs_path(dev, "..", 0);
+    var depth = 0;
+    while (depth < 4) {
+        var u = _pcie_attr(up, max_name, is_speed);
+        if (u > 0 && u < v) { v = u; }
+        if (parse_hex_field(sysfs_read(sysfs_path(up, 0, "vendor"))) != PCI_VENDOR_AMD) { break; }
+        up = sysfs_path(up, "..", 0);
+        depth = depth + 1;
+    }
     return v;
 }

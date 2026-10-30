@@ -138,7 +138,7 @@ fn registry_detect_threaded_with(builder_mask) {
     registry_post_passes(r, 1);
 
     # Main thread, after every join+merge — see warnings_log_parse in
-    # src/error.cyr for why the detector threads no longer log directly.
+    # src/registry.cyr for why the detector threads no longer log directly.
     var nwarn = vec_len(warns);
     warnings_log_parse(warns, 0);
     if (nwarn > 0) { hwlog_info_n("detect_threaded: warnings=", nwarn); }

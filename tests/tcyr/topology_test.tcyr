@@ -158,15 +158,19 @@ fn _ft_cat(a, b) {
 }
 
 # The dev host's APU at 0000:04:00.0 behind the 0000:00:08.1 bridge (card1,
-# no card0), an RX 7900 XTX at 0000:83:00.0 behind a Gen4 port (card2), an
-# Intel iGPU (card0, i915), an AMD device on a driver named like amdgpu but
-# not it (card3), an NVIDIA GPU at 0000:65:00.0 on the root bus, a device at
+# no card0), an RX 7900 XTX at 0000:83:00.0 behind its card's own PCIe switch
+# (upstream port 81:00.0, downstream port 82:00.0, both AMD's, as on every
+# Radeon since Navi 10) in a Gen3 x8 slot (card2), an Intel iGPU (card0,
+# i915), an AMD device on a driver named like amdgpu but not it (card3), an
+# NVIDIA GPU at 0000:65:00.0 on the root bus, another at 0000:a3:00.0 behind
+# a Broadcom board switch (Gen4) on a Gen3 root port, a device at
 # 0000:66:00.0 with only its current link, and a Gen1 x1 one at 0000:67:00.0.
 fn _ft_build() {
     var t = _ft_new();
     var fx = "tests/fixtures/sysfs/renoir/";
     _ft_dir(t, "devices");
     _ft_pci_dev(t, "devices/0000:00:08.1", "8.0 GT/s PCIe\n", "8.0 GT/s PCIe\n", "16\n");
+    _ft_file(t, "devices/0000:00:08.1/vendor", "0x1022\n");
     var apu = "devices/0000:00:08.1/0000:04:00.0/";
     _ft_pci_dev(t, "devices/0000:00:08.1/0000:04:00.0", "16.0 GT/s PCIe\n", "2.5 GT/s PCIe\n", "16\n");
     _ft_file(t, _ft_cat(apu, "vendor"), "0x1002\n");
@@ -177,15 +181,24 @@ fn _ft_build() {
     _ft_file(t, _ft_cat(apu, "numa_node"), "-1\n");
     _ft_copy(t, _ft_cat(apu, "pp_dpm_mclk"), _ft_cat(fx, "pp_dpm_mclk.txt"));
     _ft_link(t, _ft_cat(apu, "driver"), "../../../drivers/amdgpu");
-    _ft_pci_dev(t, "devices/0000:80:01.1", "16.0 GT/s PCIe\n", "16.0 GT/s PCIe\n", "16\n");
-    var dgpu = "devices/0000:80:01.1/0000:83:00.0/";
-    _ft_pci_dev(t, "devices/0000:80:01.1/0000:83:00.0", "16.0 GT/s PCIe\n", "2.5 GT/s PCIe\n", "16\n");
+    _ft_pci_dev(t, "devices/0000:80:01.1", "8.0 GT/s PCIe\n", "8.0 GT/s PCIe\n", "8\n");
+    _ft_file(t, "devices/0000:80:01.1/vendor", "0x1022\n");
+    var usp = "devices/0000:80:01.1/0000:81:00.0";
+    _ft_pci_dev(t, usp, "16.0 GT/s PCIe\n", "8.0 GT/s PCIe\n", "16\n");
+    _ft_file(t, _ft_cat(usp, "/vendor"), "0x1002\n");
+    _ft_file(t, _ft_cat(usp, "/device"), "0x1478\n");
+    var dsp = "devices/0000:80:01.1/0000:81:00.0/0000:82:00.0";
+    _ft_pci_dev(t, dsp, "16.0 GT/s PCIe\n", "16.0 GT/s PCIe\n", "16\n");
+    _ft_file(t, _ft_cat(dsp, "/vendor"), "0x1002\n");
+    _ft_file(t, _ft_cat(dsp, "/device"), "0x1479\n");
+    var dgpu = "devices/0000:80:01.1/0000:81:00.0/0000:82:00.0/0000:83:00.0/";
+    _ft_pci_dev(t, _ft_cat(dsp, "/0000:83:00.0"), "16.0 GT/s PCIe\n", "2.5 GT/s PCIe\n", "16\n");
     _ft_file(t, _ft_cat(dgpu, "vendor"), "0x1002\n");
     _ft_file(t, _ft_cat(dgpu, "device"), "0x744c\n");
     _ft_file(t, _ft_cat(dgpu, "mem_info_vram_total"), "25753026560\n");
     _ft_file(t, _ft_cat(dgpu, "numa_node"), "1\n");
     _ft_file(t, _ft_cat(dgpu, "pp_dpm_mclk"), "0: 96Mhz\n1: 456Mhz\n2: 772Mhz\n3: 1249Mhz *\n");
-    _ft_link(t, _ft_cat(dgpu, "driver"), "../../../drivers/amdgpu");
+    _ft_link(t, _ft_cat(dgpu, "driver"), "../../../../../drivers/amdgpu");
     _ft_dir(t, "devices/0000:00:02.0");
     _ft_file(t, "devices/0000:00:02.0/vendor", "0x8086\n");
     _ft_file(t, "devices/0000:00:02.0/device", "0x46a6\n");
@@ -196,6 +209,15 @@ fn _ft_build() {
     _ft_link(t, "devices/0000:05:00.0/driver", "../../drivers/amdgpux");
     _ft_pci_dev(t, "devices/0000:65:00.0", "32.0 GT/s PCIe\n", "2.5 GT/s PCIe\n", "16\n");
     _ft_file(t, "devices/0000:65:00.0/numa_node", "0\n");
+    _ft_pci_dev(t, "devices/0000:a0:01.0", "8.0 GT/s PCIe\n", "8.0 GT/s PCIe\n", "16\n");
+    _ft_file(t, "devices/0000:a0:01.0/vendor", "0x8086\n");
+    var plx = "devices/0000:a0:01.0/0000:a1:00.0";
+    _ft_pci_dev(t, plx, "16.0 GT/s PCIe\n", "8.0 GT/s PCIe\n", "16\n");
+    _ft_file(t, _ft_cat(plx, "/vendor"), "0x10b5\n");
+    var plx_dn = "devices/0000:a0:01.0/0000:a1:00.0/0000:a2:00.0";
+    _ft_pci_dev(t, plx_dn, "16.0 GT/s PCIe\n", "16.0 GT/s PCIe\n", "16\n");
+    _ft_file(t, _ft_cat(plx_dn, "/vendor"), "0x10b5\n");
+    _ft_pci_dev(t, _ft_cat(plx_dn, "/0000:a3:00.0"), "16.0 GT/s PCIe\n", "2.5 GT/s PCIe\n", "16\n");
     _ft_pci_dev(t, "devices/0000:66:00.0", 0, "8.0 GT/s PCIe\n", "8\n");
     _ft_pci_dev(t, "devices/0000:67:00.0", "2.5 GT/s PCIe\n", "2.5 GT/s PCIe\n", "1\n");
     _ft_dir(t, "drm");
@@ -205,7 +227,7 @@ fn _ft_build() {
     _ft_link(t, "drm/card1/device", "../../devices/0000:00:08.1/0000:04:00.0");
     _ft_dir(t, "drm/card1-DP-1");
     _ft_dir(t, "drm/card2");
-    _ft_link(t, "drm/card2/device", "../../devices/0000:80:01.1/0000:83:00.0");
+    _ft_link(t, "drm/card2/device", "../../devices/0000:80:01.1/0000:81:00.0/0000:82:00.0/0000:83:00.0");
     _ft_dir(t, "drm/card3");
     _ft_link(t, "drm/card3/device", "../../devices/0000:05:00.0");
     _ft_dir(t, "drm/renderD128");
@@ -225,8 +247,9 @@ fn _ft_build() {
     _ft_file(t, "kfd/2/mem_banks/0/properties", "heap_type 1\nwidth 384\nmem_clk_max 1249\n");
     _ft_dir(t, "pci");
     _ft_link(t, "pci/0000:04:00.0", "../devices/0000:00:08.1/0000:04:00.0");
-    _ft_link(t, "pci/0000:83:00.0", "../devices/0000:80:01.1/0000:83:00.0");
+    _ft_link(t, "pci/0000:83:00.0", "../devices/0000:80:01.1/0000:81:00.0/0000:82:00.0/0000:83:00.0");
     _ft_link(t, "pci/0000:65:00.0", "../devices/0000:65:00.0");
+    _ft_link(t, "pci/0000:a3:00.0", "../devices/0000:a0:01.0/0000:a1:00.0/0000:a2:00.0/0000:a3:00.0");
     return t;
 }
 
@@ -283,8 +306,9 @@ fn test_rocm_fake_tree(t) {
 }
 
 # enrich_pcie / enrich_numa read each profile's own PCI address (2.5.5), and
-# the link's capability: the idle current link (2.5 GT/s) is not it, and a
-# port above the device caps it.
+# the link's capability: the idle current link (2.5 GT/s) is not it, and the
+# slot's port caps it, past a Radeon's own switch but not past a board
+# switch's port.
 fn test_enrich_fake_tree(t) {
     var profs = vec_new();
     detect_rocm_at(profs, _ft_path(t, "drm"), _ft_path(t, "kfd"));
@@ -294,24 +318,31 @@ fn test_enrich_fake_tree(t) {
     str_builder_add_cstr(sb, row);
     str_builder_add_cstr(sb, ", 00000000:65:00.0\n1, ");
     str_builder_add_cstr(sb, row);
+    str_builder_add_cstr(sb, ", 00000000:A3:00.0\n2, ");
+    str_builder_add_cstr(sb, row);
     parse_cuda_output(str_builder_build(sb), profs, vec_new());
     enrich_pcie_at(profs, _ft_path(t, "pci"));
     enrich_numa_at(profs, _ft_path(t, "pci"));
     var apu = _by_bdf(profs, "0000:04:00.0");
     var dgpu = _by_bdf(profs, "0000:83:00.0");
     var nv = _by_bdf(profs, "0000:65:00.0");
-    if (apu == 0 || dgpu == 0 || nv == 0) {
+    var nvsw = _by_bdf(profs, "0000:a3:00.0");
+    if (apu == 0 || dgpu == 0 || nv == 0 || nvsw == 0) {
         assert(0, "enrich: profiles with addresses");
         return 0;
     }
     assert_eq(profile_pcie_bw_x1000(apu), 15744, "apu: Gen4 device on a Gen3 port, not its idle Gen1");
-    assert_eq(profile_pcie_bw_x1000(dgpu), 31488, "dgpu: Gen4 x16");
+    assert_eq(profile_pcie_bw_x1000(dgpu), 7872, "dgpu: its Gen3 x8 slot, past the card's own switch");
+    var dg = _ft_path(t, "pci/0000:83:00.0");
+    assert_eq(pcie_link_cap(dg, "max_link_width", "current_link_width", 0), 8, "dgpu: the slot's 8 lanes");
+    assert_eq(pcie_link_cap(dg, "max_link_speed", "current_link_speed", 1), 8000, "dgpu: the slot's Gen3");
     assert_eq(profile_pcie_bw_x1000(nv), 62976, "nvidia: Gen5 x16 on the root bus");
+    assert_eq(profile_pcie_bw_x1000(nvsw), 31488, "nvidia: Gen4 x16 to its board switch, the walk ends there");
     assert_eq(profile_numa_node(apu), PROFILE_NONE, "apu: numa_node -1");
     assert_eq(profile_numa_node(dgpu), 1, "dgpu: its own numa node");
     assert_eq(profile_numa_node(nv), 0, "nvidia: its own numa node");
     var none = vec_get(profs, vec_len(profs) - 1);
-    assert_eq(profile_pci_bdf(none), 0, "the second CUDA row has no address");
+    assert_eq(profile_pci_bdf(none), 0, "the last CUDA row has no address");
     assert_eq(profile_pcie_bw_x1000(none), PROFILE_NONE, "no address: no link guessed");
     assert_eq(profile_numa_node(none), PROFILE_NONE, "no address: no node guessed");
     # No max_link files: the current link.

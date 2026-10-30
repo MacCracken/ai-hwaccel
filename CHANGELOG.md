@@ -5,6 +5,581 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [semantic versioning](https://semver.org/) as of v0.19.3.
 
+## [2.5.5] — 2026-10-29 — a P(-1) audit: wrong numbers, phantom devices and leaks fixed, and 2.5.x closed
+
+A hardening release with no new features, and the last of 2.5.x. Real
+hardware work waits for 2.6.x.
+
+**How it was done:**
+1. An audit read every source file and found 130 issues. Each was checked by
+   a separate verifier, which left about 75 distinct defects.
+2. Three repair passes fixed them, each fix with a test that fails without it.
+3. Two adversarial reviews of the repairs found 59 more issues in the new
+   code, and those are fixed too.
+
+**Hardware facts.** No new hardware was available. Where a fix depends on how
+a device behaves, it follows the kernel source or vendor documentation and is
+locked in with a fixture. These are listed for real-hardware confirmation in
+the roadmap's 2.6.x captures. The dev host, `cass` (Windows) and `ecb` (macOS)
+ran the result.
+
+On those three hosts, detection output matches 2.5.4 apart from the fixes
+listed below.
+
+### Fixed — wrong numbers and phantom devices
+
+- **`--cost` read 1 of the 18 pricing rows.** The loader brace-matched the
+  file's `{"instances": [...]}` wrapper as a single object, the same defect
+  `load_models` had before 2.3.22. It now reads every row: 7B BF16 now gets
+  `g4dn.xlarge` at $0.53/hr instead of `p5.48xlarge` at $98.32. The rows this
+  made reachable were checked, and three changed:
+  - the two Azure A100 rows were corrected;
+  - an MI300X row was added (19 rows).
+
+  A row missing `gpu` or `provider` crashed the text output; a null value took
+  the next key's name or number. Rows are now type-checked, and an unusable
+  row is skipped with a warning.
+- **NVIDIA power was 100× too high.** `str_to_int` read the `power.draw`
+  decimals as more digits, so 64.67 W became 6467 W. Fields are now read with
+  strict parsers: `parse_field_int`, a new `parse_decimal_x1000`, and a new
+  `str_leading_uint`.
+- **AMD memory bandwidth used the DPM level index as the clock.** 2.5.4 also
+  read `card<device_id>`, which on most hosts is another card or none.
+  Bandwidth is now computed when the card is detected: the top `pp_dpm_mclk`
+  clock after the `:`, the KFD node's bus width, and a memory-type multiplier.
+  The dev host's Renoir now reports 51.2 GB/s, where 2.5.4 reported nothing.
+- **ROCm `compute_capability` was the PCI revision byte.** It is now KFD's
+  gfx target: `gfx90c`, not `0xc5`.
+- **Any `/sys/class/accel` node was a "Google TPU v4".** That class is the
+  kernel's DRM compute-accelerator class, and the Intel NPU (`intel_vpu`),
+  Gaudi (`habanalabs`) and Cloud AI 100 (`qaic`) all live there. So a Core
+  Ultra laptop showed a 32 GiB TPU, with a 192 GB/s ICI link that changed GPU
+  plans. Nodes are now classified by driver and by PCI vendor (Google
+  0x1ae0):
+  - the Intel NPU is found through `intel_vpu`; the old
+    `/sys/class/misc/intel_npu` node never existed;
+  - Gaudi through `habanalabs` when `hl-smi` lists nothing;
+  - Qualcomm through `qaic`;
+  - a TPU's version comes from its PCI device ID.
+- **NUMA nodes and PCIe links were taken from another GPU.** They came from the
+  N-th entry of the driver's sysfs directory, which is in name-hash order, so
+  on a multi-GPU host the order did not match. Each GPU profile now carries
+  its PCI address (`pci_bdf`, not serialized): `nvidia-smi`'s `pci.bus_id`,
+  or the ROCm card's device link.
+
+  PCIe bandwidth is also now the link's capability (`max_link_*`), clipped to
+  the slot, where 2.5.4 read the idle, power-managed current link. The clip
+  walks past AMD's on-card switch to reach the slot, as
+  `amdgpu_device_partner_bandwidth` does. "2.5 GT/s" no longer reads as 2.
+- **An interconnect's `state` was a memory address.** InfiniBand and NVSwitch
+  stored a string pointer that the JSON wrote as an integer. It is now the
+  InfiniBand port state (4 = ACTIVE), and 0 where none is reported.
+- **NVLink counting:**
+  - every line containing "Link" counted as a 25 GB/s link, inactive ones
+    included, and links were summed across all GPUs into one entry;
+  - NVLink is now one entry per GPU (`nvlink0`, `nvlink1`, …), from its active
+    links at the rate the tool prints;
+  - an unbridged RTX 3090 or A100 PCIe pair now reports no NVLink. Through
+    2.5.4 such a pair could pass the 100 GB/s tensor-parallel threshold.
+- **Other interconnects:**
+  - **XGMI** was never detected: the path went through `str_data()` as if it
+    were a `Str`.
+  - **ICI** now sums every TPU profile.
+  - **No-exec mode** now reads InfiniBand, NVSwitch, XGMI and ICI. Only the
+    `nvidia-smi nvlink` run is skipped.
+- **Neuron:** the JSON parser looked for a `"model"` key that `neuron-ls`
+  does not print, so real output gave no device and no fallback. It now
+  parses the documented keys: `neuron_device`, `nc_count` and `memory_size`.
+  Two values were also wrong:
+  - **Trainium's per-core HBM was doubled.** It is 16 GiB per core: a trn1
+    device is 32 GiB, not 64.
+  - **The `/dev/neuron<N>` fallback used one shape for every chip.** It now
+    takes the instance generation from DMI: trn3 and later are 8 cores and
+    144 GiB a device, trn2 8 cores and 96 GiB, inf1 4 cores and 8 GiB.
+
+  Device IDs no longer count the CPU and GPUs listed before them.
+- **Gaudi:** every HL-3xx board is a Gaudi 3. HL-338 was reported as a Gaudi 2
+  in 2.5.4. `hl-smi` fields are now range-checked, so its memory figure can no
+  longer overflow negative.
+- **Intel IPU6 cameras were Graphcore IPUs.** `/dev/ipu-psys0` matched
+  `/dev/ipu*`. Device-node scans now take only numeric suffixes.
+- **Blackwell bus widths:**
+  - B200 bandwidth was 32× low.
+  - CC 12.0 parts (RTX 50xx, mobile included) took a desktop flagship's
+    width. They are now matched by device-ID range from `pci.ids`.
+  - An unlisted compute capability leaves `mem_bandwidth_x1000` out instead
+    of guessing 256 bits.
+- **A GPU whose memory nvidia-smi cannot read is kept, unavailable.**
+  `[Unknown Error]` and similar values gave a silent 0-byte GPU in 2.5.4. The
+  GPU is now listed with `available:false`, and a warning names its index.
+- **Unified-memory NVIDIA parts are sized from host RAM.** On GB10 and Jetson
+  Thor, `memory.total` reads `[N/A]`, and 2.5.4 reported 0 bytes. The GPU now
+  gets the host's physical RAM, all of it marked shared.
+- **Other nvidia-smi fixes:**
+  - a GH200 with 144 GB of HBM is recognised;
+  - drivers before R510 get a second query without `compute_cap`, instead of
+    reporting no GPU;
+  - `[N/A]` optional fields are unknown, while a real 0 MiB or 0 % is kept.
+- **Discrete Vulkan GPUs no vendor backend reports** (Intel Arc without
+  `xpu-smi`, NVIDIA under NVK) are sized from their device-local heap instead
+  of a 4 GiB guess.
+- **Apple:** M5 and later get the newest ANE figure, 8 GiB rather than the
+  4 GiB fallback, and Asahi's ANE is sized by generation. On `ecb`'s M5 Pro the
+  ANE reads 8 GiB, where it read 4.
+- **System memory:**
+  - **Containers:** inside one, the CPU profile is capped at the cgroup memory
+    limit (v2 `memory.max` or v1 `limit_in_bytes`) when that is lower than
+    `MemTotal`.
+  - **Unified-memory GPUs** keep the host's physical RAM, uncapped.
+- **Environment:**
+  - **Kubernetes:** the `NVIDIA_VISIBLE_DEVICES` values `all`, `none` and
+    `void`, and a path, no longer all count as one GPU. `k8s_gpu_count` is
+    left out when unknown, where it was always 0.
+  - **Cloud:** Surface laptops and local Hyper-V VMs no longer read as Azure,
+    nor Chromebooks as GCP. Xen-based EC2 instances now read as AWS.
+  - **Podman** is detected.
+- **Storage:** nbd, zvol, rbd, drbd and mtdblock devices, and devices with no
+  capacity, are no longer listed. Network-backed NVMe (EBS, NVMe-oF) is no
+  longer rated at 3.5 GB/s.
+- **xpu-smi:** a trailing message line became a phantom 16 GiB GPU; it now
+  gives a parse warning.
+- **wmic:** virtual display adapters (RDP, Hyper-V, root-enumerated drivers)
+  are no longer reported as GPUs.
+- **Duplicate pass:**
+  - identical cards each take their Vulkan view's name, where 2.5.4 named only
+    the first;
+  - cards of different models that share one PCI device ID keep their
+    placeholders rather than risk taking each other's name;
+  - an available vendor profile with no memory figure takes the view's.
+
+### Fixed — planning, training and cost
+
+- **Model sizes were misread.** Three copies of one loop gathered every digit,
+  so "1.5B" planned 15B, "0.5B" 5B, "350M" 350B and "8x7B" 87B, and "1.5B"
+  priced as 15B. A single parser, `model_params_from_str`, now reads
+  digits, a fraction and a K/M/B/T unit; no unit means billions. Anything
+  else is rejected.
+- **Sharding plans:**
+  - **Tensor parallel** now needs one kind of device and a slice that fits
+    the smallest device.
+  - **Pipeline layers** are split in proportion to device memory, never more
+    than a device holds, and each shard reports its own memory. Through 2.5.4
+    a split could hand a small dGPU next to a shared-memory iGPU more than it
+    has.
+  - **Tokens per second** on several devices now depends on model size. It
+    did not, and read about 100× the single-device figure.
+  - **`fits`:** the plan JSON gains `"fits"`, false when nothing holds the
+    model. A `plan:` warning on stderr says so; such a plan was
+    indistinguishable from one that fits.
+  - **TPU chip counts** are bounded at 9 216.
+- **Full fine-tune memory was half of the standard figure.** Full fine-tune,
+  DPO, RLHF and distillation now use mixed-precision AdamW accounting: about
+  16 B per parameter before activations. 7B full goes from 52.2 to 117.4
+  GiB. LoRA, QLoRA and prefix are unchanged.
+- **Cost:**
+  - **The memory check** compared whole GiB, so an instance up to 1 GiB short
+    could be recommended. It now compares bytes.
+  - **The text output** rounds the requirement up: 70B BF16 prints 157 GiB,
+    not 156.
+  - **Pricing rows** are cached per data path. A long-lived caller that
+    replaces the file calls `cloud_pricing_reload()`.
+- **Model files (untrusted input):**
+  - **Safetensors:** the header scan could run 2 bytes past the declared
+    header. A tensor's shape product could overflow. A scalar tensor counted
+    0 parameters.
+  - **GGUF:** file types 21–38 now have names, `BF16` and `IQ4_XS` among them.
+  - **ONNX:** a 10-byte varint is no longer accepted.
+  - **JSON:** `model_meta_to_json` escapes the dtype.
+- `quant_model_bytes` saturates instead of wrapping.
+
+### Fixed — output and the command line
+
+- **JSON strings were never escaped.** Device names, driver versions and
+  warnings come from tool output, so a `"`, `\` or control byte broke the
+  document, or added keys to it. The `--cost` model argument was echoed
+  raw too. Every string value is now escaped. A word-at-a-time scan leaves a
+  clean string's copy as fast as before, and the program's own enum names
+  skip the scan.
+- **`profile_from_json` trusted its input:**
+  - a key of the wrong type read as 0;
+  - out-of-range IDs, memory sizes and chip counts were accepted;
+  - a NULL document crashed it.
+
+  Now a key of the wrong type reads as absent, and out-of-range values refuse
+  the profile. A new fuzz harness, `fuzz/json_profile.fcyr` (150 000 mutated
+  documents), checks that every accepted profile round-trips.
+- **The CLI accepted anything and exited 0:**
+  - a value flag with no value (`--plan` alone ran a full detection and
+    printed the registry);
+  - unknown flags (`--sumary`);
+  - a bad `--quant` or `--method` (silently BF16 or full);
+  - two modes at once.
+
+  The new `src/cli.cyr` checks the line before anything runs. A bad line
+  exits 2 with `ai-hwaccel: <reason> (see --help)`. `--quant` and `--method`
+  accept any letter case.
+
+  `--train` still takes and ignores `--quant`, because every Python wheel
+  through 2.5.4 sends it. `--help` and `--version` win over every check after
+  the structure (unknown flags, missing values, repeats).
+- **`--version` printed "unknown" outside the repository.** It read `VERSION`
+  at run time. It is now built in (`CYRIUS_PKG_VERSION`) and reads no file.
+- **`--table` lines up.** Cells are padded, long values cut with `...`, and
+  control bytes print as `?`.
+- **Failed tools show at `-v`.** A tool that ran and failed now logs its exit
+  status at info level ("nvidia-smi: exited with status 9"), and a timeout
+  logs at warn. The default level stays silent for a failed tool, since
+  `vulkaninfo` exits 1 on any host without a Vulkan GPU. `warning_print`'s
+  stale label for -1 is fixed. The JSON `warnings` array is unchanged: tool
+  names.
+- **An unknown family is not the CPU.** An `accel_type` past the known range
+  (from newer or foreign JSON) was family CPU. It is now `FAMILY_UNKNOWN`,
+  counted with neither the CPU nor any accelerator family. `ACCEL_TYPE_COUNT`
+  bounds every loop over the types.
+- **`find_satisfying_profile`** no longer depends on detection order (rank,
+  then memory). `REQ_NONE` still returns the CPU.
+- **`reg_suggest_quant`** answered from host RAM on Neuron, Cerebras,
+  Qualcomm, Graphcore and Groq hosts. It now considers every AI ASIC.
+
+### Fixed — exec, threads and memory
+
+- **Each detection kept a 1 MiB buffer per tool run.** It also kept 4 KiB per
+  sysfs read and about 12 KB per `/dev` scan, and the bump allocator frees
+  nothing. A `cached_get` poller grew by about 1.3 MB a minute on the dev
+  host, more on a multi-tool NVIDIA host.
+
+  The capture buffer is now `fl_alloc`ed and freed, keeping a right-sized
+  copy of the output, and sysfs reads and `/dev` scans use stack buffers.
+  Heap kept per detection on the dev host:
+  - `registry_detect`: 1 282 840 → 40 488 B;
+  - `registry_detect_no_exec`: 161 912 → 10 552 B;
+  - `registry_detect_threaded`: 1 309 984 → 76 376 B.
+
+  The bundle's `# Requires` block gains `lib/freelist.cyr` (14 leaves).
+- **`--threaded` tools could corrupt each other's results.** cyrius 6.7.18's
+  capture state is process-wide: the idle-cut flag, non-close-on-exec pipes
+  and the kill-tree buffer. So a hung tool on one thread turned a healthy
+  capture on another into a false timeout, and tools inherited each other's
+  pipes. `cmd_capture` now runs one tool at a time, while the detector
+  threads still overlap everything else. Logged upstream as
+  [issue 2026-10-29-cyrius-process-capture-state-not-thread-safe](docs/development/issues/2026-10-29-cyrius-process-capture-state-not-thread-safe.md).
+- **`--threaded` could lose every vendor tool.** The detector threads made
+  the process's first `getenv`, and cyrius's `_env_load` answers 0 to a second
+  thread while the first is still reading. So `which()` found no tool. The
+  environment is now loaded before the threads start
+  ([issue 2026-10-29-cyrius-env-load-first-getenv-race](docs/development/issues/2026-10-29-cyrius-env-load-first-getenv-race.md)).
+- **Windows: a PATH of 4096 or more characters hid every tool.** The stdlib
+  `getenv` reads into a fixed 4 KiB buffer and returns nothing past it.
+  `cmd_getenv` now calls `GetEnvironmentVariableA` itself, at the size Windows
+  reports. Checked on `cass` with a 6 360-character PATH: 2.5.4 lost
+  `vulkaninfo`, and 2.5.5 found it
+  ([issue 2026-10-29-cyrius-pe-getenv-4096-cap](docs/development/issues/2026-10-29-cyrius-pe-getenv-4096-cap.md)).
+- **Windows: Linux paths were read.** `/sys`, `/proc` and `/dev` resolve to
+  folders any user can create on `C:\`, and a planted folder could crash the
+  program. Those reads now answer "absent" on PE.
+- **`which()` took the first PATH entry it could open,** including a
+  directory or a non-executable file, and a FIFO could block it. It now takes
+  only regular executable files.
+- **Deadline cost:**
+  - **The real cost is documented:** a hung tool costs about 20 s on POSIX,
+    not 10. It is cut after 10 s of silence, gets a second 10 s, then TERM,
+    up to 5 s of grace and KILL. A tool stuck in D state is not bounded at
+    all
+    ([issue 2026-10-29-cyrius-capture-deadline-shape](docs/development/issues/2026-10-29-cyrius-capture-deadline-shape.md)).
+  - **The NVLink probe** no longer runs `nvidia-smi` a second time after the
+    CUDA query hit its deadline.
+- **Cache:**
+  - `cached_get` now detects under its lock, so a concurrent
+    `cached_invalidate` is no longer lost and concurrent misses run one
+    detection.
+  - A clock that reads 0 now means always detect, where it served the cache
+    forever.
+- **Lazy registry:** `lazy_probed_profiles` and `lazy_warnings` handed out
+  live vectors. They now return copies taken under the lock, and `_into`
+  variants refill a vector the caller owns. `lazy_into_registry` now logs its
+  system pass's warnings.
+- **Library builds read the host program's argv.** `data_file_path` scanned
+  it for `--data-dir`. A library now uses the new `data_dir_set()` or
+  `AI_HWACCEL_DATA_DIR`. `cmd_data_dir_arg` is deprecated, for removal in
+  2.6.0.
+- **Logging:** a library consumer at sakshi's default INFO got an
+  `[INFO] detect` line on every detection. ai-hwaccel now has its own
+  threshold, `hwlog_set_level`, WARN by default, and including the bundle
+  leaves the host's sakshi level alone. `hwlog_set_process_level` sets both.
+  Level names accept any letter case, and an unknown one warns.
+
+### Changed
+
+- **No-exec and selective detection:**
+  - **`registry_detect_no_exec()`** now finds Gaudi, Neuron, Cerebras and
+    Graphcore through their device nodes, and runs the interconnect pass
+    without its one tool run. Through 2.5.4 it skipped all of these. The
+    classification is split three ways:
+    - `backend_needs_exec`: CUDA and oneAPI, which find nothing without a
+      tool;
+    - `backend_uses_exec`: as in 2.5.4;
+    - `backend_may_exec`: every backend that can start a tool.
+
+    New `builder_native()`.
+  - **Selective masks** run their tools as in 2.5.4. Only
+    `registry_detect_no_exec()` or `registry_detect_with_opts(mask, 0)` is
+    spawn-free with those four backends.
+  - **Threads:** every backend that can start a tool gets a thread under
+    `--threaded`, Cerebras and Graphcore included.
+- **`--threaded` latency.** The vendor tools run one at a time (see above).
+  Where they dominate, the latency is about that of the default run.
+- **The Python package:**
+  - **Timeout:** the default is now 60 s, up from 30 s, since two hung tools
+    take longer than 30 s.
+  - **Errors:** a timeout raises `CommandTimeoutError` and invalid JSON raises
+    `InvalidOutputError`. Both are `CommandError` subclasses, and also
+    subclasses of `subprocess.TimeoutExpired` and `json.JSONDecodeError`, so
+    old handlers still catch them.
+  - **Decoding:** output is decoded as UTF-8 on every platform; on Windows it
+    was the locale code page.
+  - **Binary choice:** an invalid `binary=` or `AI_HWACCEL_BIN` now raises
+    instead of silently running another binary.
+  - **`training_memory`:** it no longer sends `--quant`, and its `quant=` is
+    deprecated, since the CLI never read it.
+  - **Plans:** `ShardingPlan.fits` is new.
+- **The wheel's license metadata.** It carries `LICENSE` and the SPDX
+  `License-Expression`, and builds need setuptools ≥ 77.
+
+### CI, release and supply chain
+
+- **The test gate passed units with 10, 20, 30… failures.** It matched
+  `0 failed` as a substring, without pipefail. It now checks the exit status
+  and an anchored `N passed, 0 failed (` line.
+- **Release permissions:**
+  - **Token:** `release.yml` no longer gives every job a write token; only the
+    release job has `contents: write`.
+  - **Credentials:** no checkout keeps its credentials.
+  - **Pinning:** every action is pinned to a commit SHA, and the cyrius
+    installer is fetched from the pinned version's tag, not `main`.
+  - **Guard:** a docs-job check enforces all of this.
+- **The release smoke test could not fail.** It ran `--version || true`. Now
+  it runs detection and checks it, and a failed `cyrius deps` stops the
+  release. An aarch64 smoke job runs the shipped binary on an arm64 runner.
+- **The Python tests now run in CI,** against the built binary with
+  `-W error::UserWarning`. A new `linux-smoke` matrix installs and runs the
+  x86_64 and aarch64 wheels. Through 2.5.4 nothing ran either.
+- **`windows-smoke` and `macos-smoke`** gain (g): `--cost` finding its data
+  by `--data-dir` alone and by `AI_HWACCEL_DATA_DIR` alone.
+- **`version-bump.sh`:**
+  - it rejects anything but x.y.z;
+  - it fails, restoring `VERSION`, when distlib fails or no toolchain is
+    found;
+  - it uses portable awk instead of GNU `sed -i`.
+
+### Docs
+
+- **The README no longer says `pip install ai-hwaccel`.** The project is not
+  on PyPI, so anyone could register that name. It now says where the wheel
+  comes from. The threat model's supply-chain row is corrected.
+- **The production guide's Kubernetes init-container check could never
+  fail.** It now uses `jq -e`.
+- **Behaviour descriptions are updated** across the README, the guides, the
+  troubleshooting page, the performance notes, the architecture overview and
+  the threat model:
+  - what `--threaded` overlaps;
+  - the real hung-tool cost;
+  - what no-exec mode finds;
+  - `plan.fits`;
+  - PCIe capability;
+  - library logging and `builder_native`.
+- **Stale figures are corrected:** assertion counts, sizes and
+  `reg_count(r)`.
+- **The roadmap** lists every fix built from documentation under the 2.6.x
+  hardware captures. It adds the removal of the 2.5.5 stdlib workarounds once
+  cyrius fixes the four new issues.
+
+### Tests
+
+- **1157 → 2536 assertions, 15 → 19 units:**
+  - `accel_test`: the accel-class classifier, Graphcore `/dev` nodes and
+    the interconnect pass;
+  - `cli_test`: the CLI's checks, sizes, `--version`, the table and the log
+    shim;
+  - `cost_test`: the real pricing file and crafted ones;
+  - `system_test`: the cgroup, environment, storage, threaded-path and
+    data-dir checks, in child processes.
+- **Fuzz harnesses go from 7 to 8,** with the new `json_profile`.
+- **Fixtures:**
+  - `tests/fixtures/sysfs/`: a fake DRM/KFD/PCI tree with a Navi switch
+    hierarchy;
+  - `tests/fixtures/from-docs/`: `neuron-ls`, `hl-smi` and
+    `nvidia-smi nvlink` samples built from vendor documentation.
+- **Every unit builds with no "undefined function" warning.** In 2.5.4 eight
+  units printed between 2 and 23 of them.
+- **Each fix was mutation-checked.** It was undone, the new assertion was seen
+  to fail, and the fix was restored.
+
+### Consumers
+
+- **New API in the bundle:**
+  - `model_params_from_str`, `hw_streq_ci`, `parse_decimal_x1000` and
+    `str_leading_uint`;
+  - `data_dir_set` and `which_in`;
+  - `builder_native`, `backend_needs_exec` and `backend_may_exec`;
+  - `detect_*_opts(…, allow_exec)` for Gaudi, Neuron, Cerebras and
+    Graphcore, and `detect_interconnects_opts`;
+  - `recommend_instances_from`, `load_cloud_instances_from`,
+    `cloud_instances_parse`, `cloud_pricing_reload` and `models_parse`;
+  - `plan_fits` and `profile_from_json_str_a`;
+  - `hwlog_set_level` and `hwlog_set_process_level`;
+  - the pure parsers and the `*_at(root)` detectors the tests use.
+- **`profile`** gains `pci_bdf` (not serialized). `PROFILE_SIZE` is
+  `sizeof(profile)`, and every derived struct is allocated with `sizeof`.
+- **JSON** stays schema v6:
+  - `"fits"` is added to the plan;
+  - `k8s_gpu_count` is left out when unknown;
+  - an interconnect's `state` is a number;
+  - NVLink entries are named `nvlink<N>`;
+  - strings are escaped.
+- **The bundle's `# Requires` block** gains `lib/freelist.cyr`.
+- **`profile_from_json`** now also calls `bayan_json_v_is_int`,
+  `bayan_json_v_is_bool` and `bayan_json_v_parse_buf_a`. A consumer that
+  calls it supplies bayan, as before; 1.11.1, the pinned tag, has all three.
+
+### Size
+
+The x86_64 DCE CLI went from 216 152 B to 288 856 B (+72 704 B), and from
+535 640 B to 608 344 B without DCE. The
+growth comes from:
+- the CLI checks (`src/cli.cyr`);
+- the string-aware JSON scanners for pricing, the model catalogue and
+  `neuron-ls`;
+- the accel-class, KFD, PCIe and cgroup readers;
+- the strict field parsers;
+- the PE getenv reader and the escaping writer.
+
+The Windows PE went from 660 480 B to 738 304 B, and the arm64 Mach-O from
+672 252 B to 754 172 B.
+
+### Performance
+
+**No unexplained regression.** Every slower row is code this release added
+to fix something, and the two rows whose code did not change moved by
+placement, which a control arm reproduces (2.5.4 → 2.5.5, both on cyrius
+6.7.18). The method is the same as in 2.5.3 and 2.5.4:
+- 5 code layouts per arm;
+- the three floor-bound rows batch-timed (†);
+- 80 rounds per suite, shuffled and pinned to one CPU.
+
+| row | 2.5.4 | 2.5.5 | Δ | p | verdict |
+|---|---:|---:|---:|---:|---|
+| `parse_cuda_8gpu` | 12.87 µs | 13.35 µs | +3.8% | < 0.001 | new code: strict fields, `pci.bus_id` (+60 ns a row) |
+| `parse_vulkan_2gpu` | 2.36 µs | 2.42 µs | +2.2% | 0.03 | neutral |
+| `parse_neuron_2dev` | 1.55 µs | 1.83 µs | +17.9% | < 0.001 | new code: a JSON walk that skips strings and nesting |
+| `detect_safetensors` † | 384.2 ns | 417.1 ns | +8.6% | 0.001 | new code: header bounds and shape-overflow checks |
+| `detect_gguf` † | 35.8 ns | 35.7 ns | −0.3% | 0.33 | neutral |
+| `parse_vulkan_summary_renoir` | 13.87 µs | 14.26 µs | +2.8% | 0.006 | placement (below) |
+| `vulkan_heaps_uhd600` | 604.55 µs | 585.25 µs | −3.2% | 0.01 | placement (below), not a gain |
+| `best_available_13dev` † | 170.6 ns | 167.1 ns | −2.1% | 0.16 | neutral |
+| `total_memory_13dev` | 97.2 ns | 97.2 ns | 0.0% | 0.79 | neutral |
+| `has_accelerator_13dev` | 17.4 ns | 17.4 ns | 0.0% | 0.48 | neutral |
+| `plan_70B_bf16_4gpu` | 1.40 µs | 1.55 µs | +11.1% | < 0.001 | new code: the capacity-proportional pipeline split |
+| `count_family_gpu_13dev` | 232.0 ns | 233.8 ns | +0.8% | 0.001 | neutral (under 1%) |
+| `json_serialize_13dev` | 21.97 µs | 22.27 µs | +1.3% | < 0.001 | new code: the escaping scan |
+| `json_summary_13dev` | 3.03 µs | 3.04 µs | +0.4% | 0.20 | neutral |
+| `json_system_io` | 4.88 µs | 4.84 µs | −0.9% | 0.001 | neutral (under 1%) |
+| `json_plan` | 16.28 µs | 16.36 µs | +0.5% | 0.001 | neutral (under 1%; one more field) |
+| `json_training` | 2.34 µs | 2.40 µs | +2.5% | < 0.001 | new code: byte counts that cannot wrap |
+| `dedup_17dev` | 853.7 ns | 868.1 ns | +1.7% | < 0.001 | new code: availability and name checks per match |
+| `profile_from_json_cuda` | 6.96 µs | 7.03 µs | +1.1% | < 0.001 | new code: type and range checks |
+
+**How the rises were explained.** A verdict needs p < 0.01 and |Δ| > 1%.
+Each row the table calls new code was A/B'd against a placement control and
+stayed flat there, so the cost is the code that row now runs:
+- **The control:** 2.5.4 with a never-called function at the end of
+  `cuda.cyr`, sized so that the code ahead of `vulkan.cyr` matches 2.5.5's to
+  the byte (405 408 B).
+- **Parsing rows:** this control moved every one within ±1.1% (p ≥ 0.19).
+- **Costs:** the rises are fractions of a microsecond per call, on paths
+  that run once per detection or per CLI call, next to vendor tools that
+  take milliseconds.
+- **`parse_neuron_2dev`:** the first 2.5.5 build read it at +106%. That
+  build scanned each device object once per key, five times in all; one
+  member walk brought it to +18%.
+
+**The two Vulkan rows are placement.** Their call tree is byte-identical to
+2.5.4's, apart from `profile_new`'s one extra store. The code-only control
+left `parse_vulkan_summary_renoir` at +2.2%: 2.5.5 also grew `.bss` by 88 B
+and `.rodata` by 642 B, which moves every string the summary parser compares
+each line against.
+
+A second control matched code and data both. It is 2.5.4 plus that pad, 11
+dead globals and one dead 323-byte string. The control's `.bss` size, its
+`.rodata` start, its `deviceName` literal and the code ahead of `vulkan.cyr`
+all match 2.5.5's exactly. Interleaved with both arms:
+
+| comparison | `parse_vulkan_summary_renoir` | `vulkan_heaps_uhd600` |
+|---|---:|---:|
+| 2.5.4 → data-matched 2.5.4 | +2.0% (p < 0.001) | −3.8% (p < 0.001) |
+| data-matched 2.5.4 → 2.5.5 | +0.7% (p = 0.26) | +0.6% (p = 0.56) |
+
+**The `lazy` suite.** 20 interleaved runs per arm, medians:
+- `lazy_tpu_query`: 5.02 → 5.07 µs (+1.0%, overlapping interquartile
+  ranges), neutral;
+- `lazy_npu_query`: 115.26 → 91.11 µs (−21.0%), faster. The NPU family's
+  `/dev` and sysfs probes no longer allocate a `Str` per directory entry or a
+  4 KiB buffer per read; both use stack buffers now.
+
+**Memory per detection** (the `alloc_used` delta, from the leak fixes above):
+1 282 840 → 40 488 B.
+
+In `bench-history.csv`:
+- the `2a6ea44` rows at 16:02:52Z are 2.5.4, measured on the clean tree
+  before any change;
+- the `b4c1499-dirty` rows at 23:41:34Z are 2.5.5, all three suites,
+  measured on the final source before the version bump. `b4c1499` is the
+  work-in-progress commit of this release.
+
+### Verified
+
+- **Dev host** (Linux x86_64, Renoir APU):
+  - all 19 units and 8 fuzz harnesses pass;
+  - every `ci.yml` step passes when replayed on a fresh copy under
+    `bash -e`, as GitHub runs it, toolchain install and benchmarks aside;
+  - the Python suite passes, 36 tests against the built binary.
+  - **CLI against 2.5.4:** only the fixes differ. The iGPU reports `gfx90c`
+    and 51.2 GB/s, `--cost` lists five instances, `--table` lines up,
+    `fits` appears in plans, and the `--threaded` warnings come out in
+    another order. stderr stays silent at the default level.
+- **`cass`** (Windows 11, Celeron J4125, UHD 600), DCE PE:
+  - the `windows-smoke` checks (a), (d), (e) and (g) pass and match 2.5.4,
+    with the same RAM and GPU;
+  - default, `--summary` and `--train` stdout is byte-identical to 2.5.4;
+  - `--version` prints the built-in version from a foreign directory, where
+    2.5.4 printed "unknown";
+  - every error case exits 2 with its message.
+  - **Long PATH:** with a 6 360-character PATH, 2.5.4 reported `vulkaninfo`
+    missing, and 2.5.5 found it.
+- **`ecb`** (Apple M5 Pro, macOS 27.2): a signed arm64 Mach-O, cross-built as
+  `stage_binary.sh` composes it.
+  - The `macos-smoke` checks (a)–(g) pass:
+    - CPU memory equals `hw.memsize`;
+    - Metal GPU 48 GiB;
+    - `--threaded` equals the default run;
+    - the Python API works against the binary.
+  - Output matches 2.5.4 apart from the ANE, now 8 GiB, and the built-in
+    `--version`.
+- **Each fix was mutation-checked.** It was undone, its assertion was seen to
+  fail, and the fix was restored. The two review rounds found 49 and then 10
+  issues in the repairs. Every one is fixed, and each has a test where one
+  can catch it.
+
+**Not verified:**
+- **Hardware not at hand.** No NVIDIA, discrete AMD, TPU, Gaudi, Neuron,
+  Cerebras, Graphcore, Intel NPU or Arc device was available, so those fixes
+  follow vendor documentation and kernel source and are tested against
+  fixtures (roadmap 2.6.x).
+- **CI.** The wheel workflows, the new `linux-smoke` and aarch64 release
+  jobs, and the SHA-pinned actions have not run on GitHub yet.
+- **Paths no host here can run.** The cgroup cap was run only under a
+  scratch cgroup on the dev host. The wmic virtual-adapter filter was run
+  only under Wine, since `cass` has no wmic.
+
 ## [2.5.4] — 2026-10-29 — a tool's exit status, a macOS smoke job, and DCE on the Windows build
 
 The last of the 2.5.x roadmap. A tool that runs and fails is now reported.

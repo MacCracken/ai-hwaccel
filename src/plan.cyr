@@ -48,10 +48,16 @@ fn _plan_pipeline(devs, needed, model_params, quant, max_bw) {
     var per_layer = needed / est_layers;
     if (needed > per_layer * est_layers) { per_layer = per_layer + 1; }
 
+    # Each device's capacity at caps[2i] and its floor share at caps[2i+1],
+    # worked out once: recomputing both per loop cost 33 more divisions on
+    # plan_70B_bf16_4gpu's 11 devices.
+    var caps = alloc(n * 16);
     var sum_cap = 0;
     var i = 0;
     while (i < n) {
-        sum_cap = sum_cap + _pp_layer_cap(vec_get(devs, i), per_layer, est_layers);
+        var c0 = _pp_layer_cap(vec_get(devs, i), per_layer, est_layers);
+        store64(caps + i * 16, c0);
+        sum_cap = sum_cap + c0;
         i = i + 1;
     }
     if (sum_cap < est_layers) { return 0; }
@@ -62,7 +68,9 @@ fn _plan_pipeline(devs, needed, model_params, quant, max_bw) {
     var assigned = 0;
     i = 0;
     while (i < n) {
-        assigned = assigned + est_layers * _pp_layer_cap(vec_get(devs, i), per_layer, est_layers) / sum_cap;
+        var sh = est_layers * load64(caps + i * 16) / sum_cap;
+        store64(caps + i * 16 + 8, sh);
+        assigned = assigned + sh;
         i = i + 1;
     }
     var rem = est_layers - assigned;
@@ -74,9 +82,9 @@ fn _plan_pipeline(devs, needed, model_params, quant, max_bw) {
     i = 0;
     while (i < n) {
         var d = vec_get(devs, i);
+        var cap = load64(caps + i * 16);
+        var lc = load64(caps + i * 16 + 8);
         i = i + 1;
-        var cap = _pp_layer_cap(d, per_layer, est_layers);
-        var lc = est_layers * cap / sum_cap;
         if (rem > 0 && lc < cap) {
             lc = lc + 1;
             rem = rem - 1;

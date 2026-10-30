@@ -104,6 +104,10 @@ import ai_hwaccel
 
 plan = ai_hwaccel.plan("70B", quant="bf16")
 
+if not plan.fits:
+    # Nothing here holds the model: plan.shards is the CPU fallback, given for
+    # reference. Quantize further (quant="int4") or use a bigger host.
+    raise SystemExit(f"{plan.total_memory_bytes / 2**30:.0f} GiB does not fit")
 if plan.strategy == "None":
     shard = plan.shards[0]            # the whole model on one device
 elif plan.strategy == "Pipeline Parallel":
@@ -113,6 +117,8 @@ elif plan.strategy == "Tensor Parallel":
     pass                              # split tensors across plan.strategy_count devices
 ```
 
+`plan.fits` is false when no accelerator group and no CPU holds the model
+(2.5.5; an older binary omits it and the wrapper reads it as true).
 `plan.est_tokens_per_sec` is an estimate, or `None` when there is none.
 
 ## Training memory budgeting

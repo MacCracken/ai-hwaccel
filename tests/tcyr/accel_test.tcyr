@@ -1,6 +1,8 @@
-# accel_test.tcyr — the DRM accel class walk, the Graphcore /dev fallback and
-# the interconnect pass (2.5.5), on fake sysfs and /dev trees this unit builds
-# under /tmp and removes, and the parsers behind them.
+# accel_test.tcyr — the DRM accel class walk, the Cerebras and Graphcore
+# detectors and the interconnect pass (2.5.5), on fake sysfs, /dev and tool
+# trees this unit builds under /tmp and removes, and the parsers behind them.
+# Linux only: the tool tests run this binary again as a child
+# (/proc/self/exe) with PATH set to a directory of fake tools.
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
@@ -13,6 +15,7 @@ include "lib/syscalls.cyr"
 include "lib/fs.cyr"
 include "lib/tagged.cyr"
 include "lib/process.cyr"
+include "lib/args.cyr"
 
 include "lib/sakshi.cyr"
 include "src/log.cyr"
@@ -80,6 +83,13 @@ fn _t_put(rel, text) {
     var path = _t_path(rel);
     _t_parent(path);
     file_write_all(path, text, strlen(text));
+    return 0;
+}
+
+# `rel` holding cstr `text`, executable.
+fn _t_exe(rel, text) {
+    _t_put(rel, text);
+    sys_chmod(_t_path(rel), 493);
     return 0;
 }
 
@@ -161,7 +171,8 @@ fn _by_id(v, id) {
 }
 
 # The fake accel class every accel test reads: one node per in-tree driver,
-# a Google TPU, a node with no driver link, and names that are not nodes.
+# a Google TPU, a node with no driver link, a platform device (no vendor
+# file) whose driver no list names, and names that are not nodes.
 fn _build_accel_tree() {
     _t_accel("accel", 0, "intel_vpu", "0x8086\n");
     var g = _t_accel("accel", 1, "habanalabs", "0x1da3\n");
@@ -179,6 +190,7 @@ fn _build_accel_tree() {
     _t_accel("accel", 8, "rocket", 0);
     var g3 = _t_accel("accel", 9, "habanalabs", "0x1da3\n");
     _t_file(g3, "/device_type", "GAUDI3\n");
+    _t_accel("accel", 10, "foo_npu", 0);
     _t_dir("accel/card0/device");
     _t_dir("accel/accelX/device");
     return 0;
@@ -193,11 +205,13 @@ fn test_accel_driver_backend() {
     assert_eq(accel_driver_backend(str_from("qaic"), 0 - 1), BACKEND_QUALCOMM, "qaic: Qualcomm");
     assert_eq(accel_driver_backend(str_from("ethosu"), 0 - 1), 0 - 1, "ethosu: no backend");
     assert_eq(accel_driver_backend(str_from("rocket"), 0 - 1), 0 - 1, "rocket: no backend");
-    assert_eq(accel_driver_backend(str_from("intel_vp"), 0 - 1), BACKEND_TPU, "a prefix is not the driver");
+    assert_eq(accel_driver_backend(str_from("intel_vp"), 0x1ae0), BACKEND_TPU, "a prefix is not the driver");
     assert_eq(accel_driver_backend(str_from("amdxdna2"), 0x1022), 0 - 1, "a longer name is not amdxdna");
     assert_eq(accel_driver_backend(0, 0 - 1), BACKEND_TPU, "no driver link, no vendor: a TPU candidate");
     assert_eq(accel_driver_backend(str_from("google_tpu"), 0x1ae0), BACKEND_TPU, "Google vendor: a TPU");
     assert_eq(accel_driver_backend(str_from("other"), 0x10DE), 0 - 1, "another vendor: not a TPU");
+    assert_eq(accel_driver_backend(str_from("foo_npu"), 0 - 1), 0 - 1, "unknown driver, no PCI vendor: not a TPU");
+    assert_eq(accel_driver_backend(str_from("foo_npu"), 0x1ae0), BACKEND_TPU, "unknown driver, Google vendor: a TPU");
     assert_eq(accel_driver_backend(str_from("intel_vpu"), 0x1ae0), BACKEND_INTEL_NPU, "the driver decides first");
     assert_eq(accel_node_index(str_from("accel12")), 12, "accel12");
     assert_eq(accel_node_index(str_from("accel")), 0 - 1, "accel: no index");
@@ -213,6 +227,7 @@ fn test_accel_driver_backend() {
 
 # Every accel node goes to its own backend: through 2.5.4 each node but the
 # amdxdna one was a 32 GiB "Google TPU v4" (and the Intel NPU was not found).
+# The platform device with an unknown driver is not a TPU either.
 fn test_accel_class_tree() {
     var root = _t_path("accel");
     var tpus = vec_new();
@@ -254,7 +269,9 @@ fn test_accel_class_tree() {
         assert_streq(profile_device_name(g2), "Intel Gaudi2", "accel1: name");
     }
     if (g3 != 0) { assert_eq(profile_gaudi_gen(g3), GAUDI3, "accel9: GAUDI3"); }
-    assert_eq(vec_len(accel_class_nodes(root, 0 - 1)), 3, "ethosu, rocket and the NVIDIA node: no backend");
+    assert(_by_id(tpus, 10) == 0, "accel10 (foo_npu, no PCI vendor) is not a TPU");
+    var none = accel_class_nodes(root, 0 - 1);
+    assert_eq(vec_len(none), 4, "ethosu, rocket, foo_npu and the NVIDIA node: no backend");
     return 0;
 }
 
@@ -277,29 +294,115 @@ fn test_accel_class_fallbacks() {
     return 0;
 }
 
-# --- /dev fallbacks (2.5.5) ---
+# --- Cerebras and Graphcore (2.5.5) ---
 
-# Graphcore's fallback takes an ipu<N> node only. Through 2.5.4 any /dev/ipu*
-# entry counted, so an Intel IPU6 or IPU7 camera (/dev/ipu-psys0,
-# /dev/ipu7-psys0) was a Graphcore IPU.
-# 2.5.5: with exec off, the Cerebras and Graphcore detectors look up no tool
-# (only their /dev fallbacks run), so registry_detect_no_exec can use them.
+# With exec off, the Cerebras and Graphcore detectors look up no tool (only
+# their /dev fallbacks run), so registry_detect_no_exec can use them.
 fn test_cloud_asic_no_exec() {
     var p = vec_new();
     var w = vec_new();
     detect_cerebras_opts(p, w, 0);
     detect_graphcore_opts(p, w, 0);
     assert_eq(vec_len(w), 0, "no-exec cerebras/graphcore: no tool looked up");
-    # With exec, gc-info is looked up (this host and CI have none).
-    var w2 = vec_new();
-    detect_graphcore_opts(vec_new(), w2, 1);
-    assert_gt(vec_len(w2), 0, "exec graphcore: gc-info looked up");
-    var w3 = vec_new();
-    detect_cerebras_opts(vec_new(), w3, 1);
-    assert_gt(vec_len(w3), 0, "exec cerebras: cerebras_cli looked up");
     return 0;
 }
 
+# What a child run of both detectors found (_child_asic's exit status): a
+# profile of each backend, at the size its tool printed, and each tool's
+# not-found and exit-status warnings.
+enum AsicSeen {
+    SEEN_GC = 1;
+    SEEN_CS = 2;
+    SEEN_GC_MISSING = 4;
+    SEEN_CS_MISSING = 8;
+    SEEN_GC_FAILED = 16;
+    SEEN_CS_FAILED = 32;
+    SEEN_GC_SIZE = 64;
+    SEEN_CS_SIZE = 128;
+}
+
+# The child half: both detectors with exec, over the /dev directory `dev` (a
+# cstr), on the PATH the parent gave; returns the AsicSeen bits.
+fn _child_asic(dev) {
+    var p = vec_new();
+    var w = vec_new();
+    detect_graphcore_at(p, w, 1, dev);
+    detect_cerebras_at(p, w, 1, dev);
+    var seen = 0;
+    var i = 0;
+    while (i < vec_len(p)) {
+        var x = vec_get(p, i);
+        i = i + 1;
+        if (profile_accel_type(x) == ACCEL_GRAPHCORE) {
+            seen = seen | SEEN_GC;
+            if (profile_memory_bytes(x) == 896 * 1024 * 1024) { seen = seen | SEEN_GC_SIZE; }
+        }
+        if (profile_accel_type(x) == ACCEL_CEREBRAS) {
+            seen = seen | SEEN_CS;
+            if (profile_memory_bytes(x) == 40 * BYTES_PER_GIB) { seen = seen | SEEN_CS_SIZE; }
+        }
+    }
+    i = 0;
+    while (i < vec_len(w)) {
+        var y = vec_get(w, i);
+        i = i + 1;
+        var gc = streq(warning_tool(y), "gc-info");
+        if (warning_code(y) == HWA_ERR_TOOL_NOT_FOUND) {
+            if (gc == 1) { seen = seen | SEEN_GC_MISSING; } else { seen = seen | SEEN_CS_MISSING; }
+        }
+        if (warning_code(y) == HWA_ERR_TOOL_FAILED) {
+            if (gc == 1) { seen = seen | SEEN_GC_FAILED; } else { seen = seen | SEEN_CS_FAILED; }
+        }
+    }
+    return seen;
+}
+
+# _child_asic's bits from a child whose PATH is only `bin` and whose /dev is
+# `dev` (both relative to the temp root), so the host's tools and nodes do
+# not count. A child, because the environment loads once per process.
+fn _asic_run(bin, dev) {
+    var a = vec_new();
+    vec_push(a, "/proc/self/exe");
+    vec_push(a, "--aihw-child");
+    vec_push(a, "asic");
+    vec_push(a, _t_path(dev));
+    var env = vec_new();
+    vec_push(env, str_data(str_builder_build(_t_sb2("PATH=", _t_path(bin)))));
+    return exec_env(a, env);
+}
+
+# With exec, each tool is looked up: on a PATH without them both are
+# reported missing, whatever the host has installed. A clean run is a device
+# whatever it prints; a failed run only when its output names a size, so a
+# host with the SDK but no reachable system, its tool's error on stdout, has
+# none (through 2.5.4 that was a 44 GiB Cerebras WSE and a 900 MiB Graphcore
+# IPU); the /dev nodes still count after a failed run.
+fn test_cloud_asic_tools() {
+    _t_dir("bin-none");
+    _t_dir("dev-none");
+    var missing = SEEN_GC_MISSING | SEEN_CS_MISSING;
+    assert_eq(_asic_run("bin-none", "dev-none"), missing, "empty PATH: both tools looked up, reported missing");
+    _t_exe("bin-fail/gc-info", "#!/bin/sh\necho Error: no IPU devices found\nexit 1\n");
+    _t_exe("bin-fail/cerebras_cli", "#!/bin/sh\necho cerebras_cli: error: cannot connect\nexit 2\n");
+    var failed = SEEN_GC_FAILED | SEEN_CS_FAILED;
+    assert_eq(_asic_run("bin-fail", "dev-none"), failed, "failed runs, error text: no device, each status warned");
+    _t_exe("bin-size/gc-info", "#!/bin/sh\necho SRAM: 896 MB\nexit 1\n");
+    _t_exe("bin-size/cerebras_cli", "#!/bin/sh\necho Memory: 40 GB\nexit 1\n");
+    var sized = SEEN_GC | SEEN_GC_SIZE | SEEN_CS | SEEN_CS_SIZE | failed;
+    assert_eq(_asic_run("bin-size", "dev-none"), sized, "failed runs that name a size: devices at that size");
+    _t_exe("bin-ok/gc-info", "#!/bin/sh\necho IPU: 0\n");
+    _t_exe("bin-ok/cerebras_cli", "#!/bin/sh\necho System: CS-2\n");
+    assert_eq(_asic_run("bin-ok", "dev-none"), SEEN_GC | SEEN_CS, "clean runs, no size: devices at the defaults");
+    _t_put("dev-asic/ipu0", "");
+    _t_put("dev-asic/cerebras0", "");
+    var nodes = SEEN_GC | SEEN_CS | failed;
+    assert_eq(_asic_run("bin-fail", "dev-asic"), nodes, "failed runs: the /dev nodes still count");
+    return 0;
+}
+
+# Graphcore's fallback takes an ipu<N> node only. Through 2.5.4 any /dev/ipu*
+# entry counted, so an Intel IPU6 or IPU7 camera (/dev/ipu-psys0,
+# /dev/ipu7-psys0) was a Graphcore IPU.
 fn test_graphcore_dev_nodes() {
     _t_put("dev-cam/ipu-psys0", "");
     _t_put("dev-cam/ipu7-psys0", "");
@@ -309,6 +412,9 @@ fn test_graphcore_dev_nodes() {
     _t_put("dev-ipu/ipu0_ex", "");
     assert_eq(graphcore_dev_present_at(_t_path("dev-ipu")), 1, "ipu0: a Graphcore IPU");
     assert_eq(graphcore_dev_present_at(_t_path("missing")), 0, "no directory: none");
+    assert_eq(cerebras_dev_present_at(_t_path("dev-ipu")), 0, "no cerebras node: none");
+    _t_put("dev-cs/cerebras0", "");
+    assert_eq(cerebras_dev_present_at(_t_path("dev-cs")), 1, "cerebras0: a Cerebras system");
     return 0;
 }
 
@@ -509,6 +615,15 @@ fn test_no_exec_interconnects() {
 }
 
 alloc_init();
+args_init();
+
+if (argc() > 3) {
+    if (streq(argv(1), "--aihw-child") == 1) {
+        var code = 0;
+        if (streq(argv(2), "asic") == 1) { code = _child_asic(argv(3)); }
+        syscall(60, code);
+    }
+}
 
 var _rsb = str_builder_new();
 str_builder_add_cstr(_rsb, "/tmp/ai-hwaccel-accel-test-");
@@ -522,6 +637,7 @@ test_accel_class_tree();
 test_accel_class_fallbacks();
 test_graphcore_dev_nodes();
 test_cloud_asic_no_exec();
+test_cloud_asic_tools();
 test_ib_port_state();
 test_infiniband_tree();
 test_nvlink_status();

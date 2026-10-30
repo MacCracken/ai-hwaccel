@@ -39,7 +39,7 @@ if (profile_power_x1000(vec_get(p1, 0)) != 120500) { syscall(60, 1); }
 # Multi-GPU
 var p2 = vec_new();
 var w2 = vec_new();
-var csv2 = str_from("0, 81920, 0, 81920, 8.0, 535.104.05, A100-SXM4-80GB, 35, 60, 0, 1593\n1, 81920, 512, 81408, 8.0, 535.104.05, A100-SXM4-80GB, 36, 62, 5, 1593");
+var csv2 = str_from("0, 81920, 0, 81920, 8.0, 535.104.05, A100-SXM4-80GB, 35, 60, 0, 1593\n1, 81920, 512, 81408, 8.0, 535.104.05, A100-SXM4-80GB, 36, 62, 5, 1593"); #skip-lint
 parse_cuda_output(csv2, p2, w2);
 if (vec_len(p2) != 2) { syscall(60, 2); }
 
@@ -141,7 +141,8 @@ while (bi < vec_len(bus)) {
 # Every field of a full row replaced in turn by what nvidia-smi prints for a
 # field it cannot read, parsed with and without a warnings vec and as the
 # query without compute_cap: nothing crashes, memory is never below 0, and a
-# row is skipped only for its index or memory.
+# row is skipped only for its index. A memory.total it cannot read keeps the
+# GPU, unavailable with a warning, and never sized from system RAM (2.5.5).
 var row = vec_new();
 vec_push(row, "0");
 vec_push(row, "81559");
@@ -172,7 +173,11 @@ while (fi < vec_len(row)) {
         var k = 0;
         while (k < vec_len(row)) {
             if (k > 0) { str_builder_add_cstr(sb13, ", "); }
-            if (k == fi) { str_builder_add_cstr(sb13, vec_get(bad, bj)); } else { str_builder_add_cstr(sb13, vec_get(row, k)); }
+            if (k == fi) {
+                str_builder_add_cstr(sb13, vec_get(bad, bj));
+            } else {
+                str_builder_add_cstr(sb13, vec_get(row, k));
+            }
             k = k + 1;
         }
         var line13 = str_builder_build(sb13);
@@ -188,6 +193,19 @@ while (fi < vec_len(row)) {
         }
         if (fi > 1 && vec_len(w13) != 0) { syscall(60, 16); }
         if (fi > 1 && vec_len(p13) < 2) { syscall(60, 16); }
+        if (fi == 1) {
+            if (vec_len(p13) != 3) { syscall(60, 17); }
+            var unified = cuda_mem_unified(str_from(vec_get(bad, bj)));
+            if (unified == 0 && vec_len(w13) != 1) { syscall(60, 17); }
+            cuda_size_unified(p13, 0, 1024 * BYTES_PER_GIB);
+            var um = 0;
+            while (um < vec_len(p13)) {
+                var uq = vec_get(p13, um);
+                if (profile_available(uq) != unified) { syscall(60, 17); }
+                if (unified == 0 && profile_memory_bytes(uq) != 0) { syscall(60, 17); }
+                um = um + 1;
+            }
+        }
         bj = bj + 1;
     }
     fi = fi + 1;

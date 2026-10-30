@@ -72,10 +72,10 @@ fn asic_size_bytes(line, dflt_unit) {
 }
 
 # Cerebras WSE memory from `cerebras_cli system-info` output (a Str): the
-# last line naming "memory" that holds a size (GB when it has no unit), else
-# 44 GiB. Pure.
-fn parse_cerebras_memory(out) {
-    var mem = 44 * BYTES_PER_GIB;
+# last line naming "memory" that holds a size (GB when it has no unit), or 0
+# when none does. Pure.
+fn cerebras_memory_found(out) {
+    var mem = 0;
     var lines = str_split(out, 10);
     var n = vec_len(lines);
     var li = 0;
@@ -89,11 +89,18 @@ fn parse_cerebras_memory(out) {
     return mem;
 }
 
+# cerebras_memory_found, else 44 GiB. Pure.
+fn parse_cerebras_memory(out) {
+    var mem = cerebras_memory_found(out);
+    if (mem > 0) { return mem; }
+    return 44 * BYTES_PER_GIB;
+}
+
 # Graphcore IPU memory from `gc-info -d 0 -i` output (a Str): the last line
-# naming "memory" or "sram" that holds a size (MB when it has no unit), else
-# 900 MiB. Pure.
-fn parse_gcinfo_memory(out) {
-    var mem = 900 * 1024 * 1024;
+# naming "memory" or "sram" that holds a size (MB when it has no unit), or 0
+# when none does. Pure.
+fn gcinfo_memory_found(out) {
+    var mem = 0;
     var lines = str_split(out, 10);
     var n = vec_len(lines);
     var li = 0;
@@ -107,16 +114,61 @@ fn parse_gcinfo_memory(out) {
     return mem;
 }
 
-# --- Detectors ---
+# gcinfo_memory_found, else 900 MiB. Pure.
+fn parse_gcinfo_memory(out) {
+    var mem = gcinfo_memory_found(out);
+    if (mem > 0) { return mem; }
+    return 900 * 1024 * 1024;
+}
 
-# Detect a Cerebras system through cerebras_cli, with `allow_exec` 1, else
-# (or when it prints nothing) a /dev/cerebras* node. Through 2.5.4 no-exec
-# mode skipped the backend, node and all.
-fn detect_cerebras_opts(profiles, warnings, allow_exec) {
+# --- Detectors ---
+#
+# Neither tool's output has been seen from hardware, nor its exit status, so
+# the output of a clean run is a device whatever it says. A run that exits
+# non-zero is reported once, by its exit-status warning (as detect_gaudi_opts
+# does), and its output is a device only when it names a memory size; else
+# the /dev node decides. Through 2.5.4 any output was a device, so a host
+# with the SDK but no reachable system, whose tool printed its error to
+# stdout, had a 44 GiB Cerebras WSE or a 900 MiB Graphcore IPU.
+
+# The output of `tool` run with `args` (a vec of cstrs), or 0 when it printed
+# nothing. Slot `failed` is set to 1 when the run exited non-zero (and its
+# exit-status warning is pushed), else 0.
+fn _asic_tool_output(tool, args, warnings, failed) {
+    var st[16];
+    var out = run_tool_status(tool, args, warnings, &st);
+    var w = tool_run_warning(tool, out, &st);
+    store64(failed, 0);
+    if (w != 0) {
+        store64(failed, 1);
+        if (warnings != 0) { vec_push(warnings, w); }
+    }
+    if (out == 0) { return 0; }
+    if (str_len(out) == 0) { return 0; }
+    return out;
+}
+
+# 1 when directory `dev` (a cstr; "/dev" but in a test) holds a Cerebras node,
+# /dev/cerebras*, else 0, and 0 on Windows (see platform.cyr's header).
+fn cerebras_dev_present_at(dev) {
+    #ifdef CYRIUS_TARGET_WIN
+    return 0;
+    #endif
+    return dev_dir_scan(dev, "cerebras", 0);
+}
+
+# Detect a Cerebras system through cerebras_cli (see above), with
+# `allow_exec` 1, else (or when its output is no system) a cerebras* node in
+# directory `dev` (a cstr). Through 2.5.4 no-exec mode skipped the backend,
+# node and all.
+fn detect_cerebras_at(profiles, warnings, allow_exec, dev) {
     if (allow_exec == 1) {
-        var result = run_tool1("cerebras_cli", "system-info", warnings);
+        var args = vec_new();
+        vec_push(args, "system-info");
+        var failed[8];
+        var result = _asic_tool_output("cerebras_cli", args, warnings, &failed);
         if (result != 0) {
-            if (str_len(result) > 0) {
+            if (load64(&failed) == 0 || cerebras_memory_found(result) > 0) {
                 var p = profile_new(ACCEL_CEREBRAS, 0, parse_cerebras_memory(result));
                 profile_set_device_name(p, "Cerebras WSE");
                 vec_push(profiles, p);
@@ -125,13 +177,17 @@ fn detect_cerebras_opts(profiles, warnings, allow_exec) {
         }
     }
 
-    # Fallback: /dev/cerebras* check
-    if (has_dev_device("cerebras") == 1) {
+    if (cerebras_dev_present_at(dev) == 1) {
         var p = profile_new(ACCEL_CEREBRAS, 0, 44 * BYTES_PER_GIB);
         profile_set_device_name(p, "Cerebras WSE");
         vec_push(profiles, p);
     }
     return 0;
+}
+
+# detect_cerebras_at on /dev.
+fn detect_cerebras_opts(profiles, warnings, allow_exec) {
+    return detect_cerebras_at(profiles, warnings, allow_exec, "/dev");
 }
 
 # detect_cerebras_opts with exec allowed.
@@ -153,14 +209,19 @@ fn graphcore_dev_present_at(dev) {
     return 0;
 }
 
-# Detect a Graphcore IPU through gc-info, with `allow_exec` 1, else (or when
-# it prints nothing) a /dev/ipu<N> node. Through 2.5.4 no-exec mode skipped
-# the backend, node and all.
-fn detect_graphcore_opts(profiles, warnings, allow_exec) {
+# Detect a Graphcore IPU through gc-info (see above), with `allow_exec` 1,
+# else (or when its output is no IPU) an ipu<N> node in directory `dev` (a
+# cstr). Through 2.5.4 no-exec mode skipped the backend, node and all.
+fn detect_graphcore_at(profiles, warnings, allow_exec, dev) {
     if (allow_exec == 1) {
-        var result = run_tool3("gc-info", "-d", "0", "-i", warnings);
+        var args = vec_new();
+        vec_push(args, "-d");
+        vec_push(args, "0");
+        vec_push(args, "-i");
+        var failed[8];
+        var result = _asic_tool_output("gc-info", args, warnings, &failed);
         if (result != 0) {
-            if (str_len(result) > 0) {
+            if (load64(&failed) == 0 || gcinfo_memory_found(result) > 0) {
                 var p = profile_new(ACCEL_GRAPHCORE, 0, parse_gcinfo_memory(result));
                 profile_set_device_name(p, "Graphcore IPU");
                 profile_set_compute_cap(p, "IPU");
@@ -170,14 +231,18 @@ fn detect_graphcore_opts(profiles, warnings, allow_exec) {
         }
     }
 
-    # Fallback: a /dev/ipu<N> node
-    if (graphcore_dev_present_at("/dev") == 1) {
+    if (graphcore_dev_present_at(dev) == 1) {
         var p = profile_new(ACCEL_GRAPHCORE, 0, 900 * 1024 * 1024);
         profile_set_device_name(p, "Graphcore IPU");
         profile_set_compute_cap(p, "IPU");
         vec_push(profiles, p);
     }
     return 0;
+}
+
+# detect_graphcore_at on /dev.
+fn detect_graphcore_opts(profiles, warnings, allow_exec) {
+    return detect_graphcore_at(profiles, warnings, allow_exec, "/dev");
 }
 
 # detect_graphcore_opts with exec allowed.

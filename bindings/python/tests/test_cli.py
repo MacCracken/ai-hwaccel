@@ -59,13 +59,28 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(c.model, "70B")
 
     def test_version(self):
-        # The binary reads ./VERSION at runtime (cwd-relative), so it may
-        # report "unknown" when run from outside the repo root. Assert the
-        # wrapper returns a non-empty string either way; the cwd/data-file
-        # dependence is documented and tracked for the 2.3.3 packaging work.
-        v = ai_hwaccel.version()
-        self.assertIsInstance(v, str)
-        self.assertTrue(v)
+        # Built into the binary from VERSION (2.5.5), so it is the repo's
+        # from any cwd: through 2.5.4 the binary read ./VERSION at run time
+        # and printed "unknown" elsewhere.
+        version_file = pathlib.Path(__file__).resolve().parents[3] / "VERSION"
+        self.assertEqual(ai_hwaccel.version(), version_file.read_text().strip())
+
+    def _stderr(self, args, log_env):
+        import subprocess
+
+        env = dict(os.environ, AI_HWACCEL_LOG=log_env)
+        proc = subprocess.run([_BINARY] + args, capture_output=True, text=True, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stderr
+
+    def test_quiet_silences_unknown_log_env(self):
+        # The unknown-name warning comes after the level flags (2.5.5), so
+        # -q, documented as silent, prints nothing on stderr.
+        warned = self._stderr(["--version"], "verbose")
+        self.assertIn("unknown log level 'verbose'", warned)
+        self.assertEqual(self._stderr(["-q", "--version"], "verbose"), "")
+        quiet = self._stderr(["--log-level", "error", "--version"], "verbose")
+        self.assertEqual(quiet, "")
 
 
 class TestVersion(unittest.TestCase):

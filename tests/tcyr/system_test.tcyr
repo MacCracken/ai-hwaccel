@@ -371,6 +371,35 @@ fn _child_env_race() {
     return 0;
 }
 
+# A selective mask of an exec backend runs its tool from both entry points,
+# as through 2.5.4: a Gaudi-only mask finds the card the fake hl-smi below
+# lists. Were Gaudi native in registry_detect_with's exec decision, both
+# would read only the habanalabs accel nodes, which this host lacks, and
+# find nothing. A child process, for its own PATH.
+fn test_selective_mask_runs_tools() {
+    var t = _fx_dir();
+    _fx_file(t, "hl-smi", "#!/bin/sh\necho '0, HL-225, 98304, 97920'\n", 0x1ED);
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "PATH=");
+    str_builder_add_cstr(sb, t);
+    str_builder_add_cstr(sb, ":/usr/bin:/bin");
+    var env = vec_new();
+    vec_push(env, str_data(str_builder_build(sb)));
+    assert_eq(exec_env(_child_args("gaudi-mask", 0), env), 0, "a Gaudi-only mask runs hl-smi, threaded or not");
+    _fx_rm(t);
+    return 0;
+}
+
+# The child half: exit 1 when registry_detect_with of a Gaudi-only mask
+# finds no Gaudi card, 2 when registry_detect_threaded_with does not.
+fn _child_gaudi_mask() {
+    var mask = builder_with(builder_none(), BACKEND_GAUDI);
+    var code = 0;
+    if (reg_count_by_family(registry_detect_with(mask), FAMILY_AI_ASIC) != 1) { code = 1; }
+    if (reg_count_by_family(registry_detect_threaded_with(mask), FAMILY_AI_ASIC) != 1) { code = code + 2; }
+    return code;
+}
+
 # --- Data directory (2.5.5) ---
 
 # A library build never reads the host program's argv. Through 2.5.4 a host
@@ -405,6 +434,7 @@ if (argc() > 2) {
         var code = 0;
         if (streq(argv(2), "env-race") == 1) { code = _child_env_race(); }
         if (streq(argv(2), "data-dir") == 1) { code = _child_data_dir(); }
+        if (streq(argv(2), "gaudi-mask") == 1) { code = _child_gaudi_mask(); }
         syscall(60, code);
     }
 }
@@ -418,6 +448,7 @@ test_cache_fresh();
 test_cached_concurrent();
 test_threaded_mask();
 test_threaded_first_getenv();
+test_selective_mask_runs_tools();
 test_data_dir_not_from_argv();
 
 var fails = assert_summary();

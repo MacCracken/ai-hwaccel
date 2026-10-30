@@ -70,7 +70,11 @@ fn test_apple_m2_ane() {
 # no Neural Engine (2.5.1; through 2.5.0 both appeared, named "Apple Silicon"
 # and sized by the Mac's RAM).
 fn test_apple_intel_mac() {
-    var hw = str_from("Hardware Overview:\n  Model Name: MacBook Pro\n  Processor Name: Quad-Core Intel Core i7\n  Processor Speed: 2.3 GHz\n  Memory: 32 GB\n");
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Hardware Overview:\n  Model Name: MacBook Pro\n");
+    str_builder_add_cstr(sb, "  Processor Name: Quad-Core Intel Core i7\n");
+    str_builder_add_cstr(sb, "  Processor Speed: 2.3 GHz\n  Memory: 32 GB\n");
+    var hw = str_builder_build(sb);
     var profiles = vec_new();
     _parse_apple_macos(hw, profiles);
     assert_eq(vec_len(profiles), 0, "Intel Mac: no Apple GPU or ANE");
@@ -142,7 +146,11 @@ fn test_intel_profiles() {
 # device, strings quoted. Not a capture from hardware.
 
 fn test_xpu_smi_dump() {
-    var out = str_from("Device ID,Device Name,Memory Physical Size,PCI Device ID\n0,\"Intel(R) Data Center GPU Max 1550\",\"131072.00 MiB\",\"0x0bd5\"\n1,\"Intel(R) Data Center GPU Max 1550\",\"131072.00 MiB\",\"0x0bd5\"\n");
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Device ID,Device Name,Memory Physical Size,PCI Device ID\n");
+    str_builder_add_cstr(sb, "0,\"Intel(R) Data Center GPU Max 1550\",\"131072.00 MiB\",\"0x0bd5\"\n");
+    str_builder_add_cstr(sb, "1,\"Intel(R) Data Center GPU Max 1550\",\"131072.00 MiB\",\"0x0bd5\"\n");
+    var out = str_builder_build(sb);
     var profs = vec_new();
     var w = vec_new();
     assert_eq(parse_xpu_smi_dump(out, profs, w), 2, "max 1550 x2: two profiles");
@@ -159,7 +167,11 @@ fn test_xpu_smi_dump() {
 # Columns are found by label, in any order; N/A falls back (16 GiB, row index);
 # CRLF lines and a comma inside a quoted name parse.
 fn test_xpu_smi_dump_order_and_gaps() {
-    var out = str_from("Device Name,PCI Device ID,Device ID,Memory Physical Size\r\n\"Intel(R) Arc(TM) A770 Graphics\",\"0x56a0\",N/A,\"N/A\"\r\n\"Intel(R) Graphics, rev 2\",\"N/A\",3,\"16384.00 MiB\"\r\n");
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "Device Name,PCI Device ID,Device ID,Memory Physical Size\r\n");
+    str_builder_add_cstr(sb, "\"Intel(R) Arc(TM) A770 Graphics\",\"0x56a0\",N/A,\"N/A\"\r\n");
+    str_builder_add_cstr(sb, "\"Intel(R) Graphics, rev 2\",\"N/A\",3,\"16384.00 MiB\"\r\n");
+    var out = str_builder_build(sb);
     var profs = vec_new();
     assert_eq(parse_xpu_smi_dump(out, profs, vec_new()), 2, "reordered: two profiles");
     var a = vec_get(profs, 0);
@@ -180,12 +192,14 @@ fn test_xpu_smi_dump_order_and_gaps() {
 fn test_xpu_smi_dump_errors() {
     var w = vec_new();
     var profs = vec_new();
-    assert_eq(parse_xpu_smi_dump(str_from("Error: XPUM Service Status Error. \n"), profs, w), 0, "service error: no profile");
+    var err = str_from("Error: XPUM Service Status Error. \n");
+    assert_eq(parse_xpu_smi_dump(err, profs, w), 0, "service error: no profile");
     assert_eq(vec_len(w), 1, "service error: one warning");
     assert_eq(warning_code(vec_get(w, 0)), HWA_ERR_PARSE, "service error: a parse warning");
     var w2 = vec_new();
     assert_eq(parse_xpu_smi_dump(str_from(""), profs, w2), 0, "empty: no profile");
-    assert_eq(parse_xpu_smi_dump(str_from("Device ID,Device Name,Memory Physical Size,PCI Device ID\n"), profs, w2), 0, "header only: no profile");
+    var hdr = str_from("Device ID,Device Name,Memory Physical Size,PCI Device ID\n");
+    assert_eq(parse_xpu_smi_dump(hdr, profs, w2), 0, "header only: no profile");
     assert_eq(vec_len(w2), 0, "empty, header only: no warning");
     assert_eq(vec_len(profs), 0, "nothing pushed");
     return 0;
@@ -274,6 +288,15 @@ fn test_cloud_asic_memory_parse() {
     assert_eq(parse_gcinfo_memory(str_from("IPU: 0\nSRAM: 896 MB\n")), 896 * 1024 * 1024, "graphcore: SRAM: 896 MB");
     assert_eq(parse_gcinfo_memory(str_from("memory: 1800 MB\n")), 1800 * 1024 * 1024, "graphcore: memory: 1800 MB");
     assert_eq(parse_gcinfo_memory(str_from("")), 900 * 1024 * 1024, "graphcore: nothing: 900 MiB");
+    # The found forms say whether a size was there at all, which is what a
+    # failed run's output needs to count as a device.
+    assert_eq(cerebras_memory_found(cs), 40 * BYTES_PER_GIB, "cerebras found: 40 GB");
+    var cserr = str_from("cerebras_cli: error: cannot connect\n");
+    assert_eq(cerebras_memory_found(cserr), 0, "cerebras found: an error names no size");
+    assert_eq(cerebras_memory_found(str_from("System: CS-2\n")), 0, "cerebras found: no memory line");
+    var gcerr = str_from("Error: no IPU devices found\n");
+    assert_eq(gcinfo_memory_found(gcerr), 0, "graphcore found: an error names no size");
+    assert_eq(gcinfo_memory_found(str_from("SRAM: 896 MB\n")), 896 * 1024 * 1024, "graphcore found: SRAM: 896 MB");
     return 0;
 }
 
@@ -321,6 +344,12 @@ fn test_neuron_ls_documented() {
 
 fn test_neuron_ls_edges() {
     var w = vec_new();
+    # The first of a repeated key counts, and a key inside a nested value is
+    # not the device's own.
+    var dup = vec_new();
+    var dd = str_from("[{\"neuron_processes\":[{\"nc_count\":64}],\"nc_count\":2,\"nc_count\":8}]");
+    assert_eq(parse_neuron_ls_json(dd, NEURON_TRAINIUM, dup, w), 1, "repeated key: one device");
+    assert_eq(profile_neuron_cores(vec_get(dup, 0)), 2, "repeated key: the first nc_count, not a nested one");
     assert_eq(parse_neuron_ls_json(str_from("[]\n"), NEURON_INFERENTIA, vec_new(), w), 0, "[]: no device");
     assert_eq(parse_neuron_ls_json(str_from(""), NEURON_INFERENTIA, vec_new(), w), 0, "empty: no device");
     assert_eq(vec_len(w), 0, "[] and empty: no warning");
@@ -374,6 +403,82 @@ fn test_neuron_ls_edges() {
     if (vec_len(p4) == 1) {
         assert_eq(profile_neuron_chip(vec_get(p4, 0)), NEURON_TRAINIUM, "model shape: trn1 is Trainium");
         assert_eq(profile_memory_bytes(vec_get(p4, 0)), 32 * BYTES_PER_GIB, "model shape: memory_per_nc_mb x cores");
+    }
+    return 0;
+}
+
+# --- The /dev/neuron<N> fallback's shape, from DMI (2.5.5) ---
+
+# The fallback's profile for device 0 on DMI product name `dmi` (a cstr).
+fn _neuron_fb(dmi) {
+    return neuron_fallback_profile(0, str_from(dmi));
+}
+
+# Fails unless `p` is a `cores`-core, `gib` GiB device of chip `chip`.
+fn _neuron_shape_is(p, chip, cores, gib, what) {
+    assert_eq(profile_neuron_chip(p), chip, what);
+    assert_eq(profile_neuron_cores(p), cores, what);
+    assert_eq(profile_memory_bytes(p), gib * BYTES_PER_GIB, what);
+    return 0;
+}
+
+# The generation in the product name sets the shape. Through 2.5.4 every
+# device was 2 cores at the chip's per-core HBM: a trn2 device had 64 of its
+# 96 GiB and 2 of its 8 cores, an inf1 device 32 GiB for its 8.
+fn test_neuron_fallback_shape() {
+    var t2 = neuron_fallback_profile(3, str_from("trn2.48xlarge"));
+    _neuron_shape_is(t2, NEURON_TRAINIUM, 8, 96, "trn2: 8 NeuronCore-v3, 96 GiB");
+    assert_eq(profile_device_id(t2), 3, "trn2: id kept");
+    assert_streq(profile_device_name(t2), "AWS Trainium", "trn2: name");
+    assert_eq(neuron_training_x1000(NEURON_TRAINIUM, profile_neuron_cores(t2)), 104000, "trn2: training on 8 cores");
+    _neuron_shape_is(_neuron_fb("trn2u.48xlarge"), NEURON_TRAINIUM, 8, 96, "trn2u: a trn2");
+    _neuron_shape_is(_neuron_fb("trn3.48xlarge"), NEURON_TRAINIUM, 8, 144, "trn3: 8 NeuronCore-v4, 144 GiB");
+    _neuron_shape_is(_neuron_fb("trn3u.48xlarge"), NEURON_TRAINIUM, 8, 144, "trn3u: a trn3");
+    _neuron_shape_is(_neuron_fb("trn9.48xlarge"), NEURON_TRAINIUM, 8, 144, "a later Trainium: the newest known shape");
+    _neuron_shape_is(_neuron_fb("Trn2.48xlarge"), NEURON_TRAINIUM, 8, 96, "Trn2: any case of the first letter");
+    _neuron_shape_is(_neuron_fb("trn1.32xlarge"), NEURON_TRAINIUM, 2, 32, "trn1: 2 cores, 32 GiB");
+    _neuron_shape_is(_neuron_fb("trn1n.32xlarge"), NEURON_TRAINIUM, 2, 32, "trn1n: a trn1");
+    _neuron_shape_is(_neuron_fb("inf2.48xlarge"), NEURON_INFERENTIA, 2, 32, "inf2: 2 cores, 32 GiB");
+    _neuron_shape_is(_neuron_fb("inf1.24xlarge"), NEURON_INFERENTIA, 4, 8, "inf1: 4 NeuronCore-v1, 8 GiB");
+    _neuron_shape_is(neuron_fallback_profile(0, 0), NEURON_INFERENTIA, 2, 32, "no DMI: 2 cores, 32 GiB");
+    var pc = _neuron_fb("Standard PC (Q35 + ICH9, 2009)");
+    _neuron_shape_is(pc, NEURON_INFERENTIA, 2, 32, "another product: the default");
+    var sh[16];
+    neuron_dmi_shape(str_from("inf1.xlarge"), NEURON_TRAINIUM, &sh);
+    assert_eq(load64(&sh), 2, "a chip the instance is not: the default shape");
+    return 0;
+}
+
+# neuron-ls's devices take the instance's shape for what they leave out, so
+# the two paths agree: a trn2 device with no memory_size is 96 GiB, not 8 x
+# 16, and one with no nc_count has 8 cores, not 2.
+fn test_neuron_ls_instance_shape() {
+    var dmi = str_from("trn2.48xlarge");
+    var sh[16];
+    neuron_dmi_shape(dmi, NEURON_TRAINIUM, &sh);
+    var p = vec_new();
+    var w = vec_new();
+    var doc = str_from("[{\"neuron_device\":0,\"nc_count\":8},{\"neuron_device\":3}]");
+    assert_eq(_neuron_ls_parse(doc, NEURON_TRAINIUM, &sh, p, w), 2, "trn2 shape: two devices");
+    assert_eq(vec_len(w), 1, "trn2 shape: the missing nc_count warned");
+    if (vec_len(p) == 2) {
+        _neuron_shape_is(vec_get(p, 0), NEURON_TRAINIUM, 8, 96, "trn2, no memory_size: 96 GiB");
+        var fb = neuron_fallback_profile(3, dmi);
+        var b = vec_get(p, 1);
+        _neuron_shape_is(b, NEURON_TRAINIUM, profile_neuron_cores(fb), 96, "trn2, no nc_count: the fallback's shape");
+        assert_eq(profile_memory_bytes(b), profile_memory_bytes(fb), "neuron-ls and the fallback agree");
+    }
+    var p2 = vec_new();
+    var trn2 = _fixture("tests/fixtures/from-docs/neuron-ls-trn2.json");
+    _neuron_ls_parse(trn2, NEURON_TRAINIUM, &sh, p2, vec_new());
+    if (vec_len(p2) == 2) {
+        _neuron_shape_is(vec_get(p2, 1), NEURON_TRAINIUM, 8, 96, "trn2 fixture: what neuron-ls says");
+    }
+    var p3 = vec_new();
+    var model = str_from("[{\"model\":\"inf2\",\"nc_count\":2}]");
+    _neuron_ls_parse(model, NEURON_TRAINIUM, &sh, p3, vec_new());
+    if (vec_len(p3) == 1) {
+        _neuron_shape_is(vec_get(p3, 0), NEURON_INFERENTIA, 2, 32, "a model's chip: its own per-core HBM");
     }
     return 0;
 }
@@ -540,6 +645,8 @@ test_asic_size_bytes();
 test_cloud_asic_memory_parse();
 test_neuron_ls_documented();
 test_neuron_ls_edges();
+test_neuron_fallback_shape();
+test_neuron_ls_instance_shape();
 test_all_backend_names();
 
 var fails = assert_summary();

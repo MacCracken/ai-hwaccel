@@ -320,6 +320,47 @@ fn test_load_from_file() {
     return 0;
 }
 
+# The name of the cheapest instance recommend_instances gives a 7B BF16
+# model, or "" when none fits.
+fn _cheapest_7b() {
+    var r = recommend_instances(7000000000, QUANT_BF16, 0 - 1);
+    if (vec_len(r) == 0) { return ""; }
+    return cloud_inst_name(rec_instance(vec_get(r, 0)));
+}
+
+# recommend_instances keeps the rows it parsed for the process (2.5.5);
+# cloud_pricing_reload makes it read a replaced file, as "update by
+# replacing this file" promises a long-lived consumer.
+fn test_pricing_reload() {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "/tmp/ai-hwaccel-cost-reload-");
+    str_builder_add_int(sb, sys_getpid());
+    var dir = str_data(str_builder_build(sb));
+    var data = sysfs_path(dir, "data", 0);
+    var path = sysfs_path(data, "cloud_pricing.json", 0);
+    sys_mkdir(dir, 0x1ED);
+    sys_mkdir(data, 0x1ED);
+    var old_j = "{\"instances\":[{\"name\":\"old1\",\"provider\":\"aws\",\"gpu\":\"H100\",\"gpu_count\":8,\"gpu_memory_gb\":80,\"total_gpu_memory_gb\":640,\"price_per_hour\":9.00}]}"; #skip-lint
+    var new_j = "{\"instances\":[{\"name\":\"new1\",\"provider\":\"aws\",\"gpu\":\"L4\",\"gpu_count\":1,\"gpu_memory_gb\":24,\"total_gpu_memory_gb\":24,\"price_per_hour\":1.00}]}"; #skip-lint
+    assert(file_write_all(path, old_j, strlen(old_j)) == strlen(old_j), "reload: pricing file written");
+    data_dir_set(dir);
+    assert_eq(streq(_cheapest_7b(), "old1"), 1, "reload: the data dir's file is read");
+    assert(file_write_all(path, new_j, strlen(new_j)) == strlen(new_j), "reload: pricing file replaced");
+    assert_eq(streq(_cheapest_7b(), "old1"), 1, "reload: the rows are kept until a reload");
+    cloud_pricing_reload();
+    assert_eq(streq(_cheapest_7b(), "new1"), 1, "reload: the replaced file is read");
+    var j = cost_to_json("7B", QUANT_BF16);
+    assert_eq(str_contains_cstr(j, "\"instance\":\"new1\""), 1, "reload: cost_to_json lists the new row");
+    assert_eq(str_contains_cstr(j, "old1"), 0, "reload: and not the old one");
+    sys_unlink(path);
+    sys_rmdir(data);
+    sys_rmdir(dir);
+    data_dir_set(0);
+    cloud_pricing_reload();
+    assert_eq(streq(_cheapest_7b(), "g4dn.xlarge"), 1, "reload: the shipped file again");
+    return 0;
+}
+
 # --- The model catalogue shares the scanners ---
 
 fn test_models_parse_shared_scanner() {
@@ -355,6 +396,7 @@ fn main() {
     test_fixed_point_values();
     test_headroom();
     test_load_from_file();
+    test_pricing_reload();
     test_models_parse_shared_scanner();
     return assert_summary();
 }

@@ -86,10 +86,21 @@ fn _cli_size_reason(args, flag) {
     return _cli_reason("invalid model size", v, " (expected e.g. 70B, 1.5B, 350M or 1.2T)");
 }
 
+# 1 if `flag` is one of the first `n` of `args`.
+fn _cli_seen(args, n, flag) {
+    var i = 0;
+    while (i < n) {
+        if (streq(vec_get(args, i), flag) == 1) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
 # 0 when `args` is a command line main.cyr can run, else why not, as a cstr
 # for "ai-hwaccel: <reason>". The structure first (every argument a known
-# flag, every value flag followed by a value), then the values themselves,
-# then the flags only one mode reads. Allocates only for a reason.
+# flag, every value flag followed by a value and given once), then the values
+# themselves, then the flags that do not go together. Allocates only for a
+# reason.
 fn cli_check_args(args) {
     var n = vec_len(args);
     var i = 0;
@@ -104,6 +115,8 @@ fn cli_check_args(args) {
             if (v == 0 || load8(v) == 0 || load8(v) == 45) {
                 return _cli_reason("missing value for", a, "");
             }
+            # main.cyr reads the first value: "--plan 7B --plan 70B" planned 7B.
+            if (_cli_seen(args, i, a) == 1) { return _cli_reason("repeated", a, ""); }
             i = i + 2;
         } elif (cli_is_bool_flag(a) == 1) {
             i = i + 1;
@@ -111,6 +124,9 @@ fn cli_check_args(args) {
             return _cli_reason("unknown argument", a, "");
         }
     }
+    # A well-formed line with --help or --version prints that and nothing
+    # else, so no check below applies to it.
+    if (cli_has_flag(args, "--help") == 1 || cli_has_flag(args, "--version") == 1) { return 0; }
     var qs = cli_get_val(args, "--quant");
     if (qs != 0 && quant_from_str(qs) < 0) {
         return _cli_reason("unknown --quant", qs, " (fp32|fp16|bf16|int8|int4)");
@@ -127,13 +143,30 @@ fn cli_check_args(args) {
     if (r == 0) { r = _cli_size_reason(args, "--plan"); }
     if (r == 0) { r = _cli_size_reason(args, "--train"); }
     if (r != 0) { return r; }
-    # A flag the chosen mode never reads would change nothing: through 2.5.4
-    # "--train 7B --quant int4" printed the bf16 estimate.
+    # --train estimates in whole millions of parameters (_handle_train): a
+    # smaller model printed an all-zero estimate.
+    var ts = cli_get_val(args, "--train");
+    if (ts != 0 && model_params_from_str(ts) < PARAMS_PER_MILLION) {
+        return _cli_reason("model size too small for --train", ts, " (1M or more)");
+    }
+    # One output mode: main.cyr runs the first of --cost, --train, --plan,
+    # --table and --summary and drops the rest, so through 2.5.4
+    # "--train 7B --quant int4 --plan 1B" printed the bf16 training estimate.
+    # --threaded, --data-dir and the log flags, which never change stdout, go
+    # with any.
+    var modes = cli_has_flag(args, "--cost") + cli_has_flag(args, "--train") + cli_has_flag(args, "--plan");
+    modes = modes + cli_has_flag(args, "--table") + cli_has_flag(args, "--summary");
+    if (modes > 1) { return "--cost, --train, --plan, --table and --summary are separate modes: give one"; }
+    # With one mode, a flag that mode never reads would change nothing.
     # --train takes and ignores --quant: every Python wheel through 2.5.4 sends
     # it with training_memory(), and refusing it would break those callers.
     var quant_ok = cli_has_flag(args, "--plan") + cli_has_flag(args, "--cost") + cli_has_flag(args, "--train");
     if (qs != 0 && quant_ok == 0) { return "--quant applies to --plan and --cost only"; }
     if (ms != 0 && cli_has_flag(args, "--train") == 0) { return "--method applies to --train only"; }
+    # Every other mode prints JSON already; --table prints none.
+    if (cli_has_flag(args, "--json") == 1 && cli_has_flag(args, "--table") == 1) {
+        return "--json does not apply to --table";
+    }
     return 0;
 }
 
@@ -203,8 +236,9 @@ Usage:
   ai-hwaccel --version          Print the version
   ai-hwaccel --help             Print this help
 
-A model size is a number and a unit: 70B, 1.5B, 350M, 1.2T (a bare number is
-billions).
+Give one of --cost, --train, --plan, --table and --summary (none: the full
+registry). A model size is a number and a unit: 70B, 1.5B, 350M, 1.2T (a bare
+number is billions); --train takes 1M or more.
 
 Options:
   --quant <fp32|fp16|bf16|int8|int4>
@@ -222,7 +256,7 @@ Options:
                     too, and the flag wins
   -v, -vv, -q       --log-level debug, trace and off
 
-Exit status: 0 on success, 2 on a usage error (an unknown argument, a
-missing or invalid value)
+Exit status: 0 on success, 2 on a usage error (an unknown or repeated
+argument, a missing or invalid value, flags that do not go together)
 ";
 }

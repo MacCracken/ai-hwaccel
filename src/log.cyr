@@ -9,34 +9,58 @@
 # Contract:
 #   - All logs go to **stderr (fd 2)** via sakshi's default output. stdout
 #     stays byte-clean for the JSON that consumers (hoosh, daimon, …) parse.
-#   - Default level is **WARN**: quiet on success, visible on failure. It
-#     holds from the include on (2.5.5), for a library consumer that never
-#     calls hwlog_init too: through 2.5.4 only hwlog_init set it, and such a
-#     consumer got sakshi's INFO default, an "[INFO] detect: profiles=N" line
-#     on stderr per detection. Raise via the `AI_HWACCEL_LOG` env var
-#     (off|fatal|error|warn|info|debug|trace, any letter case) or the
+#   - Default level is **WARN**: quiet on success, visible on failure.
+#     ai-hwaccel keeps a threshold of its own (_hwlog_level, WARN until set),
+#     and one of its lines goes out only when both that threshold and
+#     sakshi's level allow it. sakshi's level is the host program's:
+#     including this module leaves it alone, so a library consumer keeps
+#     sakshi's INFO default for its own lines while ai-hwaccel's INFO lines
+#     (a "detect: profiles=N" per detection) stay off. Through 2.5.4 those
+#     followed sakshi's level alone and reached such a consumer's stderr. A
+#     consumer raises ai-hwaccel's threshold with hwlog_set_level.
+#   - The CLI owns its process, so it sets both levels
+#     (hwlog_set_process_level): hwlog_init reads the `AI_HWACCEL_LOG` env
+#     var (off|fatal|error|warn|info|debug|trace, any letter case), then the
 #     `--log-level <name>` / `-v` (debug) / `-vv` (trace) / `-q` (off) CLI
-#     flags. env is read first; a CLI flag wins. An unknown name warns.
+#     flags apply. env is read first; a CLI flag wins. An unknown env name
+#     warns once the flags are applied (hwlog_report_env), so -q silences it.
 #   - Hot-path rule: a below-threshold log call still **evaluates its
-#     arguments**. Static-message helpers (hwlog_warn etc.) only cost one
-#     strlen + a level compare, but any helper that *builds* a message
-#     (hwlog_*_n) is guarded by hwlog_enabled() so no str_builder runs
-#     when the level is suppressed. Never log inside a per-iteration parse
-#     loop — log per operation (one detector, one plan), at dispatch sites.
+#     arguments**. Static-message helpers (hwlog_warn etc.) only cost two
+#     level compares, but any helper that *builds* a message (hwlog_*_n) is
+#     guarded by hwlog_enabled() so no str_builder runs when the level is
+#     suppressed. Never log inside a per-iteration parse loop — log per
+#     operation (one detector, one plan), at dispatch sites.
 #   - Every emitter goes through sakshi's public per-level functions, so a
 #     consumer's `-D SAKSHI_DISABLE_<LEVEL>` or `#define SAKSHI_LEVEL <n>`
 #     removes the hwlog_*_n lines as it does the static ones.
 
-# sakshi starts at INFO. Lower it to WARN once, as the program starts, unless
-# it chose a level before including this module. A global's initializer
-# (lib/poison.cyr's idiom): a top-level statement here would come before the
-# enums of the modules that follow, which the compiler refuses.
-fn _hwlog_default_level(): i64 {
-    if (sakshi_get_level() == SK_INFO) { sakshi_set_level(SK_WARN); }
+# ai-hwaccel's own threshold (above). A constant initializer: nothing runs
+# when a program includes this module.
+var _hwlog_level = SK_WARN;
+
+# An AI_HWACCEL_LOG value hwlog_init could not read (a cstr), held for
+# hwlog_report_env; 0 when none.
+var _hwlog_bad_env = 0;
+
+# Set ai-hwaccel's threshold to `lv` (an SK_* level, or -1 for off). sakshi's
+# level, the host's, is left alone; a line still needs both.
+fn hwlog_set_level(lv): i64 {
+    _hwlog_level = lv;
     return 0;
 }
 
-var _hwlog_defaulted = _hwlog_default_level();
+# ai-hwaccel's threshold.
+fn hwlog_get_level(): i64 {
+    return _hwlog_level;
+}
+
+# Set ai-hwaccel's threshold and sakshi's to `lv`: for a program that owns
+# its process's logging, as the CLI does.
+fn hwlog_set_process_level(lv): i64 {
+    _hwlog_level = lv;
+    sakshi_set_level(lv);
+    return 0;
+}
 
 # Map a level name (cstring, any letter case) to a sakshi SK_* level. "off"
 # returns a below-FATAL sentinel (-1) so even fatals are suppressed; an
@@ -56,79 +80,97 @@ fn hwlog_level_from_name(name): i64 {
 # Warn that `src` (the env var or the flag) named no level. Through 2.5.4
 # "AI_HWACCEL_LOG=verbose" was dropped without a word.
 fn _hwlog_unknown_level(src, name): i64 {
+    if (hwlog_enabled(SK_WARN) == 0) { return 0; }
     var sb = str_builder_new();
     str_builder_add_cstr(sb, src);
     str_builder_add_cstr(sb, ": unknown log level '");
     str_builder_add_cstr(sb, name);
-    str_builder_add_cstr(sb, "', level unchanged (off|fatal|error|warn|info|debug|trace)");
+    str_builder_add_cstr(sb, "', ignored (off|fatal|error|warn|info|debug|trace)");
     var m = str_builder_build(sb);
     sakshi_warn(str_data(m), str_len(m));
     return 0;
 }
 
-# Initialize logging. Call once at startup, after alloc_init() (the env
-# read + any built message allocates). sakshi already defaults to stderr,
-# so we only set the level and tag the process for log correlation.
+# Initialize logging for a program that owns its process (the CLI): both
+# levels to WARN, or to AI_HWACCEL_LOG's level. Call once at startup, after
+# alloc_init() (the env read + any built message allocates). sakshi already
+# defaults to stderr, so this only sets the levels and tags the process for
+# log correlation. An unknown AI_HWACCEL_LOG is kept for hwlog_report_env.
 fn hwlog_init(): i64 {
-    sakshi_set_level(SK_WARN);
+    hwlog_set_process_level(SK_WARN);
+    _hwlog_bad_env = 0;
     var ev = getenv("AI_HWACCEL_LOG");
     # Set but empty reads as unset.
     if (ev != 0 && load8(ev) != 0) {
         var lv = hwlog_level_from_name(ev);
-        if (lv != (0 - 100)) { sakshi_set_level(lv); }
-        else { _hwlog_unknown_level("AI_HWACCEL_LOG", ev); }
+        if (lv != (0 - 100)) { hwlog_set_process_level(lv); }
+        else { _hwlog_bad_env = ev; }
     }
     sakshi_trace_set(getpid());
     return 0;
 }
 
+# Warn, once, about the unknown AI_HWACCEL_LOG value hwlog_init kept, at the
+# level the program settled on: main.cyr calls this after its level flags,
+# so -q or --log-level error silences it.
+fn hwlog_report_env(): i64 {
+    if (_hwlog_bad_env != 0) { _hwlog_unknown_level("AI_HWACCEL_LOG", _hwlog_bad_env); }
+    _hwlog_bad_env = 0;
+    return 0;
+}
+
 # Apply a `--log-level <name>` value (cstring, or 0 if the flag was
-# absent). An unknown name warns and leaves the env/default level; the CLI
-# refuses one before it gets here.
+# absent) to both levels, as hwlog_init does. An unknown name warns and
+# leaves the env/default level; the CLI refuses one before it gets here.
 fn hwlog_apply_level_name(val): i64 {
     if (val == 0) { return 0; }
     var lv = hwlog_level_from_name(val);
-    if (lv != (0 - 100)) { sakshi_set_level(lv); }
+    if (lv != (0 - 100)) { hwlog_set_process_level(lv); }
     else { _hwlog_unknown_level("--log-level", val); }
     return 0;
 }
 
-# True if a message at `level` would be emitted at the current level —
-# guard expensive (allocating) message construction with this.
+# True if a message at `level` would be emitted: at or above both
+# ai-hwaccel's threshold and sakshi's level. Guard expensive (allocating)
+# message construction with this.
 fn hwlog_enabled(level): i64 {
-    if (level <= sakshi_get_level()) { return 1; }
-    return 0;
+    if (level > _hwlog_level) { return 0; }
+    if (level > sakshi_get_level()) { return 0; }
+    return 1;
 }
 
 # --- Static-message emitters (cstring literal) ---
+#
+# Each checks ai-hwaccel's threshold, then sakshi's per-level function
+# checks sakshi's.
 
 fn hwlog_fatal(msg): i64 {
-    sakshi_fatal(msg, strlen(msg));
+    if (hwlog_enabled(SK_FATAL) == 1) { sakshi_fatal(msg, strlen(msg)); }
     return 0;
 }
 
 fn hwlog_error(msg): i64 {
-    sakshi_error(msg, strlen(msg));
+    if (hwlog_enabled(SK_ERROR) == 1) { sakshi_error(msg, strlen(msg)); }
     return 0;
 }
 
 fn hwlog_warn(msg): i64 {
-    sakshi_warn(msg, strlen(msg));
+    if (hwlog_enabled(SK_WARN) == 1) { sakshi_warn(msg, strlen(msg)); }
     return 0;
 }
 
 fn hwlog_info(msg): i64 {
-    sakshi_info(msg, strlen(msg));
+    if (hwlog_enabled(SK_INFO) == 1) { sakshi_info(msg, strlen(msg)); }
     return 0;
 }
 
 fn hwlog_debug(msg): i64 {
-    sakshi_debug(msg, strlen(msg));
+    if (hwlog_enabled(SK_DEBUG) == 1) { sakshi_debug(msg, strlen(msg)); }
     return 0;
 }
 
 fn hwlog_trace(msg): i64 {
-    sakshi_trace(msg, strlen(msg));
+    if (hwlog_enabled(SK_TRACE) == 1) { sakshi_trace(msg, strlen(msg)); }
     return 0;
 }
 

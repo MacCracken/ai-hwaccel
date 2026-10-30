@@ -1,13 +1,76 @@
 # neuron.cyr — AWS Inferentia/Trainium detection via neuron-ls + sysfs fallback
 
-# Chip from the DMI product name ("trn1.32xlarge"), else Inferentia.
-fn _neuron_dmi_chip() {
-    var dmi = sysfs_read("/sys/devices/virtual/dmi/id/product_name");
+# --- The instance, from DMI ---
+#
+# Neither /dev/neuron<N> nor neuron-ls's JSON names the chip, so it comes
+# from the DMI product name ("trn2.48xlarge"), and so does a device's shape
+# where no tool gives it. AWS documents trn3 as 8 NeuronCore-v4 and 144 GiB a
+# device, trn2 as 8 NeuronCore-v3 and 96 GiB, trn1 and inf2 as 2
+# NeuronCore-v2 and 32 GiB, and inf1 as 4 NeuronCore-v1 and 8 GiB. A later
+# Trainium generation takes trn3's shape, the newest known, rather than
+# trn1's. Through 2.5.4 the name was read for "trn" alone
+# and the /dev fallback gave every device 2 cores at the chip's per-core HBM,
+# so a trn2 device had 2 of its 8 cores and 64 of its 96 GiB, and an inf1
+# device 32 GiB for its 8.
+
+# The DMI product name (a Str), or 0.
+fn _neuron_dmi() {
+    return sysfs_read("/sys/devices/virtual/dmi/id/product_name");
+}
+
+# The chip the DMI product name `dmi` (a Str, or 0) names: Trainium for a trn
+# instance, else Inferentia. Pure.
+fn _neuron_dmi_chip(dmi) {
     if (dmi != 0) {
         if (str_contains_cstr(dmi, "trn") == 1) { return NEURON_TRAINIUM; }
         if (str_contains_cstr(dmi, "Trn") == 1) { return NEURON_TRAINIUM; }
     }
     return NEURON_INFERENTIA;
+}
+
+# The Trainium generation the DMI product name `dmi` (a Str) names: the
+# digit after its first "trn" or "Trn" ("trn2u.48xlarge" is 2), or 0. Pure.
+fn _neuron_trn_gen(dmi) {
+    var d = str_data(dmi);
+    var n = str_len(dmi);
+    var i = 0;
+    while (i + 3 < n) {
+        var c = load8(d + i);
+        if ((c == 116 || c == 84) && load8(d + i + 1) == 114 && load8(d + i + 2) == 110) {
+            var g = load8(d + i + 3);
+            if (g >= 48 && g <= 57) { return g - 48; }
+            return 0;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# The shape of a chip-`chip` device on the instance the DMI product name
+# `dmi` (a Str, or 0) names, into `out` (two i64 slots): its NeuronCores,
+# then the HBM a core has. A Trainium on trn2 is 8 cores at 12 GiB, on trn3
+# or later 8 at 18 GiB, and an Inferentia on inf1 4 at 2 GiB; anything else
+# (trn1, inf2, no DMI) is 2 cores at the chip's neuron_hbm_per_core. Pure.
+fn neuron_dmi_shape(dmi, chip, out) {
+    store64(out, 2);
+    store64(out + 8, neuron_hbm_per_core(chip));
+    if (dmi == 0) { return 0; }
+    if (chip == NEURON_TRAINIUM) {
+        var gen = _neuron_trn_gen(dmi);
+        if (gen == 2) {
+            store64(out, 8);
+            store64(out + 8, 12 * BYTES_PER_GIB);
+        } elif (gen >= 3) {
+            store64(out, 8);
+            store64(out + 8, 18 * BYTES_PER_GIB);
+        }
+    } elif (chip == NEURON_INFERENTIA) {
+        if (str_contains_cstr(dmi, "inf1") == 1 || str_contains_cstr(dmi, "Inf1") == 1) {
+            store64(out, 4);
+            store64(out + 8, 2 * BYTES_PER_GIB);
+        }
+    }
+    return 0;
 }
 
 # A Neuron profile named "AWS Inferentia" / "AWS Trainium".
@@ -20,15 +83,30 @@ fn _neuron_profile(dev_id, chip, cores) {
     return p;
 }
 
+# The /dev/neuron<N> fallback's profile for device `dev_id` on the instance
+# the DMI product name `dmi` (a Str, or 0) names: its chip, and the shape
+# neuron_dmi_shape gives that chip there. Pure.
+fn neuron_fallback_profile(dev_id, dmi) {
+    var chip = _neuron_dmi_chip(dmi);
+    var shape[16];
+    neuron_dmi_shape(dmi, chip, &shape);
+    var cores = load64(&shape);
+    var p = _neuron_profile(dev_id, chip, cores);
+    profile_set_memory_bytes(p, cores * load64(&shape + 8));
+    return p;
+}
+
 # neuron-ls first, with `allow_exec` 1; when it lists no device (missing,
 # failed, or output this parser does not read), or with `allow_exec` 0,
-# /dev/neuronN, two cores each, the chip from DMI. A run that exits non-zero
-# is reported once, by its exit-status warning (as detect_cuda does).
-# Through 2.5.4 any output over 2 bytes ended detection there, so a host
-# whose neuron-ls printed nothing usable reported no device, and no-exec mode
-# skipped Neuron.
+# /dev/neuronN, each shaped by neuron_fallback_profile. The DMI product name
+# is read once, and only when neuron-ls printed something or a node exists;
+# it gives neuron-ls's devices their chip and whatever shape they leave out,
+# as it does the fallback's. A run that exits non-zero is reported once, by
+# its exit-status warning (as detect_cuda does). Through 2.5.4 any output
+# over 2 bytes ended detection there, so a host whose neuron-ls printed
+# nothing usable reported no device, and no-exec mode skipped Neuron.
 fn detect_neuron_opts(profiles, warnings, allow_exec) {
-    var chip = 0 - 1;
+    var dmi = 0 - 1;
     if (allow_exec == 1) {
         var args = vec_new();
         vec_push(args, "--json-output");
@@ -38,10 +116,13 @@ fn detect_neuron_opts(profiles, warnings, allow_exec) {
         if (w != 0 && warnings != 0) { vec_push(warnings, w); }
         if (result != 0) {
             if (str_len(result) > 0) {
-                chip = _neuron_dmi_chip();
+                dmi = _neuron_dmi();
+                var chip = _neuron_dmi_chip(dmi);
+                var shape[16];
+                neuron_dmi_shape(dmi, chip, &shape);
                 var pw = warnings;
                 if (w != 0) { pw = vec_new(); }
-                if (parse_neuron_ls_json(result, chip, profiles, pw) > 0) { return 0; }
+                if (_neuron_ls_parse(result, chip, &shape, profiles, pw) > 0) { return 0; }
             }
         }
     }
@@ -49,10 +130,10 @@ fn detect_neuron_opts(profiles, warnings, allow_exec) {
     var ids = scan_dev_devices("neuron");
     var nids = vec_len(ids);
     if (nids == 0) { return 0; }
-    if (chip < 0) { chip = _neuron_dmi_chip(); }
+    if (dmi == 0 - 1) { dmi = _neuron_dmi(); }
     var ni = 0;
     while (ni < nids) {
-        vec_push(profiles, _neuron_profile(vec_get(ids, ni), chip, 2));
+        vec_push(profiles, neuron_fallback_profile(vec_get(ids, ni), dmi));
         ni = ni + 1;
     }
     return 0;
@@ -133,35 +214,6 @@ fn _nj_skip_value(d, i, end) {
     return end;
 }
 
-# Where the value of member `key` (a cstr, unquoted) of the object d[s..e)
-# starts, at the object's own level (not inside a nested value), or -1. Pure.
-fn _nj_member(d, s, e, key) {
-    var klen = strlen(key);
-    var i = s + 1;
-    while (i < e) {
-        i = _nj_skip_ws(d, i, e);
-        if (i >= e) { return 0 - 1; }
-        var c = load8(d + i);
-        if (c == 125) { return 0 - 1; }
-        if (c == 44) {
-            i = i + 1;
-            continue;
-        }
-        if (c != 34) { return 0 - 1; }
-        var ks = i + 1;
-        var ke = _nj_skip_string(d, i, e);
-        i = _nj_skip_ws(d, ke, e);
-        if (i >= e) { return 0 - 1; }
-        if (load8(d + i) != 58) { return 0 - 1; }
-        var vs = _nj_skip_ws(d, i + 1, e);
-        if (ke - 1 - ks == klen && memeq(d + ks, key, klen) == 1) { return vs; }
-        var ve = _nj_skip_value(d, vs, e);
-        if (ve <= vs) { ve = vs + 1; }
-        i = ve;
-    }
-    return 0 - 1;
-}
-
 # The unsigned integer at d[i] (1 to 18 digits, up to the first non-digit),
 # or -1: none there ("null", a string), or `i` is -1. Pure.
 fn _nj_uint(d, i, e) {
@@ -197,32 +249,77 @@ fn _nj_model_chip(d, i, e, dflt) {
 
 # Push the device the object d[s..e) describes, the `index`th of the array.
 # An object with neither neuron_device nor nc_count is not a device (0). The
-# id is neuron_device, else `index`; an nc_count that is missing or past 128
-# is taken as 2, with a parse warning, so the device is still listed. Memory
-# is memory_size, else memory_per_nc_mb per core, else the chip's per-core
-# HBM; a figure past 16 TiB is not used. Returns 1 when it pushed one.
-fn _neuron_json_device(d, s, e, index, chip, profiles, warnings) {
-    var id_at = _nj_member(d, s, e, "neuron_device");
-    var nc_at = _nj_member(d, s, e, "nc_count");
+# id is neuron_device, else `index`; the chip is a "model" member's, else
+# `chip`. An nc_count that is missing or past 128 is taken as the cores of
+# `shape` (neuron_dmi_shape's slots for `chip`; 2 for another chip), with a
+# parse warning, so the device is still listed. Memory is memory_size, else
+# memory_per_nc_mb per core, else the cores times the per-core HBM in
+# `shape` (another chip's own); a figure past 16 TiB is not used. Returns 1
+# when it pushed one.
+fn _neuron_json_device(d, s, e, index, chip, shape, profiles, warnings) {
+    # One walk over the object's own members (not inside a nested value) for
+    # the five keys read below, the first of each counting: a scan per key
+    # doubled the cost of a parse.
+    var id_at = 0 - 1;
+    var nc_at = 0 - 1;
+    var model_at = 0 - 1;
+    var size_at = 0 - 1;
+    var per_at = 0 - 1;
+    var i = s + 1;
+    while (i < e) {
+        i = _nj_skip_ws(d, i, e);
+        if (i >= e) { break; }
+        var c0 = load8(d + i);
+        if (c0 == 125) { break; }
+        if (c0 == 44) {
+            i = i + 1;
+            continue;
+        }
+        if (c0 != 34) { break; }
+        var ks = i + 1;
+        var ke = _nj_skip_string(d, i, e);
+        i = _nj_skip_ws(d, ke, e);
+        if (i >= e) { break; }
+        if (load8(d + i) != 58) { break; }
+        var vs = _nj_skip_ws(d, i + 1, e);
+        var kl = ke - 1 - ks;
+        if (kl == 13 && id_at < 0) {
+            if (memeq(d + ks, "neuron_device", 13) == 1) { id_at = vs; }
+        } elif (kl == 8 && nc_at < 0) {
+            if (memeq(d + ks, "nc_count", 8) == 1) { nc_at = vs; }
+        } elif (kl == 5 && model_at < 0) {
+            if (memeq(d + ks, "model", 5) == 1) { model_at = vs; }
+        } elif (kl == 11 && size_at < 0) {
+            if (memeq(d + ks, "memory_size", 11) == 1) { size_at = vs; }
+        } elif (kl == 16 && per_at < 0) {
+            if (memeq(d + ks, "memory_per_nc_mb", 16) == 1) { per_at = vs; }
+        }
+        var ve = _nj_skip_value(d, vs, e);
+        if (ve <= vs) { ve = vs + 1; }
+        i = ve;
+    }
     if (id_at < 0 && nc_at < 0) { return 0; }
     var dev_id = _nj_uint(d, id_at, e);
     if (dev_id < 0 || dev_id > CMD_MAX_DEVICE_ID) { dev_id = index; }
+    var c = _nj_model_chip(d, model_at, e, chip);
     var cores = _nj_uint(d, nc_at, e);
     if (cores <= 0 || cores > 128) {
         if (warnings != 0) {
-            vec_push(warnings, warning_parse("neuron", "nc_count missing or out of range; 2 NeuronCores assumed"));
+            var msg = "nc_count missing or out of range; the instance's NeuronCore count assumed";
+            vec_push(warnings, warning_parse("neuron", msg));
         }
         cores = 2;
+        if (c == chip) { cores = load64(shape); }
     }
-    var c = _nj_model_chip(d, _nj_member(d, s, e, "model"), e, chip);
     var p = _neuron_profile(dev_id, c, cores);
     var cap = 16 * BYTES_PER_GIB * 1024;
-    var mem = _nj_uint(d, _nj_member(d, s, e, "memory_size"), e);
+    var mem = _nj_uint(d, size_at, e);
     if (mem <= 0 || mem > cap) {
         mem = 0;
-        var per_mb = _nj_uint(d, _nj_member(d, s, e, "memory_per_nc_mb"), e);
+        var per_mb = _nj_uint(d, per_at, e);
         if (per_mb > 0 && per_mb <= 16 * 1024 * 1024) { mem = per_mb * 1024 * 1024 * cores; }
         if (mem > cap) { mem = 0; }
+        if (mem == 0 && c == chip) { mem = load64(shape + 8) * cores; }
     }
     if (mem > 0) { profile_set_memory_bytes(p, mem); }
     vec_push(profiles, p);
@@ -230,9 +327,20 @@ fn _neuron_json_device(d, s, e, index, chip, profiles, warnings) {
 }
 
 # Parse `neuron-ls --json-output` (see above) into ACCEL_NEURON profiles of
-# chip `chip` (NEURON_*), at most 256. Output that is not an empty array but
-# yields no device pushes a parse warning. Returns the number pushed. Pure.
+# chip `chip` (NEURON_*), at most 256, a device's missing shape that of
+# neuron_dmi_shape with no DMI (2 cores at the chip's per-core HBM). Output
+# that is not an empty array but yields no device pushes a parse warning.
+# Returns the number pushed. Pure.
 fn parse_neuron_ls_json(output, chip, profiles, warnings) {
+    var shape[16];
+    neuron_dmi_shape(0, chip, &shape);
+    return _neuron_ls_parse(output, chip, &shape, profiles, warnings);
+}
+
+# parse_neuron_ls_json with `shape` (neuron_dmi_shape's two slots for
+# `chip`) for what a device leaves out, as detect_neuron_opts passes the
+# instance's. Pure.
+fn _neuron_ls_parse(output, chip, shape, profiles, warnings) {
     var d = str_data(output);
     var e = str_len(output);
     var i = _nj_skip_ws(d, 0, e);
@@ -241,7 +349,7 @@ fn parse_neuron_ls_json(output, chip, profiles, warnings) {
     var empty = 0;
     var c = load8(d + i);
     if (c == 123) {
-        added = _neuron_json_device(d, i, _nj_skip_value(d, i, e), 0, chip, profiles, warnings);
+        added = _neuron_json_device(d, i, _nj_skip_value(d, i, e), 0, chip, shape, profiles, warnings);
     } elif (c == 91) {
         var first = _nj_skip_ws(d, i + 1, e);
         if (first < e && load8(d + first) == 93) { empty = 1; }
@@ -259,7 +367,7 @@ fn parse_neuron_ls_json(output, chip, profiles, warnings) {
             var ve = _nj_skip_value(d, i, e);
             if (ve <= i) { ve = i + 1; }
             if (b == 123) {
-                added = added + _neuron_json_device(d, i, ve, index, chip, profiles, warnings);
+                added = added + _neuron_json_device(d, i, ve, index, chip, shape, profiles, warnings);
             }
             index = index + 1;
             i = ve;

@@ -12,9 +12,9 @@ decide how to quantize and shard a model across them.
 
 | Metric | Value |
 |--------|-------|
-| Binary size | **216 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
+| Binary size | **289 KB** (x86_64 ELF, `CYRIUS_DCE=1`) |
 | Compiler | Cyrius cycc 6.7.18 |
-| Tests | 1226 assertions (15 test units) |
+| Tests | 2536 assertions (19 test units), 8 fuzz harnesses |
 | Fuzz harnesses | 7 |
 | Dependencies | **0** third-party (bayan's JSON sublib: first-party, optional) |
 | Hardware families | 18 |
@@ -67,7 +67,7 @@ ai-hwaccel --plan 70B       # Sharding plan JSON (--quant int4, ...)
 ai-hwaccel --train 7B --method lora   # Training memory JSON (GPU target)
 ai-hwaccel --cost 70B       # Cloud instance recommendation (--json for JSON)
 ai-hwaccel --version        # Print version
-ai-hwaccel --threaded       # Any of the above, the vendor tools in parallel
+ai-hwaccel --threaded       # Any of the above, detectors on threads (tools run one at a time)
 ai-hwaccel -v               # Log to stderr at debug level (-vv trace, -q silent)
 ```
 
@@ -128,14 +128,17 @@ var r = registry_detect();
 
 Consumers with a no-subprocess contract — `mihi`'s probe surface, any
 read-only system-info library — call `registry_detect_no_exec()`
-instead. It masks off the six exec-shelling backends (CUDA, Gaudi,
-Neuron, Intel oneAPI, Cerebras, Graphcore) and skips the
-`detect_interconnects` post-pass. The eleven native backends still run,
-along with the sysfs post-passes: ROCm, Intel NPU, AMD XDNA, TPU,
-Qualcomm, Groq, Samsung NPU, MediaTek APU, Windows (DXGI), Apple
-(sysctl on macOS, the device tree on Asahi Linux) and Vulkan (a sysfs
-scan of the DRM cards, which leaves AMD cards to ROCm). Their `wmic` /
-`system_profiler` / `vulkaninfo` runs do not happen.
+instead. It masks off the two backends that find nothing without a tool
+(CUDA and Intel oneAPI: `nvidia-smi`, `xpu-smi`) and runs the other fifteen
+with exec off, along with the post-passes: ROCm, Intel NPU, AMD XDNA, TPU,
+Qualcomm, Groq, Samsung NPU, MediaTek APU, Windows (DXGI), Apple (sysctl on
+macOS, the device tree on Asahi Linux), Vulkan (a sysfs scan of the DRM cards,
+which leaves AMD cards to ROCm), and since 2.5.5 Gaudi, Neuron, Cerebras and
+Graphcore through their device nodes (the habanalabs accel nodes,
+`/dev/neuron<N>`, `/dev/cerebras*`, `/dev/ipu<N>`). The interconnect pass
+reads InfiniBand, NVSwitch, XGMI and ICI from sysfs and skips only its
+`nvidia-smi nvlink` run. No `wmic` / `system_profiler` / `vulkaninfo` /
+`hl-smi` / `neuron-ls` / `cerebras_cli` / `gc-info` run happens.
 
 ```cyrius
 include "lib/ai-hwaccel.cyr"
@@ -145,14 +148,31 @@ include "lib/ai-hwaccel.cyr"
 var r = registry_detect_no_exec();
 ```
 
-The classification lives in `backend_uses_exec(b)` in `src/types.cyr`.
+The classification lives in `src/types.cyr`: `backend_needs_exec(b)` (CUDA,
+oneAPI) for the no-exec entry point, and `backend_uses_exec(b)` (those plus
+Gaudi, Neuron, Cerebras and Graphcore, whose tools see more than their device
+nodes) for selective masks.
 A mask without a tool-based backend stays spawn-free through
 `registry_detect_with(mask)` too (2.5.1), for example
 `registry_detect_with(builder_without(builder_no_exec(), BACKEND_GROQ))`:
 Vulkan uses its sysfs scan, and the `system_profiler`, `wmic` and
 `nvidia-smi nvlink` runs are skipped. Through 2.5.0 `registry_detect_with`
 allowed tools whatever the mask. `registry_detect_with_opts(mask, 0)` forbids
-tools for any mask.
+tools for any mask. `builder_native()`, the mask `registry_detect_no_exec()`
+runs, holds Gaudi, Neuron, Cerebras and Graphcore: through
+`registry_detect_with` it runs their tools, and only `registry_detect_no_exec()`
+or `registry_detect_with_opts(mask, 0)` keeps it spawn-free.
+
+#### Logging from a library
+
+Including the bundle leaves the host's `sakshi` level alone. ai-hwaccel has
+its own threshold (2.5.5), WARN by default, so it logs only parse warnings
+and tool timeouts; through 2.5.4 a host at sakshi's default INFO also got an
+`[INFO] detect` line per detection. To see its info and debug lines and its `detect`
+spans, raise both: `hwlog_set_level(SK_DEBUG)` for ai-hwaccel's threshold, and
+the host's sakshi level, or `hwlog_set_process_level(SK_DEBUG)` for both.
+`AI_HWACCEL_LOG` is read by `hwlog_init`, which is meant for a program that
+owns its process's logging (the CLI), since it sets sakshi's level too.
 
 ## Architecture
 
@@ -207,7 +227,7 @@ src/
 |------|----------|----------|
 | Synchronous | `registry_detect()` | Simple, single-threaded |
 | No-exec | `registry_detect_no_exec()` | No subprocess at all (see above) |
-| Threaded | `registry_detect_threaded()` (CLI: `--threaded`) | CLI backends run in parallel threads |
+| Threaded | `registry_detect_threaded()` (CLI: `--threaded`) | Tool backends on threads; the tools themselves run one at a time (2.5.5) |
 | Cached | `cached_get(c)` | Long-running services, configurable TTL |
 | Lazy | `lazy_by_family(lr, FAMILY_GPU)` | Probe only what you need (see below) |
 
@@ -223,7 +243,7 @@ warnings so far with `lazy_warnings(lr)`.
 
 | Strategy | When used |
 |----------|----------|
-| None | Model fits on a single device |
+| None | Model fits on a single device, or the CPU fallback when nothing holds it (check `fits`, 2.5.5) |
 | Tensor Parallel | NVSwitch-connected GPUs or high-bandwidth interconnect |
 | Pipeline Parallel | Multiple GPUs or AI ASICs |
 | Data Parallel | Replicas for throughput |
@@ -260,13 +280,13 @@ the `warnings` array names the missing tool. Detection itself doesn't fail.
 ```sh
 cyrius lib sync                                # Repopulate lib/ from the version-pinned stdlib snapshot
 cyrius deps                                    # Resolve non-stdlib [deps.*] entries (bayan) + transitive stdlib leaves
-CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # Build (≈216 KB ELF, x86_64)
+CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # Build (≈289 KB ELF, x86_64)
 cyrius vet src/main.cyr                        # Include-graph audit
 for f in src/*.cyr src/detect/*.cyr; do cyrius lint --strict "$f"; done # Static analysis (fails on a warning)
 for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do cyrius fmt "$f" --check; done
                                                # Format check (plain `cyrius fmt <file>` rewrites the file)
 
-# Test suite — 15 units under tests/tcyr/, 1226 assertions total. Run from the
+# Test suite — 19 units under tests/tcyr/, 2536 assertions total. Run from the
 # repository root: some tests read tests/fixtures/.
 for t in tests/tcyr/*.tcyr; do
     CYRIUS_DCE=1 cyrius build "$t" "/tmp/$(basename $t .tcyr)"
@@ -295,6 +315,10 @@ done
 | `model_catalog_test.tcyr` | `load_models` against the shipped `data/models.json`, `compatible_with_registry` |
 | `windows_test.tcyr` | Windows DXGI adapter descriptors (memory, PCI IDs) + `wmic` fallback parsers |
 | `lazy_test.tcyr` | lazy registry: per-family queries vs full detection, no backend run twice, the system passes once, warnings kept |
+| `accel_test.tcyr` | the `/sys/class/accel` classifier (TPU, Intel NPU, Gaudi, Qualcomm, XDNA), Graphcore and Cerebras `/dev` nodes and tools, the interconnect pass |
+| `cli_test.tcyr` | `src/cli.cyr`: flag and value checks, model sizes, `--version`, `--table` cells, the log shim |
+| `cost_test.tcyr` | the pricing loader and recommendations against `data/cloud_pricing.json` and crafted files |
+| `system_test.tcyr` | cgroup memory, environment and cloud rules, storage, the threaded entry point, the library data dir (Linux; spawns child processes) |
 
 ### Pattern: derived struct accessors
 

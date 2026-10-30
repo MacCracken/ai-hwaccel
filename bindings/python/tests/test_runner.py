@@ -80,6 +80,23 @@ class TestRunnerErrors(unittest.TestCase):
         self.assertIn("timed out after 5 s", str(e))
         self.assertEqual(str(pickle.loads(pickle.dumps(e))), str(e))
 
+    def test_timeout_keeps_partial_output(self):
+        # subprocess fills these with what the binary printed before it was
+        # killed; a 2.5.4 caller of TimeoutExpired reads them.
+        def fake(cmd, **kw):
+            raise subprocess.TimeoutExpired(
+                cmd, kw["timeout"], output=b'{"a":', stderr=b"[WARN] hung"
+            )
+
+        with self.assertRaises(subprocess.TimeoutExpired) as cm:
+            self._run_json(fake)
+        e = cm.exception
+        self.assertEqual(e.stderr, b"[WARN] hung")
+        self.assertEqual(e.stdout, b'{"a":')
+        self.assertEqual(e.output, b'{"a":')
+        p = pickle.loads(pickle.dumps(e))
+        self.assertEqual((p.stderr, p.output, str(p)), (e.stderr, e.output, str(e)))
+
     def test_nonzero_exit_is_command_error(self):
         def fake(cmd, **kw):
             return _Proc("", returncode=2, stderr="boom")

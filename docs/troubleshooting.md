@@ -40,13 +40,16 @@ or the backend was not asked to run.
 1. Are the detection tools installed? (`nvidia-smi`, `vulkaninfo`, `hl-smi`, etc.)
 2. Is the kernel driver loaded? (`lsmod | grep nvidia`, `lsmod | grep amdgpu`)
 3. Are sysfs paths accessible? (`ls /sys/class/drm/card*`)
-4. Did the caller mask the backend out? `registry_detect_no_exec()` skips the
-   tool-based backends (CUDA, Gaudi, Neuron, oneAPI, Cerebras, Graphcore), and
+4. Did the caller mask the backend out? `registry_detect_no_exec()` drops
+   CUDA and oneAPI, and finds Gaudi, Neuron, Cerebras and Graphcore through
+   their device nodes only (2.5.5; it skipped them before), and
    `registry_detect_with(mask)` runs only the backends in `mask`. A mask
-   without a tool-based backend runs no tool at all (2.5.1), so Vulkan falls
-   back to its sysfs scan.
-5. Did the tool time out? A tool that prints nothing for 10 s is killed and
-   its name appears in `warnings` (a timeout, `HWA_ERR_TIMEOUT`).
+   without a tool-based backend (`backend_uses_exec`) runs no tool at all
+   (2.5.1), so Vulkan falls back to its sysfs scan.
+5. Did the tool time out? A tool that prints nothing for 10 s is cut and its
+   name appears in `warnings` (a timeout, `HWA_ERR_TIMEOUT`); `-vv` or the
+   default log level shows "<tool>: timed out after 10s". A tool that ran and
+   failed is listed too, and `-v` shows its exit status.
 
 ---
 
@@ -93,9 +96,10 @@ Silicon, laptop NPUs, integrated GPUs) carries `shared_memory_bytes`, and
 ## "Detection is slow or hangs"
 
 **Cause**: Vendor tools have startup overhead. A tool that hangs, such as
-`nvidia-smi` on a GPU in an error state, is killed once it has printed
-nothing for 10 s (2.5.1), and is listed in `warnings` as a timeout; before
-2.5.1 it blocked detection until it exited.
+`nvidia-smi` on a GPU in an error state, is cut once it has printed nothing
+for 10 s (2.5.1) and killed about 10 s later, and is listed in `warnings` as a
+timeout; budget about 20 s per hung tool. Before 2.5.1 it blocked detection
+until it exited.
 
 **Fix**:
 - Find the tool: at `-vv` the log shows `[ENTER] detect` with no matching
@@ -109,8 +113,8 @@ nothing for 10 s (2.5.1), and is listed in `warnings` as a timeout; before
   var c = cached_registry_new(60);
   var r = cached_get(c);
   ```
-- Where even 10 s is too long, use `registry_detect_no_exec()`, which runs no
-  tool at all.
+- Where that is too long, use `registry_detect_no_exec()`, which runs no tool
+  at all.
 
 ---
 
@@ -141,12 +145,15 @@ word, so the results came from a build the caller had not chosen.
 
 ## "`pcie_bandwidth_x1000` is missing"
 
-**Cause**: The sysfs PCI device files `current_link_width` and
-`current_link_speed` are not readable, or the device is not a PCI device.
-Only CUDA and ROCm profiles get PCIe enrichment.
+**Cause**: The profile has no PCI address (`pci_bdf`: `nvidia-smi`'s
+`pci.bus_id`, or the ROCm card's device link), or the device's
+`max_link_width` / `max_link_speed` (falling back to `current_link_*`) cannot
+be read, or it is not a PCI device. Since 2.5.5 the value is the link
+capability, clipped to the slot (past AMD's on-card switch), not the
+power-managed current link. Only CUDA and ROCm profiles get PCIe enrichment.
 
 **Fix**:
-- Check: `cat /sys/bus/pci/devices/*/current_link_speed`
+- Check: `cat /sys/bus/pci/devices/<bdf>/max_link_speed`
 - Some devices (integrated GPUs, Apple Silicon) don't have PCIe links.
 
 ---

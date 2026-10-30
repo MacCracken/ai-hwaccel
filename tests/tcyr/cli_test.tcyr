@@ -27,8 +27,8 @@ include "src/quantization.cyr"
 include "src/training.cyr"
 include "src/cli.cyr"
 
-# Read before alloc_init or any hwlog call: the level a library consumer
-# that never calls hwlog_init runs at.
+# Read before alloc_init or any hwlog call: sakshi's level in a program
+# that includes log.cyr and never calls hwlog_init, as a library consumer.
 var _level_at_start = sakshi_get_level();
 
 # A vec of the given argument cstrs (0 ends the list early).
@@ -69,6 +69,23 @@ fn test_valid_lines() {
     assert_eq(_ok(_args("--data-dir", "/opt/ai-hwaccel", "--cost", "70B")), 1, "--data-dir before a mode");
     assert_eq(_ok(_args("--version", 0, 0, 0)), 1, "--version");
     assert_eq(_ok(_args("--help", 0, 0, 0)), 1, "--help");
+    assert_eq(_ok(_args("--train", "1M", 0, 0)), 1, "--train 1M, the smallest it takes");
+    assert_eq(_ok(_args("--plan", "800K", 0, 0)), 1, "--plan below 1M");
+    assert_eq(_ok(_args("--cost", "800K", "--json", 0)), 1, "--cost below 1M");
+    assert_eq(_ok(_args("--json", 0, 0, 0)), 1, "--json alone: the registry JSON");
+    assert_eq(_ok(_args("--plan", "7B", "--json", 0)), 1, "--json with a JSON mode");
+    assert_eq(_ok(_args("--cost", "7B", "--threaded", 0)), 1, "--threaded with any mode");
+    # The Python wheel's command lines, --data-dir first as its runner puts it.
+    assert_eq(_ok(_args("--data-dir", "/w", "--plan", "70B")), 1, "wheel: --data-dir --plan");
+    var wc = _args("--data-dir", "/w", "--cost", "70B");
+    vec_push(wc, "--json");
+    vec_push(wc, "--quant");
+    vec_push(wc, "bf16");
+    assert_eq(_ok(wc), 1, "wheel: cost()");
+    var wt = _args("--data-dir", "/w", "--train", "70B");
+    vec_push(wt, "--method");
+    vec_push(wt, "full");
+    assert_eq(_ok(wt), 1, "wheel: training_memory()");
     return 0;
 }
 
@@ -82,6 +99,7 @@ fn test_structure_refused() {
     assert_eq(_refused(_args("--cost", "-q", 0, 0), "missing value for '--cost'"), 1, "value flag before a short flag");
     assert_eq(_refused(_args("--cost", "", 0, 0), "missing value for '--cost'"), 1, "empty value");
     assert_eq(_refused(_args("--summary", "--data-dir", 0, 0), "missing value for '--data-dir'"), 1, "--data-dir last");
+    assert_eq(_refused(_args("--plan", "7B", "--plan", "70B"), "repeated '--plan'"), 1, "a value flag twice");
     var unreadable = vec_new();
     vec_push(unreadable, 0);
     assert_eq(_refused(unreadable, "unreadable argument"), 1, "unreadable argv entry");
@@ -96,8 +114,31 @@ fn test_values_refused() {
     var cj = _args("--cost", "1.5.B", "--json", 0);
     assert_eq(_refused(cj, "invalid model size '1.5.B'"), 1, "--cost --json size checked");
     assert_eq(_refused(_args("--train", "0B", 0, 0), "invalid model size '0B'"), 1, "--train size checked");
+    assert_eq(_refused(_args("--plan", "0B", 0, 0), "invalid model size '0B'"), 1, "--plan 0B");
+    assert_eq(_refused(_args("--cost", "0.0B", 0, 0), "invalid model size '0.0B'"), 1, "--cost 0.0B");
+    # --train works in whole millions: 2.5.4 read "800K" as 800B, and until
+    # this check a size under 1M printed an all-zero estimate.
+    var small = "model size too small for --train '800K' (1M or more)";
+    assert_eq(_refused(_args("--train", "800K", 0, 0), small), 1, "--train 800K");
+    assert_eq(_refused(_args("--train", "0.9M", 0, 0), "too small for --train"), 1, "--train 0.9M");
+    # One mode per run: main.cyr ran the first of them and dropped the rest.
+    var modes = "separate modes";
+    assert_eq(_refused(_args("--train", "7B", "--plan", "1B"), modes), 1, "--train with --plan");
+    assert_eq(_refused(_args("--cost", "7B", "--train", "7B"), modes), 1, "--cost with --train");
+    assert_eq(_refused(_args("--plan", "7B", "--table", 0), modes), 1, "--plan with --table");
+    assert_eq(_refused(_args("--summary", "--table", 0, 0), modes), 1, "--summary with --table");
+    var tqp = _args("--train", "7B", "--quant", "int4");
+    vec_push(tqp, "--plan");
+    vec_push(tqp, "1B");
+    assert_eq(_refused(tqp, modes), 1, "--train --quant --plan: the plan's --quant was dropped");
+    var cm = _args("--cost", "7B", "--method", "lora");
+    assert_eq(_refused(cm, "--method applies to --train only"), 1, "--method under --cost");
+    assert_eq(_refused(_args("--table", "--json", 0, 0), "--json does not apply to --table"), 1, "--table --json");
     # 2.5.5 keeps taking --quant with --train (ignored): the 2.5.4 Python
     # wheel's training_memory() sends it.
+    # --help and --version win over every check after the structure.
+    assert_eq(cli_check_args(_args("--help", "--plan", "7B", "--summary")), 0, "--help with two modes");
+    assert_eq(cli_check_args(_args("--version", "--quant", "int4", "--json")), 0, "--version with --quant");
     var tq = _args("--train", "7B", "--quant", "int4");
     assert_eq(cli_check_args(tq), 0, "--quant under --train accepted");
     assert_eq(_refused(_args("--summary", "--quant", "int8", 0), "--quant applies"), 1, "--quant without a mode");
@@ -177,10 +218,43 @@ fn test_help_complete() {
 
 # --- Logging (log.cyr) ---
 
-# WARN without hwlog_init: through 2.5.4 a library consumer ran at sakshi's
-# INFO default and got an INFO line per detection.
+# A library consumer: including log.cyr leaves sakshi's level, the host's,
+# at its INFO default, and ai-hwaccel's own lines start at WARN. sakshi has
+# one level per process, so lowering it on include (a global initializer
+# can) would hide every one of the host's INFO lines.
 fn test_log_default_level() {
-    assert_eq(_level_at_start, SK_WARN, "default level is WARN without hwlog_init");
+    assert_eq(_level_at_start, SK_INFO, "include leaves the host's sakshi level");
+    assert_eq(sakshi_get_level(), SK_INFO, "still INFO before any hwlog call");
+    assert_eq(hwlog_get_level(), SK_WARN, "ai-hwaccel's threshold starts at WARN");
+    assert_eq(hwlog_enabled(SK_INFO), 0, "ai-hwaccel INFO off without hwlog_init");
+    assert_eq(hwlog_enabled(SK_WARN), 1, "ai-hwaccel WARN on without hwlog_init");
+    sakshi_output_buffer();
+    sakshi_ring_clear();
+    sakshi_info("host info", 9);
+    hwlog_info("detect: static info");
+    hwlog_info_n("detect: profiles=", 1);
+    assert_eq(sakshi_ring_event_count(), 1, "the host's INFO line out, ai-hwaccel's not");
+    hwlog_warn("detect: warn");
+    assert_eq(sakshi_ring_event_count(), 2, "ai-hwaccel's WARN line out");
+    sakshi_set_output(SK_OUT_STDERR);
+    return 0;
+}
+
+# hwlog_set_level moves ai-hwaccel's threshold and never sakshi's; a line
+# needs both, so the host's level still caps it.
+fn test_log_library_threshold() {
+    sakshi_set_level(SK_INFO);
+    hwlog_set_level(SK_INFO);
+    assert_eq(sakshi_get_level(), SK_INFO, "hwlog_set_level leaves sakshi's level");
+    assert_eq(hwlog_enabled(SK_INFO), 1, "raised threshold lets INFO out");
+    sakshi_set_level(SK_WARN);
+    assert_eq(hwlog_enabled(SK_INFO), 0, "the host's WARN still caps it");
+    hwlog_set_level(0 - 1);
+    assert_eq(hwlog_enabled(SK_FATAL), 0, "off silences even fatals");
+    hwlog_set_process_level(SK_ERROR);
+    assert_eq(sakshi_get_level(), SK_ERROR, "process level sets sakshi's");
+    assert_eq(hwlog_get_level(), SK_ERROR, "process level sets ai-hwaccel's");
+    hwlog_set_process_level(SK_WARN);
     return 0;
 }
 
@@ -199,14 +273,15 @@ fn test_log_level_names() {
     return 0;
 }
 
-# hwlog_apply_level_name: 0 leaves the level, a name sets it, an unknown
-# name leaves it and says so.
+# hwlog_apply_level_name: 0 leaves the level, a name sets both levels (the
+# CLI's), an unknown name leaves them and says so.
 fn test_log_apply_level() {
-    sakshi_set_level(SK_WARN);
+    hwlog_set_process_level(SK_WARN);
     hwlog_apply_level_name(0);
     assert_eq(sakshi_get_level(), SK_WARN, "absent flag keeps the level");
     hwlog_apply_level_name("Info");
     assert_eq(sakshi_get_level(), SK_INFO, "Info applied");
+    assert_eq(hwlog_get_level(), SK_INFO, "Info applied to ai-hwaccel's threshold");
     sakshi_output_buffer();
     sakshi_ring_clear();
     hwlog_apply_level_name("verbose");
@@ -215,7 +290,38 @@ fn test_log_apply_level() {
     assert_eq(hwlog_enabled(SK_WARN), 1, "warn enabled at info");
     assert_eq(hwlog_enabled(SK_INFO), 1, "info enabled at info");
     assert_eq(hwlog_enabled(SK_DEBUG), 0, "debug off at info");
+    hwlog_set_process_level(SK_WARN);
+    sakshi_set_output(SK_OUT_STDERR);
+    return 0;
+}
+
+# An unknown AI_HWACCEL_LOG warns once, after the CLI's level flags: under
+# -q or --log-level error it says nothing. A warning from hwlog_init itself
+# would go out before -q could turn logging off.
+fn test_log_env_report() {
+    sakshi_output_buffer();
+    _hwlog_bad_env = "verbose";
+    hwlog_set_process_level(0 - 1);
+    sakshi_ring_clear();
+    hwlog_report_env();
+    assert_eq(sakshi_ring_event_count(), 0, "-q silences the env warning");
+    assert_eq(_hwlog_bad_env, 0, "dropped once reported");
+    _hwlog_bad_env = "verbose";
+    hwlog_set_process_level(SK_ERROR);
+    hwlog_report_env();
+    assert_eq(sakshi_ring_event_count(), 0, "--log-level error silences it");
+    _hwlog_bad_env = "verbose";
     sakshi_set_level(SK_WARN);
+    hwlog_set_level(SK_ERROR);
+    hwlog_report_env();
+    assert_eq(sakshi_ring_event_count(), 0, "ai-hwaccel's threshold gates it too");
+    _hwlog_bad_env = "verbose";
+    hwlog_set_process_level(SK_WARN);
+    hwlog_report_env();
+    hwlog_report_env();
+    assert_eq(sakshi_ring_event_count(), 1, "default level: one warning");
+    hwlog_report_env();
+    assert_eq(sakshi_ring_event_count(), 1, "nothing held, nothing said");
     sakshi_set_output(SK_OUT_STDERR);
     return 0;
 }
@@ -224,7 +330,7 @@ fn test_log_apply_level() {
 # This unit defines SAKSHI_DISABLE_DEBUG: through 2.5.4 hwlog_debug_n called
 # sakshi's private _sk_log and emitted the line anyway.
 fn test_log_n_gates() {
-    sakshi_set_level(SK_TRACE);
+    hwlog_set_process_level(SK_TRACE);
     sakshi_output_buffer();
     sakshi_ring_clear();
     hwlog_debug("static debug");
@@ -233,7 +339,7 @@ fn test_log_n_gates() {
     hwlog_info_n("info n=", 2);
     hwlog_warn_n("warn n=", 3);
     assert_eq(sakshi_ring_event_count(), 2, "info and warn lines emitted");
-    sakshi_set_level(SK_WARN);
+    hwlog_set_process_level(SK_WARN);
     sakshi_ring_clear();
     hwlog_info_n("info n=", 4);
     assert_eq(sakshi_ring_event_count(), 0, "info line below the level");
@@ -250,8 +356,10 @@ fn main() {
     test_flag_lookup();
     test_table_cells();
     test_help_complete();
+    test_log_library_threshold();
     test_log_level_names();
     test_log_apply_level();
+    test_log_env_report();
     test_log_n_gates();
     test_version_builtin();
     return assert_summary();

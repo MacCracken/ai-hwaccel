@@ -24,8 +24,8 @@ Run everything from the repository root (some tests read `tests/fixtures/`):
 
 ```sh
 CYRIUS_DCE=1 cyrius build src/main.cyr build/ai-hwaccel   # build the CLI
-cyrius test tests/tcyr                                    # 15 test units
-cyrius fuzz                                               # 7 fuzz harnesses
+cyrius test tests/tcyr                                    # 19 test units
+cyrius fuzz                                               # 8 fuzz harnesses
 cyrius vet src/main.cyr                                   # include-graph audit
 for f in src/*.cyr src/detect/*.cyr; do cyrius lint --strict "$f"; done   # fails on a warning
 for f in src/*.cyr src/detect/*.cyr tests/tcyr/*.tcyr fuzz/*.fcyr benches/*.bcyr; do

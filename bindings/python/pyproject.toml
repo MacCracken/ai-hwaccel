@@ -14,10 +14,12 @@ name = "ai-hwaccel"
 # bindings version" step in .github/workflows/ci.yml asserts it equals
 # VERSION). Runtime `ai_hwaccel.__version__` derives from this via the
 # installed wheel metadata — see src/ai_hwaccel/__init__.py.
-version = "2.5.4"
+version = "2.5.5"
 description = "Universal AI hardware accelerator detection — Python bindings"
 readme = "README.md"
-requires-python = ">=3.8"
+# setuptools 75.4 and later need Python 3.9, and this file needs setuptools
+# 77 (above), so a source install cannot work on 3.8; the wheels say the same.
+requires-python = ">=3.9"
 license = "GPL-3.0-only"
 # The wheel ships a GPL-3.0 binary, so its .dist-info/licenses/ carries the
 # license text. setuptools reads no file outside the project root, so

@@ -1,7 +1,8 @@
 # Fuzz: AWS Neuron JSON parser
 # Exercises parse_neuron_ls_json with the shape AWS documents for
 # `neuron-ls --json-output`, the older "model" shape, and empty, malformed,
-# truncated and mutated input.
+# truncated and mutated input, with no DMI and with a trn2 instance's shape
+# for what a device leaves out.
 
 include "lib/string.cyr"
 include "lib/alloc.cyr"
@@ -47,7 +48,13 @@ alloc_init();
 
 # The documented shape: two trn1 devices, a process whose command holds a
 # quoted key and a brace.
-var good = "[{\"neuron_device\":0,\"bdf\":\"10:1c.0\",\"connected_to\":[12,3,4,1],\"nc_count\":2,\"memory_size\":34359738368,\"neuron_processes\":[{\"pid\":7,\"command\":\"run \\\"nc_count\\\": 99}\"}]},{\"neuron_device\":1,\"connected_to\":null,\"nc_count\":2,\"memory_size\":34359738368,\"neuron_processes\":[]}]";
+var gsb = str_builder_new();
+str_builder_add_cstr(gsb, "[{\"neuron_device\":0,\"bdf\":\"10:1c.0\",\"connected_to\":[12,3,4,1],\"nc_count\":2,");
+str_builder_add_cstr(gsb, "\"memory_size\":34359738368,\"neuron_processes\":[{\"pid\":7,");
+str_builder_add_cstr(gsb, "\"command\":\"run \\\"nc_count\\\": 99}\"}]},");
+str_builder_add_cstr(gsb, "{\"neuron_device\":1,\"connected_to\":null,\"nc_count\":2,\"memory_size\":34359738368,");
+str_builder_add_cstr(gsb, "\"neuron_processes\":[]}]");
+var good = str_data(str_builder_build(gsb));
 var p1 = vec_new();
 if (parse_neuron_ls_json(str_from(good), NEURON_TRAINIUM, p1, vec_new()) != 2) { syscall(60, 1); }
 if (fz_check(p1) == 0) { syscall(60, 2); }
@@ -70,14 +77,19 @@ _parse_neuron_json(str_from("[]"), p3);
 _parse_neuron_json(str_from("[[[[[[[[{{{{{{{{"), p3);
 _parse_neuron_json(str_from("[{\"neuron_device\":\"0"), p3);
 _parse_neuron_json(str_from("[{\"nc_count\":2,\"x\":[1,2,"), p3);
-_parse_neuron_json(str_from("[{\"neuron_device\":99999999999999999999999,\"nc_count\":99999999999999999999,\"memory_size\":99999999999999999999}]"), p3);
+var hsb = str_builder_new();
+str_builder_add_cstr(hsb, "[{\"neuron_device\":99999999999999999999999,\"nc_count\":99999999999999999999,");
+str_builder_add_cstr(hsb, "\"memory_size\":99999999999999999999}]");
+_parse_neuron_json(str_builder_build(hsb), p3);
 _parse_neuron_json(str_from("{\"neuron_device\":0,\"nc_count\":4}"), p3);
 _parse_neuron_json(str_from("[{\"\\\\\":1,\"nc_count\":2},,,{:},{\"nc_count\"}]"), p3);
 if (fz_check(p3) == 0) { syscall(60, 5); }
 
 # Every byte replaced in turn by each of a few structural bytes, then cut
 # short there: nothing may crash, at most one device per object, and every
-# profile keeps its invariants.
+# profile keeps its invariants, with the trn2 shape too.
+var trn2[16];
+neuron_dmi_shape(str_from("trn2.48xlarge"), NEURON_TRAINIUM, &trn2);
 var subs = "{}[]\",:\\0";
 var nsub = strlen(subs);
 var glen = strlen(good);
@@ -95,6 +107,7 @@ while (pos < glen) {
         if (fz_check(pm) == 0) { syscall(60, 7); }
         var pc = vec_new();
         parse_neuron_ls_json(str_new(buf, pos), NEURON_TRAINIUM, pc, vec_new());
+        _neuron_ls_parse(str_new(buf, glen), NEURON_TRAINIUM, &trn2, pc, vec_new());
         if (fz_check(pc) == 0) { syscall(60, 7); }
         si = si + 1;
     }

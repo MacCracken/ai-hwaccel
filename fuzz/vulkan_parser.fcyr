@@ -26,7 +26,7 @@ alloc_init();
 
 # Valid vulkaninfo-like output with deviceName
 var p1 = vec_new();
-var out1 = str_from("VkPhysicalDeviceProperties:\n  deviceName = NVIDIA GeForce RTX 4090\n  deviceType = DISCRETE_GPU\n");
+var out1 = str_from("VkPhysicalDeviceProperties:\n  deviceName = NVIDIA GeForce RTX 4090\n  deviceType = DISCRETE_GPU\n"); #skip-lint
 _parse_vulkaninfo(out1, p1);
 
 # Empty input — should not crash
@@ -191,29 +191,61 @@ vulkan_size_shared(p12, 0, ids12, str_from(arc));
 if (vec_len(p12) != 1) { syscall(60, 12); }
 if (profile_memory_bytes(vec_get(p12, 0)) != 16225243136) { syscall(60, 12); }
 if (profile_shared_bytes(vec_get(p12, 0)) != 0) { syscall(60, 12); }
-var alen = strlen(arc);
-var apos = 0;
-while (apos < alen) {
-    var asi = 0;
-    while (asi < nsub) {
-        var abuf = alloc(alen + 1);
-        memcpy(abuf, arc, alen);
-        store8(abuf + alen, 0);
-        store8(abuf + apos, load8(subs + asi));
-        var pa = vec_new();
-        var ida = vec_new();
-        _parse_vulkaninfo_ids(str_new(abuf, alen), pa, ida);
-        vulkan_size_shared(pa, 0, ida, str_new(abuf, alen));
-        var ai = 0;
-        while (ai < vec_len(pa)) {
-            var q = vec_get(pa, ai);
-            if (profile_memory_bytes(q) < 0) { syscall(60, 13); }
-            if (vec_get(ida, ai * 3 + 2) == VK_DEV_DISCRETE && profile_shared_bytes(q) != 0) { syscall(60, 13); }
-            ai = ai + 1;
+# The same damage to two such GPUs in one output, which vulkan_size_shared
+# sizes from one scan of it (2.5.5): each keeps a heap of 0 or more, never
+# shared.
+var dl2 = vec_new();
+vec_push(dl2, "GPU1:");
+vec_push(dl2, "\tvendorID = 0x8086");
+vec_push(dl2, "\tdeviceID = 0x56a1");
+vec_push(dl2, "\tdeviceType = PHYSICAL_DEVICE_TYPE_DISCRETE_GPU");
+vec_push(dl2, "\tdeviceName = Arc 2");
+vec_push(dl2, "\tmemoryHeaps[0]:");
+vec_push(dl2, "\t\tsize   = 8589934592");
+vec_push(dl2, "\t\t\tMEMORY_HEAP_DEVICE_LOCAL_BIT");
+vec_push(dl2, "memoryTypes: count = 1");
+var sb2 = str_builder_new();
+str_builder_add_cstr(sb2, arc);
+str_builder_add_cstr(sb2, fz_join(dl2, "\n"));
+var arc2 = str_cstr(str_builder_build(sb2));
+var p14 = vec_new();
+var ids14 = vec_new();
+_parse_vulkaninfo_ids(str_from(arc2), p14, ids14);
+vulkan_size_shared(p14, 0, ids14, str_from(arc2));
+if (vec_len(p14) != 2) { syscall(60, 14); }
+if (profile_memory_bytes(vec_get(p14, 0)) != 16225243136) { syscall(60, 14); }
+if (profile_memory_bytes(vec_get(p14, 1)) != 8589934592) { syscall(60, 14); }
+var arcs = vec_new();
+vec_push(arcs, arc);
+vec_push(arcs, arc2);
+var ai2 = 0;
+while (ai2 < 2) {
+    var asrc = vec_get(arcs, ai2);
+    ai2 = ai2 + 1;
+    var alen = strlen(asrc);
+    var apos = 0;
+    while (apos < alen) {
+        var asi = 0;
+        while (asi < nsub) {
+            var abuf = alloc(alen + 1);
+            memcpy(abuf, asrc, alen);
+            store8(abuf + alen, 0);
+            store8(abuf + apos, load8(subs + asi));
+            var pa = vec_new();
+            var ida = vec_new();
+            _parse_vulkaninfo_ids(str_new(abuf, alen), pa, ida);
+            vulkan_size_shared(pa, 0, ida, str_new(abuf, alen));
+            var ai = 0;
+            while (ai < vec_len(pa)) {
+                var q = vec_get(pa, ai);
+                if (profile_memory_bytes(q) < 0) { syscall(60, 13); }
+                if (vec_get(ida, ai * 3 + 2) == VK_DEV_DISCRETE && profile_shared_bytes(q) != 0) { syscall(60, 13); }
+                ai = ai + 1;
+            }
+            asi = asi + 1;
         }
-        asi = asi + 1;
+        apos = apos + 1;
     }
-    apos = apos + 1;
 }
 
 syscall(60, 0);

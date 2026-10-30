@@ -25,6 +25,33 @@ include "src/quantization.cyr"
 include "src/profile.cyr"
 include "src/system_io.cyr"
 include "src/training.cyr"
+
+# Stubs for the detection modules registry.cyr calls: this harness only
+# parses and re-emits profiles, so it never detects.
+fn detect_cuda(p, w) { return 0; }
+fn detect_rocm(p, w) { return 0; }
+fn detect_apple_opts(p, w, a) { return 0; }
+fn detect_vulkan_opts(p, w, a, l) { return 0; }
+fn detect_intel_npu(p, w) { return 0; }
+fn detect_amd_xdna(p, w) { return 0; }
+fn detect_tpu(p, w) { return 0; }
+fn detect_gaudi_opts(p, w, a) { return 0; }
+fn detect_neuron_opts(p, w, a) { return 0; }
+fn detect_intel_oneapi(p, w) { return 0; }
+fn detect_qualcomm(p, w) { return 0; }
+fn detect_cerebras_opts(p, w, a) { return 0; }
+fn detect_graphcore_opts(p, w, a) { return 0; }
+fn detect_groq(p, w) { return 0; }
+fn detect_samsung_npu(p, w) { return 0; }
+fn detect_mediatek_apu(p, w) { return 0; }
+fn enrich_bandwidth(p) { return 0; }
+fn enrich_pcie(p) { return 0; }
+fn enrich_numa(p) { return 0; }
+fn detect_interconnects_opts(s, p, w, a) { return 0; }
+fn detect_storage(s) { return 0; }
+fn detect_environment(s) { return 0; }
+fn detect_system_memory_opts(a) { return 16 * 1073741824; }
+
 include "src/registry.cyr"
 include "src/json_out.cyr"
 

@@ -22,6 +22,7 @@ include "src/profile.cyr"
 include "src/system_io.cyr"
 include "src/detect/platform.cyr"
 include "src/detect/command.cyr"
+include "src/detect/disk.cyr"
 
 # --- Fixtures ---
 
@@ -40,9 +41,20 @@ fn _fx_dir() {
     return d;
 }
 
-# Write cstr `text` to `dir`/`name` and give it mode `mode`. Returns the path.
+# Write cstr `text` to `dir`/`name`, making the directories on the way, and
+# give it mode `mode`. Returns the path.
 fn _fx_file(dir, name, text, mode) {
     var p = sysfs_path(dir, name, 0);
+    var n = strlen(p);
+    var i = strlen(dir) + 1;
+    while (i < n) {
+        if (load8(p + i) == 47) {
+            store8(p + i, 0);
+            sys_mkdir(p, 0x1ED);
+            store8(p + i, 47);
+        }
+        i = i + 1;
+    }
     file_write_all(p, text, strlen(text));
     sys_chmod(p, mode);
     return p;
@@ -151,7 +163,7 @@ fn test_which_candidates_posix() {
 # skips empty, relative and drive-relative ("C:tools") entries. Through 2.5.2
 # which() split this on ':' too, so no tool was ever found on Windows.
 fn test_which_candidates_windows() {
-    var path = "C:\\WINDOWS\\system32;;.\\bin;C:tools;\"C:\\Program Files\\NVIDIA Corporation\\NVSMI\";D:/sdk/;\\\\srv\\share\\bin";
+    var path = "C:\\WINDOWS\\system32;;.\\bin;C:tools;\"C:\\Program Files\\NVIDIA Corporation\\NVSMI\";D:/sdk/;\\\\srv\\share\\bin"; #skip-lint
     var c = which_candidates(path, "nvidia-smi", 1);
     var want = vec_new();
     vec_push(want, "C:\\WINDOWS\\system32\\nvidia-smi.exe");
@@ -161,7 +173,8 @@ fn test_which_candidates_windows() {
     assert_eq(_same_paths(c, want), 1, "windows: absolute entries, .exe added");
     var e = which_candidates("C:\\WINDOWS\\System32\\wbem", "wmic.EXE", 1);
     assert_streq(vec_get(e, 0), "C:\\WINDOWS\\System32\\wbem\\wmic.EXE", "windows: .exe not added twice");
-    assert_eq(vec_len(which_candidates("C:\\a\"b;\"C:\\x", "t", 1)), 0, "windows: an entry with a stray quote is skipped");
+    var stray = which_candidates("C:\\a\"b;\"C:\\x", "t", 1);
+    assert_eq(vec_len(stray), 0, "windows: an entry with a stray quote is skipped");
     assert_streq(vec_get(which_candidates("c:/x", "t", 1), 0), "c:/x\\t.exe", "windows: a lower-case drive letter");
     var posix_on_win = which_candidates("/usr/bin:/bin", "sh", 1);
     assert_eq(vec_len(posix_on_win), 0, "windows: a POSIX PATH finds nothing");
@@ -173,8 +186,11 @@ fn test_which_candidates_windows() {
 # on cass, with vulkaninfo.exe under "dir with space" first on PATH and a
 # dir.exe planted beside it, the unquoted line ran dir.exe (2.5.3).
 fn test_cmd_win_program_token() {
-    assert_streq(cmd_win_program_token("C:\\WINDOWS\\system32\\vulkaninfo.exe"), "C:\\WINDOWS\\system32\\vulkaninfo.exe", "no blank: unchanged");
-    assert_streq(cmd_win_program_token("C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe"), "\"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe\"", "blank: quoted");
+    var vk = "C:\\WINDOWS\\system32\\vulkaninfo.exe";
+    assert_streq(cmd_win_program_token(vk), vk, "no blank: unchanged");
+    var smi = "C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe";
+    var quoted = "\"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe\"";
+    assert_streq(cmd_win_program_token(smi), quoted, "blank: quoted");
     assert_streq(cmd_win_program_token("C:\\a\tb.exe"), "\"C:\\a\tb.exe\"", "tab: quoted");
     return 0;
 }
@@ -229,8 +245,10 @@ fn test_tool_exit_warning() {
     assert_streq(warning_tool(w), "nvidia-smi", "tool named");
     assert_streq(warning_message(w), "exited with status 9", "status message");
     assert_streq(warning_message(tool_exit_warning("t", 137, 1)), "killed by signal 9", "signal 9");
-    assert_streq(warning_message(tool_exit_warning("t", 137, 0)), "exited with status 137", "exit(137) is not a signal");
-    assert_streq(warning_message(tool_exit_warning("t", 3221225477, 0)), "exited with status 0xC0000005", "a Windows crash, in hex");
+    var w137 = tool_exit_warning("t", 137, 0);
+    assert_streq(warning_message(w137), "exited with status 137", "exit(137) is not a signal");
+    var crash = tool_exit_warning("t", 3221225477, 0);
+    assert_streq(warning_message(crash), "exited with status 0xC0000005", "a Windows crash, in hex");
     return 0;
 }
 
@@ -540,6 +558,90 @@ fn test_sysfs_read_cap() {
     return 0;
 }
 
+# sysfs_read of `path` with SYSFS_MAX_READ at `cap`: its length, or -1 for
+# no Str. The canary sits in this frame, just above sysfs_read's.
+fn _sysfs_read_len_at(path, cap) {
+    var canary = 0x1234;
+    var saved = SYSFS_MAX_READ;
+    SYSFS_MAX_READ = cap;
+    var s = sysfs_read(path);
+    SYSFS_MAX_READ = saved;
+    assert_eq(canary, 0x1234, "sysfs_read stays inside its buffer");
+    if (s == 0) { return 0 - 1; }
+    return str_len(s);
+}
+
+# SYSFS_MAX_READ is a global a library consumer may set; it can lower the
+# read cap and never raise it past sysfs_read's 4 KiB stack buffer. A read
+# of SYSFS_MAX_READ - 1 bytes into that buffer went past it, over the stack
+# (SIGSEGV), once the value was raised.
+fn test_sysfs_read_raised_cap() {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "/tmp/ai-hwaccel-io-raised-");
+    str_builder_add_int(sb, sys_getpid());
+    var path = str_data(str_builder_build(sb));
+    var n = 20000;
+    var buf = alloc(n);
+    memset(buf, 65, n);
+    assert(file_write_all(path, buf, n) == n, "20000-byte file written");
+    assert_eq(_sysfs_read_len_at(path, 16384), 4095, "raised cap: still 4095 bytes");
+    assert_eq(_sysfs_read_len_at(path, 100), 99, "lowered cap honoured");
+    assert_eq(_sysfs_read_len_at(path, 0), 0 - 1, "no cap: no read");
+    sys_unlink(path);
+    return 0;
+}
+
+# The kind detect_storage_in gave /sys/block entry `name` under `root`, or
+# -1 when it listed none.
+fn _storage_kind_of(root, name) {
+    var sio = system_io_new();
+    detect_storage_in(sio, root);
+    var devs = sio_storage(sio);
+    var i = 0;
+    while (i < vec_len(devs)) {
+        var d = vec_get(devs, i);
+        if (streq(storage_name(d), name) == 1) { return storage_kind(d); }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+# An NVMe namespace's transport (2.5.5). Under native multipath a subsystem
+# with several controllers, as NVMe over fabrics targets report, gives its
+# disk the subsystem as device: model and links to its controllers, no
+# transport. The check read only device/transport, so such an NVMe/TCP disk
+# was a local 3.5 GB/s NVMe.
+fn test_storage_nvme_transport() {
+    var t = _fx_dir();
+    # Local: the device is the controller.
+    _fx_file(t, "nvme0n1/size", "1000215216\n", 0x1A4);
+    _fx_file(t, "nvme0n1/device/model", "Samsung SSD 980 PRO 1TB\n", 0x1A4);
+    _fx_file(t, "nvme0n1/device/transport", "pcie\n", 0x1A4);
+    # NVMe/TCP under multipath: the subsystem, its namespace entry and the
+    # controller link that has the transport.
+    _fx_file(t, "nvme2n1/size", "209715200\n", 0x1A4);
+    _fx_file(t, "nvme2n1/device/model", "Linux\n", 0x1A4);
+    _fx_file(t, "nvme2n1/device/subsysnqn", "nqn.2014-08.org.nvmexpress:t\n", 0x1A4);
+    _fx_file(t, "nvme2n1/device/nvme2n1/size", "209715200\n", 0x1A4);
+    _fx_file(t, "nvme2n1/device/nvme2/transport", "tcp\n", 0x1A4);
+    # NVMe/RDMA without multipath: the device is the controller.
+    _fx_file(t, "nvme3n1/size", "209715200\n", 0x1A4);
+    _fx_file(t, "nvme3n1/device/transport", "rdma\n", 0x1A4);
+    # No transport anywhere: a local NVMe, as before.
+    _fx_file(t, "nvme4n1/size", "209715200\n", 0x1A4);
+    _fx_file(t, "nvme4n1/device/model", "X\n", 0x1A4);
+    var tr = storage_nvme_transport(t, str_from("nvme2n1"));
+    assert(tr != 0, "multipath: a transport found");
+    if (tr != 0) { assert_eq(str_eq_cstr(tr, "tcp"), 1, "multipath: the controller's transport"); }
+    assert_eq(storage_nvme_transport(t, str_from("nvme4n1")), 0, "no transport: 0");
+    assert_eq(_storage_kind_of(t, "nvme0n1"), STK_NVME, "local NVMe");
+    assert_eq(_storage_kind_of(t, "nvme2n1"), STK_UNKNOWN, "multipath NVMe/TCP is no local NVMe");
+    assert_eq(_storage_kind_of(t, "nvme3n1"), STK_UNKNOWN, "NVMe/RDMA is no local NVMe");
+    assert_eq(_storage_kind_of(t, "nvme4n1"), STK_NVME, "no transport: NVMe");
+    _fx_rm(t);
+    return 0;
+}
+
 # A read keeps only its bytes (2.5.5): through 2.5.4 each one kept a 4 KiB
 # buffer, a missing file's included.
 fn test_sysfs_read_right_sized() {
@@ -570,11 +672,21 @@ fn test_path_exists() {
 
 # --- System memory ---
 
+# MemTotal capped by this cgroup's memory limit (2.5.5), which in a
+# container is the container's own, so no fixed floor: a "> 512 MB" check
+# failed under `docker run --memory=512m`. The bounds still catch a failed
+# read (0) and a cap applied the wrong way round.
 fn test_detect_system_memory() {
     var mem = detect_system_memory();
     assert(mem > 0, "system memory > 0");
-    # Should be at least 512 MB
-    assert(mem > 512 * 1024 * 1024, "system memory > 512 MB");
+    var buf[4096];
+    var n = file_read_all("/proc/meminfo", &buf, 4096);
+    var host = 0;
+    if (n > 0) { host = meminfo_total_bytes(&buf, n); }
+    assert(host > 0, "/proc/meminfo MemTotal read");
+    assert(mem <= host, "system memory <= MemTotal");
+    var lim = cgroup_mem_limit_bytes("/sys/fs/cgroup");
+    if (lim > 0) { assert(mem <= lim, "system memory <= the cgroup limit"); }
     return 0;
 }
 
@@ -765,6 +877,8 @@ test_sysfs_read_proc();
 test_sysfs_read_int();
 test_sysfs_read_missing();
 test_sysfs_read_cap();
+test_sysfs_read_raised_cap();
+test_storage_nvme_transport();
 test_sysfs_read_right_sized();
 test_path_exists();
 test_detect_system_memory();

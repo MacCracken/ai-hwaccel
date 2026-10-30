@@ -177,8 +177,8 @@ fn _cmd_getenv_win(name) {
 #endif
 
 # --- Data directory (2.5.5) ---
-# The directory data_file_path reads VERSION and data/*.json from, as the
-# embedding program set it (data_dir_set), or 0.
+# The directory data_file_path reads data/*.json from, as the embedding
+# program set it (data_dir_set), or 0.
 var _cmd_data_dir = 0;
 
 # Point data_file_path at directory `dir` (a cstr; 0 clears it). The CLI
@@ -216,9 +216,10 @@ fn cmd_data_dir_arg() {
     return 0;
 }
 
-# Resolve a data-file path. The binary reads VERSION (--version) and
-# data/cloud_pricing.json (--cost) at runtime; invoked from outside the
-# project root (e.g. a pip-installed wheel) those are not cwd-relative.
+# Resolve a data-file path. The binary reads data/cloud_pricing.json
+# (--cost) and data/models.json at runtime; invoked from outside the project
+# root (e.g. a pip-installed wheel) those are not cwd-relative. --version is
+# compiled in (CYRIUS_PKG_VERSION) since 2.5.5 and reads no file.
 # Resolution precedence:
 #   1. data_dir_set(<path>): the CLI's `--data-dir <path>` flag, on EVERY
 #      platform including Windows PE, because argv is readable there. This
@@ -227,8 +228,8 @@ fn cmd_data_dir_arg() {
 #   2. AI_HWACCEL_DATA_DIR env var — honoured on **every target** as of
 #      2.3.21. It was a silent no-op on macOS and Windows through 2.3.21
 #      because `cmd_getenv` read /proc/self/environ, which neither has; it
-#      now delegates to the stdlib `getenv`. The flag still supersedes it
-#      where both are present.
+#      now delegates to the stdlib `getenv` (on PE to _cmd_getenv_win, since
+#      2.5.5). The flag still supersedes it where both are present.
 #   3. cwd-relative <rel> — the original fallback.
 # See roadmap 2.3.3 (env var) and 2.3.12 (the --data-dir flag for PE).
 fn data_file_path(rel) {

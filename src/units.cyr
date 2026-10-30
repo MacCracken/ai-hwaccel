@@ -80,9 +80,12 @@ var SCHEMA_VERSION = 6;
 # --- Text helpers ---
 
 # 1 when C strings `a` and `b` are equal ignoring ASCII case ("Int8" and
-# "INT8"), 0 otherwise or when either is 0. No allocation. It lives here,
-# the first module every unit includes, so the name parsers (quant, training
-# method, log level) can use it whatever else a unit includes.
+# "INT8"), 0 otherwise or when either is 0. No allocation. It lives here
+# because every unit includes this module, and not log.cyr, which
+# foundation_test, model_format_test and several fuzz harnesses skip, so the
+# name parsers (quant, training method, log level) can use it whatever else
+# a unit includes. log.cyr comes just before this module and reaches it as a
+# forward call, which the compiler resolves within a unit.
 fn hw_streq_ci(a, b) {
     if (a == 0 || b == 0) { return 0; }
     var i = 0;

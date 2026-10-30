@@ -188,6 +188,15 @@ fn test_find_satisfying_order() {
     profile_set_available(cuda, 0);
     assert_eq(find_satisfying_profile(REQ_GPU, 0, _profs3(cpu, cuda, rocm)), rocm, "an unavailable best is skipped");
     assert_eq(find_satisfying_profile(REQ_TPU, 1, _profs3(cpu, cuda, rocm)), 0, "none: 0");
+    # REQ_NONE is the CPU whatever outranks it, as through 2.5.4; ranked, an
+    # 80 GiB GPU went to work that needs no accelerator.
+    var big2 = profile_new(ACCEL_CUDA, 3, 80 * BYTES_PER_GIB);
+    assert_eq(find_satisfying_profile(REQ_NONE, 0, _profs3(cpu, big2, rocm)), cpu, "REQ_NONE: the CPU");
+    assert_eq(find_satisfying_profile(REQ_NONE, 0, _profs3(big2, rocm, cpu)), cpu, "REQ_NONE: the CPU, any order");
+    var off = profile_new(ACCEL_CPU, 0, 16 * BYTES_PER_GIB);
+    profile_set_available(off, 0);
+    assert_eq(find_satisfying_profile(REQ_NONE, 0, _profs3(off, rocm, big2)), big2,
+      "REQ_NONE, no available CPU: the ranked pick");
     return 0;
 }
 

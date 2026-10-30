@@ -417,35 +417,48 @@ fn backend_name(b) {
     return "unknown";
 }
 
-# Classifies whether a backend's detector needs a subprocess (vendor CLI:
-# nvidia-smi, xpu-smi) to find anything. Library
-# consumers with a no-exec contract (e.g. mihi's probe surface) use
-# builder_no_exec() / the registry_detect_no_exec() entry point, which honors
-# this predicate.
-# BACKEND_WINDOWS, BACKEND_APPLE, BACKEND_VULKAN, BACKEND_GAUDI,
-# BACKEND_NEURON, BACKEND_CEREBRAS and BACKEND_GRAPHCORE are native: DXGI
-# adapter enumeration, macOS sysctl (the Asahi device tree on Linux), Vulkan's
-# sysfs scan of the DRM cards, the habanalabs accel nodes, /dev/neuron<N>,
-# /dev/cerebras* and /dev/ipu<N> spawn nothing. Their wmic / system_profiler /
-# vulkaninfo / hl-smi / neuron-ls / cerebras_cli / gc-info runs happen only
-# when registry_detect_with_opts' allow_exec is 1. Through 2.3.28 Vulkan was
-# exec, so registry_detect_no_exec() found no Intel or NVIDIA GPU on Linux;
-# through 2.5.4 Gaudi, Neuron, Cerebras and Graphcore were, so it found none
-# of them.
-fn backend_uses_exec(b) {
+# 1 when a backend's detector finds nothing without its vendor CLI
+# (nvidia-smi, xpu-smi). Library consumers with a no-exec contract (e.g.
+# mihi's probe surface) call registry_detect_no_exec(), which runs every
+# other backend (builder_native()) with exec off, as
+# registry_detect_with_opts(mask, 0) does for any mask.
+# BACKEND_WINDOWS, BACKEND_APPLE and BACKEND_VULKAN are native: DXGI adapter
+# enumeration, macOS sysctl (the Asahi device tree on Linux) and Vulkan's
+# sysfs scan of the DRM cards spawn nothing. With exec off, Gaudi, Neuron,
+# Cerebras and Graphcore (backend_uses_exec) read their device nodes: the
+# habanalabs accel nodes, /dev/neuron<N>, /dev/cerebras* and /dev/ipu<N>.
+# The wmic / system_profiler / vulkaninfo / hl-smi / neuron-ls /
+# cerebras_cli / gc-info runs happen only when registry_detect_with_opts'
+# allow_exec is 1. Through 2.3.28 Vulkan was exec, so
+# registry_detect_no_exec() found no Intel or NVIDIA GPU on Linux; through
+# 2.5.4 it found no Gaudi, Neuron, Cerebras or Graphcore device.
+fn backend_needs_exec(b) {
     if (b == BACKEND_CUDA) { return 1; }
     if (b == BACKEND_INTEL_ONEAPI) { return 1; }
     return 0;
 }
 
+# 1 when a backend's vendor CLI is its source of record: the backends that
+# need one (backend_needs_exec), and Gaudi, Neuron, Cerebras and Graphcore,
+# whose device-node fallbacks see less than hl-smi, neuron-ls, cerebras_cli
+# and gc-info do (sizes from the generation, not the board; no Cerebras
+# system or IPU-POD without a local node). A registry_detect_with mask
+# holding one runs with exec (builder_uses_exec), and one without spawns
+# nothing (builder_no_exec(), 2.5.1). So a selective mask of the four runs
+# their tools, and vulkaninfo and system_profiler, as through 2.5.4.
+fn backend_uses_exec(b) {
+    if (backend_needs_exec(b) == 1) { return 1; }
+    if (b == BACKEND_GAUDI || b == BACKEND_NEURON) { return 1; }
+    if (b == BACKEND_CEREBRAS || b == BACKEND_GRAPHCORE) { return 1; }
+    return 0;
+}
+
 # 1 when a backend's detector can start a vendor tool once exec is allowed:
-# the exec backends, and the native ones that run a tool before their
-# fallback (vulkaninfo, system_profiler, hl-smi, neuron-ls, cerebras_cli,
-# gc-info). registry_detect_threaded gives each of these a thread.
+# the backend_uses_exec ones, and Vulkan and Apple, which run vulkaninfo and
+# system_profiler before their native paths. registry_detect_threaded gives
+# each of these a thread.
 fn backend_may_exec(b) {
     if (backend_uses_exec(b) == 1) { return 1; }
     if (b == BACKEND_VULKAN || b == BACKEND_APPLE) { return 1; }
-    if (b == BACKEND_GAUDI || b == BACKEND_NEURON) { return 1; }
-    if (b == BACKEND_CEREBRAS || b == BACKEND_GRAPHCORE) { return 1; }
     return 0;
 }

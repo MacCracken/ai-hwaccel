@@ -35,7 +35,8 @@ The Wheels workflow builds wheels for Linux (manylinux x86_64 / aarch64), macOS
 (arm64), and Windows (x86_64). Each bundles a self-contained binary, so there
 is nothing else to install. Where no wheel matches your platform,
 `pip install ./bindings/python` installs the package without a binary, and it
-runs one you supply. It locates the binary via, in order, an explicit
+runs one you supply. The package needs Python 3.9 or later (its build backend,
+setuptools 77+, does not run on 3.8). It locates the binary via, in order, an explicit
 `binary=` argument, the `AI_HWACCEL_BIN` environment variable, a wheel-bundled
 binary, or `ai-hwaccel` on `PATH`. A `binary=` or `AI_HWACCEL_BIN` you give is
 the only one tried: when it is not an executable file the call raises
@@ -87,7 +88,8 @@ whole run. `TrainingMemory`, `ShardingPlan` and
 `est_tokens_per_sec`, `price_per_hour_usd`).
 
 `training_memory()` assumes bf16 weights unless `method` is `qlora-4bit` or
-`qlora-8bit`. Its `quant=` keyword never had an effect (`--train` does not read
+`qlora-8bit`, and takes a model of 1M parameters or more (the estimate works
+in whole millions). Its `quant=` keyword never had an effect (`--train` does not read
 `--quant`); since 2.5.5 passing it issues a `DeprecationWarning`, and 2.6.0
 removes it.
 
@@ -105,25 +107,32 @@ says how much of its `memory_bytes` is system RAM, and
   output that is not valid JSON. The last two raise the subclasses
   `CommandTimeoutError` (also a `subprocess.TimeoutExpired`) and
   `InvalidOutputError` (also a `json.JSONDecodeError`, with the output in
-  `.doc`), so code that caught those before 2.5.5 still catches them.
+  `.doc`), so code that caught those before 2.5.5 still catches them. A
+  `CommandTimeoutError` keeps what the binary printed before it was killed in
+  `.stdout` and `.stderr` (as `subprocess` gives them: bytes on POSIX, str on Windows); the stderr log
+  names the detector that was running.
 
 The binary's output is decoded as UTF-8 whatever the locale's code page (a
 Windows host's is cp1252, cp936, ...); a byte that is not UTF-8 becomes U+FFFD.
 
 ## Data files & working directory
 
-`version()` reads `VERSION` and `cost()` reads `data/cloud_pricing.json`.
-The binary looks for them in the directory given by `--data-dir`, else in
-**`AI_HWACCEL_DATA_DIR`**, else relative to the working directory:
+`cost()` reads `data/cloud_pricing.json`. The binary looks for it in the
+directory given by `--data-dir`, else in **`AI_HWACCEL_DATA_DIR`**, else
+relative to the working directory:
 
 - **Bundled wheel binary**: unless you set `AI_HWACCEL_DATA_DIR` yourself,
   the wrapper points the binary at the bundled directory (with `--data-dir`),
-  so `version()` and `cost()` work from any working directory.
+  so `cost()` works from any working directory.
 - **A binary you supply** (via `binary=`, `AI_HWACCEL_BIN`, or `PATH`):
-  set `AI_HWACCEL_DATA_DIR` to a directory containing `VERSION` and
-  `data/cloud_pricing.json`, or run from a directory that has them.
+  set `AI_HWACCEL_DATA_DIR` to a directory containing
+  `data/cloud_pricing.json`, or run from a directory that has it.
   Detection (`detect`, `summary`, `plan`, `training_memory`) never needs
-  this — only `version()` and `cost()` do.
+  this — only `cost()` does.
+
+`version()` is the version built into the binary (since 2.5.5) and reads no
+file; through 2.5.4 it read `VERSION` the same way and said `unknown` without
+it.
 
 The package's own version is always available as `ai_hwaccel.__version__`.
 

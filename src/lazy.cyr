@@ -195,30 +195,50 @@ fn lazy_count_by_family(lr, family) {
     return count;
 }
 
-# All profiles detected so far (no new detection): a copy, taken under the
-# lock.
-fn lazy_probed_profiles(lr) {
+# All profiles detected so far (no new detection), copied under the lock
+# into the caller's vec `out` (emptied first), which is returned. A reused
+# `out` keeps its buffer, so a consumer that polls per request stops
+# allocating once it has grown (2.5.5).
+fn lazy_probed_profiles_into(lr, out) {
     var mtx = lazy_mutex(lr);
     mutex_lock(mtx);
-    var out = vec_new();
+    vec_truncate(out, 0);
     _lazy_append(out, lazy_profiles(lr));
     mutex_unlock(mtx);
     return out;
 }
 
-# The probes' warnings so far: a copy, taken under the lock.
-fn lazy_warnings(lr) {
+# All profiles detected so far, in a new vec. Allocates a vec per call;
+# repeat calls use lazy_probed_profiles_into.
+fn lazy_probed_profiles(lr) {
+    return lazy_probed_profiles_into(lr, vec_new());
+}
+
+# The probes' warnings so far, copied under the lock into the caller's vec
+# `out` (emptied first), which is returned, as lazy_probed_profiles_into.
+fn lazy_warnings_into(lr, out) {
     var mtx = lazy_mutex(lr);
     mutex_lock(mtx);
-    var out = vec_new();
+    vec_truncate(out, 0);
     _lazy_append(out, lazy_warns(lr));
     mutex_unlock(mtx);
     return out;
 }
 
+# The probes' warnings so far, in a new vec. Allocates a vec per call;
+# repeat calls use lazy_warnings_into.
+fn lazy_warnings(lr) {
+    return lazy_warnings_into(lr, vec_new());
+}
+
 # Probe all families and return a full registry: the probes' profiles and
 # warnings, and the system passes, run here once (2.5.2). Through 2.5.1 the
-# registry had no detector warnings, and every post-pass ran twice.
+# registry had no detector warnings, and every post-pass ran twice. The
+# probes logged their own warnings; the system pass's (a hung `nvidia-smi
+# nvlink -s`) are logged here, as registry_detect logs them (2.5.5), under
+# the lock, as each probe's are: sakshi is single-threaded. The pass keeps
+# the probes' warnings in place: each names a tool of its own backend, so
+# warnings_dedup_missing drops none of them.
 fn lazy_into_registry(lr) {
     var mtx = lazy_mutex(lr);
     mutex_lock(mtx);
@@ -229,8 +249,12 @@ fn lazy_into_registry(lr) {
     var r = hw_registry_new();
     _lazy_append(reg_profiles(r), lazy_profiles(lr));
     _lazy_append(reg_warnings(r), lazy_warns(lr));
+    var w0 = vec_len(reg_warnings(r));
     mutex_unlock(mtx);
 
     registry_system_passes(r, 1);
+    mutex_lock(mtx);
+    warnings_log_parse(reg_warnings(r), w0);
+    mutex_unlock(mtx);
     return r;
 }

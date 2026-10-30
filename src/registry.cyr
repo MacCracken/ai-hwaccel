@@ -56,8 +56,7 @@ fn reg_num_warnings(r) {
     return vec_len(reg_warnings(r));
 }
 
-# Total memory of the available devices (`skip_cpu` 1: the accelerators
-# only), counting system RAM once.
+# Total memory across all available devices, counting system RAM once.
 #
 # A profile's `shared_mem` part is system RAM (see src/profile.cyr): all of the
 # CPU's memory, all of a unified-memory device's (Apple Silicon's GPU and
@@ -66,9 +65,12 @@ fn reg_num_warnings(r) {
 # 100 GiB in 2.3.27 (CPU 48 + GPU 48 + Neural Engine 4). So the shared parts
 # fold into one pool, the largest of them, and only the rest adds up. With no
 # shared-memory device the pool is the CPU's RAM and the result is the plain
-# sum, as before. One host per registry: the pool is a max, not a sum. Both
-# totals used a copy of this loop through 2.5.4.
-fn _reg_total_mem(r, skip_cpu) {
+# sum, as before. One host per registry: the pool is a max, not a sum.
+#
+# reg_total_accel_memory runs the same loop without the CPU. They stay two
+# loops: one taking a skip-the-CPU flag tested it on every profile, 1919
+# instructions a total_memory_13dev call against 1769 (2.5.5).
+fn reg_total_memory(r) {
     var profs = reg_profiles(r);
     var total = 0;
     var pool = 0;
@@ -78,9 +80,6 @@ fn _reg_total_mem(r, skip_cpu) {
         var p = vec_get(profs, i);
         i = i + 1;
         if (profile_available(p) != 1) { continue; }
-        if (skip_cpu == 1) {
-            if (profile_accel_type(p) == ACCEL_CPU) { continue; }
-        }
         # profile_shared_bytes, inlined: a call per profile cost +70% on
         # total_memory_13dev. A device that shares nothing adds its memory
         # as before, for one extra load and compare.
@@ -97,16 +96,31 @@ fn _reg_total_mem(r, skip_cpu) {
     return total + pool;
 }
 
-# Total memory across all available devices, counting system RAM once.
-fn reg_total_memory(r) {
-    return _reg_total_mem(r, 0);
-}
-
 # Total accelerator memory (excludes CPU), counting shared system RAM once:
 # dedicated accelerator memory plus the largest shared part any accelerator
 # can address (48 GiB on that M5 Pro, not GPU 48 + Neural Engine 4).
 fn reg_total_accel_memory(r) {
-    return _reg_total_mem(r, 1);
+    var profs = reg_profiles(r);
+    var total = 0;
+    var pool = 0;
+    var n = vec_len(profs);
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(profs, i);
+        i = i + 1;
+        if (profile_available(p) != 1) { continue; }
+        if (profile_accel_type(p) == ACCEL_CPU) { continue; }
+        if (profile_shared_mem(p) == 0) {
+            total = total + profile_memory_bytes(p);
+            continue;
+        }
+        var part = profile_shared_mem(p);
+        if (part > profile_memory_bytes(p)) { part = profile_memory_bytes(p); }
+        if (part < 0) { part = 0; }
+        if (part > pool) { pool = part; }
+        total = total + profile_memory_bytes(p) - part;
+    }
+    return total + pool;
 }
 
 # Whether any non-CPU accelerator is available
@@ -295,10 +309,11 @@ fn builder_with(mask, backend) { return mask | (1 << backend); }
 fn builder_without(mask, backend) { return mask & (~(1 << backend)); }
 fn builder_is_enabled(mask, backend) { return (mask >> backend) & 1; }
 
-# Mask of backends that can run without spawning a subprocess (sysfs,
-# syscalls, DXGI, sysctl). registry_detect_with() of this mask, or of any mask
-# without an exec backend, spawns nothing (2.5.1; see registry_detect_with).
-# registry_detect_no_exec() is the same call.
+# Mask of the backends whose vendor CLI, if any, is not their source of
+# record (backend_uses_exec 0): sysfs, syscalls, DXGI, sysctl, with
+# vulkaninfo, system_profiler and wmic as extras. registry_detect_with() of
+# this mask, or of any mask holding no backend_uses_exec backend, spawns
+# nothing (2.5.1; see registry_detect_with).
 fn builder_no_exec() {
     var mask = 0;
     var b = 0;
@@ -316,6 +331,26 @@ fn builder_no_exec() {
 fn builder_uses_exec(mask) {
     if ((mask & (~builder_no_exec())) == 0) { return 0; }
     return 1;
+}
+
+# Mask of the backends that find something with exec off (backend_needs_exec
+# 0): builder_no_exec()'s, and Gaudi, Neuron, Cerebras and Graphcore through
+# their device nodes (2.5.5). registry_detect_no_exec() runs it, and
+# registry_detect_with_opts(mask, 0) strips every other backend from `mask`.
+# It holds backend_uses_exec backends, so registry_detect_with() and
+# registry_detect_threaded_with() of it DO run hl-smi, neuron-ls,
+# cerebras_cli, gc-info and vulkaninfo; it is spawn-free only through
+# registry_detect_no_exec() or registry_detect_with_opts(mask, 0).
+fn builder_native() {
+    var mask = 0;
+    var b = 0;
+    while (b < AIHW_BACKEND_COUNT) {
+        if (backend_needs_exec(b) == 0) {
+            mask = mask | (1 << b);
+        }
+        b = b + 1;
+    }
+    return mask;
 }
 
 # --- One physical device, one profile (2.4.0) ---
@@ -357,11 +392,13 @@ fn _dedup_unfilled(q) {
 # nonzero pci_id, the twin is the best-ranked profile above it with that
 # pci_id: a vendor profile, else (for Vulkan) the first Windows GPU. Among
 # vendor profiles it is the first one that still lacks what a view gives
-# (_dedup_unfilled), else the first: pci_id is the PCI model ID, so identical
-# cards share it, and through 2.5.4 every view paired with the first card,
-# which left the second card's placeholder name in place. For a Vulkan
-# integrated GPU on system RAM with no such profile, it is the first Apple
-# Metal profile. Every other type has no twin. Pure.
+# (_dedup_unfilled), else the first: pci_id is the PCI vendor and device ID,
+# so identical cards share it, and through 2.5.4 every view paired with the
+# first card, which left the second card's placeholder name in place. The
+# pairing is by list order, so it need not match the view to its own card:
+# AMD gives one device ID to several SKUs (_dedup_name_ambiguous). For a
+# Vulkan integrated GPU on system RAM with no such profile, it is the first
+# Apple Metal profile. Every other type has no twin. Pure.
 #
 # The ranks are inline type tests, not a rank function: the pass runs once
 # per detection, and dedup_17dev measured a call per profile at +6% (2.5.3).
@@ -402,6 +439,62 @@ fn _dedup_twin(profiles, p) {
     return metal;
 }
 
+# 1 if view `p`'s name may belong to another card than vendor profile
+# `twin`: two or more vendor profiles share its pci_id and the views of that
+# The length of C string `s` up to its first " (" (a driver's suffix, as in
+# "AMD Radeon RX 7900 XTX (RADV NAVI31)"), or all of it.
+fn _dedup_model_len(s) {
+    var i = 0;
+    while (load8(s + i) != 0) {
+        if (load8(s + i) == 32 && load8(s + i + 1) == 40) { return i; }
+        i = i + 1;
+    }
+    return i;
+}
+
+# 1 when C strings `a` and `b` name the same model: equal up to a driver's
+# parenthesised suffix. Pure.
+fn _dedup_model_eq(a, b) {
+    var la = _dedup_model_len(a);
+    if (la != _dedup_model_len(b)) { return 0; }
+    return memeq(a, b, la);
+}
+
+# pci_id name different models. AMD gives one device ID to several SKUs
+# (0x744C: RX 7900 XTX, XT and GRE; 0x73BF: RX 6800, 6800 XT, 6900 XT),
+# which RADV tells apart by revision, while _dedup_twin pairs views and cards
+# by list order (ROCm's in /sys/class/drm order, vulkaninfo's in its own).
+# Identical cards' views agree, so each card still takes the name (2.5.5).
+# Names are compared up to a driver's parenthesised suffix, so RADV's
+# "... XTX (RADV NAVI31)" and AMDVLK's "... XTX" for one card agree. Only
+# called for a rename. Pure.
+fn _dedup_name_ambiguous(profiles, p, twin) {
+    var tt = profile_accel_type(twin);
+    if (tt != ACCEL_CUDA && tt != ACCEL_ROCM && tt != ACCEL_INTEL_ONEAPI) { return 0; }
+    var pid = profile_pci_id(p);
+    var nm = profile_device_name(p);
+    var vendors = 0;
+    var differ = 0;
+    var n = vec_len(profiles);
+    var i = 0;
+    while (i < n) {
+        var q = vec_get(profiles, i);
+        i = i + 1;
+        if (profile_pci_id(q) != pid) { continue; }
+        var t = profile_accel_type(q);
+        if (t == ACCEL_CUDA || t == ACCEL_ROCM || t == ACCEL_INTEL_ONEAPI) {
+            vendors = vendors + 1;
+        } elif (t == ACCEL_VULKAN || t == ACCEL_WIN_GPU) {
+            var qn = profile_device_name(q);
+            if (profile_name_is_placeholder(qn) == 0) {
+                if (_dedup_model_eq(qn, nm) == 0) { differ = 1; }
+            }
+        }
+    }
+    if (vendors > 1 && differ == 1) { return 1; }
+    return 0;
+}
+
 # Log (at debug) that profile `p` was dropped as a view of `twin`, and that
 # `twin` takes its name (`renamed` 1) and its memory figure (`took_mem` 1).
 # Call before renaming.
@@ -440,15 +533,19 @@ fn _dedup_log(p, twin, renamed, took_mem) {
 # A survivor whose name is a placeholder (profile_name_is_placeholder) takes
 # the dropped profile's name, which has the model: on the dev host, ROCm's
 # "AMD Radeon (PCI 0x1002:0x1638)" becomes RADV's "AMD Radeon Graphics (RADV
-# RENOIR)". A Windows GPU survivor of a Vulkan view on system RAM takes that
-# view's memory and shared part: DXGI gives an integrated GPU its boot-time
-# carve-out, and vulkaninfo its heap (cass's UHD 600: 128 MiB becomes
-# 4 202 799 104 bytes, all shared). So does a survivor with no memory figure
-# (2.5.5) from a view vulkaninfo named, such as a GB10 from nvidia-smi's
-# "[N/A]" that nothing sized from system RAM. Order is kept; `profiles` is
-# compacted in place. Returns the number of profiles dropped. Through 2.3.29
-# nothing was dropped: the dev host listed its one iGPU twice and counted its
-# 8 GiB twice.
+# RENOIR)". Not when cards sharing its pci_id have views that name different
+# models (_dedup_name_ambiguous): the name could be another card's, so the
+# placeholder stays. A Windows GPU survivor of a Vulkan view on system RAM
+# takes that view's memory and shared part: DXGI gives an integrated GPU its
+# boot-time carve-out, and vulkaninfo its heap (cass's UHD 600: 128 MiB
+# becomes 4 202 799 104 bytes, all shared). So does an available survivor
+# with no memory figure (2.5.5) from a view vulkaninfo named, such as a GB10
+# from nvidia-smi's "[N/A]" that nothing sized from system RAM; an
+# unavailable one (a GPU whose memory nvidia-smi could not read) keeps its 0,
+# not the view's estimate. Order is kept; `profiles` is compacted in place.
+# Returns the number of profiles dropped. Through 2.3.29 nothing was
+# dropped: the dev host listed its one iGPU twice and counted its 8 GiB
+# twice.
 fn profiles_dedup(profiles) {
     var n = vec_len(profiles);
     if (n < 2) { return 0; }
@@ -464,16 +561,22 @@ fn profiles_dedup(profiles) {
                 store8(drop + i, 1);
                 var rename = 0;
                 if (profile_name_is_placeholder(profile_device_name(twin)) == 1) {
-                    if (profile_name_is_placeholder(profile_device_name(p)) == 0) { rename = 1; }
+                    if (profile_name_is_placeholder(profile_device_name(p)) == 0) {
+                        if (_dedup_name_ambiguous(profiles, p, twin) == 0) { rename = 1; }
+                    }
                 }
                 var take_mem = 0;
                 if (profile_accel_type(twin) == ACCEL_WIN_GPU) {
                     if (profile_shared_bytes(p) > 0) { take_mem = 1; }
                 }
-                # A twin with no memory figure takes a vulkaninfo view's heap;
-                # the sysfs scan's figure is a guess, and its name says so.
+                # An available twin with no memory figure takes a vulkaninfo
+                # view's heap; the sysfs scan's figure is a guess, and its
+                # name says so. An unavailable one is a GPU whose memory read
+                # failed, which the view's estimate would not fix.
                 if (profile_memory_bytes(twin) == 0 && profile_memory_bytes(p) > 0) {
-                    if (profile_name_is_placeholder(profile_device_name(p)) == 0) { take_mem = 1; }
+                    if (profile_available(twin) == 1) {
+                        if (profile_name_is_placeholder(profile_device_name(p)) == 0) { take_mem = 1; }
+                    }
                 }
                 _dedup_log(p, twin, rename, take_mem);
                 if (rename == 1) { profile_set_device_name(twin, profile_device_name(p)); }
@@ -599,9 +702,10 @@ fn registry_system_passes(r, allow_exec) {
 # and their diagnostics onto `warns`; no CPU profile, no post-passes. Every
 # entry point detects through this: the threaded one per thread, the lazy
 # registry one family's backends at a time (2.5.2). `allow_exec` (0 or 1) is
-# passed down as is: the native backends that can run a tool (Apple, Vulkan,
-# Gaudi, Neuron, Windows) run it only with 1, and a caller that forbids exec
-# strips the exec backends from the mask itself.
+# passed down as is: the backends with an exec-free path that can run a tool
+# (Apple, Vulkan, Gaudi, Neuron, Cerebras, Graphcore, Windows) run it only
+# with 1, and a caller that forbids exec strips the others (CUDA, oneAPI)
+# from the mask itself.
 fn registry_run_detectors(profs, warns, builder_mask, allow_exec) {
     if (builder_is_enabled(builder_mask, BACKEND_CUDA) == 1) { detect_cuda(profs, warns); }
     if (builder_is_enabled(builder_mask, BACKEND_ROCM) == 1) { detect_rocm(profs, warns); }
@@ -670,27 +774,32 @@ fn registry_detect() {
     return registry_detect_with_opts(builder_all(), 1);
 }
 
-# Detect with only the backends in `builder_mask`. A mask that holds no exec
-# backend (backend_uses_exec) spawns nothing: it runs with allow_exec 0, so
-# Vulkan uses its sysfs scan instead of `vulkaninfo`, Gaudi and Neuron their
-# device nodes instead of `hl-smi` and `neuron-ls`, the system_profiler and
-# wmic fallbacks are skipped, and so is the interconnect pass's
-# `nvidia-smi nvlink -s`. Through 2.5.0 every mask ran with exec allowed, so
-# registry_detect_with(builder_no_exec()) still spawned all four. For tools
-# with an exec-free mask, call registry_detect_with_opts(mask, 1).
+# Detect with only the backends in `builder_mask`. A mask that holds a
+# backend whose vendor CLI is its source of record (backend_uses_exec: CUDA,
+# oneAPI, Gaudi, Neuron, Cerebras, Graphcore) runs with exec allowed, every
+# tool included. A mask without one spawns nothing: it runs with allow_exec
+# 0, so Vulkan uses its sysfs scan instead of `vulkaninfo`, the
+# system_profiler and wmic fallbacks are skipped, and so is the interconnect
+# pass's `nvidia-smi nvlink -s`. Through 2.5.0 every mask ran with exec
+# allowed, so registry_detect_with(builder_no_exec()) still spawned all
+# four. For tools with an exec-free mask, call
+# registry_detect_with_opts(mask, 1); for Gaudi, Neuron, Cerebras or
+# Graphcore without their tools, registry_detect_with_opts(mask, 0).
 fn registry_detect_with(builder_mask) {
     return registry_detect_with_opts(builder_mask, builder_uses_exec(builder_mask));
 }
 
-# No-subprocess detection — masks off exec-shelling backends (defense
-# in depth: even if the caller's mask had them set), runs the native ones
-# without their tools, and runs the interconnect pass without its
-# `nvidia-smi nvlink -s` (InfiniBand, NVSwitch, XGMI and ICI come from sysfs
-# and the profiles). Safe to call from contexts that forbid process
-# spawning, e.g. mihi probes. See backend_uses_exec() in types.cyr for the
-# per-backend classification.
+# No-subprocess detection: every backend that finds something without a
+# tool (builder_native()), run without its tools, Gaudi, Neuron, Cerebras
+# and Graphcore through their device nodes, and the interconnect pass
+# without its `nvidia-smi nvlink -s` (InfiniBand, NVSwitch, XGMI and ICI
+# come from sysfs and the profiles). Safe to call from contexts that forbid
+# process spawning, e.g. mihi probes. See backend_needs_exec() in types.cyr
+# for the per-backend classification. Since 2.5.5 this is not the same call
+# as registry_detect_with(builder_no_exec()), whose mask leaves those four
+# out.
 fn registry_detect_no_exec() {
-    return registry_detect_with_opts(builder_no_exec(), 0);
+    return registry_detect_with_opts(builder_native(), 0);
 }
 
 fn registry_detect_with_opts(builder_mask, allow_exec) {
@@ -698,10 +807,10 @@ fn registry_detect_with_opts(builder_mask, allow_exec) {
     # `== 1`, so through 2.5.4 a 2 kept the exec backends but ran Vulkan,
     # Apple and the interconnect pass as if exec were off.
     if (allow_exec != 0) { allow_exec = 1; }
-    # When exec is forbidden, force-strip any exec backends the caller
-    # may have enabled. backend_uses_exec() is the source of truth.
+    # When exec is forbidden, force-strip the backends that find nothing
+    # without a tool. backend_needs_exec() is the source of truth.
     if (allow_exec == 0) {
-        builder_mask = builder_mask & builder_no_exec();
+        builder_mask = builder_mask & builder_native();
     }
 
     hwlog_span_enter("detect");

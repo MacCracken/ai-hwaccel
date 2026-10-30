@@ -327,22 +327,44 @@ fn load_cloud_instances() {
     return load_cloud_instances_from(data_file_path("data/cloud_pricing.json"));
 }
 
-# recommend_instances parses the pricing file once per data path, so a
-# long-lived caller does not re-read and re-allocate it on every query. A
-# caller that replaces the file at run time loads it again itself and uses
-# recommend_instances_from.
+# recommend_instances and cost_to_json parse the pricing file once per data
+# path and keep the rows for the process, so a long-lived caller does not
+# re-read and re-allocate them on every query; through 2.5.4 each query read
+# the file again. The key is the path's text: with no data dir set that is
+# the relative "data/cloud_pricing.json", so a chdir keeps the rows read
+# before it. The CLI is a process per run and sees a replaced file on its
+# next run. A long-lived library consumer that replaces the file calls
+# cloud_pricing_reload, or loads the file itself (load_cloud_instances_from)
+# and uses recommend_instances_from.
 var _cloud_cache = 0;
 var _cloud_cache_path = 0;
 
 fn _cloud_instances_cached() {
     var path = data_file_path("data/cloud_pricing.json");
-    if (_cloud_cache != 0 && streq(path, _cloud_cache_path) == 1) { return _cloud_cache; }
+    # Each global is read once: a cloud_pricing_reload on another thread
+    # clears them one after the other, and rows read before it stay valid
+    # (the bump heap never frees them). The fill and a reload are not atomic
+    # as a pair; at worst a racing caller reads the file again.
+    var cv = _cloud_cache;
+    var cp = _cloud_cache_path;
+    if (cv != 0 && cp != 0) {
+        if (streq(path, cp) == 1) { return cv; }
+    }
     var v = load_cloud_instances_from(path);
     if (vec_len(v) > 0) {
-        _cloud_cache = v;
         _cloud_cache_path = path;
+        _cloud_cache = v;
     }
     return v;
+}
+
+# Drop the pricing rows recommend_instances keeps, so its next call (or
+# cost_to_json's) reads data/cloud_pricing.json again: for a long-lived
+# caller that replaced the file.
+fn cloud_pricing_reload() {
+    _cloud_cache = 0;
+    _cloud_cache_path = 0;
+    return 0;
 }
 
 # Recommend instances from `instances` for a model, sorted by price

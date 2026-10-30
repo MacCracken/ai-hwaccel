@@ -9,10 +9,11 @@ accelerators, queries their capabilities, and plans model placement.
 ```
 src/
   main.cyr               CLI: JSON (default), --summary, --table, --plan, --train, --cost
+  cli.cyr                CLI argument checks (2.5.5): unknown flags, missing values, bad sizes exit 2
   types.cyr              AcceleratorType (20, CPU included), families, backends, exec classification
   profile.cyr            AcceleratorProfile: one device's memory, capabilities, PCI id, shared RAM
   registry.cyr           Detection entry points, builder masks, post-passes, duplicate-device pass, totals
-  async_detect.cyr       registry_detect_threaded(): exec backends in threads
+  async_detect.cyr       registry_detect_threaded(): tool backends in threads
   lazy.cyr               LazyRegistry: probe a family on first query
   cache.cyr              CachedRegistry (TTL) + DiskCachedRegistry
   json_out.cyr           JSON out (registry, summary, plan, training) and profile_from_json
@@ -54,7 +55,7 @@ src/
 
 ```
 registry_detect()                      = registry_detect_with_opts(builder_all(), allow_exec 1)
-registry_detect_no_exec()              = registry_detect_with_opts(builder_no_exec(), allow_exec 0)
+registry_detect_no_exec()              = registry_detect_with_opts(builder_native(), allow_exec 0)
 registry_detect_with(mask)             = registry_detect_with_opts(mask, allow_exec 1 iff mask has a tool backend)
 registry_detect_with_opts(mask, allow_exec)
   1. CPU profile                       total RAM: /proc/meminfo, sysctl hw.memsize (macOS),
@@ -79,8 +80,8 @@ registry_detect_with_opts(mask, allow_exec)
 ```
 
 The other entry points share the backends and `registry_post_passes`:
-`registry_detect_threaded()` runs the tool-based backends in threads and the
-sysfs ones on the calling thread; `lazy_by_family()` runs one family's
+`registry_detect_threaded()` runs the tool-based backends in threads (their
+tools one at a time, 2.5.5) and the sysfs ones on the calling thread; `lazy_by_family()` runs one family's
 backends on its first query (`registry_run_detectors`, tools allowed) and the
 profile passes on what they found, deduplicating as families accumulate, and
 `lazy_into_registry()` runs the system passes once (2.5.2);

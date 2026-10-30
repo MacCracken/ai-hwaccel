@@ -223,19 +223,33 @@ fn test_builder_selective() {
 # --- 2.2.5: no-exec contract ---
 
 fn test_backend_uses_exec() {
-    # Four backends find nothing without their vendor CLI
+    # Six backends' vendor CLI is their source of record, as through 2.5.4,
+    # so a mask holding one runs the tools.
     assert_eq(backend_uses_exec(BACKEND_CUDA), 1, "cuda exec");
     assert_eq(backend_uses_exec(BACKEND_INTEL_ONEAPI), 1, "intel-oneapi exec");
-    # 2.5.5: their /dev fallbacks need no tool, so no-exec mode finds them.
-    assert_eq(backend_uses_exec(BACKEND_CEREBRAS), 0, "cerebras native (/dev nodes)");
-    assert_eq(backend_uses_exec(BACKEND_GRAPHCORE), 0, "graphcore native (/dev nodes)");
+    assert_eq(backend_uses_exec(BACKEND_GAUDI), 1, "gaudi exec (hl-smi)");
+    assert_eq(backend_uses_exec(BACKEND_NEURON), 1, "neuron exec (neuron-ls)");
+    assert_eq(backend_uses_exec(BACKEND_CEREBRAS), 1, "cerebras exec (cerebras_cli)");
+    assert_eq(backend_uses_exec(BACKEND_GRAPHCORE), 1, "graphcore exec (gc-info)");
+    # Two of them find nothing without it; the other four fall back to their
+    # device nodes with exec off (2.5.5).
+    assert_eq(backend_needs_exec(BACKEND_CUDA), 1, "cuda needs exec");
+    assert_eq(backend_needs_exec(BACKEND_INTEL_ONEAPI), 1, "intel-oneapi needs exec");
+    assert_eq(backend_needs_exec(BACKEND_GAUDI), 0, "gaudi: accel nodes without exec");
+    assert_eq(backend_needs_exec(BACKEND_NEURON), 0, "neuron: /dev nodes without exec");
+    assert_eq(backend_needs_exec(BACKEND_CEREBRAS), 0, "cerebras: /dev nodes without exec");
+    assert_eq(backend_needs_exec(BACKEND_GRAPHCORE), 0, "graphcore: /dev nodes without exec");
+    var b = 0;
+    var bad = 0;
+    while (b < AIHW_BACKEND_COUNT) {
+        if (backend_needs_exec(b) == 1 && backend_uses_exec(b) == 0) { bad = bad + 1; }
+        b = b + 1;
+    }
+    assert_eq(bad, 0, "needs exec implies uses exec");
 
-    # Thirteen backends spawn nothing (sysfs/syscall, DXGI on Windows, sysctl on
-    # macOS). Vulkan's sysfs scan is native since 2.3.29, and Gaudi's
-    # habanalabs nodes and Neuron's /dev nodes since 2.5.5; vulkaninfo, hl-smi
-    # and neuron-ls run only with exec.
-    assert_eq(backend_uses_exec(BACKEND_GAUDI), 0, "gaudi native (accel nodes)");
-    assert_eq(backend_uses_exec(BACKEND_NEURON), 0, "neuron native (/dev nodes)");
+    # Eleven backends spawn nothing (sysfs/syscall, DXGI on Windows, sysctl on
+    # macOS). Vulkan's sysfs scan is native since 2.3.29; vulkaninfo runs
+    # only with exec.
     assert_eq(backend_uses_exec(BACKEND_VULKAN), 0, "vulkan native (sysfs scan)");
     assert_eq(backend_uses_exec(BACKEND_WINDOWS), 0, "windows native (dxgi)");
     assert_eq(backend_uses_exec(BACKEND_APPLE), 0, "apple native (sysctl)");
@@ -266,26 +280,36 @@ fn test_builder_no_exec_mask() {
     assert_eq(builder_is_enabled(mask, BACKEND_GROQ), 1, "groq in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_SAMSUNG_NPU), 1, "samsung in mask");
     assert_eq(builder_is_enabled(mask, BACKEND_MEDIATEK_APU), 1, "mediatek in mask");
-    # 2.5.5: registry_detect_no_exec() finds Gaudi and Neuron devices too.
-    assert_eq(builder_is_enabled(mask, BACKEND_GAUDI), 1, "gaudi in mask");
-    assert_eq(builder_is_enabled(mask, BACKEND_NEURON), 1, "neuron in mask");
-    assert_eq(builder_is_enabled(mask, BACKEND_CEREBRAS), 1, "cerebras in mask");
-    assert_eq(builder_is_enabled(mask, BACKEND_GRAPHCORE), 1, "graphcore in mask");
-
-    # Every exec backend absent
+    # Every exec backend absent, as through 2.5.4: a mask of them runs tools.
     assert_eq(builder_is_enabled(mask, BACKEND_CUDA), 0, "cuda excluded");
     assert_eq(builder_is_enabled(mask, BACKEND_INTEL_ONEAPI), 0, "oneapi excluded");
+    assert_eq(builder_is_enabled(mask, BACKEND_GAUDI), 0, "gaudi excluded");
+    assert_eq(builder_is_enabled(mask, BACKEND_NEURON), 0, "neuron excluded");
+    assert_eq(builder_is_enabled(mask, BACKEND_CEREBRAS), 0, "cerebras excluded");
+    assert_eq(builder_is_enabled(mask, BACKEND_GRAPHCORE), 0, "graphcore excluded");
+
+    # 2.5.5: registry_detect_no_exec() runs builder_native(), which adds the
+    # four with device-node fallbacks; only CUDA and oneAPI stay out.
+    var nat = builder_native();
+    assert_eq(nat & mask, mask, "native: every no_exec backend");
+    assert_eq(builder_is_enabled(nat, BACKEND_GAUDI), 1, "native: gaudi");
+    assert_eq(builder_is_enabled(nat, BACKEND_NEURON), 1, "native: neuron");
+    assert_eq(builder_is_enabled(nat, BACKEND_CEREBRAS), 1, "native: cerebras");
+    assert_eq(builder_is_enabled(nat, BACKEND_GRAPHCORE), 1, "native: graphcore");
+    assert_eq(builder_is_enabled(nat, BACKEND_CUDA), 0, "native: cuda excluded");
+    assert_eq(builder_is_enabled(nat, BACKEND_INTEL_ONEAPI), 0, "native: oneapi excluded");
     return 0;
 }
 
 # Defense-in-depth: even when the caller forces an EXEC bit on,
 # registry_detect_with_opts(mask, 0) must strip it before dispatch.
 fn test_no_exec_strips_exec_bits() {
-    var poisoned = builder_no_exec() | (1 << BACKEND_CUDA) | (1 << BACKEND_INTEL_ONEAPI);
-    var stripped = poisoned & builder_no_exec();
+    var poisoned = builder_native() | (1 << BACKEND_CUDA) | (1 << BACKEND_INTEL_ONEAPI);
+    var stripped = poisoned & builder_native();
     assert_eq(builder_is_enabled(stripped, BACKEND_CUDA), 0, "cuda forced off");
     assert_eq(builder_is_enabled(stripped, BACKEND_INTEL_ONEAPI), 0, "oneapi forced off");
     assert_eq(builder_is_enabled(stripped, BACKEND_ROCM), 1, "rocm preserved");
+    assert_eq(builder_is_enabled(stripped, BACKEND_GAUDI), 1, "gaudi preserved (accel nodes)");
     return 0;
 }
 
@@ -372,10 +396,13 @@ fn test_builder_uses_exec() {
     assert_eq(builder_uses_exec(builder_no_exec()), 0, "no_exec mask: no exec");
     assert_eq(builder_uses_exec(builder_none()), 0, "none: no exec");
     assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_VULKAN)), 0, "vulkan alone: no exec");
-    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_GAUDI)), 0, "gaudi alone: no exec");
-    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_NEURON)), 0, "neuron alone: no exec");
+    # A selective mask of Gaudi, Neuron, Cerebras or Graphcore runs their
+    # tools, as through 2.5.4 (and vulkaninfo, system_profiler with them).
+    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_GAUDI)), 1, "gaudi alone: exec");
+    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_NEURON)), 1, "neuron alone: exec");
+    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_CEREBRAS)), 1, "cerebras alone: exec");
+    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_GRAPHCORE)), 1, "graphcore alone: exec");
     assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_CUDA)), 1, "cuda: exec");
-    assert_eq(builder_uses_exec(builder_with(builder_none(), BACKEND_GRAPHCORE)), 0, "graphcore alone: no exec");
     assert_eq(builder_uses_exec(builder_with(builder_no_exec(), BACKEND_INTEL_ONEAPI)), 1, "no_exec + oneapi: exec");
     return 0;
 }
@@ -452,7 +479,9 @@ fn test_allow_exec_normalised() {
 }
 
 # Gaudi and Neuron run without exec (2.5.5): registry_detect_no_exec keeps
-# them, and their tools run only with exec.
+# them, and their tools run only with exec. A selective mask of them runs
+# with exec, threaded or not, as through 2.5.4: detecting as
+# registry_detect_with_opts(mask, 1) does.
 fn test_gaudi_neuron_no_exec() {
     var p = vec_new();
     var w = vec_new();
@@ -462,7 +491,11 @@ fn test_gaudi_neuron_no_exec() {
     var r = registry_detect_no_exec();
     assert_eq(_tool_warnings(r), 0, "no_exec: still no tool run");
     var only = builder_with(builder_with(builder_none(), BACKEND_GAUDI), BACKEND_NEURON);
-    assert_eq(_tool_warnings(registry_detect_with(only)), 0, "gaudi + neuron mask: no tool run");
+    var with_exec = registry_detect_with_opts(only, 1);
+    assert_eq(_registry_diff(registry_detect_with(only), with_exec), 0, "gaudi + neuron mask: tools run");
+    assert_eq(_registry_diff(registry_detect_threaded_with(only), with_exec), 0,
+      "threaded gaudi + neuron mask: tools run");
+    assert_eq(_tool_warnings(registry_detect_with_opts(only, 0)), 0, "with_opts(gaudi + neuron, 0): no tool run");
     return 0;
 }
 
@@ -501,11 +534,13 @@ fn _logged(w, from, lvl) {
     _hook_lines = vec_new();
     _hook_levels = vec_new();
     var keep = sakshi_get_level();
-    sakshi_set_level(lvl);
+    var keep_hw = hwlog_get_level();
+    hwlog_set_process_level(lvl);
     sakshi_set_emit_hook(&_log_hook);
     warnings_log_parse(w, from);
     sakshi_clear_emit_hook();
     sakshi_set_level(keep);
+    hwlog_set_level(keep_hw);
     return _hook_lines;
 }
 
@@ -1047,6 +1082,67 @@ fn test_dedup_zero_memory_twin() {
     return 0;
 }
 
+# An unavailable vendor profile with no memory figure (nvidia-smi listed the
+# GPU but could not read its memory) keeps its 0: the view's heap or estimate
+# would read as memory the card was found to have.
+fn test_dedup_unavailable_zero_memory_twin() {
+    var v = vec_new();
+    var h100 = _gpu(ACCEL_CUDA, 0x10DE, 0x2330, "NVIDIA H100 80GB HBM3", 0);
+    profile_set_available(h100, 0);
+    vec_push(v, h100);
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x10DE, 0x2330, "NVIDIA H100 80GB HBM3", 4 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(v), 1, "unavailable twin: the view dropped");
+    assert_eq(vec_len(v), 1, "unavailable twin: one profile");
+    assert_eq(profile_accel_type(vec_get(v, 0)), ACCEL_CUDA, "unavailable twin: CUDA kept");
+    assert_eq(profile_memory_bytes(h100), 0, "unavailable twin: the view's memory not taken");
+    assert_eq(profile_shared_mem(h100), 0, "unavailable twin: no shared part either");
+    return 0;
+}
+
+# Two SKUs with one PCI device ID (0x744C: RX 7900 XT, 20 GiB, and XTX,
+# 24 GiB): the views pair with the cards by list order, so a name could land
+# on the wrong card. Views that disagree leave both placeholders in place;
+# memory is each card's own.
+fn test_dedup_mixed_sku_same_device_id() {
+    var v = vec_new();
+    var xt = _gpu(ACCEL_ROCM, 0x1002, 0x744c, "AMD Radeon (PCI 0x1002:0x744c)", 20 * BYTES_PER_GIB);
+    var xtx = _gpu(ACCEL_ROCM, 0x1002, 0x744c, "AMD Radeon (PCI 0x1002:0x744c)", 24 * BYTES_PER_GIB);
+    vec_push(v, xt);
+    vec_push(v, xtx);
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX (RADV NAVI31)", 4 * BYTES_PER_GIB));
+    vec_push(v, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XT (RADV NAVI31)", 4 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(v), 2, "mixed sku: both views dropped");
+    assert_streq(profile_device_name(xt), "AMD Radeon (PCI 0x1002:0x744c)", "mixed sku: the 20 GiB card not named XTX");
+    assert_streq(profile_device_name(xtx), "AMD Radeon (PCI 0x1002:0x744c)", "mixed sku: the 24 GiB card not named XT");
+    assert_eq(profile_memory_bytes(xt), 20 * BYTES_PER_GIB, "mixed sku: memory kept");
+    # One card of the ID: its views cannot be another card's, so a view's
+    # name is taken even beside a second driver's wording.
+    var w = vec_new();
+    var one = _gpu(ACCEL_ROCM, 0x1002, 0x744c, "AMD Radeon (PCI 0x1002:0x744c)", 24 * BYTES_PER_GIB);
+    vec_push(w, one);
+    vec_push(w, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX (RADV NAVI31)", 4 * BYTES_PER_GIB));
+    vec_push(w, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX", 4 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(w), 2, "one card, two drivers: both views dropped");
+    assert_streq(profile_device_name(one), "AMD Radeon RX 7900 XTX (RADV NAVI31)", "one card: renamed");
+    # Two identical cards seen by RADV and AMDVLK: the views name one model
+    # (RADV adds its driver suffix), so each card still takes a name.
+    var z = vec_new();
+    var c0 = _gpu(ACCEL_ROCM, 0x1002, 0x744c, "AMD Radeon (PCI 0x1002:0x744c)", 24 * BYTES_PER_GIB);
+    var c1 = _gpu(ACCEL_ROCM, 0x1002, 0x744c, "AMD Radeon (PCI 0x1002:0x744c)", 24 * BYTES_PER_GIB);
+    vec_push(z, c0);
+    vec_push(z, c1);
+    vec_push(z, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX (RADV NAVI31)", 4 * BYTES_PER_GIB));
+    vec_push(z, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX (RADV NAVI31)", 4 * BYTES_PER_GIB));
+    vec_push(z, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX", 4 * BYTES_PER_GIB));
+    vec_push(z, _gpu(ACCEL_VULKAN, 0x1002, 0x744c, "AMD Radeon RX 7900 XTX", 4 * BYTES_PER_GIB));
+    assert_eq(profiles_dedup(z), 4, "two cards, two drivers: four views dropped");
+    assert_eq(profile_name_is_placeholder(profile_device_name(c0)), 0, "two cards, two drivers: card 0 named");
+    assert_eq(profile_name_is_placeholder(profile_device_name(c1)), 0, "two cards, two drivers: card 1 named");
+    assert_eq(_dedup_model_eq("AMD Radeon RX 7900 XT (RADV NAVI31)", "AMD Radeon RX 7900 XTX"), 0, "XT is not XTX");
+    assert_eq(_dedup_model_eq("AMD Radeon(TM) Graphics", "AMD Radeon(TM) Graphics"), 1, "no space before ( is no suffix");
+    return 0;
+}
+
 # Nothing matches on an unknown id, on a different id, or against another
 # Vulkan profile; a lone Vulkan GPU stays.
 fn test_dedup_no_false_matches() {
@@ -1478,6 +1574,8 @@ test_dedup_cuda_keeps_other_gpus();
 test_dedup_two_vulkan_drivers();
 test_dedup_identical_placeholder_cards();
 test_dedup_zero_memory_twin();
+test_dedup_unavailable_zero_memory_twin();
+test_dedup_mixed_sku_same_device_id();
 test_dedup_no_false_matches();
 test_dedup_apple();
 test_dedup_twin_ranks();

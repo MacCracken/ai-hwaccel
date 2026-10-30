@@ -19,8 +19,11 @@ enum AccelPciVendor {
 # The backend an accel node belongs to, from the basename of its
 # device/driver link (a Str, or 0 when the link cannot be read) and its PCI
 # vendor ID (-1 when device/vendor cannot be read). A known driver names its
-# backend; ethosu and rocket have none (-1). An unknown driver is a TPU
-# candidate unless a PCI vendor other than Google's (0x1ae0) says otherwise.
+# backend; ethosu and rocket have none (-1). Any other driver is a TPU only
+# on Google's PCI vendor (0x1ae0): a TPU is a PCI function, so a driver bound
+# to a device with no vendor file is a platform device, such as an Arm SoC's
+# NPU, and through 2.5.4 that was a 32 GiB "Google TPU v4" too. A node with
+# no driver link stays a TPU candidate unless another vendor says otherwise.
 # Pure.
 fn accel_driver_backend(drv, vendor) {
     if (drv != 0) {
@@ -30,6 +33,8 @@ fn accel_driver_backend(drv, vendor) {
         if (str_eq_cstr(drv, "qaic") == 1) { return BACKEND_QUALCOMM; }
         if (str_eq_cstr(drv, "ethosu") == 1) { return 0 - 1; }
         if (str_eq_cstr(drv, "rocket") == 1) { return 0 - 1; }
+        if (vendor == PCI_VENDOR_GOOGLE) { return BACKEND_TPU; }
+        return 0 - 1;
     }
     if (vendor >= 0 && vendor != PCI_VENDOR_GOOGLE) { return 0 - 1; }
     return BACKEND_TPU;
@@ -47,15 +52,17 @@ fn accel_node_index(name) {
 }
 
 # accel_driver_backend for node `name` (a Str) of the accel class at `root`
-# (a cstr). The PCI vendor is read only for a driver it does not know.
+# (a cstr). The PCI vendor is read only for a driver it does not know: the
+# first call asks whether Google's vendor would make the node a TPU, the
+# second decides on the vendor read (-1 when there is no vendor file).
 fn accel_node_backend(root, name) {
     var drv = 0;
     var link = read_symlink(sysfs_path_str(root, name, "device/driver"));
     if (link != 0) { drv = path_basename(link); }
-    var b = accel_driver_backend(drv, 0 - 1);
+    var b = accel_driver_backend(drv, PCI_VENDOR_GOOGLE);
     if (b == BACKEND_TPU) {
         var vs = sysfs_read(sysfs_path_str(root, name, "device/vendor"));
-        if (vs != 0) { b = accel_driver_backend(drv, parse_hex_field(vs)); }
+        b = accel_driver_backend(drv, parse_hex_field(vs));
     }
     return b;
 }

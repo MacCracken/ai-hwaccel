@@ -14,8 +14,9 @@ var _NVSMI_FMT = "--format=csv,noheader,nounits";
 # Memory bus width (bits) by compute capability: the width of the
 # generation's flagship part, or 0 for a generation not listed, which leaves
 # the bandwidth unknown. Through 2.5.4 an unlisted one got 256 bits, so a
-# B200 (10.0) reported 256 GB/s of its 8 TB/s. Parts whose width differs from
-# their generation's are in nvidia_bus_width_by_dev. Pure.
+# B200 (10.0) reported 256 GB/s of its 8 TB/s. nvidia_bus_width_by_dev gives
+# the narrower parts by PCI device ID: Blackwell's by die, the older
+# generations' as listed there. Pure.
 fn nvidia_bus_width(cc) {
     var cclen = str_len(cc);
     var ccd = str_data(cc);
@@ -46,15 +47,18 @@ fn nvidia_bus_width(cc) {
 # sheets; 0 for any other. One compute capability spans a 128-bit RTX 4060
 # and a 384-bit RTX 4090. Pure.
 fn nvidia_bus_width_by_dev(dev) {
-    # 12.0 Blackwell
-    if (dev == 0x2BB3) { return 384; }  # RTX PRO 5000 Blackwell
-    if (dev == 0x2C02 || dev == 0x2C05) { return 256; }  # RTX 5080, 5070 Ti
-    if (dev == 0x2C31 || dev == 0x2C3A) { return 256; }  # RTX PRO 4500 Blackwell
-    if (dev == 0x2C34) { return 192; }  # RTX PRO 4000 Blackwell
-    if (dev == 0x2F04) { return 192; }  # RTX 5070
-    if (dev == 0x2D04 || dev == 0x2D05) { return 128; }  # RTX 5060 Ti, 5060
-    if (dev == 0x2D30) { return 128; }  # RTX PRO 2000 Blackwell
-    if (dev == 0x2D83) { return 128; }  # RTX 5050
+    # 12.0 Blackwell: each die's ID range (pci.ids), so its Mobile, laptop and
+    # embedded parts are covered too, after the SKUs cut below their die's
+    # width. Through 2.5.4 every one of them took 256 bits. GB202
+    # (0x2B8x-0x2BBx) keeps its CC's 512.
+    if (dev == 0x2B8C || dev == 0x2BB3) { return 384; }  # RTX 5090 D V2, RTX PRO 5000
+    if (dev == 0x2BB9) { return 448; }  # RTX 6000D (84 GB)
+    if (dev == 0x2C09 || dev == 0x2C33 || dev == 0x2C34) { return 192; }  # RTX 5070 (GB203), RTX PRO 4000 (SFF)
+    if (dev == 0x2F06) { return 128; }  # RTX 5060 (GB205)
+    if (dev == 0x2DB9 || dev == 0x2DF9) { return 96; }  # RTX PRO 500 laptop, embedded
+    if (dev >= 0x2C00 && dev <= 0x2C7F) { return 256; }  # GB203: 5080, 5070 Ti, 5090/5080 Mobile, PRO 4000/5000 laptop
+    if (dev >= 0x2F00 && dev <= 0x2F7F) { return 192; }  # GB205: 5070, 5070 Ti Mobile, PRO 3000 laptop
+    if (dev >= 0x2D00 && dev <= 0x2DFF) { return 128; }  # GB206/GB207: 5060 (Ti), 5050, their Mobile parts
     # 9.0 Hopper: six HBM stacks, not five
     if (dev == 0x2321 || dev == 0x233A) { return 6144; }  # H100 NVL, H800L
     if (dev == 0x2335 || dev == 0x233B) { return 6144; }  # H200 SXM, H200 NVL
@@ -185,14 +189,26 @@ fn parse_cuda_output(output, profiles, warnings) {
     return parse_cuda_output_cc(output, profiles, warnings, 1);
 }
 
+# The warning for GPU `index` whose memory.total nvidia-smi could not read.
+fn _cuda_mem_warning(index) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "GPU ");
+    str_builder_add_int(sb, index);
+    str_builder_add_cstr(sb, ": memory.total unreadable, listed as unavailable");
+    return warning_parse("cuda", str_cstr(str_builder_build(sb)));
+}
+
 # parse_cuda_output for the output of _NVSMI_QUERY (`has_cc` 1) or of
 # _NVSMI_QUERY_NOCC (0). `warnings` may be 0. A memory.total of "[N/A]"
 # (cuda_mem_unified) gives a GPU with memory 0, which detect_cuda sizes from
-# system RAM; any other memory.total that is not a MiB count above 0
-# ("[Unknown Error]", "0") skips the line with a warning, where through 2.5.4
-# it was a silent 0-byte GPU. Another numeric field that is not a number
-# ("[N/A]") is unknown, and a real 0 is 0: str_to_int read "[N/A]" as 0,
-# "64.67" W as 6467 W, and the parse took a 0 MiB used as unknown.
+# system RAM. Any other memory.total that is not a MiB count above 0
+# ("[Unknown Error]", "[GPU requires reset]", "0") gives the GPU with memory
+# 0, marked unavailable, and a warning naming its index: it stays in the
+# inventory with its name, driver and PCI IDs, but out of totals and plans,
+# and nothing sizes it (through 2.5.4 it was an available 0-byte GPU).
+# Another numeric field that is not a number ("[N/A]") is unknown, and a real
+# 0 is 0: str_to_int read "[N/A]" as 0, "64.67" W as 6467 W, and the parse
+# took a 0 MiB used as unknown.
 fn parse_cuda_output_cc(output, profiles, warnings, has_cc) {
     var lines = str_split(output, 10);
     var li = 0;
@@ -220,10 +236,11 @@ fn parse_cuda_output_cc(output, profiles, warnings, has_cc) {
 
         var f_mem = vec_get(fields, 1);
         var mem_mb = validate_memory_mb(f_mem);
+        var mem_unread = 0;
         if (mem_mb <= 0) {
             if (cuda_mem_unified(f_mem) == 0) {
-                if (warnings != 0) { vec_push(warnings, warning_parse("cuda", "bad memory")); }
-                continue;
+                mem_unread = 1;
+                if (warnings != 0) { vec_push(warnings, _cuda_mem_warning(dev_id)); }
             }
             mem_mb = 0;
         }
@@ -233,6 +250,7 @@ fn parse_cuda_output_cc(output, profiles, warnings, has_cc) {
         var mem_free_mb = parse_field_int(vec_get(fields, 3));
 
         var p = profile_cuda(dev_id, mem_bytes);
+        if (mem_unread == 1) { profile_set_available(p, 0); }
 
         # PCI device and vendor ID (field 11): "0x268410DE" is device 0x2684
         # of vendor 0x10DE.
@@ -246,15 +264,17 @@ fn parse_cuda_output_cc(output, profiles, warnings, has_cc) {
         # Memory bandwidth from clocks.max.memory (field 10) and the bus
         # width, the device ID's where it is listed, else the compute
         # capability's: MHz * bits * 2 (DDR) / 8 = MB/s, GB/s x1000.
-        var bw_bits = 0;
-        if (dv_id > 0) { bw_bits = nvidia_bus_width_by_dev((dv_id >> 16) & 0xFFFF); }
+        var bw_dev = 0;
+        if (dv_id > 0) { bw_dev = nvidia_bus_width_by_dev((dv_id >> 16) & 0xFFFF); }
+        var bw_bits = bw_dev;
         if (bw_bits == 0) { bw_bits = nvidia_bus_width(cc); }
         if (bw_bits > 0 && vec_len(fields) > 10) {
             var clock_mhz = parse_field_int(vec_get(fields, 10));
             if (clock_mhz > 0) { profile_set_mem_bw_x1000(p, clock_mhz * bw_bits * 2 / 8); }
         }
-        # Fallback: estimate from CC
-        if (profile_mem_bw_x1000(p) == PROFILE_NONE) {
+        # Fallback: estimate from CC, the flagship's figure, so not for a part
+        # the device ID says is narrower (an RTX 5070 Laptop is no RTX 5090).
+        if (profile_mem_bw_x1000(p) == PROFILE_NONE && bw_dev == 0) {
             var est = nvidia_est_bw_x1000(cc);
             if (est > 0) { profile_set_mem_bw_x1000(p, est); }
         }
@@ -282,7 +302,7 @@ fn parse_cuda_output_cc(output, profiles, warnings, has_cc) {
                             # Add 480 GB unified LPDDR5X. That part is the
                             # Grace CPU's memory, which the CPU profile also
                             # counts, so it is marked shared (2.3.28);
-                            # detect_cuda caps it at system RAM.
+                            # detect_cuda caps it at the host's RAM.
                             profile_set_memory_bytes(p, mem_bytes + 480 * BYTES_PER_GIB);
                             profile_set_shared_mem(p, 480 * BYTES_PER_GIB);
                         }
@@ -375,13 +395,38 @@ fn detect_cuda(profiles, warnings) {
     var k = first;
     while (k < vec_len(profiles)) {
         var p = vec_get(profiles, k);
+        k = k + 1;
+        if (profile_available(p) != 1) { continue; }
         if (profile_memory_bytes(p) == 0 || profile_shared_mem(p) > 0) {
-            cuda_size_unified(profiles, first, detect_system_memory_opts(0));
+            cuda_size_unified(profiles, first, cuda_host_ram());
             break;
         }
-        k = k + 1;
     }
     return 0;
+}
+
+# The host's physical RAM in bytes, which a GPU on system RAM draws on:
+# MemTotal, not detect_system_memory_opts's figure, which a container's
+# cgroup limit caps (2.5.5). That cap is the CPU profile's: the NVIDIA
+# driver's allocations for a unified-memory GPU (GB10, Jetson) are not
+# charged to the container's cgroup, so a GB10 in a 16 GiB container still
+# reaches all of its 128 GB. On Windows and macOS the two figures are the
+# same; without a MemTotal, the capped one.
+fn cuda_host_ram() {
+    #ifdef CYRIUS_TARGET_WIN
+    return detect_system_memory_opts(0);
+    #endif
+    #ifdef CYRIUS_TARGET_MACOS
+    return detect_system_memory_opts(0);
+    #endif
+    # MemTotal is the file's first line, so a cut-short read still holds it.
+    var buf[4096];
+    var n = file_read_all("/proc/meminfo", &buf, 4096);
+    if (n > 0) {
+        var total = meminfo_total_bytes(&buf, n);
+        if (total > 0) { return total; }
+    }
+    return detect_system_memory_opts(0);
 }
 
 # Parse nvidia-smi's output `result` (a Str, or 0) into profiles; after a run
@@ -402,13 +447,15 @@ fn cuda_take_output_cc(result, failed, has_cc, profiles, warnings) {
     return vec_len(profiles) - first;
 }
 
-# Size the CUDA profiles from index `first` on from system RAM `ram` (bytes;
-# nothing happens when it is not above 0): one with memory 0, whose
-# memory.total nvidia-smi gave as "[N/A]" (a unified-memory part), gets all
-# of it, all shared, as an integrated Vulkan GPU does; a GH200 whose Grace part
-# (its shared part) passes `ram` has that part cut to it, so the CPU memory
-# it shares is never more than the CPU profile holds. Through 2.5.4 a GB10
-# came out as a GPU with 0 bytes. Pure.
+# Size the CUDA profiles from index `first` on from the host's physical RAM
+# `ram` (bytes, cuda_host_ram; nothing happens when it is not above 0): one
+# with memory 0, whose memory.total nvidia-smi gave as "[N/A]" (a
+# unified-memory part), gets all of it, all shared, as an integrated Vulkan
+# GPU does; a GH200 whose Grace part (its shared part) passes `ram` has that
+# part cut to it. A container's limit may hold the CPU profile below either;
+# the registry counts the larger shared part once. An unavailable GPU, whose
+# memory.total nvidia-smi could not read, is no unified part and is left at
+# 0. Through 2.5.4 a GB10 came out as a GPU with 0 bytes. Pure.
 fn cuda_size_unified(profiles, first, ram) {
     if (ram <= 0) { return 0; }
     var n = vec_len(profiles);
@@ -417,6 +464,7 @@ fn cuda_size_unified(profiles, first, ram) {
         var p = vec_get(profiles, k);
         k = k + 1;
         if (profile_accel_type(p) != ACCEL_CUDA) { continue; }
+        if (profile_available(p) != 1) { continue; }
         var sh = profile_shared_mem(p);
         if (profile_memory_bytes(p) == 0) {
             profile_set_memory_bytes(p, ram);

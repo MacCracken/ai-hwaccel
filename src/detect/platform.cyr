@@ -11,10 +11,11 @@
 var SYSFS_MAX_READ = 4096;
 
 # Read a sysfs/procfs file into a Str. Returns Str or 0 on error. Reads at
-# most SYSFS_MAX_READ - 1 bytes (through 2.5.0 a 4 KiB file put the NUL one
-# byte past the buffer). A longer file is cut short without a warning: this
-# runs on detector threads, which must not log, and every file read here is a
-# short sysfs value or device-tree string. One trailing newline is dropped.
+# most min(SYSFS_MAX_READ, 4096) - 1 bytes (through 2.5.0 a 4 KiB file put
+# the NUL one byte past the buffer). A longer file is cut short without a
+# warning: this runs on detector threads, which must not log, and every file
+# read here is a short sysfs value or device-tree string. One trailing
+# newline is dropped.
 # The read goes to the stack and the Str is a copy of its own size: through
 # 2.5.4 each read kept a 4 KiB buffer for a value of a few bytes, missing
 # files included, and a long-lived consumer re-detects (2.5.5).
@@ -22,8 +23,13 @@ fn sysfs_read(path) {
     #ifdef CYRIUS_TARGET_WIN
     return 0;
     #endif
-    var tmp[4096];   # SYSFS_MAX_READ
-    var n = file_read_all(path, &tmp, SYSFS_MAX_READ - 1);
+    # The read is capped by this stack buffer: SYSFS_MAX_READ, a global a
+    # consumer may set, can lower the cap and never raise it past the buffer.
+    var tmp[4096];
+    var cap = SYSFS_MAX_READ - 1;
+    if (cap > 4095) { cap = 4095; }
+    if (cap < 1) { return 0; }
+    var n = file_read_all(path, &tmp, cap);
     if (n <= 0) { return 0; }
     if (load8(&tmp + n - 1) == 10) { n = n - 1; }
     return str_from_buf(&tmp, n);

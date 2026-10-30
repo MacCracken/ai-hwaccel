@@ -45,7 +45,7 @@
         },
         "device_id": { "description": "Index within the backend, at most 1024 (CMD_MAX_DEVICE_ID, the bound every tool parser applies).", "type": "integer", "minimum": 0, "maximum": 1024 },
         "available": { "type": "boolean" },
-        "memory_bytes": { "description": "Memory the device can use. For a device on system RAM this includes the shared part below. At most 16 TiB (17592186044416) for an accelerator, the tool parsers' bound, and 1 PiB (1125899906842624) for the CPU profile's system RAM.", "type": "integer", "minimum": 0, "maximum": 1125899906842624 },
+        "memory_bytes": { "description": "Memory the device can use. For a device on system RAM this includes the shared part below. At most 16 TiB (17592186044416) for an accelerator, the tool parsers' bound, except a TPU, whose memory may reach tpu_chips x 95 GiB (v5p HBM), and 1 PiB (1125899906842624) for the CPU profile's system RAM.", "type": "integer", "minimum": 0, "maximum": 1125899906842624 },
         "family": { "description": "\"Unknown\" only for a re-serialized profile whose accel_type_id this build does not know.", "enum": ["CPU", "GPU", "NPU", "TPU", "AI ASIC", "Unknown"] },
         "compute_capability": { "description": "CUDA compute capability (\"8.9\"), or the ROCm gfx target.", "type": "string" },
         "driver_version": { "type": "string" },

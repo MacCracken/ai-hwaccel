@@ -106,6 +106,30 @@ fn test_roundtrip_tpu_chips() {
     return 0;
 }
 
+# A TPU's memory is its chips' HBM (profile_tpu), so a slice tpu.cyr can
+# build reads back whatever its size: 200 v5p chips are 18.6 TiB, past the
+# 16 TiB device bound, which refused them until the bound followed the chips.
+fn test_roundtrip_tpu_large_slice() {
+    var a = _rt(profile_tpu(0, 200, TPU_V5P));
+    assert(a != 0, "200 v5p chips read back");
+    if (a != 0) {
+        assert_eq(profile_tpu_chips(a), 200, "200 chips kept");
+        assert_eq(profile_memory_bytes(a), 200 * tpu_hbm_per_chip(TPU_V5P), "200 chips' HBM kept");
+    }
+    assert(_rt(profile_tpu(0, 1024, TPU_V5P)) != 0, "1024 v5p chips, the most tpu.cyr takes, read back");
+    assert(_rt(profile_tpu(0, 1024, TPU_V4)) != 0, "1024 v4 chips read back");
+    # Past both the chips' HBM and 16 TiB: still refused.
+    var two = "\"memory_bytes\":20401094656000,\"tpu_chips\":2";
+    assert_eq(_pj(ACCEL_TPU, two), 0, "TPU memory past its chips' HBM -> 0");
+    var max = "\"memory_bytes\":104453604638720,\"tpu_chips\":1024";
+    assert(_pj(ACCEL_TPU, max) != 0, "1024 x 95 GiB accepted");
+    var over = "\"memory_bytes\":104453604638721,\"tpu_chips\":1024";
+    assert_eq(_pj(ACCEL_TPU, over), 0, "one byte past 1024 x 95 GiB -> 0");
+    # Only a TPU's bound follows its chips.
+    assert_eq(_pj(1, "\"memory_bytes\":20401094656000,\"tpu_chips\":200"), 0, "GPU with tpu_chips keeps 16 TiB");
+    return 0;
+}
+
 fn test_roundtrip_tpu_satisfies_requirement() {
     # The property samay's M3 placement depends on.
     var t = profile_tpu(0, 8, TPU_V5P);
@@ -328,6 +352,7 @@ fn main() {
     alloc_init();
     test_roundtrip_cuda();
     test_roundtrip_tpu_chips();
+    test_roundtrip_tpu_large_slice();
     test_roundtrip_tpu_satisfies_requirement();
     test_roundtrip_neuron_cores();
     test_roundtrip_gaudi();

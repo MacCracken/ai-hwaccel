@@ -64,17 +64,30 @@ fn requirement_satisfied(req, min_chips, profile) {
 }
 
 # The best profile in `profiles` that satisfies the requirement, or 0: the
-# highest profile_rank, then the most memory, then the lowest index, as
-# reg_best_available ranks. Through 2.5.4 it was the first match in vector
+# highest profile_rank, then the most memory, then the lowest index.
+# reg_best_available ranks the same way but keeps the first of an equal
+# rank, whatever its memory. Through 2.5.4 it was the first match in vector
 # order, and registry_detect and registry_detect_threaded push the backends
 # in different orders, so with a ROCm iGPU and a CUDA card REQ_GPU gave CUDA
-# from one and ROCm from the other.
+# from one and ROCm from the other. REQ_NONE ("the CPU is sufficient") gives
+# the first available CPU profile, as through 2.5.4, where every entry point
+# pushed it first; ranked, it would hand the best accelerator to work that
+# needs none. Only without a CPU profile does it take the ranked pick.
 fn find_satisfying_profile(req, min_chips, profiles) {
+    var np = vec_len(profiles);
+    var i = 0;
+    if (req == REQ_NONE) {
+        while (i < np) {
+            var c = vec_get(profiles, i);
+            i = i + 1;
+            if (profile_available(c) != 1) { continue; }
+            if (profile_accel_type(c) == ACCEL_CPU) { return c; }
+        }
+        i = 0;
+    }
     var best = 0;
     var best_rank = 0;
     var best_mem = 0;
-    var np = vec_len(profiles);
-    var i = 0;
     while (i < np) {
         var p = vec_get(profiles, i);
         i = i + 1;
